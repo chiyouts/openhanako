@@ -505,7 +505,12 @@ export default async function chatRoute(app, { engine, hub }) {
             }
           }
         }
-        debugLog()?.log("ws", `user message (${(msg.text || "").length} chars, ${msg.images?.length || 0} images)`);
+        // 只发图片没文字时补一个占位文本，防止空 text 导致某些 API 异常
+        let promptText = msg.text || "";
+        if (!promptText.trim() && msg.images?.length) {
+          promptText = "（看图）";
+        }
+        debugLog()?.log("ws", `user message (${promptText.length} chars, ${msg.images?.length || 0} images)`);
         // 只检查当前活跃 session 是否在 streaming
         if (engine.isStreaming) {
           wsSend(ws, { type: "error", message: t("error.stillStreaming", { name: engine.agentName }) });
@@ -521,7 +526,7 @@ export default async function chatRoute(app, { engine, hub }) {
           ss.titlePreview = "";
           beginSessionStream(ss);
           broadcast({ type: "status", isStreaming: true });
-          await hub.send(msg.text || "", msg.images ? { images: msg.images } : undefined);
+          await hub.send(promptText, msg.images ? { images: msg.images } : undefined);
           // prompt 完成时，只有仍在活跃 session 才发 status:false
           if (engine.currentSessionPath === promptSessionPath) {
             broadcast({ type: "status", isStreaming: false });
