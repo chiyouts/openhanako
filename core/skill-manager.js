@@ -7,6 +7,28 @@
 import fs from "fs";
 import path from "path";
 
+/** 从 SKILL.md 内容中解析 description（支持 YAML 单行和多行格式） */
+function parseSkillDescription(content) {
+  const match = content.match(/^description:\s*(.*)$/m);
+  if (!match) return "";
+  const inline = match[1].trim().replace(/["']/g, "");
+  // 单行值（非 | 或 >）
+  if (inline && inline !== "|" && inline !== ">") return inline;
+  // 多行值：取后续缩进行
+  const startIdx = content.indexOf(match[0]) + match[0].length;
+  const rest = content.slice(startIdx);
+  const lines = rest.split("\n");
+  const parts = [];
+  for (const line of lines) {
+    if (line.match(/^\s+\S/)) {
+      parts.push(line.trim());
+    } else if (parts.length > 0) {
+      break; // 缩进结束
+    }
+  }
+  return parts.join(" ").replace(/["']/g, "");
+}
+
 export class SkillManager {
   /**
    * @param {object} opts
@@ -176,9 +198,8 @@ export class SkillManager {
           try {
             const content = fs.readFileSync(skillFile, "utf-8");
             const nameMatch = content.match(/^name:\s*(.+?)\s*$/m);
-            const descMatch = content.match(/^description:\s*(.+?)\s*$/m);
             const name = nameMatch ? nameMatch[1].replace(/["']/g, "") : entry.name;
-            const description = descMatch ? descMatch[1].replace(/["']/g, "") : "";
+            const description = parseSkillDescription(content);
             results.push({
               name,
               description,
@@ -251,8 +272,7 @@ export class SkillManager {
       if (!fs.existsSync(skillFile)) continue;
       try {
         const content = fs.readFileSync(skillFile, "utf-8");
-        const descMatch = content.match(/^description:\s*(.+?)\s*$/m);
-        const description = descMatch ? descMatch[1].replace(/["']/g, "") : "";
+        const description = parseSkillDescription(content);
         results.push({
           name: entry.name,
           description,
