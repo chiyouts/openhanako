@@ -635,6 +635,9 @@ function DeskDropZone({ children }: { children: React.ReactNode }) {
     e.stopPropagation();
     setDragging(false);
 
+    // 如果 drop 目标在技能面板内，让技能面板自己处理，这里不复制文件
+    if ((e.target as HTMLElement).closest('.desk-cwd-panel')) return;
+
     const files = e.dataTransfer.files;
     const text = e.dataTransfer.getData('text/plain');
     const desk = window.HanaModules.desk as Record<string, unknown>;
@@ -756,15 +759,17 @@ function DeskCwdSkillsPanel() {
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
+    // 不 stopPropagation：让书桌的 drop handler 也执行（它会检测 .desk-cwd-panel 跳过复制）
     setDragging(false);
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
     const dir = useStore.getState().deskBasePath;
+    console.log('[cwd-skills] drop: files=', files.length, 'dir=', dir);
     if (!dir) return;
     let installed = false;
     for (const file of files) {
       const filePath = (window as any).platform?.getFilePath?.(file);
+      console.log('[cwd-skills] filePath=', filePath, 'file.name=', file.name);
       if (!filePath) continue;
       try {
         const res = await getDeskCtx().hanaFetch('/api/desk/install-skill', {
@@ -799,8 +804,8 @@ function DeskCwdSkillsPanel() {
     <div className={`desk-cwd-panel-wrap${closing ? ' closing' : ''}`}>
       <div
         className={`desk-cwd-panel${dragging ? ' drag-over' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
-        onDragLeave={(e) => { e.stopPropagation(); setDragging(false); }}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
       >
         {/* 说明文案 + 装饰线 */}
