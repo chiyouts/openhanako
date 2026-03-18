@@ -417,7 +417,18 @@
       "added": "已添加 {name}",
       "deleted": "已删除 {name}",
       "noModels": "暂无模型",
-      "resetModels": "重置模型"
+      "resetModels": "重置模型",
+      "apiType": "API 类型",
+      "verify": "验证",
+      "verifyConnection": "验证连接",
+      "verifySuccess": "验证通过",
+      "verifyFailed": "验证失败",
+      "setupHint": "输入 API Key 以启用此供应商",
+      "selectHint": "选择一个供应商查看详情",
+      "addCustom": "添加自定义供应商",
+      "noKey": "未配置",
+      "remove": "移除",
+      "deleteConfirm": "确定删除供应商 {name}？相关模型和收藏将一并清除。"
     },
     "oauth": {
       "title": "快速登录",

@@ -24,6 +24,20 @@ export interface SkillInfo {
   readonly?: boolean;
 }
 
+export interface ProviderSummary {
+  type: 'api-key' | 'oauth';
+  display_name: string;
+  base_url: string;
+  api: string;
+  api_key_masked: string;
+  models: string[];
+  custom_models: string[];
+  has_credentials: boolean;
+  logged_in?: boolean;
+  supports_oauth: boolean;
+  can_delete: boolean;
+}
+
 export interface SettingsState {
   // connection
   serverPort: number | null;
@@ -54,6 +68,10 @@ export interface SettingsState {
 
   // pins
   currentPins: string[];
+
+  // providers (unified)
+  providersSummary: Record<string, ProviderSummary>;
+  selectedProviderId: string | null;
 
   // skills
   skillsList: SkillInfo[];
@@ -104,6 +122,10 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
 
   // pins
   currentPins: [],
+
+  // providers (unified)
+  providersSummary: {},
+  selectedProviderId: null,
 
   // skills
   skillsList: [],

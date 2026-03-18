@@ -829,7 +829,7 @@ function ThinkingLevelButton({ level, onChange, modelXhigh }: {
 
 // ── Model Selector ──
 
-function ModelSelector({ models }: { models: Array<{ id: string; name: string; isCurrent?: boolean }> }) {
+function ModelSelector({ models }: { models: Array<{ id: string; name: string; provider?: string; isCurrent?: boolean }> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -853,7 +853,6 @@ function ModelSelector({ models }: { models: Array<{ id: string; name: string; i
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelId }),
       });
-      // Reload models
       const favRes = await hanaFetch('/api/models/favorites');
       const favData = await favRes.json();
       const state = window.__hanaState;
@@ -865,6 +864,26 @@ function ModelSelector({ models }: { models: Array<{ id: string; name: string; i
     setOpen(false);
   }, []);
 
+  // 按 provider 分组
+  const grouped = useMemo(() => {
+    const groups: Record<string, typeof models> = {};
+    for (const m of models) {
+      const key = m.provider || '';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(m);
+    }
+    // 当前模型不在 favorites 时强制加入
+    if (current && !models.find(m => m.id === current.id)) {
+      const key = current.provider || '';
+      if (!groups[key]) groups[key] = [];
+      groups[key].unshift(current);
+    }
+    return groups;
+  }, [models, current]);
+
+  const groupKeys = Object.keys(grouped);
+  const hasMultipleProviders = groupKeys.length > 1 || (groupKeys.length === 1 && groupKeys[0] !== '');
+
   return (
     <div className={'model-selector' + (open ? ' open' : '')} ref={ref}>
       <button className="model-pill" onClick={(e) => { e.stopPropagation(); setOpen(!open); }}>
@@ -873,15 +892,25 @@ function ModelSelector({ models }: { models: Array<{ id: string; name: string; i
       </button>
       {open && (
         <div className="model-dropdown">
-          {models.map(m => (
-            <button
-              key={m.id}
-              className={'model-option' + (m.isCurrent ? ' active' : '')}
-              onClick={() => switchModel(m.id)}
-            >
-              {m.name}
-            </button>
-          ))}
+          {groupKeys.map(provider => {
+            const items = grouped[provider];
+            return (
+              <div key={provider || '__none'}>
+                {hasMultipleProviders && (
+                  <div className="model-group-header">{provider || '—'}</div>
+                )}
+                {items.map(m => (
+                  <button
+                    key={m.id}
+                    className={'model-option' + (m.isCurrent ? ' active' : '')}
+                    onClick={() => switchModel(m.id)}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

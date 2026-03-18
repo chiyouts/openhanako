@@ -3533,6 +3533,14 @@ html[data-platform="linux"] .tb-toggle-right {
     to { opacity: 1; transform: translateY(0); }
 }
 
+.model-group-header {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    padding: 6px 0.6rem 2px;
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+}
+
 .model-option {
     display: block;
     width: 100%;
@@ -7101,6 +7109,854 @@ body.resizing .jian-sidebar-inner {
 @keyframes oauth-pulse {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
+}
+
+/* ========================================
+   Provider Tab — 双栏布局（新）
+   ======================================== */
+.pv-layout {
+    display: flex;
+    gap: 0;
+    min-height: 400px;
+    background: var(--bg-card, var(--bg));
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-md);
+    box-shadow: 0 1px 4px var(--shadow);
+}
+
+.pv-list {
+    width: 33.33%;
+    flex-shrink: 0;
+    border-right: 1px solid var(--overlay-light);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-xs) 0;
+    overflow-y: auto;
+    background: transparent;
+}
+
+.pv-list-title {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 6px 12px 4px;
+    letter-spacing: 0.03em;
+}
+
+.pv-list-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: none;
+    border: none;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    width: 100%;
+}
+
+.pv-list-item:hover { background: var(--accent-light); }
+.pv-list-item.dim { opacity: 0.45; }
+.pv-list-item.dim:hover { opacity: 0.7; }
+.pv-list-item.dim.selected { opacity: 1; }
+.pv-list-item.selected {
+    border-left-color: var(--accent);
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.pv-list-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pv-list-item-count {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.pv-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    flex-shrink: 0;
+    opacity: 0.4;
+}
+
+.pv-status-dot.on {
+    background: var(--success, #5a9);
+    opacity: 1;
+}
+
+.pv-list-divider {
+    height: 1px;
+    background: var(--overlay-light);
+    margin: 4px 12px;
+}
+
+.pv-add-wrapper {
+    margin-top: auto;
+    position: relative;
+}
+
+.pv-add-btn {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border-light, var(--overlay-light));
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-align: left;
+}
+
+.pv-add-btn:hover { color: var(--accent); }
+
+.pv-add-popover {
+    position: fixed;
+    width: 360px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow);
+    z-index: 9999;
+    padding: 12px;
+}
+
+.pv-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pv-add-form .settings-input { font-size: 0.78rem; padding: 4px 8px; }
+.pv-add-form .settings-field { margin-bottom: 0; }
+
+.pv-add-form-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+.pv-add-form-btn {
+    font-family: inherit;
+    font-size: 0.72rem;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.pv-add-form-btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: transparent;
+}
+
+.pv-add-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pv-add-form-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+/* ── Preset Setup 引导 ── */
+.pv-setup-hint {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-md);
+}
+
+.pv-setup-activate-btn {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 6px 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.pv-setup-activate-btn:hover { opacity: 0.85; }
+
+/* ── 右栏 ── */
+.pv-detail {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-md);
+    overflow-y: auto;
+    background: transparent;
+}
+
+.pv-detail-inner { max-width: 560px; }
+
+.pv-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+}
+
+.pv-detail-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text);
+}
+
+.pv-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+/* ── 凭证区 ── */
+.pv-credentials {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-md);
+    border-bottom: 1px solid var(--overlay-light);
+}
+
+.pv-cred-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: 28px;
+}
+
+.pv-cred-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    width: 60px;
+    flex-shrink: 0;
+}
+
+.pv-cred-value {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pv-cred-value.muted { color: var(--text-muted); font-size: 0.72rem; cursor: default; }
+
+.pv-cred-badge {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    background: var(--overlay-light);
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+
+.pv-cred-edit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+.pv-cred-key-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.pv-cred-conn-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.pv-cred-conn-icon:hover { color: var(--accent); border-color: var(--accent); }
+.pv-cred-conn-icon.ok { color: var(--success, #5a9); border-color: var(--success, #5a9); }
+.pv-cred-conn-icon.fail { color: var(--danger, #c55); border-color: var(--danger, #c55); }
+.pv-cred-conn-icon.testing { opacity: 0.5; }
+.pv-cred-conn-icon.spinning svg { animation: pv-spin 0.8s linear infinite; }
+
+@keyframes pv-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.pv-cred-select-wrapper {
+    flex: 1;
+    min-width: 0;
+}
+
+.pv-cred-select-wrapper .select-widget { font-size: 0.78rem; }
+
+.pv-verify-btn {
+    font-family: inherit;
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+}
+
+.pv-verify-btn:hover { opacity: 0.85; }
+.pv-verify-btn:disabled { opacity: 0.5; cursor: default; }
+
+.pv-verify-connection-btn {
+    font-family: inherit;
+    font-size: 0.75rem;
+    padding: 5px 14px;
+    margin-top: 4px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.pv-verify-connection-btn:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.pv-cred-save, .pv-cred-cancel {
+    font-family: inherit;
+    font-size: 0.72rem;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pv-cred-save { background: var(--accent); color: #fff; border-color: transparent; }
+
+.pv-oauth-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* ── 已收藏模型（紧凑列表） ── */
+.pv-fav-section {
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--overlay-light);
+}
+
+.pv-fav-title {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pv-fav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.pv-fav-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+}
+
+.pv-fav-item:hover { background: var(--accent-light); }
+
+.pv-fav-item-name {
+    flex: 1;
+    font-size: 0.78rem;
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pv-fav-item-id {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
+.pv-fav-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.pv-fav-item:hover .pv-fav-item-actions { opacity: 1; }
+
+.pv-fav-item-edit,
+.pv-fav-item-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 2px;
+    flex-shrink: 0;
+}
+
+.pv-fav-item-edit:hover { color: var(--accent); }
+.pv-fav-item-remove:hover { color: var(--danger, #c55); }
+
+/* ── 模型编辑弹出卡片 ── */
+.pv-model-edit-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.15);
+    z-index: 9998;
+}
+
+.pv-model-edit-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pv-model-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+}
+
+.pv-model-edit-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.pv-model-edit-id {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-family: var(--font-mono, monospace);
+    opacity: 0.7;
+}
+
+.pv-model-edit-row {
+    display: flex;
+    gap: 8px;
+}
+
+.pv-model-edit-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.pv-model-edit-card .settings-input {
+    font-size: 0.78rem;
+    padding: 4px 8px;
+}
+
+/* ── 模型列表区（折叠式） ── */
+.pv-models {
+    margin-bottom: var(--space-md);
+}
+
+/* ── 添加模型行 ── */
+.pv-models-action-row {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    position: relative;
+}
+
+.pv-fetch-btn-inline {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: var(--bg-input, var(--bg));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    padding: 0 10px;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+
+.pv-fetch-btn-inline:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── 模型下拉选择器 ── */
+
+.pv-model-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    background: var(--bg-input, var(--bg));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.pv-model-dropdown-trigger:hover { border-color: var(--accent); }
+
+.pv-model-dropdown-panel {
+    /* position/left/bottom/width/zIndex set by JS */
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 16px var(--shadow);
+    overflow: hidden;
+}
+
+.pv-model-dropdown-search {
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-bottom: 1px solid var(--overlay-light);
+    font-family: inherit;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: transparent;
+    outline: none;
+}
+
+.pv-model-dropdown-list {
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.pv-model-dropdown-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 5px 10px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s;
+}
+
+.pv-model-dropdown-option:hover { background: var(--accent-light); }
+.pv-model-dropdown-option.added { color: var(--text-muted); }
+
+.pv-model-dropdown-option-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pv-model-dropdown-option-check {
+    color: var(--accent);
+    flex-shrink: 0;
+    font-size: 0.72rem;
+}
+
+.pv-model-dropdown-empty {
+    padding: 12px 10px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.pv-model-dropdown-custom {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    border-top: 1px solid var(--overlay-light);
+}
+
+.pv-model-dropdown-custom-input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.75rem;
+    color: var(--text);
+    background: var(--bg-input, var(--bg));
+    outline: none;
+}
+
+.pv-models-title {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pv-models-count {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    background: var(--overlay-light);
+    padding: 0 5px;
+    border-radius: 8px;
+    font-weight: 400;
+}
+
+.pv-fetch-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+}
+
+.pv-fetch-btn:hover { color: var(--accent); background: var(--accent-light); }
+
+.pv-models-search {
+    width: 100%;
+    font-size: 0.78rem;
+    padding: 4px 8px;
+    margin-bottom: var(--space-xs);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input, var(--bg));
+    color: var(--text);
+    font-family: inherit;
+}
+
+.pv-models-empty {
+    padding: var(--space-md);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.pv-models-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.pv-model-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+}
+
+.pv-model-item:hover { background: var(--accent-light); }
+
+.pv-model-star {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    opacity: 0.4;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.pv-model-star:hover { opacity: 1; }
+.pv-model-star.on { color: var(--accent); opacity: 1; }
+
+.pv-model-name {
+    flex: 1;
+    font-size: 0.78rem;
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pv-model-ctx {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.pv-model-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.pv-model-item:hover .pv-model-actions { opacity: 1; }
+
+/* ── 自定义模型输入 ── */
+.pv-model-add-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: var(--space-xs);
+}
+
+.pv-model-add-input {
+    flex: 1;
+    font-size: 0.78rem !important;
+    padding: 4px 8px !important;
+}
+
+.pv-model-add-btn {
+    font-family: inherit;
+    font-size: 0.82rem;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.pv-model-add-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── 删除按钮（标题栏右侧） ── */
+.pv-delete-btn {
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: var(--danger, #c55);
+    background: transparent;
+    border: 1px solid var(--danger, #c55);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    padding: 3px 10px;
+    opacity: 0.6;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.pv-delete-btn:hover {
+    opacity: 1;
+    background: var(--danger, #c55);
+    color: #fff;
+}
+
+.pv-confirm-dialog {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow);
+    padding: 16px 20px;
+    width: 320px;
+}
+
+.pv-confirm-text {
+    font-size: 0.82rem;
+    color: var(--text);
+    margin: 0 0 12px;
+    line-height: 1.5;
+}
+
+.pv-confirm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.pv-add-form-btn.danger {
+    background: var(--danger, #c55);
+    color: #fff;
+    border-color: transparent;
+}
+
+/* ── 底部全局模型分配 ── */
+.pv-other-section {
+    margin-top: var(--space-md);
+    border-top: 1px solid var(--overlay-light);
+    padding-top: var(--space-md);
 }
 
 /* ========================================

@@ -417,7 +417,18 @@
       "added": "Added {name}",
       "deleted": "Deleted {name}",
       "noModels": "No models yet",
-      "resetModels": "Reset Models"
+      "resetModels": "Reset Models",
+      "apiType": "API Type",
+      "verify": "Verify",
+      "verifyConnection": "Verify Connection",
+      "verifySuccess": "Connection verified",
+      "verifyFailed": "Verification failed",
+      "setupHint": "Enter API Key to activate this provider",
+      "selectHint": "Select a provider to view details",
+      "addCustom": "Add Custom Provider",
+      "noKey": "Not configured",
+      "remove": "Remove",
+      "deleteConfirm": "Delete provider {name}? Associated models and favorites will be removed."
     },
     "oauth": {
       "title": "Quick Login",
