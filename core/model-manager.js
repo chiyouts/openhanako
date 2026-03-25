@@ -106,7 +106,14 @@ export class ModelManager {
    * @returns {object|null} SDK 模型对象
    */
   _resolveFromAvailable(ref) {
-    if (!ref || typeof ref !== "string") return null;
+    if (!ref) return null;
+
+    // 新格式：{id, provider} 对象 — 用复合键精确查找
+    if (typeof ref === "object" && ref.id) {
+      return findModel(this._availableModels, ref.id, ref.provider) || null;
+    }
+
+    if (typeof ref !== "string") return null;
     const str = ref.trim();
     if (!str) return null;
 
