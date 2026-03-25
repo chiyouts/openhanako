@@ -328,6 +328,34 @@ export async function archiveSession(path: string): Promise<void> {
 }
 
 // ══════════════════════════════════════════════════════
+// 重命名 Session
+// ══════════════════════════════════════════════════════
+
+export async function renameSession(path: string, title: string): Promise<boolean> {
+  try {
+    const res = await hanaFetch('/api/sessions/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, title }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      console.error('[session] rename failed:', data.error);
+      return false;
+    }
+    // 乐观更新 store 中的 title
+    const sessions = useStore.getState().sessions.map(s =>
+      s.path === path ? { ...s, title } : s,
+    );
+    useStore.setState({ sessions });
+    return true;
+  } catch (err) {
+    console.error('[session] rename failed:', err);
+    return false;
+  }
+}
+
+// ══════════════════════════════════════════════════════
 // Toast
 // ══════════════════════════════════════════════════════
 

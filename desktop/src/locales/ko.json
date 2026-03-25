@@ -55,7 +55,8 @@
     "messageCount": "{n}개의 메시지",
     "switchFailed": "세션 전환 실패",
     "createFailed": "세션 생성 실패",
-    "archiveFailed": "세션 보관 실패"
+    "archiveFailed": "세션 보관 실패",
+    "rename": "이름 변경"
   },
   "common": {
     "on": "켜기",

@@ -5,12 +5,12 @@
  * 通过 portal 渲染到 #sessionList，从 Zustand sessions 状态驱动。
  */
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../stores';
 import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
 import { useI18n } from '../hooks/use-i18n';
 import { formatSessionDate } from '../utils/format';
-import { switchSession, archiveSession } from '../stores/session-actions';
+import { switchSession, archiveSession, renameSession } from '../stores/session-actions';
 import type { Session, Agent } from '../types';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import styles from './SessionList.module.css';
@@ -116,15 +116,51 @@ function SessionItem({ session: s, isActive, isStreaming, agents, browserUrl }: 
   browserUrl: string | null;
 }) {
   const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleClick = useCallback(() => {
+    if (editing) return;
     switchSession(s.path);
-  }, [s.path]);
+  }, [s.path, editing]);
 
   const handleArchive = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     archiveSession(s.path);
   }, [s.path]);
+
+  const startRename = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditValue(s.title || s.firstMessage || '');
+    setEditing(true);
+  }, [s.title, s.firstMessage]);
+
+  const commitRename = useCallback(() => {
+    const trimmed = editValue.trim();
+    setEditing(false);
+    if (trimmed && trimmed !== (s.title || s.firstMessage || '')) {
+      renameSession(s.path, trimmed);
+    }
+  }, [editValue, s.path, s.title, s.firstMessage]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitRename();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setEditing(false);
+    }
+  }, [commitRename]);
+
+  // Auto-focus input when editing starts
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
 
   // Meta line
   const parts: string[] = [];
@@ -146,10 +182,30 @@ function SessionItem({ session: s, isActive, isStreaming, agents, browserUrl }: 
           <AgentBadge agentId={s.agentId} agentName={s.agentName} agents={agents} />
         )}
         {isStreaming && <span className={styles.sessionStreamingDot} />}
-        <div className={styles.sessionItemTitle}>
-          {s.title || s.firstMessage || t('session.untitled')}
-        </div>
+        {editing ? (
+          <input
+            ref={inputRef}
+            className={styles.sessionRenameInput}
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={commitRename}
+            onClick={e => e.stopPropagation()}
+          />
+        ) : (
+          <div className={styles.sessionItemTitle}>
+            {s.title || s.firstMessage || t('session.untitled')}
+          </div>
+        )}
       </div>
+
+      {!editing && (
+        <div className={styles.sessionRenameBtn} title={t('session.rename')} onClick={startRename}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+          </svg>
+        </div>
+      )}
 
       <div className={styles.sessionArchiveBtn} title="Archive" onClick={handleArchive}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

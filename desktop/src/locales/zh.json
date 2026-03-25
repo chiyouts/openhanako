@@ -56,7 +56,8 @@
     "messageCount": "{n} 条消息",
     "switchFailed": "切换 session 失败",
     "createFailed": "新建 session 失败",
-    "archiveFailed": "归档 session 失败"
+    "archiveFailed": "归档 session 失败",
+    "rename": "重命名"
   },
   "common": {
     "on": "开",

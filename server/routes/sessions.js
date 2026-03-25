@@ -327,6 +327,27 @@ export function createSessionsRoute(engine) {
     return c.json({ ok: true });
   });
 
+  // 重命名 session
+  route.post("/sessions/rename", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const { path: sessionPath, title } = body;
+      if (!sessionPath) {
+        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+      }
+      if (typeof title !== "string" || !title.trim()) {
+        return c.json({ error: t("error.missingParam", { param: "title" }) }, 400);
+      }
+      if (!isValidSessionPath(sessionPath, engine.agentsDir)) {
+        return c.json({ error: "Invalid session path" }, 403);
+      }
+      await engine.saveSessionTitle(sessionPath, title.trim());
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
   // 清理过期归档 session
   route.post("/sessions/cleanup", async (c) => {
     try {

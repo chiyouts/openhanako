@@ -55,7 +55,8 @@
     "messageCount": "{n} 則訊息",
     "switchFailed": "切換 session 失敗",
     "createFailed": "新建 session 失敗",
-    "archiveFailed": "歸檔 session 失敗"
+    "archiveFailed": "歸檔 session 失敗",
+    "rename": "重新命名"
   },
   "common": {
     "on": "開",

@@ -56,7 +56,8 @@
     "messageCount": "{n} messages",
     "switchFailed": "Failed to switch session",
     "createFailed": "Failed to create session",
-    "archiveFailed": "Failed to archive session"
+    "archiveFailed": "Failed to archive session",
+    "rename": "Rename"
   },
   "common": {
     "on": "On",

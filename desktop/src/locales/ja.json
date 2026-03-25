@@ -55,7 +55,8 @@
     "messageCount": "{n} 件のメッセージ",
     "switchFailed": "セッションの切り替えに失敗しました",
     "createFailed": "セッションの作成に失敗しました",
-    "archiveFailed": "セッションのアーカイブに失敗しました"
+    "archiveFailed": "セッションのアーカイブに失敗しました",
+    "rename": "名前を変更"
   },
   "common": {
     "on": "オン",

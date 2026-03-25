@@ -57,6 +57,55 @@
     opacity: 0.8;
 }
 
+/* 重命名按钮 */
+.sessionRenameBtn {
+    position: absolute;
+    bottom: 4px;
+    right: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.15s;
+    z-index: 1;
+}
+
+.sessionRenameBtn svg {
+    pointer-events: none;
+}
+
+.sessionItem:hover .sessionRenameBtn {
+    opacity: 0.5;
+}
+
+.sessionRenameBtn:hover {
+    opacity: 1 !important;
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+/* 重命名输入框 */
+.sessionRenameInput {
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.4;
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    padding: 0 4px;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+    font-family: inherit;
+}
+
 /* 归档按钮 */
 .sessionArchiveBtn {
     position: absolute;
