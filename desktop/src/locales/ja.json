@@ -311,84 +311,84 @@
   },
   "tool": {
     "web_search": {
-      "running": "🌐 {name} はウェブを検索しています",
-      "done": "🌐 {name} が検索から戻りました",
-      "failed": "🌐 {name} は検索できませんでした"
+      "running": "🌐 {name} はネットサーフィン中",
+      "done": "🌐 {name} サーフィンから戻ってきた",
+      "failed": "🌐 {name} 波に乗れなかった"
     },
     "web_fetch": {
-      "running": "📄 {name} はウェブページを読んでいます",
-      "done": "📄 {name} は読み終わりました",
-      "failed": "📄 {name} はページを取得できませんでした"
+      "running": "📄 {name} はウェブページを覗いている",
+      "done": "📄 {name} しっかり読んだ",
+      "failed": "📄 {name} ネットに繋がらなかった"
     },
     "search_memory": {
-      "running": "💭 {name} は思い出そうとしています",
-      "done": "💭 {name} は何か思い出しました",
-      "failed": "💭 {name} は思い出せませんでした"
+      "running": "💭 {name} は一生懸命思い出そうとしている",
+      "done": "💭 {name} 思い出した！",
+      "failed": "💭 {name} どうしても思い出せない"
     },
     "bash": {
-      "running": "💻 {name} はそっとコンピュータを操作しています",
-      "done": "💻 {name} はコンピュータ操作を終えました",
-      "failed": "💻 {name} のコマンドが失敗しました"
+      "running": "💻 {name} はそっとパソコンを触っている",
+      "done": "💻 {name} パソコン使い終わった",
+      "failed": "💻 {name} パソコンが言うことを聞かなかった"
     },
     "read": {
-      "running": "📖 {name} はファイルを読んでいます",
-      "done": "📖 {name} は読み終わりました",
-      "failed": "📖 {name} は読めませんでした"
+      "running": "📖 {name} はファイルをめくっている",
+      "done": "📖 {name} 読み終わった",
+      "failed": "📖 {name} 見つからなかった"
     },
     "write": {
-      "running": "✏️ {name} は書いています",
-      "done": "✏️ {name} は書き終わりました",
-      "failed": "✏️ {name} は書けませんでした"
+      "running": "✏️ {name} はペンを走らせている",
+      "done": "✏️ {name} 書き上げた",
+      "failed": "✏️ {name} インクが切れた"
     },
     "edit": {
-      "running": "✏️ {name} は編集しています",
-      "done": "✏️ {name} は編集を終えました",
-      "failed": "✏️ {name} は編集できませんでした"
+      "running": "✏️ {name} は手直ししている",
+      "done": "✏️ {name} 直った",
+      "failed": "✏️ {name} 直そうとしたら余計に…"
     },
     "edit-diff": {
-      "running": "✏️ {name} は編集しています",
-      "done": "✏️ {name} は編集を終えました",
-      "failed": "✏️ {name} は編集できませんでした"
+      "running": "✏️ {name} は手直ししている",
+      "done": "✏️ {name} 直った",
+      "failed": "✏️ {name} 直そうとしたら余計に…"
     },
     "glob": {
-      "running": "🔍 {name} はファイルを探しています",
-      "done": "🔍 {name} は見つけました",
-      "failed": "🔍 {name} は見つけられませんでした"
+      "running": "🔍 {name} はファイルを探している",
+      "done": "🔍 {name} 見つけた",
+      "failed": "🔍 {name} 隅々まで探したけど見つからない"
     },
     "grep": {
-      "running": "🔍 {name} はファイル内を検索しています",
-      "done": "🔍 {name} の検索が完了しました",
-      "failed": "🔍 {name} は見つけられませんでした"
+      "running": "🔍 {name} はファイルの中を探し回っている",
+      "done": "🔍 {name} 見つけた",
+      "failed": "🔍 {name} 全部探したけどなかった"
     },
     "find": {
-      "running": "🔍 {name} はファイルを探しています",
-      "done": "🔍 {name} は見つけました",
-      "failed": "🔍 {name} は見つけられませんでした"
+      "running": "🔍 {name} はファイルを探している",
+      "done": "🔍 {name} 見つけた",
+      "failed": "🔍 {name} 隅々まで探したけど見つからない"
     },
     "ls": {
-      "running": "📂 {name} はフォルダを覗いています",
-      "done": "📂 {name} は確認しました",
-      "failed": "📂 {name} は覗けませんでした"
+      "running": "📂 {name} はフォルダの中を覗いている",
+      "done": "📂 {name} 確認した",
+      "failed": "📂 {name} このフォルダ開けない"
     },
     "truncate": {
-      "running": "✂️ {name} はファイルを整理しています",
-      "done": "✂️ {name} は整理しました",
-      "failed": "✂️ {name} は整理できませんでした"
+      "running": "✂️ {name} はファイルを整理している",
+      "done": "✂️ {name} きれいになった",
+      "failed": "✂️ {name} 片付けられなかった"
     },
     "present_files": {
-      "running": "📎 {name} はファイルを準備しています",
-      "done": "📎 ファイルの準備ができました",
-      "failed": "📎 ファイルの提示に失敗しました"
+      "running": "📎 {name} はファイルを準備している",
+      "done": "📎 はい、どうぞ！",
+      "failed": "📎 ファイルを渡せなかった"
     },
     "browser": {
-      "running": "🌐 {name} はウェブを閲覧しています",
-      "done": "🌐 {name} は閲覧を終えました",
-      "failed": "🌐 {name} のブラウザ操作が失敗しました"
+      "running": "🌐 {name} はブラウザを操作している",
+      "done": "🌐 {name} ブラウザ操作おわり",
+      "failed": "🌐 {name} ブラウザが言うことを聞かない"
     },
     "_fallback": {
-      "running": "🔧 {name} は作業中です…",
-      "done": "🔧 {name} は完了しました",
-      "failed": "🔧 {name} に問題が発生しました"
+      "running": "🔧 {name} は作業中…",
+      "done": "🔧 {name} 終わった",
+      "failed": "🔧 {name} うまくいかなかった"
     }
   },
   "file_output": {

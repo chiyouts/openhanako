@@ -19,7 +19,9 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
   const { showToast } = useSettingsStore();
   const [keyVal, setKeyVal] = useState('');
   const [keyEdited, setKeyEdited] = useState(false);
-  const baseUrl = summary.base_url || presetInfo?.url || '';
+  const derivedBaseUrl = summary.base_url || presetInfo?.url || '';
+  const [urlVal, setUrlVal] = useState(derivedBaseUrl);
+  const [urlEdited, setUrlEdited] = useState(false);
   const api = summary.api || presetInfo?.api || '';
 
   // 未编辑时，从 summary 同步已保存的 key 到输入框
@@ -29,25 +31,33 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
     }
   }, [summary.api_key, keyEdited]);
 
+  // 未编辑时，从 summary 同步 base_url
+  useEffect(() => {
+    if (!urlEdited) setUrlVal(derivedBaseUrl);
+  }, [derivedBaseUrl, urlEdited]);
+
   const verifyAndSave = async (btn: HTMLButtonElement) => {
     if (!keyEdited) return;
     const key = keyVal.trim();
     if (!key && !presetInfo?.local) return;
     btn.classList.add(styles['spinning']);
     try {
+      const effectiveUrl = urlVal.trim() || derivedBaseUrl;
       const testRes = await hanaFetch('/api/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_url: baseUrl, api, api_key: key }),
+        body: JSON.stringify({ base_url: effectiveUrl, api, api_key: key }),
       });
       const testData = await testRes.json();
       if (!testData.ok) {
         showToast(t('settings.providers.verifyFailed'), 'error');
         return;
       }
-      const payload = isPresetSetup
-        ? { base_url: baseUrl, api_key: key, api, models: [] as string[] }
+      const payload: Record<string, unknown> = isPresetSetup
+        ? { base_url: effectiveUrl, api_key: key, api, models: [] as string[] }
         : { api_key: key };
+      // 如果 base_url 也被编辑过，一并保存
+      if (urlEdited && !isPresetSetup) payload.base_url = effectiveUrl;
       await hanaFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -56,6 +66,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       showToast(t('settings.providers.verifySuccess'), 'success');
       if (isPresetSetup) useSettingsStore.setState({ selectedProviderId: providerId });
       setKeyEdited(false);
+      if (urlEdited) setUrlEdited(false);
       await onRefresh();
       platform?.settingsChanged?.('models-changed');
     } catch (err: unknown) {
@@ -75,7 +86,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       const testRes = await hanaFetch('/api/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_url: baseUrl, api, api_key: keyVal.trim() || undefined }),
+        body: JSON.stringify({ base_url: urlVal.trim() || derivedBaseUrl, api, api_key: keyVal.trim() || undefined }),
       });
       const testData = await testRes.json();
       setConnStatus(testData.ok ? 'ok' : 'fail');
@@ -118,7 +129,32 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       </div>
       <div className={styles['pv-cred-row']}>
         <span className={styles['pv-cred-label']}>Base URL</span>
-        <span className={`${styles['pv-cred-value']} ${styles['muted']}`}>{baseUrl || '\u2014'}</span>
+        <div className={styles['pv-cred-url-row']}>
+          <input
+            className={styles['settings-input']}
+            type="text"
+            value={urlVal}
+            onChange={(e) => { setUrlVal(e.target.value); setUrlEdited(true); }}
+            onBlur={async () => {
+              if (!urlEdited || isPresetSetup) return;
+              const trimmed = urlVal.trim();
+              if (trimmed === derivedBaseUrl) { setUrlEdited(false); return; }
+              try {
+                await hanaFetch('/api/config', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ providers: { [providerId]: { base_url: trimmed } } }),
+                });
+                showToast(t('settings.saved'), 'success');
+                setUrlEdited(false);
+                await onRefresh();
+              } catch { /* swallow */ }
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            placeholder="https://api.example.com/v1"
+            readOnly={!!isPresetSetup}
+          />
+        </div>
       </div>
       <div className={styles['pv-cred-row']}>
         <span className={styles['pv-cred-label']}>{t('settings.providers.apiType')}</span>
@@ -139,6 +175,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
               } catch { /* swallow */ }
             }}
             placeholder="API Format"
+            disabled={!!isPresetSetup}
           />
         </div>
       </div>

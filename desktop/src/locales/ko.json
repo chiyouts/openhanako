@@ -311,84 +311,84 @@
   },
   "tool": {
     "web_search": {
-      "running": "🌐 {name}이(가) 웹을 검색하고 있어요",
-      "done": "🌐 {name}이(가) 검색을 마쳤어요",
-      "failed": "🌐 {name}이(가) 검색에 실패했어요"
+      "running": "🌐 {name}이(가) 인터넷 서핑 중이에요",
+      "done": "🌐 {name} 서핑 다녀왔어요",
+      "failed": "🌐 {name} 파도를 못 탔어요"
     },
     "web_fetch": {
-      "running": "📄 {name}이(가) 웹페이지를 읽고 있어요",
-      "done": "📄 {name}이(가) 다 읽었어요",
-      "failed": "📄 {name}이(가) 페이지를 가져오지 못했어요"
+      "running": "📄 {name}이(가) 웹페이지를 보고 있어요",
+      "done": "📄 {name} 다 파악했어요",
+      "failed": "📄 {name} 인터넷 연결 실패"
     },
     "search_memory": {
       "running": "💭 {name}이(가) 기억을 떠올리는 중이에요",
-      "done": "💭 {name}이(가) 무언가 떠올렸어요",
-      "failed": "💭 {name}이(가) 기억해내지 못했어요"
+      "done": "💭 {name} 떠올랐어요!",
+      "failed": "💭 {name} 아무리 해도 기억이 안 나요"
     },
     "bash": {
       "running": "💻 {name}이(가) 컴퓨터를 살금살금 만지고 있어요",
-      "done": "💻 {name}이(가) 컴퓨터 작업을 끝냈어요",
-      "failed": "💻 {name} 명령 실행 실패"
+      "done": "💻 {name} 컴퓨터 다 썼어요",
+      "failed": "💻 {name} 컴퓨터가 말을 안 들어요"
     },
     "read": {
-      "running": "📖 {name}이(가) 파일을 읽고 있어요",
-      "done": "📖 {name}이(가) 다 읽었어요",
-      "failed": "📖 {name}이(가) 읽지 못했어요"
+      "running": "📖 {name}이(가) 파일을 넘겨보고 있어요",
+      "done": "📖 {name} 다 봤어요",
+      "failed": "📖 {name} 못 찾았어요"
     },
     "write": {
       "running": "✏️ {name}이(가) 글을 쓰고 있어요",
-      "done": "✏️ {name}이(가) 다 썼어요",
-      "failed": "✏️ {name}이(가) 쓰지 못했어요"
+      "done": "✏️ {name} 다 적었어요",
+      "failed": "✏️ {name} 펜에 잉크가 없어요"
     },
     "edit": {
-      "running": "✏️ {name}이(가) 글을 쓰고 있어요",
-      "done": "✏️ {name}이(가) 편집을 마쳤어요",
-      "failed": "✏️ {name}이(가) 편집하지 못했어요"
+      "running": "✏️ {name}이(가) 고치고 있어요",
+      "done": "✏️ {name} 고쳤어요",
+      "failed": "✏️ {name} 고치다가 더 꼬였어요"
     },
     "edit-diff": {
-      "running": "✏️ {name}이(가) 글을 쓰고 있어요",
-      "done": "✏️ {name}이(가) 편집을 마쳤어요",
-      "failed": "✏️ {name}이(가) 편집하지 못했어요"
+      "running": "✏️ {name}이(가) 고치고 있어요",
+      "done": "✏️ {name} 고쳤어요",
+      "failed": "✏️ {name} 고치다가 더 꼬였어요"
     },
     "glob": {
       "running": "🔍 {name}이(가) 파일을 찾고 있어요",
-      "done": "🔍 {name}이(가) 찾았어요",
-      "failed": "🔍 {name}이(가) 찾지 못했어요"
+      "done": "🔍 {name} 찾았어요",
+      "failed": "🔍 {name} 샅샅이 뒤져도 못 찾았어요"
     },
     "grep": {
       "running": "🔍 {name}이(가) 파일 속을 뒤지고 있어요",
-      "done": "🔍 {name} 검색 완료",
-      "failed": "🔍 {name}이(가) 찾지 못했어요"
+      "done": "🔍 {name} 찾았어요",
+      "failed": "🔍 {name} 다 뒤져도 없어요"
     },
     "find": {
       "running": "🔍 {name}이(가) 파일을 찾고 있어요",
-      "done": "🔍 {name}이(가) 찾았어요",
-      "failed": "🔍 {name}이(가) 찾지 못했어요"
+      "done": "🔍 {name} 찾았어요",
+      "failed": "🔍 {name} 샅샅이 뒤져도 못 찾았어요"
     },
     "ls": {
-      "running": "📂 {name}이(가) 폴더를 들여다보고 있어요",
-      "done": "📂 {name}이(가) 다 봤어요",
-      "failed": "📂 {name}이(가) 들여다보지 못했어요"
+      "running": "📂 {name}이(가) 폴더 안에 뭐가 있는지 보고 있어요",
+      "done": "📂 {name} 다 봤어요",
+      "failed": "📂 {name} 이 폴더를 열 수 없어요"
     },
     "truncate": {
       "running": "✂️ {name}이(가) 파일을 정리하고 있어요",
-      "done": "✂️ {name} 깔끔하게 정리됐어요",
-      "failed": "✂️ {name}이(가) 정리하지 못했어요"
+      "done": "✂️ {name} 깔끔해졌어요",
+      "failed": "✂️ {name} 정리가 안 돼요"
     },
     "present_files": {
       "running": "📎 {name}이(가) 파일을 준비하고 있어요",
-      "done": "📎 파일 준비 완료",
-      "failed": "📎 파일 표시 실패"
+      "done": "📎 여기요!",
+      "failed": "📎 파일을 건네지 못했어요"
     },
     "browser": {
-      "running": "🌐 {name}이(가) 웹을 탐색하고 있어요",
-      "done": "🌐 {name}이(가) 탐색을 마쳤어요",
-      "failed": "🌐 {name} 브라우저 작업 실패"
+      "running": "🌐 {name}이(가) 브라우저를 쓰고 있어요",
+      "done": "🌐 {name} 브라우저 작업 끝났어요",
+      "failed": "🌐 {name} 브라우저가 말을 안 들어요"
     },
     "_fallback": {
       "running": "🔧 {name}이(가) 열심히 작업 중이에요…",
-      "done": "🔧 {name} 다 끝났어요",
-      "failed": "🔧 {name} 뭔가 잘못됐어요"
+      "done": "🔧 {name} 끝났어요",
+      "failed": "🔧 {name} 뭔가 잘 안 됐어요"
     }
   },
   "file_output": {

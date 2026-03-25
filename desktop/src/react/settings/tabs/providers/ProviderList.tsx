@@ -34,6 +34,8 @@ export function AddCustomButton({ adding, onToggle, onDone, onCancel }: {
     const handler = (e: MouseEvent) => {
       if (btnRef.current?.contains(e.target as Node)) return;
       if (popRef.current?.contains(e.target as Node)) return;
+      // SelectWidget 的下拉面板通过 portal 渲染到 body，不在 popRef 内
+      if ((e.target as Element).closest?.('[data-sdw-popup]')) return;
       onCancel();
     };
     document.addEventListener('mousedown', handler);

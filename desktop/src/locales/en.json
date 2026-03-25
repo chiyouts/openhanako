@@ -317,79 +317,79 @@
       "failed": "🌐 {name} couldn't catch a wave"
     },
     "web_fetch": {
-      "running": "📄 {name} is reading a webpage",
-      "done": "📄 {name} finished reading",
-      "failed": "📄 {name} couldn't fetch the page"
+      "running": "📄 {name} is peeking at a webpage",
+      "done": "📄 {name} got it all",
+      "failed": "📄 {name} couldn't reach the page"
     },
     "search_memory": {
       "running": "💭 {name} is trying to remember",
-      "done": "💭 {name} recalled something",
-      "failed": "💭 {name} couldn't recall"
+      "done": "💭 {name} remembered!",
+      "failed": "💭 {name} can't seem to remember"
     },
     "bash": {
       "running": "💻 {name} is tiptoeing through your computer",
       "done": "💻 {name} is done with the computer",
-      "failed": "💻 {name} command failed"
+      "failed": "💻 {name}'s computer didn't cooperate"
     },
     "read": {
-      "running": "📖 {name} is reading a file",
-      "done": "📖 {name} finished reading",
-      "failed": "📖 {name} couldn't read"
+      "running": "📖 {name} is flipping through a file",
+      "done": "📖 {name} done flipping",
+      "failed": "📖 {name} found nothing there"
     },
     "write": {
       "running": "✏️ {name} is putting pen to paper",
-      "done": "✏️ {name} finished writing",
-      "failed": "✏️ {name} couldn't write"
+      "done": "✏️ {name} ink's down",
+      "failed": "✏️ {name} ran out of ink"
     },
     "edit": {
-      "running": "✏️ {name} is putting pen to paper",
-      "done": "✏️ {name} done editing",
-      "failed": "✏️ {name} couldn't edit"
+      "running": "✏️ {name} is making edits",
+      "done": "✏️ {name} all fixed up",
+      "failed": "✏️ {name} made a bit of a mess"
     },
     "edit-diff": {
-      "running": "✏️ {name} is putting pen to paper",
-      "done": "✏️ {name} done editing",
-      "failed": "✏️ {name} couldn't edit"
+      "running": "✏️ {name} is making edits",
+      "done": "✏️ {name} all fixed up",
+      "failed": "✏️ {name} made a bit of a mess"
     },
     "glob": {
       "running": "🔍 {name} is looking for files",
       "done": "🔍 {name} found them",
-      "failed": "🔍 {name} couldn't find"
+      "failed": "🔍 {name} searched high and low, nothing"
     },
     "grep": {
-      "running": "🔍 {name} is searching through files",
-      "done": "🔍 {name} search done",
-      "failed": "🔍 {name} couldn't find"
+      "running": "🔍 {name} is rummaging through files",
+      "done": "🔍 {name} found something",
+      "failed": "🔍 {name} rummaged through everything, nope"
     },
     "find": {
       "running": "🔍 {name} is looking for files",
       "done": "🔍 {name} found them",
-      "failed": "🔍 {name} couldn't find"
+      "failed": "🔍 {name} searched high and low, nothing"
     },
     "ls": {
-      "running": "📂 {name} is peeking into a folder",
-      "done": "📂 {name} done peeking",
-      "failed": "📂 {name} couldn't peek"
+      "running": "📂 {name} is peeking inside a folder",
+      "done": "📂 {name} all seen",
+      "failed": "📂 {name} couldn't open this folder"
     },
     "truncate": {
       "running": "✂️ {name} is tidying up a file",
-      "done": "✂️ {name} all tidy",
-      "failed": "✂️ {name} couldn't tidy"
+      "done": "✂️ {name} all tidied up",
+      "failed": "✂️ {name} couldn't tidy up"
     },
     "present_files": {
       "running": "📎 {name} is preparing the file",
-      "done": "📎 File ready",
-      "failed": "📎 Failed to present file"
+      "done": "📎 Here it is!",
+      "failed": "📎 Couldn't hand it over"
     },
     "browser": {
       "running": "🌐 {name} is browsing the web",
-      "done": "🌐 {name} done browsing",
-      "failed": "🌐 {name} browser action failed"
+      "done": "🌐 {name} done with the browser",
+      "failed": "🌐 {name}'s browser wouldn't cooperate"
     },
     "_fallback": {
       "running": "🔧 {name} is busy working…",
       "done": "🔧 {name} all done",
-      "failed": "🔧 {name} something went wrong"
+      "failed": "🔧 {name} that didn't go as planned"
     }
   },
   "file_output": {

@@ -316,79 +316,79 @@
       "failed": "🌐 {name} 沒衝到浪"
     },
     "web_fetch": {
-      "running": "📄 {name} 正在讀取網頁",
-      "done": "📄 {name} 讀取完成",
-      "failed": "📄 {name} 網頁讀取失敗"
+      "running": "📄 {name} 正在看網頁",
+      "done": "📄 {name} 瞭然於心",
+      "failed": "📄 {name} 上網失敗"
     },
     "search_memory": {
-      "running": "💭 {name} 正在努力回想中",
-      "done": "💭 {name} 回想完畢",
-      "failed": "💭 {name} 記憶檢索失敗"
+      "running": "💭 {name} 正在努力回想",
+      "done": "💭 {name} 想起來了",
+      "failed": "💭 {name} 怎麼也想不起來"
     },
     "bash": {
       "running": "💻 {name} 正在小心翼翼地用你的電腦",
       "done": "💻 {name} 用完電腦了",
-      "failed": "💻 {name} 指令執行失敗"
+      "failed": "💻 {name} 電腦沒聽話"
     },
     "read": {
-      "running": "📖 {name} 正在讀取檔案",
-      "done": "📖 {name} 讀取完成",
-      "failed": "📖 {name} 讀取失敗"
+      "running": "📖 {name} 正在翻閱檔案",
+      "done": "📖 {name} 翻完了",
+      "failed": "📖 {name} 沒翻到"
     },
     "write": {
       "running": "✏️ {name} 提筆寫字中",
-      "done": "✏️ {name} 寫完了",
-      "failed": "✏️ {name} 寫入失敗"
+      "done": "✏️ {name} 落筆了",
+      "failed": "✏️ {name} 筆沒墨了"
     },
     "edit": {
-      "running": "✏️ {name} 提筆寫字中",
-      "done": "✏️ {name} 改完了",
-      "failed": "✏️ {name} 修改失敗"
+      "running": "✏️ {name} 提筆改字中",
+      "done": "✏️ {name} 改好了",
+      "failed": "✏️ {name} 越改越亂了"
     },
     "edit-diff": {
-      "running": "✏️ {name} 提筆寫字中",
-      "done": "✏️ {name} 改完了",
-      "failed": "✏️ {name} 修改失敗"
+      "running": "✏️ {name} 提筆改字中",
+      "done": "✏️ {name} 改好了",
+      "failed": "✏️ {name} 越改越亂了"
     },
     "glob": {
-      "running": "🔍 {name} 正在尋找檔案",
+      "running": "🔍 {name} 正在找檔案",
       "done": "🔍 {name} 找到了",
-      "failed": "🔍 {name} 查找失敗"
+      "failed": "🔍 {name} 翻遍了也沒找到"
     },
     "grep": {
-      "running": "🔍 {name} 正在檔案中搜尋",
-      "done": "🔍 {name} 搜尋完成",
-      "failed": "🔍 {name} 搜尋失敗"
+      "running": "🔍 {name} 正在檔案裡翻找",
+      "done": "🔍 {name} 翻到了",
+      "failed": "🔍 {name} 翻了個遍，沒有"
     },
     "find": {
-      "running": "🔍 {name} 正在尋找檔案",
+      "running": "🔍 {name} 正在找檔案",
       "done": "🔍 {name} 找到了",
-      "failed": "🔍 {name} 查找失敗"
+      "failed": "🔍 {name} 翻遍了也沒找到"
     },
     "ls": {
-      "running": "📂 {name} 正在查看目錄",
-      "done": "📂 {name} 查看完成",
-      "failed": "📂 {name} 查看失敗"
+      "running": "📂 {name} 正在看資料夾裡有什麼",
+      "done": "📂 {name} 看完了",
+      "failed": "📂 {name} 打不開這個資料夾"
     },
     "truncate": {
       "running": "✂️ {name} 正在整理檔案",
-      "done": "✂️ {name} 整理完成",
-      "failed": "✂️ {name} 整理失敗"
+      "done": "✂️ {name} 整理好了",
+      "failed": "✂️ {name} 整理不動了"
     },
     "present_files": {
       "running": "📎 {name} 正在整理檔案",
-      "done": "📎 檔案就緒",
-      "failed": "📎 檔案呈現失敗"
+      "done": "📎 在這！",
+      "failed": "📎 檔案沒放好"
     },
     "browser": {
       "running": "🌐 {name} 正在操作瀏覽器",
-      "done": "🌐 {name} 瀏覽器操作完成",
-      "failed": "🌐 {name} 瀏覽器操作失敗"
+      "done": "🌐 {name} 操作完了",
+      "failed": "🌐 {name} 瀏覽器不聽使喚"
     },
     "_fallback": {
       "running": "🔧 {name} 正在忙碌中…",
-      "done": "🔧 {name} 操作完成",
-      "failed": "🔧 {name} 操作失敗"
+      "done": "🔧 {name} 忙完了",
+      "failed": "🔧 {name} 沒忙明白"
     }
   },
   "file_output": {

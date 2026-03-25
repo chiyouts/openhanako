@@ -90,6 +90,19 @@ export class AuthStore {
     const userProviders = this._loadProvidersYaml();
     const authJson = this._loadAuthJson();
 
+    // 一次性迁移：minimax-oauth 的 authJsonKey 从 "minimax" 改为 "minimax-oauth"
+    if (authJson["minimax"] && !authJson["minimax-oauth"]) {
+      const entry = authJson["minimax"];
+      if (entry && typeof entry === "object" && entry.type === "oauth") {
+        authJson["minimax-oauth"] = entry;
+        delete authJson["minimax"];
+        try {
+          const jsonPath = path.join(this._hanakoHome, "auth.json");
+          fs.writeFileSync(jsonPath, JSON.stringify(authJson, null, 2), "utf-8");
+        } catch {}
+      }
+    }
+
     // 处理 providers.yaml 中的所有 provider
     for (const [id, p] of Object.entries(userProviders)) {
       if (!p.api_key && !p.base_url) continue;
@@ -109,7 +122,7 @@ export class AuthStore {
       const authKey = this._registry.getAuthJsonKey(providerId);
       const providerEntry = this._registry.get(providerId);
 
-      // 建立 authJsonKey → providerId 反向索引（如 minimax → minimax-oauth）
+      // 建立 authJsonKey → providerId 反向索引（如 openai-codex → openai-codex-oauth）
       if (authKey !== providerId) {
         this._authKeyToId.set(authKey, providerId);
       }
@@ -126,7 +139,7 @@ export class AuthStore {
           source: "auth-json",
         };
         this._creds.set(providerId, cred);
-        // 同时在 authJsonKey 下存一份别名，让 get("minimax") 也能命中
+        // 同时在 authJsonKey 下存一份别名
         if (authKey !== providerId && !this._creds.has(authKey)) {
           this._creds.set(authKey, cred);
         }
@@ -163,7 +176,7 @@ export class AuthStore {
       return this._creds.get(providerId);
     }
 
-    // 反向查找：authJsonKey → providerId（如 "minimax" → "minimax-oauth"）
+    // 反向查找：authJsonKey → providerId
     const mappedId = this._authKeyToId.get(providerId);
     if (mappedId && this._creds.has(mappedId)) {
       return this._creds.get(mappedId);

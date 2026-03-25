@@ -2754,6 +2754,16 @@ a.about-link:hover {
 
 .pv-cred-value.muted { color: var(--text-muted); font-size: 0.72rem; cursor: default; }
 
+.pv-cred-url-row {
+    flex: 1;
+    min-width: 0;
+}
+
+.pv-cred-url-row .settings-input {
+    width: 100%;
+    font-size: 0.75rem;
+}
+
 .pv-cred-badge {
     font-size: 0.65rem;
     color: var(--text-muted);
@@ -4174,6 +4184,12 @@ a.about-link:hover {
 .sdw-trigger:hover,
 .sdw-trigger:focus {
     box-shadow: 0 1px 3px var(--shadow), 0 0 0 2px rgba(var(--accent-rgb), 0.12);
+}
+
+.sdw-trigger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
 .sdw-value {

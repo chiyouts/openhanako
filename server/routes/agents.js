@@ -305,7 +305,10 @@ export function createAgentsRoute(engine) {
       }
 
       // providers 变更后确保运行时刷新
-      if (providersChanged) clearConfigCache();
+      if (providersChanged) {
+        clearConfigCache();
+        engine.providerRegistry?.reload();
+      }
 
       // providers 是全局状态，变更后无论编辑的是哪个 agent，运行时都要刷新
       if (providersChanged) {

@@ -133,6 +133,7 @@ export function createConfigRoute(engine) {
       }
 
       // providers 变更后确保运行时刷新
+      if (providersChanged) engine.providerRegistry?.reload();
       const needsModelSync = providersChanged && !agentPartial.models;
       if (providersChanged && Object.keys(agentPartial).length === 0) {
         clearConfigCache();
