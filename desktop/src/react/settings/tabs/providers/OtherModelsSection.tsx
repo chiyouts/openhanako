@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSettingsStore } from '../../store';
 import { hanaFetch } from '../../api';
 import {
-  t, lookupModelMeta, formatContext, autoSaveGlobalModels, favKey,
+  t, lookupModelMeta, formatContext, autoSaveGlobalModels, favKey, parseFavKey,
 } from '../../helpers';
 import { loadSettingsConfig } from '../../actions';
 import { SelectWidget } from '../../widgets/SelectWidget';
@@ -119,7 +119,10 @@ export function OtherModelsSection({ providers }: { providers: Record<string, { 
               providers={providers}
               favorites={pendingFavorites}
               value={utilityVal}
-              onSelect={(id) => autoSaveGlobalModels({ models: { utility: id } })}
+              onSelect={(mid) => {
+                const { provider, id } = parseFavKey(mid);
+                autoSaveGlobalModels({ models: { utility: provider ? { id, provider } : id } });
+              }}
               lookupModelMeta={lookupModelMeta}
               formatContext={formatContext}
             />
@@ -134,7 +137,10 @@ export function OtherModelsSection({ providers }: { providers: Record<string, { 
               providers={providers}
               favorites={pendingFavorites}
               value={utilityLargeVal}
-              onSelect={(id) => autoSaveGlobalModels({ models: { utility_large: id } })}
+              onSelect={(mid) => {
+                const { provider, id } = parseFavKey(mid);
+                autoSaveGlobalModels({ models: { utility_large: provider ? { id, provider } : id } });
+              }}
               lookupModelMeta={lookupModelMeta}
               formatContext={formatContext}
             />
