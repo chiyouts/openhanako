@@ -111,8 +111,8 @@ export function createModelsRoute(engine) {
       if (!modelId) {
         return c.json({ error: t("error.missingParam", { param: "modelId" }) }, 400);
       }
-      await engine.setModel(modelId, provider);
-      return c.json({ ok: true, model: engine.currentModel?.name });
+      await engine.setPendingModel(modelId, provider);
+      return c.json({ ok: true, model: engine.currentModel?.name, pendingModel: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

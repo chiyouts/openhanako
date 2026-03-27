@@ -232,7 +232,7 @@ export class HanaEngine {
   get cwd() { return this._sessionCoord.session?.sessionManager?.getCwd?.() ?? process.cwd(); }
   get deskCwd() { return this._sessionCoord.session?.sessionManager?.getCwd?.() || this.homeCwd || null; }
 
-  async createSession(mgr, cwd, mem) { return this._sessionCoord.createSession(mgr, cwd, mem); }
+  async createSession(mgr, cwd, mem, model) { return this._sessionCoord.createSession(mgr, cwd, mem, model); }
   async switchSession(p) { return this._sessionCoord.switchSession(p); }
   /** @deprecated Phase 2: 使用 promptSession(path, text, opts) */
   async prompt(text, opts) { return this._sessionCoord.prompt(text, opts); }
@@ -268,7 +268,11 @@ export class HanaEngine {
 
   get config() { return this.agent.config; }
   get factStore() { return this.agent.factStore; }
-  get currentModel() { return this._sessionCoord.session?.model ?? this._models.currentModel; }
+  get currentModel() {
+    return this._sessionCoord.session?.model
+      ?? this._sessionCoord.pendingModel
+      ?? this._models.currentModel;
+  }
   get availableModels() { return this._models.availableModels; }
   get memoryEnabled() { return this.agent.memoryEnabled; }
   get memoryModelUnavailableReason() { return this.agent.memoryModelUnavailableReason; }
@@ -315,7 +319,8 @@ export class HanaEngine {
   readAgentOrder() { return this._configCoord.readAgentOrder(); }
   saveAgentOrder(o) { return this._configCoord.saveAgentOrder(o); }
   async syncModelsAndRefresh() { return this._configCoord.syncAndRefresh(); }
-  async setModel(id, provider) { return this._configCoord.setModel(id, provider); }
+  async setPendingModel(id, provider) { return this._configCoord.setPendingModel(id, provider); }
+  async setDefaultModel(id, provider) { return this._configCoord.setDefaultModel(id, provider); }
   getThinkingLevel() { return this._configCoord.getThinkingLevel(); }
   setThinkingLevel(l) { return this._configCoord.setThinkingLevel(l); }
   getSandbox() { return this._prefs.getSandbox(); }

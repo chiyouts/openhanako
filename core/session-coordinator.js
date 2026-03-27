@@ -58,6 +58,7 @@ export class SessionCoordinator {
    */
   constructor(deps) {
     this._d = deps;
+    this._pendingModel = null;
     this._session = null;
     this._sessionStarted = false;
     this._sessions = new Map();
@@ -72,20 +73,25 @@ export class SessionCoordinator {
   get sessionStarted() { return this._sessionStarted; }
   get sessions() { return this._sessions; }
 
+  setPendingModel(model) { this._pendingModel = model; }
+  get pendingModel() { return this._pendingModel; }
+
   get currentSessionPath() {
     return this._session?.sessionManager?.getSessionFile?.() ?? null;
   }
 
   // ── Session 创建 / 切换 ──
 
-  async createSession(sessionMgr, cwd, memoryEnabled = true) {
+  async createSession(sessionMgr, cwd, memoryEnabled = true, model = null) {
     const t0 = Date.now();
     const effectiveCwd = cwd || this._d.getHomeCwd() || process.cwd();
     const agent = this._d.getAgent();
     const models = this._d.getModels();
+    const effectiveModel = model || this._pendingModel || models.currentModel;
+    this._pendingModel = null;
     log.log(`createSession cwd=${effectiveCwd} (传入: ${cwd || "未指定"})`);
 
-    if (!models.currentModel) {
+    if (!effectiveModel) {
       throw new Error(t("error.noAvailableModel"));
     }
 
@@ -120,17 +126,17 @@ export class SessionCoordinator {
     const { session } = await createAgentSession({
       cwd: effectiveCwd,
       sessionManager: sessionMgr,
-      settingsManager: this._createSettings(models.currentModel),
+      settingsManager: this._createSettings(effectiveModel),
       authStorage: models.authStorage,
       modelRegistry: models.modelRegistry,
-      model: models.currentModel,
+      model: effectiveModel,
       thinkingLevel: models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel()),
       resourceLoader,
       tools: sessionTools,
       customTools: sessionCustomTools,
     });
     const elapsed = Date.now() - t0;
-    log.log(`session created (${elapsed}ms), model=${models.currentModel?.name || "?"}`);
+    log.log(`session created (${elapsed}ms), model=${effectiveModel?.name || "?"}`);
     this._session = session;
     this._sessionStarted = false;
 
@@ -153,8 +159,8 @@ export class SessionCoordinator {
       agentId: this._d.getActiveAgentId(),
       memoryEnabled,
       planMode: initialPlanMode,
-      modelId: models.currentModel?.id || null,
-      modelProvider: models.currentModel?.provider || null,
+      modelId: effectiveModel?.id || null,
+      modelProvider: effectiveModel?.provider || null,
       lastTouchedAt: Date.now(),
       unsub,
     });
@@ -227,18 +233,6 @@ export class SessionCoordinator {
       }
       this._session = existing.session;
       existing.lastTouchedAt = Date.now();
-      // ── 恢复该 session 快照的模型 ──
-      if (existing.modelId) {
-        try {
-          const models = this._d.getModels();
-          // 从活跃 session 的实际模型对象获取 provider（比 entry 快照更准确）
-          const entryProvider = existing.session?.model?.provider || existing.modelProvider || undefined;
-          const model = models.setModel(existing.modelId, entryProvider);
-          await existing.session.setModel(model);
-        } catch (err) {
-          log.warn(`session model restore failed (${existing.modelId}): ${err.message}`);
-        }
-      }
       const targetAgent = this._d.getAgentById(existing.agentId) || this._d.getAgent();
       targetAgent.setMemoryEnabled(memoryEnabled);
       return existing.session;
@@ -253,20 +247,18 @@ export class SessionCoordinator {
         await oldAgent?._memoryTicker?.notifySessionEnd(oldSp).catch(() => {});
       }
     }
-    // 冷启动恢复：先保存当前模型，尝试恢复快照模型，失败时回退
+    // 冷启动恢复：从 session-meta.json 解析 model，传给 createSession
+    let savedModel = null;
     if (savedModelRef) {
       const models = this._d.getModels();
-      const prevModel = models.currentModel;
-      try {
-        models.setModel(savedModelRef.id, savedModelRef.provider || undefined);
-      } catch (err) {
-        log.warn(`cold-start model restore failed (${savedModelRef.id}): ${err.message}`);
-        if (prevModel) models.currentModel = prevModel;
+      savedModel = findModel(models.availableModels, savedModelRef.id, savedModelRef.provider || undefined);
+      if (!savedModel) {
+        log.warn(`cold-start model not found (${savedModelRef.id}), using agent default`);
       }
     }
     const sessionMgr = SessionManager.open(sessionPath, this._d.getAgent().sessionDir);
     const cwd = sessionMgr.getCwd?.() || undefined;
-    return this.createSession(sessionMgr, cwd, memoryEnabled);
+    return this.createSession(sessionMgr, cwd, memoryEnabled, savedModel);
   }
 
   async prompt(text, opts) {
@@ -366,17 +358,6 @@ export class SessionCoordinator {
 
     this._d.emitEvent({ type: "plan_mode", enabled: entry.planMode }, sp);
     this._d.emitDevLog(`Plan Mode: ${entry.planMode ? "ON (只读)" : "OFF (正常)"}`, "info");
-  }
-
-  /** 更新当前焦点 session 的模型快照 */
-  updateCurrentSessionModel(modelId, provider) {
-    const sp = this.currentSessionPath;
-    if (!sp) return;
-    const entry = this._sessions.get(sp);
-    if (entry) {
-      entry.modelId = modelId;
-      if (provider !== undefined) entry.modelProvider = provider;
-    }
   }
 
   /** 获取当前焦点 session 的 modelId 快照 */

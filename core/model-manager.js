@@ -32,7 +32,6 @@ export class ModelManager {
     this._authStorage = null;
     this._modelRegistry = null;
     this._defaultModel = null;   // 设置页面选的，持久化，bridge 用这个
-    this._sessionModel = null;   // 聊天页面临时切的，只影响桌面端
     this._availableModels = [];
 
     // 新架构模块（init() 后可用）
@@ -62,8 +61,7 @@ export class ModelManager {
   get modelRegistry() { return this._modelRegistry; }
   get defaultModel() { return this._defaultModel; }
   set defaultModel(m) { this._defaultModel = m; }
-  get currentModel() { return this._sessionModel || this._defaultModel; }
-  set currentModel(m) { this._sessionModel = m; }
+  get currentModel() { return this._defaultModel; }
   get availableModels() { return this._availableModels; }
   get modelsJsonPath() { return path.join(this._hanakoHome, "models.json"); }
   get authJsonPath() { return path.join(this._hanakoHome, "auth.json"); }
@@ -179,13 +177,13 @@ export class ModelManager {
   }
 
   /**
-   * 切换当前模型（只改状态，不推到 session）
+   * 设置 agent 默认模型
    * @returns {object} 新模型对象
    */
-  setModel(modelId, provider) {
+  setDefaultModel(modelId, provider) {
     const model = findModel(this._availableModels, modelId, provider);
     if (!model) throw new Error(t("error.modelNotFound", { id: modelId }));
-    this._sessionModel = model;
+    this._defaultModel = model;
     return model;
   }
 

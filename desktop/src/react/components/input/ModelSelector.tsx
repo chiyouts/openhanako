@@ -28,6 +28,13 @@ export function ModelSelector({ models, disabled }: { models: Array<{ id: string
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelId, provider }),
       });
+      // 如果当前有活跃 session，切模型 = 开新对话
+      const { currentSessionPath, pendingNewSession } = useStore.getState();
+      if (currentSessionPath && !pendingNewSession) {
+        const { createNewSession } = await import('../../stores/session-actions');
+        createNewSession();
+      }
+      // 刷新模型列表
       const res = await hanaFetch('/api/models');
       const data = await res.json();
       useStore.setState({ models: data.models || [] });

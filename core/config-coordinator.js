@@ -11,6 +11,7 @@ import os from "os";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { saveConfig } from "../lib/memory/config-loader.js";
 import { findModel } from "../shared/model-ref.js";
+import { t } from "../server/i18n.js";
 
 const log = createModuleLogger("config");
 
@@ -184,25 +185,35 @@ export class ConfigCoordinator {
     return synced;
   }
 
-  async setModel(modelId, provider) {
+  /**
+   * 暂存用户选择的模型，用于下次 createSession。
+   * 不修改当前活跃 session 的模型，不持久化到 config.yaml。
+   */
+  setPendingModel(modelId, provider) {
     const models = this._d.getModels();
-    const model = models.setModel(modelId, provider);
-    const session = this._d.getSession();
-    if (session) {
-      await session.setModel(model);
-    }
-    // 同步更新当前 session 的快照
+    const model = findModel(models.availableModels, modelId, provider);
+    if (!model) throw new Error(t("error.modelNotFound", { id: modelId }));
     const sessionCoord = this._d.getSessionCoordinator();
-    sessionCoord?.updateCurrentSessionModel(modelId, provider);
-    this.persistSessionMeta();
+    sessionCoord?.setPendingModel(model);
+    return model;
+  }
 
-    // 持久化到 agent config.yaml（直接用 saveConfig 避免经过 updateConfig 的循环路径）
+  /**
+   * 设置 agent 默认模型（设置页面操作）。
+   * 更新 ModelManager._defaultModel + 持久化到 config.yaml。
+   * 不修改任何已有 session 的模型。
+   */
+  setDefaultModel(modelId, provider) {
+    const models = this._d.getModels();
+    const model = models.setDefaultModel(modelId, provider);
     const agent = this._d.getAgent();
     if (agent?.configPath) {
       saveConfig(agent.configPath, {
         models: { chat: provider ? { id: modelId, provider } : modelId },
       });
     }
+    log.log(`default model set to: ${model.name || model.id}`);
+    return model;
   }
 
   setThinkingLevel(level) {
@@ -283,20 +294,9 @@ export class ConfigCoordinator {
         || partial.api?.provider || undefined;
       const newModel = findModel(models.availableModels, chatId, chatProvider);
       if (newModel) {
+        // 只更新 agent 默认模型，不改活跃 session
         models.defaultModel = newModel;
-        models.currentModel = newModel;
-        log.log(`default model switched to: ${newModel.name || newModel.id}`);
-        const session = this._d.getSession();
-        if (session) {
-          await session.setModel(newModel);
-          session.setThinkingLevel(
-            models.resolveThinkingLevel(this.getThinkingLevel())
-          );
-        }
-        // 同步 SessionEntry 快照
-        const sessionCoord = this._d.getSessionCoordinator();
-        sessionCoord?.updateCurrentSessionModel(chatId, newModel.provider);
-        this.persistSessionMeta();
+        log.log(`default model updated to: ${newModel.name || newModel.id}`);
       }
     }
 

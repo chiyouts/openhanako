@@ -13,6 +13,7 @@ import { buildItemsFromHistory } from '../utils/history-builder';
 import { loadAvatars as loadAvatarsAction, clearChat as clearChatAction } from './agent-actions';
 import { loadDeskFiles } from './desk-actions';
 import { saveTabState, restoreTabState } from './artifact-actions';
+import { loadModels } from '../utils/ui-helpers';
 
 // ── 防竞争计数器 ──
 
@@ -130,6 +131,9 @@ export async function switchSession(path: string): Promise<void> {
       browserUrl: data.browserUrl || null,
       browserThumbnail: data.browserRunning ? state.browserThumbnail : null,
     });
+
+    // 刷新模型列表（当前 session 的模型可能不同）
+    loadModels();
 
     // 恢复目标 session 的 tab 状态 + 清除 quotedSelection
     restoreTabState(path);

@@ -303,6 +303,8 @@ export function createSessionsRoute(engine) {
         browserRunning: bm.isRunning,
         browserUrl: bm.currentUrl || null,
         isStreaming: engine.isSessionStreaming(engine.currentSessionPath),
+        currentModelId: engine.currentModel?.id || null,
+        currentModelProvider: engine.currentModel?.provider || null,
       });
     } catch (err) {
       const errDetail = `${err.message}\n${err.stack || ""}`;
