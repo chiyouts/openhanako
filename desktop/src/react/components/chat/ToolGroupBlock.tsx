@@ -5,7 +5,7 @@
 import { memo, useState, useCallback } from 'react';
 import styles from './Chat.module.css';
 import { extractToolDetail } from '../../utils/message-parser';
-import { useStore } from '../../stores';
+
 import type { ToolCall } from '../../stores/chat-types';
 
 interface Props {
@@ -14,16 +14,15 @@ interface Props {
   agentName?: string;
 }
 
-function getToolLabel(name: string, phase: string): string {
+function getToolLabel(name: string, phase: string, agentName: string): string {
   const t = window.t;
-  const agentName = useStore.getState().agentName || 'Hanako';
   const vars = { name: agentName };
   const val = t?.(`tool.${name}.${phase}`, vars);
   if (val && val !== `tool.${name}.${phase}`) return val;
   return t?.(`tool._fallback.${phase}`, vars) || name;
 }
 
-export const ToolGroupBlock = memo(function ToolGroupBlock({ tools, collapsed: initialCollapsed }: Props) {
+export const ToolGroupBlock = memo(function ToolGroupBlock({ tools, collapsed: initialCollapsed, agentName = 'Hanako' }: Props) {
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const toggle = useCallback(() => setCollapsed(v => !v), []);
 
@@ -61,7 +60,7 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools, collapsed: i
       )}
       <div className={`${styles.toolGroupContent}${collapsed && !isSingle ? ` ${styles.toolGroupContentCollapsed}` : ''}`}>
         {tools.map((tool, i) => (
-          <ToolIndicator key={`${tool.name}-${i}`} tool={tool} />
+          <ToolIndicator key={`${tool.name}-${i}`} tool={tool} agentName={agentName} />
         ))}
       </div>
     </div>
@@ -70,9 +69,9 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools, collapsed: i
 
 // ── ToolIndicator ──
 
-const ToolIndicator = memo(function ToolIndicator({ tool }: { tool: ToolCall }) {
+const ToolIndicator = memo(function ToolIndicator({ tool, agentName }: { tool: ToolCall; agentName: string }) {
   const detail = extractToolDetail(tool.name, tool.args);
-  const label = getToolLabel(tool.name, tool.done ? 'done' : 'running');
+  const label = getToolLabel(tool.name, tool.done ? 'done' : 'running', agentName);
 
   // 如果 args 里有 tag 类型信息（如 agent 名）
   const tag = tool.args?.agentId as string | undefined;
