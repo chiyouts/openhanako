@@ -311,3 +311,49 @@ describe("provider declarations", () => {
     expect(providers[0].id).toBe("my-llm");
   });
 });
+
+// ── 动态工具注册 ──────────────────────────────────────────────────────────────
+
+describe("addTool (dynamic registration)", () => {
+  it("dynamically registered tool appears in getAllTools", async () => {
+    const pm = new PluginManager({ pluginsDir, dataDir, bus: await makeBus() });
+    const remove = pm.addTool("mcp-bridge", {
+      name: "search",
+      description: "MCP search tool",
+      execute: async () => "result",
+    });
+    const tools = pm.getAllTools();
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe("mcp-bridge.search");
+    expect(tools[0]._dynamic).toBe(true);
+
+    remove();
+    expect(pm.getAllTools()).toHaveLength(0);
+  });
+
+  it("plugin can register tools via ctx.registerTool in onload", async () => {
+    const dir = path.join(pluginsDir, "dyn-plug");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "index.js"), `
+      export default class DynPlugin {
+        async onload() {
+          this.register(this.ctx.registerTool({
+            name: "dynamic-tool",
+            description: "Registered at runtime",
+            execute: async (input) => "dynamic " + input.x,
+          }));
+        }
+      }
+    `);
+    const pm = new PluginManager({ pluginsDir, dataDir, bus: await makeBus() });
+    pm.scan();
+    await pm.loadAll();
+
+    const tools = pm.getAllTools();
+    expect(tools.some(t => t.name === "dyn-plug.dynamic-tool")).toBe(true);
+
+    // unload should clean up
+    await pm.unloadPlugin("dyn-plug");
+    expect(pm.getAllTools().some(t => t.name === "dyn-plug.dynamic-tool")).toBe(false);
+  });
+});

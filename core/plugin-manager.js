@@ -116,6 +116,7 @@ export class PluginManager {
     instance.register = (disposable) => {
       if (typeof disposable === "function") entry._disposables.push(disposable);
     };
+    instance.ctx.registerTool = (toolDef) => this.addTool(entry.id, toolDef);
     if (typeof instance.onload === "function") await instance.onload();
   }
 
@@ -160,6 +161,28 @@ export class PluginManager {
         console.error(`[plugin-manager] tool "${file}" in "${entry.id}" failed to load:`, err.message);
       }
     }
+  }
+
+  /**
+   * 动态注册工具（供 plugin 在 onload 中调用，如 MCP bridge）
+   * @param {string} pluginId
+   * @param {{ name: string, description: string, parameters?: object, execute: Function }} toolDef
+   * @returns {Function} 清理函数（调用即移除该工具）
+   */
+  addTool(pluginId, toolDef) {
+    const tool = {
+      name: `${pluginId}.${toolDef.name}`,
+      description: toolDef.description || "",
+      parameters: toolDef.parameters || { type: "object", properties: {} },
+      execute: toolDef.execute,
+      _pluginId: pluginId,
+      _dynamic: true,
+    };
+    this._tools.push(tool);
+    return () => {
+      const idx = this._tools.indexOf(tool);
+      if (idx !== -1) this._tools.splice(idx, 1);
+    };
   }
 
   getAllTools() {
