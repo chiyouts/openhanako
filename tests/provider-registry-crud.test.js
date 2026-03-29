@@ -350,6 +350,85 @@ describe("saveProvider", () => {
   });
 });
 
+// ── updateModelEntry type field ───────────────────────────────────────────────
+
+describe("updateModelEntry type field", () => {
+  it("accepts type in updateModelEntry whitelist", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: ["model-a"],
+      },
+    });
+    const reg = makeRegistry();
+    reg.updateModelEntry("test-provider", "model-a", { type: "image" });
+
+    const raw = readAddedModels();
+    const entry = raw["test-provider"].models.find(
+      m => (typeof m === "object" ? m.id : m) === "model-a"
+    );
+    expect(entry).toEqual({ id: "model-a", type: "image" });
+  });
+});
+
+// ── getModelsByType ───────────────────────────────────────────────────────────
+
+describe("getModelsByType", () => {
+  it("returns only image models for a provider", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: [
+          "chat-model",
+          { id: "image-model", type: "image" },
+        ],
+      },
+    });
+    const reg = makeRegistry();
+    const imageModels = reg.getModelsByType("test-provider", "image");
+    expect(imageModels).toHaveLength(1);
+    expect(imageModels[0].id).toBe("image-model");
+  });
+
+  it("returns empty array for provider with no image models", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: ["chat-model"],
+      },
+    });
+    const reg = makeRegistry();
+    expect(reg.getModelsByType("test-provider", "image")).toEqual([]);
+  });
+});
+
+// ── getAllModelsByType ─────────────────────────────────────────────────────────
+
+describe("getAllModelsByType", () => {
+  it("aggregates image models across providers", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-a",
+        models: [{ id: "img-a", type: "image" }],
+      },
+      "other-provider": {
+        api_key: "key-b",
+        models: [{ id: "img-b", type: "image" }, "chat-b"],
+      },
+    });
+    const reg = makeRegistry();
+    reg._plugins.set("other-provider", {
+      id: "other-provider", displayName: "Other", authType: "api-key",
+      defaultBaseUrl: "https://other.com", defaultApi: "openai-completions",
+    });
+
+    const all = reg.getAllModelsByType("image");
+    expect(all).toHaveLength(2);
+    expect(all.map(m => m.id).sort()).toEqual(["img-a", "img-b"]);
+    expect(all.every(m => m.provider)).toBe(true);
+  });
+});
+
 // ── removeProvider ───────────────────────────────────────────────────────────
 
 describe("removeProvider", () => {

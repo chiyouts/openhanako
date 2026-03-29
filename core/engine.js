@@ -614,7 +614,12 @@ export class HanaEngine {
     const ct = customTools || this.agent.tools;
     // Append plugin tools
     const pluginTools = this._pluginManager?.getAllTools() || [];
-    const allTools = [...ct, ...pluginTools];
+    const agentId = this.agent?.id || (opts.agentDir ? path.basename(opts.agentDir) : "");
+    const wrappedPluginTools = pluginTools.map(t => ({
+      ...t,
+      execute: (input) => t.execute(input, { agentId }),
+    }));
+    const allTools = [...ct, ...wrappedPluginTools];
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;

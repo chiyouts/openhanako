@@ -15,6 +15,7 @@ import path from "path";
 import YAML from "js-yaml";
 import { safeReadYAMLSync } from "../shared/safe-fs.js";
 import { fromRoot } from "../shared/hana-root.js";
+import { lookupKnown } from "../shared/known-models.js";
 
 const _defaultModels = JSON.parse(
   fs.readFileSync(fromRoot("lib", "default-models.json"), "utf-8"),
@@ -502,7 +503,7 @@ export class ProviderRegistry {
     }
 
     // 白名单：只允许模型能力字段
-    const ALLOWED = ["name", "context", "maxOutput", "vision", "reasoning"];
+    const ALLOWED = ["name", "context", "maxOutput", "vision", "reasoning", "type"];
     const safe = {};
     for (const key of ALLOWED) {
       if (meta[key] !== undefined) safe[key] = meta[key];
@@ -547,5 +548,44 @@ export class ProviderRegistry {
    */
   removeProvider(providerId) {
     this.remove(providerId);
+  }
+
+  /**
+   * Get models of a specific type for a provider.
+   * Type resolution: model entry type field → known-models.json type → default "chat"
+   * @param {string} providerId
+   * @param {string} type - "chat" | "image" | ...
+   * @returns {{ id: string, name?: string, type: string }[]}
+   */
+  getModelsByType(providerId, type) {
+    const raw = this._loadAddedModels();
+    const models = raw[providerId]?.models || [];
+    const results = [];
+    for (const m of models) {
+      const isObj = typeof m === "object" && m !== null;
+      const id = isObj ? m.id : m;
+      if (!id) continue;
+      const known = lookupKnown(providerId, id);
+      const resolvedType = (isObj && m.type) || known?.type || "chat";
+      if (resolvedType !== type) continue;
+      results.push({ id, name: (isObj && m.name) || known?.name || id, type: resolvedType });
+    }
+    return results;
+  }
+
+  /**
+   * Get all models of a specific type across all providers.
+   * @param {string} type
+   * @returns {{ provider: string, id: string, name?: string, type: string }[]}
+   */
+  getAllModelsByType(type) {
+    const raw = this._loadAddedModels();
+    const results = [];
+    for (const providerId of Object.keys(raw)) {
+      for (const entry of this.getModelsByType(providerId, type)) {
+        results.push({ ...entry, provider: providerId });
+      }
+    }
+    return results;
   }
 }

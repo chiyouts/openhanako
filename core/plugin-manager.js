@@ -180,7 +180,7 @@ export class PluginManager {
           name: `${entry.id}.${mod.name}`,
           description: mod.description,
           parameters: mod.parameters ?? {},
-          execute: (input) => origExecute(input, ctx),
+          execute: (input, runtimeCtx) => origExecute(input, runtimeCtx ? { ...ctx, ...runtimeCtx } : ctx),
           _pluginId: entry.id,
         });
       } catch (err) {

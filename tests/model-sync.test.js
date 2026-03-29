@@ -19,6 +19,7 @@ const KNOWN_MODELS = {
   },
   openai: {
     "gpt-4o": { name: "GPT-4o", context: 128000, maxOutput: 16384, vision: true },
+    "gpt-image-1": { name: "GPT Image 1", type: "image" },
   },
 };
 
@@ -323,6 +324,51 @@ describe("syncModels", () => {
     expect(result.providers.dashscope.models[0].id).toBe("qwen3.5-flash");
     expect(result.providers.deepseek.models[0].id).toBe("deepseek-chat");
     expect(result.providers.deepseek.models[0].name).toBe("DeepSeek Chat");
+  });
+
+  it("skips models with type: image from models.json output", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      openai: {
+        base_url: "https://api.openai.com/v1",
+        api_key: "sk-test",
+        api: "openai-completions",
+        models: [
+          "gpt-4o",
+          { id: "gpt-image-1", type: "image" },
+        ],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const models = result.providers.openai?.models || [];
+    const ids = models.map(m => m.id);
+    expect(ids).toContain("gpt-4o");
+    expect(ids).not.toContain("gpt-image-1");
+  });
+
+  it("skips string model entries whose type is image via known-models lookup", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      openai: {
+        base_url: "https://api.openai.com/v1",
+        api_key: "sk-test",
+        api: "openai-completions",
+        models: ["gpt-4o", "gpt-image-1"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const models = result.providers.openai?.models || [];
+    const ids = models.map(m => m.id);
+    expect(ids).toContain("gpt-4o");
+    expect(ids).not.toContain("gpt-image-1");
   });
 
   it("falls back to humanized name for unknown models", async () => {
