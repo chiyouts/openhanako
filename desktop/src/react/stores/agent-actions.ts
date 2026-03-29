@@ -24,12 +24,17 @@ export function clearChat(): void {
     s.clearSession?.(sessionPath);
   }
 
-  useStore.setState({
+  // 清除 compat 全局 artifacts + keyed store 中当前 session 的 artifacts
+  const artifactsPatch: Record<string, unknown> = {
     welcomeVisible: true,
     memoryEnabled: true,
     sessionTodos: [],
     artifacts: [],
-  });
+  };
+  if (sessionPath) {
+    artifactsPatch.artifactsBySession = { ...s.artifactsBySession, [sessionPath]: [] };
+  }
+  useStore.setState(artifactsPatch);
 
   if (s.previewOpen) closePreview();
 }

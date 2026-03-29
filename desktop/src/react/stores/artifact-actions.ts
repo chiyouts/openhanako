@@ -50,6 +50,18 @@ export function handleArtifact(data: Record<string, unknown>): void {
   if (idx >= 0) arts[idx] = artifact;
   else arts.push(artifact);
   s.setArtifacts(arts);
+
+  // 写入 keyed store
+  const sp = (data.sessionPath as string) || s.currentSessionPath;
+  if (sp) {
+    useStore.setState(prev => {
+      const sessionArts = [...(prev.artifactsBySession[sp] || [])];
+      const sIdx = sessionArts.findIndex(a => a.id === id);
+      if (sIdx >= 0) sessionArts[sIdx] = artifact;
+      else sessionArts.push(artifact);
+      return { artifactsBySession: { ...prev.artifactsBySession, [sp]: sessionArts } };
+    });
+  }
 }
 
 /** Save/restore tab state helpers (used by session-actions) */

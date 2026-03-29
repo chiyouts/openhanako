@@ -23,6 +23,8 @@ export interface QuotedSelection {
 
 export interface InputSlice {
   attachedFiles: AttachedFile[];
+  /** 按 session path 存储的附件（权威源） */
+  attachedFilesBySession: Record<string, AttachedFile[]>;
   deskContextAttached: boolean;
   docContextAttached: boolean;
   inputFocusTrigger: number;
@@ -44,6 +46,7 @@ export const createInputSlice = (
   set: (partial: Partial<InputSlice> | ((s: InputSlice) => Partial<InputSlice>)) => void
 ): InputSlice => ({
   attachedFiles: [],
+  attachedFilesBySession: {},
   deskContextAttached: false,
   docContextAttached: false,
   inputFocusTrigger: 0,

@@ -186,21 +186,38 @@ export function handleServerMessage(msg: any): void {
       loadDeskFiles();
       break;
 
-    case 'browser_status':
-      useStore.setState({
-        browserRunning: !!msg.running,
-        browserUrl: msg.url || null,
-        browserThumbnail: msg.running ? (msg.thumbnail || state.browserThumbnail) : null,
-      });
+    case 'browser_status': {
+      const bsp = msg.sessionPath || state.currentSessionPath;
+      const bRunning = !!msg.running;
+      const bUrl = msg.url || null;
+      const bThumbnail = bRunning ? (msg.thumbnail || state.browserThumbnail) : null;
+      // 写入 keyed store
+      if (bsp) {
+        useStore.setState(s => ({
+          browserBySession: {
+            ...s.browserBySession,
+            [bsp]: { running: bRunning, url: bUrl, thumbnail: bThumbnail },
+          },
+        }));
+      }
+      // Compat: 只有当前 session 才更新全局字段
+      if (!msg.sessionPath || msg.sessionPath === state.currentSessionPath) {
+        useStore.setState({
+          browserRunning: bRunning,
+          browserUrl: bUrl,
+          browserThumbnail: bThumbnail,
+        });
+      }
       // renderBrowserCard — no-op (browser card rendering handled by React)
       if (window.platform?.updateBrowserViewer) {
         window.platform.updateBrowserViewer({
-          running: !!msg.running,
-          url: msg.url || null,
-          thumbnail: msg.running ? (msg.thumbnail || state.browserThumbnail) : null,
+          running: bRunning,
+          url: bUrl,
+          thumbnail: bThumbnail,
         });
       }
       break;
+    }
 
     case 'browser_bg_status': {
       useStore.setState({ browserRunning: !!msg.running });

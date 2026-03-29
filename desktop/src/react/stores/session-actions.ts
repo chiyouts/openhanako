@@ -151,6 +151,14 @@ export async function switchSession(path: string): Promise<void> {
     const currentPath = s.currentSessionPath;
     if (currentPath) saveTabState(currentPath);
 
+    // 保存当前 session 的附件到 keyed store
+    const currentAttachments = state.attachedFiles;
+    if (currentPath && currentAttachments.length) {
+      useStore.setState(prev => ({
+        attachedFilesBySession: { ...prev.attachedFilesBySession, [currentPath]: currentAttachments },
+      }));
+    }
+
     // 批量更新 store
     useStore.setState({
       currentSessionPath: path,
@@ -164,7 +172,7 @@ export async function switchSession(path: string): Promise<void> {
       browserRunning: !!data.browserRunning,
       browserUrl: data.browserUrl || null,
       browserThumbnail: data.browserRunning ? state.browserThumbnail : null,
-      attachedFiles: [],
+      attachedFiles: state.attachedFilesBySession[path] || [],
       deskContextAttached: false,
       docContextAttached: false,
       ...agentPatch,

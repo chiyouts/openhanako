@@ -7,6 +7,8 @@ interface TabState {
 
 export interface ArtifactSlice {
   artifacts: Artifact[];
+  /** 按 session path 存储的 artifacts（权威源） */
+  artifactsBySession: Record<string, Artifact[]>;
   openTabs: string[];
   activeTabId: string | null;
   editorDetached: boolean;
@@ -24,6 +26,7 @@ export const createArtifactSlice = (
   set: (partial: Partial<ArtifactSlice> | ((s: ArtifactSlice) => Partial<ArtifactSlice>)) => void
 ): ArtifactSlice => ({
   artifacts: [],
+  artifactsBySession: {},
   openTabs: [],
   activeTabId: null,
   editorDetached: false,
