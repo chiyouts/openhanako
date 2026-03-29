@@ -246,9 +246,13 @@ export function handleServerMessage(msg: any): void {
       }
       break;
 
-    case 'plan_mode':
-      window.dispatchEvent(new CustomEvent('hana-plan-mode', { detail: { enabled: !!msg.enabled } }));
+    case 'plan_mode': {
+      const sp = msg.sessionPath;
+      if (!sp || sp === useStore.getState().currentSessionPath) {
+        window.dispatchEvent(new CustomEvent('hana-plan-mode', { detail: { enabled: !!msg.enabled } }));
+      }
       break;
+    }
 
     case 'channel_new_message': {
       const store = useStore.getState();

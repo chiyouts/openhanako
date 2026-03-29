@@ -306,7 +306,7 @@ function App() {
 
           <div className={`input-area${currentTab === 'chat' ? '' : ' hidden'}`}>
             <RegionalErrorBoundary region="input" resetKeys={[currentSessionPath]}>
-              <InputArea />
+              <InputArea key={currentSessionPath || '__new'} />
             </RegionalErrorBoundary>
           </div>
 
