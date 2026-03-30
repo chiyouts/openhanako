@@ -79,14 +79,6 @@ export function createProvidersRoute(engine) {
     // OAuth 自定义模型
     const oauthCustom = engine.preferences.getOAuthCustomModels();
 
-    // SDK 可用模型（含 OAuth 注入的）
-    const sdkModels = engine.availableModels || [];
-    const sdkByProvider = new Map();
-    for (const m of sdkModels) {
-      if (!sdkByProvider.has(m.provider)) sdkByProvider.set(m.provider, []);
-      sdkByProvider.get(m.provider).push(m.id);
-    }
-
     const result = {};
 
     // OAuth 登录信息查找（oauthLoginMap 用 authJsonKey 索引）
@@ -101,11 +93,8 @@ export function createProvidersRoute(engine) {
     for (const [name, p] of Object.entries(providers)) {
       const isOAuth = provRegistry.isOAuth(name);
       const oauthInfo = getOAuthLoginInfo(name);
-      const sdkIds = sdkByProvider.get(name) || [];
-      // 合并 added-models.yaml 条目 + SDK 发现的模型 ID，按 ID 去重（保留原始对象形式）
+      // added-models.yaml 是模型列表的唯一信源
       const rawModels = p.models || [];
-      const seenIds = new Set(rawModels.map(m => typeof m === "object" ? m.id : m));
-      const allModels = [...rawModels, ...sdkIds.filter(id => !seenIds.has(id))];
       const customModels = oauthCustom[name] || [];
 
       result[name] = {
@@ -114,7 +103,7 @@ export function createProvidersRoute(engine) {
         base_url: p.base_url || "",
         api: p.api || "",
         api_key: p.api_key || "",
-        models: allModels,
+        models: rawModels,
         custom_models: customModels,
         has_credentials: !!(p.api_key || (isOAuth && oauthInfo?.loggedIn)),
         logged_in: isOAuth ? !!oauthInfo?.loggedIn : undefined,
@@ -131,7 +120,6 @@ export function createProvidersRoute(engine) {
       const authKey = provRegistry.getAuthJsonKey(oauthId);
       const loginInfo = oauthLoginMap.get(authKey);
       if (!loginInfo) continue;
-      const sdkIds = sdkByProvider.get(authKey) || sdkByProvider.get(oauthId) || [];
       const customModels = oauthCustom[authKey] || oauthCustom[oauthId] || [];
       result[oauthId] = {
         type: "oauth",
@@ -139,7 +127,7 @@ export function createProvidersRoute(engine) {
         base_url: "",
         api: "",
         api_key: "",
-        models: sdkIds,
+        models: [],
         custom_models: customModels,
         has_credentials: !!loginInfo.loggedIn,
         logged_in: !!loginInfo.loggedIn,
@@ -155,14 +143,13 @@ export function createProvidersRoute(engine) {
       for (const [id, entry] of provRegistry.getAll()) {
         if (result[id]) continue;
         if (entry.authType === "oauth") continue; // OAuth provider 走上面的白名单逻辑
-        const sdkIds = sdkByProvider.get(id) || [];
         result[id] = {
           type: "api-key",
           display_name: entry.displayName || id,
           base_url: entry.baseUrl || "",
           api: entry.api || "",
           api_key: "",
-          models: sdkIds,
+          models: [],
           custom_models: [],
           has_credentials: false,
           logged_in: undefined,
