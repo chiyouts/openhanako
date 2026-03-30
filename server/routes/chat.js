@@ -62,6 +62,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       if (activeWsClients > 0) return;
 
       // 中断所有正在 streaming 的 owner session（焦点 + 后台）
+      for (const [, ss] of sessionState) ss.isAborted = true;
       debugLog()?.log("ws", `no clients for ${DISCONNECT_ABORT_GRACE_MS}ms, aborting all streaming`);
       engine.abortAllStreaming().catch(() => {});
     }, DISCONNECT_ABORT_GRACE_MS);
@@ -90,6 +91,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         hasToolCall: false,
         hasThinking: false,
         hasError: false,
+        isAborted: false,
         titleRequested: false,
         titlePreview: "",
         ...createSessionStreamState(),
@@ -462,7 +464,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       });
 
       // 空回复检测：本轮没有文本输出也没有工具调用，提示用户检查配置
-      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && isActive) {
+      // 被 abort 的 turn 不弹此提示（用户主动停止 / WS 断开 / 连接超时）
+      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && !ss.isAborted && isActive) {
         broadcast({ type: "error", message: t("error.modelNoResponse"), sessionPath });
       }
 
@@ -489,6 +492,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss.hasToolCall = false;
       ss.hasThinking = false;
       ss.hasError = false;
+      ss.isAborted = false;
       ss.thinkTagParser.reset();
       ss.moodParser.reset();
       ss.xingParser.reset();
@@ -533,6 +537,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           (async () => {
             if (msg.type === "abort") {
               const abortPath = msg.sessionPath || engine.currentSessionPath;
+              const abortSs = getState(abortPath);
+              if (abortSs) abortSs.isAborted = true;
               if (engine.isSessionStreaming(abortPath)) {
                 try { await hub.abort(abortPath); } catch {}
               }
@@ -702,6 +708,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 ss.thinkTagParser.reset();
                 ss.moodParser.reset();
                 ss.xingParser.reset();
+                ss.isAborted = false;
                 ss.titleRequested = false;
                 ss.titlePreview = "";
                 beginSessionStream(ss);
