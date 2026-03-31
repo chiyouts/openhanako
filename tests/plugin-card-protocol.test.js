@@ -1,46 +1,42 @@
 import { describe, it, expect } from 'vitest';
 
-describe('Plugin Card Protocol - pluginId injection', () => {
-  it('injects pluginId into details.card when card is present', () => {
-    const pluginId = 'finance-monitor';
+describe('Plugin Card Protocol V2 - _cardHint', () => {
+  it('tool result contains _cardHint with required fields', () => {
     const result = {
-      content: [{ type: 'text', text: 'test' }],
-      details: { card: { type: 'iframe', route: '/card/kline', data: { symbol: 'sh600519' }, height: 280 } }
+      content: [{ type: 'text', text: 'data...\n\n📊 <card type="iframe" plugin="fm" route="/k">desc</card>' }],
+      details: {
+        _cardHint: {
+          type: 'iframe',
+          plugin: 'fm',
+          route: '/k',
+          title: 'Title',
+          defaultDescription: 'fallback desc',
+        }
+      }
     };
-    if (result.details?.card && !result.details.card.pluginId) {
-      result.details.card.pluginId = pluginId;
-    }
-    expect(result.details.card.pluginId).toBe('finance-monitor');
-    expect(result.details.card.type).toBe('iframe');
+    const hint = result.details._cardHint;
+    expect(hint.plugin).toBe('fm');
+    expect(hint.route).toBe('/k');
+    expect(hint.defaultDescription).toBeTruthy();
   });
 
-  it('does not inject when no card in details', () => {
-    const result = {
-      content: [{ type: 'text', text: 'test' }],
-      details: { media: { mediaUrls: ['/img.png'] } }
-    };
-    if (result.details?.card && !result.details.card.pluginId) {
-      result.details.card.pluginId = 'finance-monitor';
-    }
-    expect(result.details.card).toBeUndefined();
+  it('content text includes <card> tag for LLM to reproduce', () => {
+    const text = 'data...\n\n📊 <card type="iframe" plugin="fm" route="/k">desc</card>';
+    expect(text).toContain('<card');
+    expect(text).toContain('</card>');
   });
 
-  it('does not overwrite existing pluginId', () => {
-    const result = {
-      content: [{ type: 'text', text: 'test' }],
-      details: { card: { type: 'iframe', route: '/test', pluginId: 'custom-plugin' } }
+  it('_cardHint has all required fields', () => {
+    const hint = {
+      type: 'iframe',
+      plugin: 'test-plugin',
+      route: '/card/test?param=value',
+      title: 'Test Card',
+      defaultDescription: 'fallback text',
     };
-    if (result.details?.card && !result.details.card.pluginId) {
-      result.details.card.pluginId = 'other-plugin';
-    }
-    expect(result.details.card.pluginId).toBe('custom-plugin');
-  });
-
-  it('handles result without details', () => {
-    const result = { content: [{ type: 'text', text: 'test' }] };
-    if (result.details?.card && !result.details.card.pluginId) {
-      result.details.card.pluginId = 'finance-monitor';
-    }
-    expect(result.details).toBeUndefined();
+    expect(hint.type).toBeDefined();
+    expect(hint.plugin).toBeDefined();
+    expect(hint.route).toBeDefined();
+    expect(hint.defaultDescription).toBeDefined();
   });
 });
