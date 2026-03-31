@@ -1010,6 +1010,12 @@
     "edit": "编辑",
     "delete": "删除"
   },
+  "ctx": {
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "selectAll": "全选"
+  },
   "desk": {
     "title": "书桌",
     "skills": "技能",

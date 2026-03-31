@@ -1010,6 +1010,12 @@
     "edit": "Edit",
     "delete": "Delete"
   },
+  "ctx": {
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select All"
+  },
   "desk": {
     "title": "Desk",
     "skills": "Skills",

@@ -972,6 +972,12 @@
     "edit": "편집",
     "delete": "삭제"
   },
+  "ctx": {
+    "cut": "잘라내기",
+    "copy": "복사",
+    "paste": "붙여넣기",
+    "selectAll": "모두 선택"
+  },
   "desk": {
     "title": "책상",
     "skills": "스킬",

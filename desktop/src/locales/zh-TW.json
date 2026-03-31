@@ -972,6 +972,12 @@
     "edit": "編輯",
     "delete": "刪除"
   },
+  "ctx": {
+    "cut": "剪下",
+    "copy": "複製",
+    "paste": "貼上",
+    "selectAll": "全選"
+  },
   "desk": {
     "title": "書桌",
     "skills": "技能",

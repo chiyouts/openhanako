@@ -972,6 +972,12 @@
     "edit": "編集",
     "delete": "削除"
   },
+  "ctx": {
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "selectAll": "すべて選択"
+  },
   "desk": {
     "title": "デスク",
     "skills": "スキル",
