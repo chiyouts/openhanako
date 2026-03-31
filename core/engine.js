@@ -265,10 +265,14 @@ export class HanaEngine {
 
   get config() { return this.agent.config; }
   get factStore() { return this.agent.factStore; }
+  /** 下一次新对话将使用的模型（UI 选择器绑定此值） */
   get currentModel() {
     return this._sessionCoord.pendingModel
-      ?? this._sessionCoord.session?.model
       ?? this._models.currentModel;
+  }
+  /** 当前活跃 session 实际使用的模型（已创建的对话不随选择器变） */
+  get activeSessionModel() {
+    return this._sessionCoord.session?.model ?? null;
   }
   get availableModels() { return this._models.availableModels; }
   get memoryEnabled() { return this.agent.memoryEnabled; }
