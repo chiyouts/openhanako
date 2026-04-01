@@ -251,7 +251,7 @@ export class Agent {
     });
     this._stageFilesTool = createStageFilesTool();
     this._artifactTool = createArtifactTool();
-    this._browserTool = createBrowserTool();
+    this._browserTool = createBrowserTool(() => this._engine?._sessionCoord?.currentSessionPath);
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
     });
