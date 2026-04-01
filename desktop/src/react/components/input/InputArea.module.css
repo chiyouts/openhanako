@@ -656,6 +656,7 @@
     color: var(--text);
     font-size: 0.88rem;
     transition: background 0.12s;
+    overflow: hidden;
 }
 
 .slash-menu-item:hover,
@@ -678,6 +679,7 @@
 .slash-menu-label {
     font-weight: 500;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .slash-menu-desc {
@@ -685,6 +687,10 @@
     font-size: 0.82rem;
     margin-left: auto;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    padding-right: 2px;
 }
 
 .slash-busy-bar {
