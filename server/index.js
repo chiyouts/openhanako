@@ -49,6 +49,8 @@ import { createPluginsRoute } from "./routes/plugins.js";
 // internal-browser WS is handled directly via raw ws.WebSocketServer in the
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
 import { ConfirmStore } from "../lib/confirm-store.js";
+import { DeferredResultStore } from "../lib/deferred-result-store.js";
+import { createDeferredResultExtension } from "../lib/extensions/deferred-result-ext.js";
 import { BridgeManager } from "../lib/bridge/bridge-manager.js";
 import { Hub } from "../hub/index.js";
 import { startCLI } from "./cli.js";
@@ -165,6 +167,33 @@ app.onError((err, c) => {
 // ── 阻塞式确认存储 ──
 const confirmStore = new ConfirmStore();
 engine.setConfirmStore(confirmStore);
+
+// --- Deferred Result Store ---
+const deferredResultStore = new DeferredResultStore(hub.eventBus);
+engine.setDeferredResultStore(deferredResultStore);
+
+// Bus handlers for plugin access
+hub.eventBus.handle("deferred:register", ({ taskId, sessionPath, meta }) => {
+  deferredResultStore.defer(taskId, sessionPath, meta);
+  return { ok: true };
+});
+hub.eventBus.handle("deferred:resolve", ({ taskId, result }) => {
+  deferredResultStore.resolve(taskId, result);
+  return { ok: true };
+});
+hub.eventBus.handle("deferred:fail", ({ taskId, reason }) => {
+  deferredResultStore.fail(taskId, reason);
+  return { ok: true };
+});
+hub.eventBus.handle("deferred:query", ({ taskId }) => {
+  return deferredResultStore.query(taskId);
+});
+hub.eventBus.handle("deferred:list-pending", ({ sessionPath }) => {
+  return deferredResultStore.listPending(sessionPath);
+});
+
+// Register Pi SDK extension factory
+engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStore));
 
 // ── 外部平台接入管理器 ──
 const bridgeManager = new BridgeManager({ engine, hub });
