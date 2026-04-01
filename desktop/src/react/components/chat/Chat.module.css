@@ -613,6 +613,17 @@
     white-space: nowrap;
 }
 
+.toolDetailLink {
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.toolDetailLink:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 .toolTag {
     font-size: 0.68rem;
     color: var(--text-muted);

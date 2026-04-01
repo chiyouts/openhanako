@@ -121,34 +121,50 @@ export function truncateHead(s: string, max: number): string {
   return s.slice(0, max - 1) + '…';
 }
 
-export function extractToolDetail(name: string, args: Record<string, unknown> | undefined): string {
-  if (!args) return '';
+export interface ToolDetail {
+  text: string;
+  /** 文件路径或 URL，存在时 ToolIndicator 渲染为可点击链接 */
+  href?: string;
+  /** 'file' 用 openFile，'url' 用 openExternal */
+  hrefType?: 'file' | 'url';
+}
+
+export function extractToolDetail(name: string, args: Record<string, unknown> | undefined): ToolDetail {
+  if (!args) return { text: '' };
   switch (name) {
     case 'read':
     case 'write':
     case 'edit':
-    case 'edit-diff':
-      return truncatePath((args.file_path || args.path || '') as string);
+    case 'edit-diff': {
+      const p = (args.file_path || args.path || '') as string;
+      return { text: truncatePath(p), href: p || undefined, hrefType: 'file' };
+    }
     case 'bash':
-      return truncateHead((args.command || '') as string, 40);
+      return { text: truncateHead((args.command || '') as string, 40) };
     case 'glob':
     case 'find':
-      return (args.pattern || '') as string;
+      return { text: (args.pattern || '') as string };
     case 'grep':
-      return truncateHead((args.pattern || '') as string, 30) +
-        (args.path ? ` in ${truncatePath(args.path as string)}` : '');
-    case 'ls':
-      return truncatePath((args.path || '') as string);
-    case 'web_fetch':
-      return extractHostname((args.url || '') as string);
+      return { text: truncateHead((args.pattern || '') as string, 30) +
+        (args.path ? ` in ${truncatePath(args.path as string)}` : '') };
+    case 'ls': {
+      const p = (args.path || '') as string;
+      return { text: truncatePath(p), href: p || undefined, hrefType: 'file' };
+    }
+    case 'web_fetch': {
+      const url = (args.url || '') as string;
+      return { text: extractHostname(url), href: url || undefined, hrefType: 'url' };
+    }
     case 'web_search':
-      return truncateHead((args.query || '') as string, 40);
-    case 'browser':
-      return extractHostname((args.url || '') as string);
+      return { text: truncateHead((args.query || '') as string, 40) };
+    case 'browser': {
+      const url = (args.url || '') as string;
+      return { text: extractHostname(url), href: url || undefined, hrefType: 'url' };
+    }
     case 'search_memory':
-      return truncateHead((args.query || '') as string, 40);
+      return { text: truncateHead((args.query || '') as string, 40) };
     default:
-      return '';
+      return { text: '' };
   }
 }
 
