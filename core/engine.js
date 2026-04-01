@@ -128,6 +128,8 @@ export class HanaEngine {
       hanakoHome,
       agentsDir: this.agentsDir,
       getAgent: () => this.agent,
+      getAgentById: (id) => this._agentMgr.getAgent(id),
+      getActiveAgentId: () => this._agentMgr.activeAgentId,
       getAgents: () => this._agentMgr.agents,
       getModels: () => this._models,
       getPrefs: () => this._prefs,
@@ -317,7 +319,7 @@ export class HanaEngine {
   setMemoryMasterEnabled(id, v) { return this._configCoord.setMemoryMasterEnabled(id, v); }
   persistSessionMeta() { return this._configCoord.persistSessionMeta(); }
   setPlanMode(enabled) { return this._sessionCoord.setPlanMode(enabled, allBuiltInTools); }
-  async updateConfig(p) { return this._configCoord.updateConfig(p); }
+  async updateConfig(p, opts) { return this._configCoord.updateConfig(p, opts); }
 
   getPreferences() { return this._readPreferences(); }
   savePreferences(p) { return this._writePreferences(p); }

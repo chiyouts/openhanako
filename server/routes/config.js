@@ -167,11 +167,12 @@ export function createConfigRoute(engine) {
       if (typeof content !== "string") {
         return c.json({ error: "content must be a string" }, 400);
       }
-      const ishikiPath = path.join(resolveAgentStrict(engine, c).agentDir, "ishiki.md");
+      const agent = resolveAgentStrict(engine, c);
+      const ishikiPath = path.join(agent.agentDir, "ishiki.md");
       await fs.writeFile(ishikiPath, content, "utf-8");
       debugLog()?.log("api", `PUT /api/ishiki (saved, ${content.length} chars)`);
       // 触发 system prompt 重建（updateConfig 内部会重新读取 ishiki.md）
-      await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: agent.id });
       return c.json({ ok: true });
     } catch (err) {
       if (err instanceof AgentNotFoundError) return c.json({ error: err.message }, 404);
@@ -200,10 +201,11 @@ export function createConfigRoute(engine) {
       if (typeof content !== "string") {
         return c.json({ error: "content must be a string" }, 400);
       }
-      const identityPath = path.join(resolveAgentStrict(engine, c).agentDir, "identity.md");
+      const agent = resolveAgentStrict(engine, c);
+      const identityPath = path.join(agent.agentDir, "identity.md");
       await fs.writeFile(identityPath, content, "utf-8");
       debugLog()?.log("api", `PUT /api/identity (saved, ${content.length} chars)`);
-      await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: agent.id });
       return c.json({ ok: true });
     } catch (err) {
       if (err instanceof AgentNotFoundError) return c.json({ error: err.message }, 404);
@@ -284,11 +286,12 @@ export function createConfigRoute(engine) {
         .map(p => `- ${p}`)
         .join("\n")
         + "\n";
-      const pinnedPath = path.join(resolveAgentStrict(engine, c).agentDir, "pinned.md");
+      const agent = resolveAgentStrict(engine, c);
+      const pinnedPath = path.join(agent.agentDir, "pinned.md");
       await fs.writeFile(pinnedPath, content, "utf-8");
       debugLog()?.log("api", `PUT /api/pinned (${pins.length} items)`);
       // 触发 system prompt 重建（updateConfig 内部会重新读取 pinned.md）
-      await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: agent.id });
       return c.json({ ok: true });
     } catch (err) {
       if (err instanceof AgentNotFoundError) return c.json({ error: err.message }, 404);

@@ -32,6 +32,8 @@ export class ConfigCoordinator {
    * @param {string} deps.hanakoHome
    * @param {string} deps.agentsDir
    * @param {() => object} deps.getAgent - 当前焦点 agent
+   * @param {(id: string) => object|null} deps.getAgentById - 按 ID 查找 agent
+   * @param {() => string} deps.getActiveAgentId - 当前焦点 agent ID
    * @param {() => Map} deps.getAgents - 所有 agent Map
    * @param {() => import('./model-manager.js').ModelManager} deps.getModels
    * @param {() => import('./preferences-manager.js').PreferencesManager} deps.getPrefs
@@ -277,18 +279,20 @@ export class ConfigCoordinator {
 
   // ── updateConfig ──
 
-  async updateConfig(partial) {
+  async updateConfig(partial, { agentId } = {}) {
     const keys = Object.keys(partial);
-    if (keys.length) log.log(`updateConfig: keys=[${keys.join(",")}]`);
+    if (keys.length) log.log(`updateConfig: keys=[${keys.join(",")}]${agentId ? ` agentId=${agentId}` : ""}`);
 
-    const agent = this._d.getAgent();
+    // 如果指定了 agentId，刷新该 agent；否则刷新焦点 agent
+    const agent = (agentId && this._d.getAgentById?.(agentId)) || this._d.getAgent();
     const models = this._d.getModels();
+    const isFocusAgent = !agentId || agentId === this._d.getActiveAgentId?.();
 
     // agent 负责：写磁盘、刷新身份、刷新模块、重建 prompt
     agent.updateConfig(partial);
 
-    // 切换聊天模型：不需要 sync，模型早已注册
-    if (partial.models?.chat) {
+    // 模型切换只在焦点 agent 时生效
+    if (isFocusAgent && partial.models?.chat) {
       const chatRaw = partial.models.chat;
       const chatId = typeof chatRaw === "object" ? chatRaw.id : chatRaw;
       const chatProvider = (typeof chatRaw === "object" ? chatRaw.provider : null)
@@ -305,7 +309,8 @@ export class ConfigCoordinator {
       this._d.getSkills().syncAgentSkills(agent);
     }
 
-    if (partial.desk) {
+    // desk（heartbeat 等）只在焦点 agent 时联动
+    if (isFocusAgent && partial.desk) {
       const scheduler = this._d.getHub()?.scheduler;
       if ("heartbeat_interval" in partial.desk && scheduler) {
         // 间隔变更：需要完整重建 heartbeat（INTERVAL 在创建时固化）
