@@ -102,11 +102,16 @@ export async function takeScreenshot(targetMessageId: string, sessionPath: strin
       y += c.height;
     }
 
-    // 6. 水印：圆形 logo + 宋体文字
-    ctx.globalAlpha = 0.15;
+    // 6. 水印：圆形 logo + 宋体文字（居中）
+    ctx.globalAlpha = 0.5;
     const serifFont = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || 'serif';
     const wmY = y + WATERMARK_H / 2;
     const logoSize = 20 * scale;
+    const gap = 8 * scale;
+
+    // 先设字体以量文字宽度
+    ctx.font = `${12 * scale}px ${serifFont}`;
+    const textW = ctx.measureText('OpenHanako').width;
 
     // 画圆形 logo
     const logoImg = new Image();
@@ -117,12 +122,13 @@ export async function takeScreenshot(targetMessageId: string, sessionPath: strin
       logoImg.onerror = () => resolve(); // logo 加载失败也不阻塞
       logoImg.src = `${baseUrl}assets/Hanako.png`;
     });
-    if (logoImg.naturalWidth > 0) {
-      const logoX = final.width - PADDING - logoSize - 8 * scale - ctx.measureText('OpenHanako').width;
-      // 这里先量文字宽度需要先设字体
-      ctx.font = `${12 * scale}px ${serifFont}`;
-      const textW = ctx.measureText('OpenHanako').width;
-      const lx = final.width - PADDING - textW - 8 * scale - logoSize;
+
+    const hasLogo = logoImg.naturalWidth > 0;
+    const totalW = hasLogo ? logoSize + gap + textW : textW;
+    const startX = (final.width - totalW) / 2;
+
+    if (hasLogo) {
+      const lx = startX;
       ctx.save();
       ctx.beginPath();
       ctx.arc(lx + logoSize / 2, wmY, logoSize / 2, 0, Math.PI * 2);
@@ -135,9 +141,10 @@ export async function takeScreenshot(targetMessageId: string, sessionPath: strin
     // 画文字
     ctx.font = `${12 * scale}px ${serifFont}`;
     ctx.fillStyle = '#999';
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('OpenHanako', final.width - PADDING, wmY);
+    const textX = hasLogo ? startX + logoSize + gap : startX;
+    ctx.fillText('OpenHanako', textX, wmY);
     ctx.globalAlpha = 1;
 
     // 7. 导出 & 保存
