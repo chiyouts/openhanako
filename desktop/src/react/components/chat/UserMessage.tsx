@@ -5,7 +5,8 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import { MarkdownContent } from './MarkdownContent';
 import { AttachmentChip } from '../shared/AttachmentChip';
-import type { ChatMessage, UserAttachment, DeskContext } from '../../stores/chat-types';
+import { MessageActions } from './MessageActions';
+import type { ChatMessage, UserAttachment, DeskContext, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
 import styles from './Chat.module.css';
 import badgeStyles from '../input/SkillBadgeView.module.css';
@@ -21,12 +22,64 @@ export const UserMessage = memo(function UserMessage({ message, showAvatar }: Pr
   const userName = useStore(s => s.userName) || t('common.me');
   const [avatarFailed, setAvatarFailed] = useState(false);
 
+  const sessionPath = useStore(s => s.currentSessionPath) || '';
+  const isStreaming = useStore(s => s.streamingSessions.includes(sessionPath));
+  const selectedIds = useStore(s => s.selectedIdsBySession[sessionPath] || []);
+  const isSelected = selectedIds.includes(message.id);
+
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     setAvatarFailed(false);
   }, [userAvatarUrl]);
 
+  const handleCopy = useCallback(() => {
+    const state = useStore.getState();
+    const sp = state.currentSessionPath;
+    if (!sp) return;
+    const ids = state.selectedIdsBySession[sp] || [];
+
+    if (ids.length > 0) {
+      const session = state.chatSessions[sp];
+      if (!session) return;
+      const texts: string[] = [];
+      for (const item of session.items) {
+        if (item.type !== 'message') continue;
+        if (!ids.includes(item.data.id)) continue;
+        if (item.data.role === 'user') {
+          texts.push(item.data.text || '');
+        } else {
+          const textBlocks = (item.data.blocks || []).filter(
+            (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
+          );
+          if (textBlocks.length === 0) continue;
+          // eslint-disable-next-line no-restricted-syntax
+          const tmp = document.createElement('div');
+          tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
+          texts.push(tmp.innerText.trim());
+        }
+      }
+      navigator.clipboard.writeText(texts.join('\n\n')).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }).catch(() => {});
+    } else {
+      const text = message.text || '';
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }).catch(() => {});
+    }
+  }, [message.text]);
+
+  const handleScreenshot = useCallback(() => {
+    // Will be wired to takeScreenshot in Task 8
+  }, []);
+
   return (
-    <div className={`${styles.messageGroup} ${styles.messageGroupUser}`}>
+    <div className={`${styles.messageGroup} ${styles.messageGroupUser}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
+         data-message-id={message.id}>
       {showAvatar && (
         <div className={`${styles.avatarRow} ${styles.avatarRowUser}`}>
           <span className={styles.avatarName}>{userName}</span>
@@ -67,6 +120,14 @@ export const UserMessage = memo(function UserMessage({ message, showAvatar }: Pr
         ))}
         {message.textHtml && <MarkdownContent html={message.textHtml} />}
       </div>
+      <MessageActions
+        messageId={message.id}
+        sessionPath={sessionPath}
+        onCopy={handleCopy}
+        onScreenshot={handleScreenshot}
+        copied={copied}
+        isStreaming={isStreaming}
+      />
     </div>
   );
 });
