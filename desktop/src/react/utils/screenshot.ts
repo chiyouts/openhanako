@@ -104,7 +104,7 @@ export async function takeScreenshot(targetMessageId: string, sessionPath: strin
 
     // 6. 水印：圆形 logo + 宋体文字
     ctx.globalAlpha = 0.15;
-    const serifFont = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || "'Songti SC', Georgia, serif";
+    const serifFont = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || 'serif';
     const wmY = y + WATERMARK_H / 2;
     const logoSize = 20 * scale;
 
