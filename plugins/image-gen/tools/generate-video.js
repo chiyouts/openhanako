@@ -28,22 +28,16 @@ export async function execute(input, ctx) {
     return { content: [{ type: "text", text: "视频生成插件未初始化" }] };
   }
 
-  // Resolve adapter: explicit provider → default for "video"
-  const adapter = input.provider
-    ? registry.get(input.provider)
-    : registry.getDefault("video");
-  if (!adapter) {
-    return { content: [{ type: "text", text: "没有可用的视频生成 provider" }] };
-  }
-
   // Build adapter context
   const generatedDir = path.join(ctx.dataDir, "generated");
-  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir };
+  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config };
 
-  // Auth check
-  const auth = await adapter.checkAuth(submitCtx);
-  if (!auth.ok) {
-    return { content: [{ type: "text", text: auth.message }] };
+  // Resolve adapter: explicit → last registered (external adapters take over)
+  const adapter = input.provider
+    ? registry.get(input.provider)
+    : registry.getByType("video").at(-1) || null;
+  if (!adapter) {
+    return { content: [{ type: "text", text: "没有可用的视频生成 provider" }] };
   }
 
   const batchId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

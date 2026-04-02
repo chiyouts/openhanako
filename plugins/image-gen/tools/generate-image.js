@@ -30,22 +30,16 @@ export async function execute(input, ctx) {
     return { content: [{ type: "text", text: "图片生成插件未初始化" }] };
   }
 
-  // Resolve adapter: explicit provider → default for "image"
-  const adapter = input.provider
-    ? registry.get(input.provider)
-    : registry.getDefault("image");
-  if (!adapter) {
-    return { content: [{ type: "text", text: "没有可用的图片生成 provider" }] };
-  }
-
   // Build adapter context
   const generatedDir = path.join(ctx.dataDir, "generated");
-  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir };
+  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config };
 
-  // Auth check
-  const auth = await adapter.checkAuth(submitCtx);
-  if (!auth.ok) {
-    return { content: [{ type: "text", text: auth.message }] };
+  // Resolve adapter: explicit → last registered (external adapters take over)
+  const adapter = input.provider
+    ? registry.get(input.provider)
+    : registry.getByType("image").at(-1) || null;
+  if (!adapter) {
+    return { content: [{ type: "text", text: "没有可用的图片生成 provider" }] };
   }
 
   const count = Math.min(Math.max(input.count || 1, 1), 4);

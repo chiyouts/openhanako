@@ -34,6 +34,7 @@ function makeMediaGen(adapterOverrides = {}) {
   const registry = {
     get: vi.fn((id) => (id === adapter.id ? adapter : undefined)),
     getDefault: vi.fn((_type) => adapter),
+    getByType: vi.fn((_type) => [adapter]),
   };
   const store = {
     add: vi.fn(),
@@ -88,9 +89,9 @@ describe("generate-image tool — initialization guard", () => {
 });
 
 describe("generate-image tool — adapter resolution", () => {
-  it("returns error when no default adapter found", async () => {
+  it("returns error when no adapter of that type exists", async () => {
     const { registry, store, poller } = makeMediaGen();
-    registry.getDefault.mockReturnValue(undefined);
+    registry.getByType.mockReturnValue([]);
     const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "a cat" }, ctx);
@@ -113,28 +114,27 @@ describe("generate-image tool — adapter resolution", () => {
 
     await execute({ prompt: "a cat", provider: "fake-provider" }, ctx);
     expect(registry.get).toHaveBeenCalledWith("fake-provider");
-    expect(registry.getDefault).not.toHaveBeenCalled();
   });
 
-  it("uses registry.getDefault when no provider specified", async () => {
+  it("uses last registered adapter when no provider specified", async () => {
     const { registry, store, poller } = makeMediaGen();
     const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "a cat" }, ctx);
-    expect(registry.getDefault).toHaveBeenCalledWith("image");
+    expect(registry.getByType).toHaveBeenCalledWith("image");
     expect(registry.get).not.toHaveBeenCalled();
   });
 });
 
-describe("generate-image tool — auth check", () => {
-  it("returns auth error message when checkAuth fails", async () => {
+describe("generate-image tool — submit error", () => {
+  it("returns error when submit throws", async () => {
     const { registry, store, poller } = makeMediaGen({
-      checkAuth: vi.fn(async () => ({ ok: false, message: "API key 无效" })),
+      submit: vi.fn(async () => { throw new Error("CLI not found"); }),
     });
     const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "a cat" }, ctx);
-    expect(result.content[0].text).toBe("API key 无效");
+    expect(result.content[0].text).toContain("CLI not found");
   });
 });
 
