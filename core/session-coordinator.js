@@ -103,7 +103,9 @@ export class SessionCoordinator {
     creatingAgent.setMemoryEnabled(memoryEnabled);
 
     const baseResourceLoader = this._d.getResourceLoader();
-    const sessionEntry = {}; // populated after session creation; resourceLoader proxy references this
+    const initialPlanMode = this._pendingPlanMode;
+    this._pendingPlanMode = false;
+    const sessionEntry = { planMode: initialPlanMode }; // pre-populated for resourceLoader proxy
 
     // Wrap resourceLoader to dynamically inject plan mode context into system prompt
     const resourceLoader = Object.create(baseResourceLoader, {
@@ -168,14 +170,10 @@ export class SessionCoordinator {
     const old = this._sessions.get(mapKey);
     if (old) old.unsub();
 
-    const initialPlanMode = this._pendingPlanMode;
-    this._pendingPlanMode = false;
-
     Object.assign(sessionEntry, {
       session,
       agentId: this._d.getActiveAgentId(),
       memoryEnabled,
-      planMode: initialPlanMode,
       modelId: effectiveModel?.id || null,
       modelProvider: effectiveModel?.provider || null,
       lastTouchedAt: Date.now(),
