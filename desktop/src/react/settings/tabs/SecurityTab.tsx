@@ -118,12 +118,12 @@ export function SecurityTab() {
             </div>
             <Toggle on={sandboxEnabled} onChange={handleSandboxToggle} />
           </div>
-          {!sandboxEnabled && (
-            <p className={`${styles['tool-caps-desc']} ${styles['warn']}`}>
-              {t('settings.security.sandboxWarning')}
-            </p>
-          )}
         </div>
+        {!sandboxEnabled && (
+          <p className={`${styles['tool-caps-desc']} ${styles['warn']} ${styles['settings-section-hint']}`}>
+            {t('settings.security.sandboxWarning')}
+          </p>
+        )}
       </section>
 
       {/* File Backup Section */}

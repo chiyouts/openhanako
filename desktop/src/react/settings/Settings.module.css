@@ -2105,8 +2105,9 @@ a.about-link:hover {
 /* section hint（Embedding / Utility 的显式配置提示） */
 .settings-section-hint {
     display: block;
-    margin-top: -0.5rem;
+    margin-top: 6px;
     margin-bottom: var(--space-md);
+    padding-left: var(--space-md);
 }
 
 /* ========================================
