@@ -9,6 +9,7 @@ import { handleCheckbox } from './widgets/checkbox';
 import { handleBlockquote } from './widgets/blockquote';
 import { handleCodeBlock } from './widgets/code-block';
 import { handleImage } from './widgets/image';
+import { handleLink } from './widgets/link';
 
 export type DecoRange = { from: number; to: number; deco: Decoration };
 
@@ -70,6 +71,9 @@ export function buildMarkdownDecorations(view: EditorView): DecorationSet {
         switch (node.name) {
           case 'Image':
             handleImage({ view, node, activeLines, ranges });
+            break;
+          case 'Link':
+            handleLink({ view, node, activeLines, ranges });
             break;
           // conceal marks
           case 'HeaderMark': case 'EmphasisMark': case 'CodeMark':

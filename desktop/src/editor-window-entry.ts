@@ -22,6 +22,7 @@ import { languages } from '@codemirror/language-data';
 import { markdownHighlight, codeHighlight } from './react/editor/highlight';
 import { markdownTheme, codeTheme } from './react/editor/theme';
 import { markdownDecoPlugin } from './react/editor/md-decorations';
+import { linkClickHandler } from './react/editor/link-handler';
 
 const SAVE_DELAY = 600;
 
@@ -73,6 +74,7 @@ function createEditor(content: string, isMd: boolean) {
     ),
     concealComp.of(isMd ? markdownDecoPlugin : []),
     themeComp.of(isMd ? markdownTheme : codeTheme),
+    linkClickHandler,
   ];
 
   if (!isMd) extensions.push(highlightActiveLine());

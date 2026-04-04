@@ -27,6 +27,7 @@ import { languages } from '@codemirror/language-data';
 import { markdownHighlight, codeHighlight } from '../editor/highlight';
 import { markdownTheme, codeTheme } from '../editor/theme';
 import { markdownDecoPlugin } from '../editor/md-decorations';
+import { linkClickHandler } from '../editor/link-handler';
 
 /* ── Types ── */
 
@@ -132,6 +133,7 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
         ),
         c.conceal.of(isMd ? markdownDecoPlugin : []),
         c.theme.of(isMd ? markdownTheme : codeTheme),
+        linkClickHandler,
       ];
 
       // 代码模式保留行高亮，markdown 模式不要

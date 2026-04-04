@@ -317,6 +317,13 @@
     font-size: 0.85em;
 }
 
+:global(.cm-link-text) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 2px;
+}
+
 /* 拖拽中禁 transition */
 :global(body.resizing) .previewPanel,
 :global(body.resizing) .previewPanelInner {
