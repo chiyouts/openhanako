@@ -103,8 +103,18 @@ export class AgentManager {
       this._agents.set(agentId, ag);
     };
 
-    // 焦点 agent 先初始化
-    await initOne(this._activeAgentId);
+    // 焦点 agent 先初始化 — 失败不阻塞启动，让用户能进应用修配置
+    try {
+      await initOne(this._activeAgentId);
+    } catch (err) {
+      console.error(`[agent-manager] 焦点 agent "${this._activeAgentId}" init 失败: ${err.message}`);
+      // 仍然创建实例放入 map，让应用能启动；agent 自身已降级（记忆不可用等）
+      if (!this._agents.has(this._activeAgentId)) {
+        const agentDir = path.join(this._d.agentsDir, this._activeAgentId);
+        const ag = this._createAgentInstance(agentDir, getOwnerIds);
+        this._agents.set(this._activeAgentId, ag);
+      }
+    }
 
     // 其余并行
     const others = entries.map(e => e.name).filter(id => id !== this._activeAgentId);

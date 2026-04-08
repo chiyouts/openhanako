@@ -194,18 +194,13 @@ export class Agent {
     this._resolvedMemoryModel = null;
     this._memoryModelUnavailableReason = null;
     if (this._memoryModel && resolveModel) {
-      if (userSetUtilityLarge) {
-        // 用户明确配置了 utility_large：解析失败直接抛错，不兜底
+      try {
         this._resolvedMemoryModel = resolveModel(this._memoryModel, this._config);
-      } else {
-        // fallback 到聊天模型：解析失败则降级，不阻塞启动
-        try {
-          this._resolvedMemoryModel = resolveModel(this._memoryModel, this._config);
-        } catch (err) {
-          this._memoryModelUnavailableReason = err.message;
-          console.warn(`[memory] 聊天模型 fallback 解析失败，记忆系统暂不可用 — ${err.message}`);
-          this._cb?.emitDevLog?.(`记忆系统未启动：聊天模型 fallback 解析失败 — ${err.message}`, "warn");
-        }
+      } catch (err) {
+        this._memoryModelUnavailableReason = err.message;
+        const src = userSetUtilityLarge ? "utility_large" : "聊天模型 fallback";
+        console.warn(`[memory] ${src} 解析失败，记忆系统暂不可用 — ${err.message}`);
+        this._cb?.emitDevLog?.(`记忆系统未启动：${src} 解析失败 — ${err.message}`, "warn");
       }
     } else if (!this._memoryModel) {
       this._memoryModelUnavailableReason = "utility_large 未配置且无聊天模型可 fallback";
