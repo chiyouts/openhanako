@@ -5,7 +5,8 @@
  * 支持多 session 并发：后台 session 静默运行，只转发当前活跃 session 的事件
  */
 import { Hono } from "hono";
-import { MoodParser, XingParser, ThinkTagParser, CardParser } from "../../core/events.js";
+import { MoodParser, ThinkTagParser, CardParser } from "../../core/events.js";
+import { extractBlocks } from "../block-extractors.js";
 import { wsSend, wsParse } from "../ws-protocol.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { t } from "../i18n.js";
@@ -85,7 +86,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       sessionState.set(sessionPath, {
         thinkTagParser: new ThinkTagParser(),
         moodParser: new MoodParser(),
-        xingParser: new XingParser(),
         cardParser: new CardParser(),
         _cardHints: [],
         _cardEmitted: false,
@@ -210,7 +210,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         }
 
         const delta = event.assistantMessageEvent.delta;
-        // ThinkTagParser（最外层）→ MoodParser → XingParser
+        // ThinkTagParser（最外层）→ MoodParser → CardParser
         ss.thinkTagParser.feed(delta, (tEvt) => {
           switch (tEvt.type) {
             case "think_start":
@@ -223,26 +223,11 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               emitStreamEvent(sessionPath, ss, { type: "thinking_end" });
               break;
             case "text":
-              // 非 think 内容继续走 MoodParser → XingParser 链
+              // 非 think 内容继续走 MoodParser → CardParser 链
               ss.moodParser.feed(tEvt.data, (evt) => {
                 switch (evt.type) {
                   case "text":
-                    ss.xingParser.feed(evt.data, (xEvt) => {
-                      switch (xEvt.type) {
-                        case "text":
-                          feedCardPipeline(xEvt.data);
-                          break;
-                        case "xing_start":
-                          emitStreamEvent(sessionPath, ss, { type: "xing_start", title: xEvt.title });
-                          break;
-                        case "xing_text":
-                          emitStreamEvent(sessionPath, ss, { type: "xing_text", delta: xEvt.data });
-                          break;
-                        case "xing_end":
-                          emitStreamEvent(sessionPath, ss, { type: "xing_end" });
-                          break;
-                      }
-                    });
+                    feedCardPipeline(evt.data);
                     break;
                   case "mood_start":
                     emitStreamEvent(sessionPath, ss, { type: "mood_start" });
@@ -298,57 +283,14 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         details: event.result?.details,
       });
 
-      // Plugin Card: emit directly (same pattern as file_output)
-      if (event.result?.details?.card) {
-        const c = event.result.details.card;
-        emitStreamEvent(sessionPath, ss, {
-          type: "plugin_card",
-          card: { ...c, type: c.type || "iframe", pluginId: c.pluginId || "" },
-        });
-      }
-
-      // COMPAT(v0.78): present_files → stage_files, remove after v0.90
-      if (event.toolName === "stage_files" || event.toolName === "present_files") {
-        const details = event.result?.details || {};
-        const files = details.files || [];
-        if (files.length === 0 && details.filePath) {
-          files.push({ filePath: details.filePath, label: details.label, ext: details.ext || "" });
-        }
-        for (const f of files) {
-          emitStreamEvent(sessionPath, ss, {
-            type: "file_output",
-            filePath: f.filePath,
-            label: f.label,
-            ext: f.ext || "",
-          });
-        }
-      }
-
-      if (event.toolName === "create_artifact") {
-        const d = event.result?.details || {};
-        emitStreamEvent(sessionPath, ss, {
-          type: "artifact",
-          artifactId: d.artifactId,
-          artifactType: d.type,
-          title: d.title,
-          content: d.content,
-          language: d.language,
-        });
+      // Unified content_block emission for all tool results
+      const blocks = extractBlocks(event.toolName, event.result?.details, event.result);
+      for (const block of blocks) {
+        emitStreamEvent(sessionPath, ss, { type: "content_block", block });
       }
 
       if (event.toolName === "browser") {
         const d = event.result?.details || {};
-        if (d.action === "screenshot" && event.result?.content) {
-          const imgBlock = event.result.content.find(c => c.type === "image");
-          if (imgBlock?.data) {
-            emitStreamEvent(sessionPath, ss, {
-              type: "browser_screenshot",
-              base64: imgBlock.data,
-              mimeType: imgBlock.mimeType || "image/jpeg",
-            });
-          }
-        }
-
         const statusMsg = {
           type: "browser_status",
           running: d.running ?? false,
@@ -358,13 +300,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         emitStreamEvent(sessionPath, ss, statusMsg);
         if (statusMsg.running) startBrowserThumbPoll();
         else stopBrowserThumbPoll();
-      }
-
-      if (event.toolName === "cron") {
-        const d = event.result?.details || {};
-        if (d.action === "pending_add" && d.jobData) {
-          emitStreamEvent(sessionPath, ss, { type: "cron_confirmation", jobData: d.jobData });
-        }
       }
 
       if (isActive && ["write", "edit", "bash"].includes(event.toolName)) {
@@ -380,24 +315,21 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       // 新的阻塞式 cron 确认（通过 emitEvent 触发）
       if (!ss) return;
       emitStreamEvent(sessionPath, ss, {
-        type: "cron_confirmation",
-        confirmId: event.confirmId,
-        jobData: event.jobData,
+        type: "content_block",
+        block: { type: "cron_confirm", confirmId: event.confirmId, jobData: event.jobData, status: "pending" },
       });
     } else if (event.type === "settings_confirmation") {
       if (!ss) return;
       emitStreamEvent(sessionPath, ss, {
-        type: "settings_confirmation",
-        confirmId: event.confirmId,
-        settingKey: event.settingKey,
-        cardType: event.cardType,
-        currentValue: event.currentValue,
-        proposedValue: event.proposedValue,
-        options: event.options,
-        optionLabels: event.optionLabels || null,
-        label: event.label,
-        description: event.description,
-        frontend: event.frontend,
+        type: "content_block",
+        block: {
+          type: "settings_confirm", confirmId: event.confirmId,
+          settingKey: event.settingKey, cardType: event.cardType,
+          currentValue: event.currentValue, proposedValue: event.proposedValue,
+          options: event.options, optionLabels: event.optionLabels || null,
+          label: event.label, description: event.description,
+          frontend: event.frontend, status: "pending",
+        },
       });
     } else if (event.type === "confirmation_resolved") {
       broadcast({
@@ -442,27 +374,12 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         ss.isThinking = false;
         emitStreamEvent(sessionPath, ss, { type: "thinking_end" });
       }
-      // flush 顺序：ThinkTag → Mood → Xing（和 feed 顺序一致）
-      // flush 内部的 mood → xing 管线（thinkTag flush 和 mood flush 共用）
+      // flush 顺序：ThinkTag → Mood → Card（和 feed 顺序一致）
+      // flush 内部的 mood → card 管线（thinkTag flush 和 mood flush 共用）
       const feedMoodPipeline = (text) => {
         ss.moodParser.feed(text, (evt) => {
           if (evt.type === "text") {
-            ss.xingParser.feed(evt.data, (xEvt) => {
-              switch (xEvt.type) {
-                case "text":
-                  feedCardPipeline(xEvt.data);
-                  break;
-                case "xing_start":
-                  emitStreamEvent(sessionPath, ss, { type: "xing_start", title: xEvt.title });
-                  break;
-                case "xing_text":
-                  emitStreamEvent(sessionPath, ss, { type: "xing_text", delta: xEvt.data });
-                  break;
-                case "xing_end":
-                  emitStreamEvent(sessionPath, ss, { type: "xing_end" });
-                  break;
-              }
-            });
+            feedCardPipeline(evt.data);
           } else if (evt.type === "mood_start") {
             emitStreamEvent(sessionPath, ss, { type: "mood_start" });
           } else if (evt.type === "mood_text") {
@@ -483,31 +400,9 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       });
       ss.moodParser.flush((evt) => {
         if (evt.type === "text") {
-          ss.xingParser.feed(evt.data, (xEvt) => {
-            switch (xEvt.type) {
-              case "text":
-                feedCardPipeline(xEvt.data);
-                break;
-              case "xing_start":
-                emitStreamEvent(sessionPath, ss, { type: "xing_start", title: xEvt.title });
-                break;
-              case "xing_text":
-                emitStreamEvent(sessionPath, ss, { type: "xing_text", delta: xEvt.data });
-                break;
-              case "xing_end":
-                emitStreamEvent(sessionPath, ss, { type: "xing_end" });
-                break;
-            }
-          });
+          feedCardPipeline(evt.data);
         } else if (evt.type === "mood_text") {
           emitStreamEvent(sessionPath, ss, { type: "mood_text", delta: evt.data });
-        }
-      });
-      ss.xingParser.flush((xEvt) => {
-        if (xEvt.type === "text") {
-          feedCardPipeline(xEvt.data);
-        } else if (xEvt.type === "xing_text") {
-          emitStreamEvent(sessionPath, ss, { type: "xing_text", delta: xEvt.data });
         }
       });
       ss.cardParser.flush((cEvt) => {
@@ -556,7 +451,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss.isAborted = false;
       ss.thinkTagParser.reset();
       ss.moodParser.reset();
-      ss.xingParser.reset();
       ss.cardParser.reset();
       ss._cardHints = [];
       ss._cardEmitted = false;
@@ -786,7 +680,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               try {
                 ss.thinkTagParser.reset();
                 ss.moodParser.reset();
-                ss.xingParser.reset();
                 ss.isAborted = false;
                 ss.titleRequested = false;
                 ss.titlePreview = "";
