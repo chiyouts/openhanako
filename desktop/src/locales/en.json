@@ -399,11 +399,6 @@
       "done": "🧭 Clone dispatched",
       "failed": "🧭 Clone ran into trouble"
     },
-    "ask_agent": {
-      "running": "💬 {name} is consulting",
-      "done": "💬 Question sent",
-      "failed": "💬 No reply"
-    },
     "check_pending_tasks": {
       "running": "📋 {name} is checking unfinished business",
       "done": "📋 {name} all caught up",
@@ -1262,13 +1257,7 @@
     "channelNoJoined": "Not joined any channels yet",
     "unknownAction": "Unknown action: {action}",
     "cannotSelfDm": "Cannot send DM to yourself",
-    "agentNotFoundAvailable": "Agent \"{id}\" not found. Available: {ids}",
     "dmSent": "DM sent to {name}",
-    "cannotCallSelf": "Cannot call yourself",
-    "noOtherAgents": "No other agents available.",
-    "askAgentNoTask": "Please provide a task for the agent.",
-    "agentNoReply": "({name} did not reply)",
-    "agentCallFailed": "Calling {name} failed: {msg}",
     "cronNoJobs": "No scheduled tasks",
     "cronAddNeedParams": "Error: add requires scheduleType, schedule, prompt parameters",
     "cronEveryMustBeNumber": "Error: schedule for every type must be a positive integer (milliseconds)",
@@ -1322,10 +1311,8 @@
     "subagentMaxConcurrent": "{max} sub-agents are already running, please wait before starting new ones.",
     "subagentFailed": "Sub-agent execution failed: {msg}",
     "subagentTimeout": "Sub-agent timed out after {minutes} minutes",
-    "askAgentTimeout": "{name} timed out after {minutes} minutes",
     "subagentNoOutput": "(Sub-agent produced no output)",
     "subagentDispatched": "Sub-task dispatched (task-id: {taskId}). Results will be delivered when ready.",
-    "askAgentDispatched": "Request sent to {name} (task-id: {taskId}). Reply will be delivered when ready.",
     "installSkillDisabled": "Self-learning skills not enabled. Please enable \"Allow Agent to create/install skills\" in settings.",
     "installSkillGithubDisabled": "GitHub skill fetching not enabled. Please enable \"Allow fetching skills from GitHub\" in settings.",
     "installSkillInvalidGithubUrl": "Invalid GitHub URL: {url}",
@@ -1527,15 +1514,9 @@
       "contentDesc": "Full content (HTML source / code / Markdown text)",
       "languageDesc": "Programming language (only for type=code), e.g. javascript, python, css"
     },
-    "askAgent": {
-      "label": "Cross-Agent Call",
-      "description": "Assign a task to another agent. The task runs in the background; the reply is delivered automatically to the current conversation when ready.\n\nYour judgment:\n- If you have other work to do in parallel, continue with it\n- If you need the reply before proceeding, tell the user you've sent the request and are waiting for the reply, then wait normally\n\nGood for: having the other agent review code, translate text, analyze a problem from their expertise, etc.\nThe other agent responds with its own persona and model, has read-only tools (read files, search, web fetch), and cannot write files or call other agents.\nTip: If you're unsure which agent to call, pass agent=\"?\" to list all available agents with their capabilities and models.",
-      "agentDesc": "Target agent's ID. Use \"?\" to list all available agents.",
-      "taskDesc": "Task description (the full prompt the other agent sees)"
-    },
     "dm": {
       "label": "Direct Message",
-      "description": "Send a single direct message to another agent to inform them of something.\nDo not use this tool to assign tasks or get results; that is ask_agent's job.",
+      "description": "Send a single direct message to another agent to inform them of something.\nDo not use this tool to assign tasks or get results; that is subagent's job.",
       "toDesc": "Target agent's ID",
       "messageDesc": "Message content"
     },
@@ -1589,8 +1570,9 @@
     },
     "subagent": {
       "label": "Launch Sub-agent",
-      "description": "Launch a sub-agent to handle an independent task in an isolated context. The task runs in the background; results are delivered automatically to the current conversation when ready.\n\nYour judgment:\n- If you have other work to do in parallel, continue with it\n- If you need the results before proceeding, tell the user you've dispatched the task and are waiting for the reply, then wait normally\n\nGood for:\n- Research tasks that require extensive searching and reading, summarized into a brief conclusion\n- Independent sub-problems that can run in parallel with your current work\n- Tasks that need simultaneous exploration in multiple directions (you can fire multiple subagent calls at once)\nNot for: Operations with side effects like modifying files or executing commands\n\nImportant: The task parameter must contain complete instructions and necessary background, as the sub-agent cannot see the current conversation history.",
+      "description": "Delegate a task to a sub-agent. Optionally specify another agent (pass agent param), or omit to self-clone. Pass agent=\"?\" to list available agents.\n\nYour judgment:\n- If you have other work to do in parallel, continue with it\n- If you need the results before proceeding, tell the user you've dispatched the task and are waiting for the reply, then wait normally\n\nGood for:\n- Research tasks that require extensive searching and reading, summarized into a brief conclusion\n- Independent sub-problems that can run in parallel with your current work\n- Tasks that need simultaneous exploration in multiple directions (you can fire multiple subagent calls at once)\n- Having another agent handle a task from their specialized perspective\nNot for: Operations with side effects like modifying files or executing commands\n\nImportant: The task parameter must contain complete instructions and necessary background, as the sub-agent cannot see the current conversation history.",
       "taskDesc": "Full instructions for the sub-agent, including necessary background",
+      "agentDesc": "Target agent ID. Omit to self-execute, pass \"?\" to list available agents.",
       "modelDesc": "Specify model (optional, defaults to utility model)"
     },
     "installSkill": {

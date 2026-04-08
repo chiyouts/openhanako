@@ -399,11 +399,6 @@
       "done": "🧭 分身出发了",
       "failed": "🧭 分身出了岔子"
     },
-    "ask_agent": {
-      "running": "💬 {name} 请教中",
-      "done": "💬 已发出请教",
-      "failed": "💬 没问到"
-    },
     "check_pending_tasks": {
       "running": "📋 {name} 正在找找没做完的事儿",
       "done": "📋 {name} 找完了",
@@ -1262,13 +1257,7 @@
     "channelNoJoined": "还没有加入任何频道",
     "unknownAction": "未知操作: {action}",
     "cannotSelfDm": "不能给自己发私信",
-    "agentNotFoundAvailable": "找不到 agent \"{id}\"。可用：{ids}",
     "dmSent": "已发送私信给 {name}",
-    "cannotCallSelf": "不能调用自己",
-    "noOtherAgents": "没有其他可用的 agent。",
-    "askAgentNoTask": "请提供任务内容。",
-    "agentNoReply": "（{name} 没有回复）",
-    "agentCallFailed": "调用 {name} 失败: {msg}",
     "cronNoJobs": "没有定时任务",
     "cronAddNeedParams": "错误：add 需要 scheduleType, schedule, prompt 参数",
     "cronEveryMustBeNumber": "错误：every 类型的 schedule 必须是正整数（毫秒）",
@@ -1322,10 +1311,8 @@
     "subagentMaxConcurrent": "当前已有 {max} 个子 agent 在运行，请等待完成后再发起。",
     "subagentFailed": "子 agent 执行失败: {msg}",
     "subagentTimeout": "子 agent 执行超时（{minutes} 分钟）",
-    "askAgentTimeout": "{name} 响应超时（{minutes} 分钟）",
     "subagentNoOutput": "(子 agent 未产生输出)",
     "subagentDispatched": "子任务已派出 (task-id: {taskId})。完成后结果会自动送达。",
-    "askAgentDispatched": "已向 {name} 发送请求 (task-id: {taskId})。收到回复后会自动送达。",
     "installSkillDisabled": "自学技能能力未启用。请在设置中开启「允许 Agent 自行创建/安装技能」。",
     "installSkillGithubDisabled": "GitHub 技能获取未启用。请在设置中开启「允许从 GitHub 获取技能」。",
     "installSkillInvalidGithubUrl": "无效的 GitHub URL：{url}",
@@ -1527,15 +1514,9 @@
       "contentDesc": "完整内容（HTML 源码 / 代码 / Markdown 文本）",
       "languageDesc": "编程语言（仅 type=code 时有效），如 javascript, python, css"
     },
-    "askAgent": {
-      "label": "跨 Agent 调用",
-      "description": "派任务给另一个 agent。任务在后台执行，对方回复后结果会自动送达当前对话。\n\n你的判断：\n- 如果当前还有可以并行推进的工作，继续做\n- 如果必须拿到回复才能进行下一步，告诉用户你已经派出去了、在等回复，然后正常等待即可\n\n适用场景：让对方 review 代码、翻译一段文字、从对方的专业视角分析问题等。\n对方以自己的人格和模型回复，有只读工具（读文件、搜索、web fetch），不能写文件或调用其他 agent。\n提示：不确定该找哪个 agent 时，传 agent=\"?\" 可以查看所有可用 agent 的能力说明和模型。",
-      "agentDesc": "目标 agent 的 ID。传 \"?\" 可查看所有可用 agent。",
-      "taskDesc": "任务描述（对方看到的完整 prompt）"
-    },
     "dm": {
       "label": "私信",
-      "description": "仅用于给另一个 agent 发一条私信，让对方知道某件事。\n不要用这个工具派任务或获取结果，那是 ask_agent 的职责。",
+      "description": "仅用于给另一个 agent 发一条私信，让对方知道某件事。\n不要用这个工具派任务或获取结果，那是 subagent 的职责。",
       "toDesc": "目标 agent 的 ID",
       "messageDesc": "消息内容"
     },
@@ -1589,8 +1570,9 @@
     },
     "subagent": {
       "label": "启动子 Agent",
-      "description": "启动一个子 agent 在隔离的上下文中处理独立任务。任务在后台执行，完成后结果会自动送达当前对话。\n\n你的判断：\n- 如果当前还有可以并行推进的工作，继续做\n- 如果必须拿到结果才能进行下一步，告诉用户你已经派出去了、在等回复，然后正常等待即可\n\n适用场景：\n- 需要大量搜索、阅读后总结为简短结论的调研任务\n- 可以和当前思路并行的独立子问题\n- 需要在多个方向同时探索的任务（可同时发起多个 subagent 调用）\n不适用：需要修改文件、执行命令等有副作用的操作\n\n重要：task 参数要写清楚完整的指令和必要背景，子 agent 看不到当前对话历史。",
+      "description": "将任务派给子 agent 执行。可指定其他 agent（传 agent 参数），不指定则自己分身执行。传 agent=\"?\" 查看可用 agent 列表。\n\n你的判断：\n- 如果当前还有可以并行推进的工作，继续做\n- 如果必须拿到结果才能进行下一步，告诉用户你已经派出去了、在等回复，然后正常等待即可\n\n适用场景：\n- 需要大量搜索、阅读后总结为简短结论的调研任务\n- 可以和当前思路并行的独立子问题\n- 需要在多个方向同时探索的任务（可同时发起多个 subagent 调用）\n- 让另一个 agent 从其专业视角处理任务\n不适用：需要修改文件、执行命令等有副作用的操作\n\n重要：task 参数要写清楚完整的指令和必要背景，子 agent 看不到当前对话历史。",
       "taskDesc": "子 agent 的完整指令，包含必要的背景信息",
+      "agentDesc": "目标 agent ID。不填则当前 agent 自己执行，传 \"?\" 列出可用 agent。",
       "modelDesc": "指定模型（可选，默认使用 utility 模型）"
     },
     "installSkill": {

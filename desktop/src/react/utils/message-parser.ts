@@ -150,8 +150,6 @@ export function extractToolDetail(name: string, args: Record<string, unknown> | 
       return { text: truncateHead((args.query || '') as string, 40) };
     case 'subagent':
       return { text: truncateHead((args.task || '') as string, 30) };
-    case 'ask_agent':
-      return { text: (args.agent || '') as string };
     case 'dm':
       return { text: (args.to || '') as string };
     case 'channel':

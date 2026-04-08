@@ -398,11 +398,6 @@
       "done": "🧭 분신을 보냈어요",
       "failed": "🧭 분신이 문제가 생겼어요"
     },
-    "ask_agent": {
-      "running": "💬 {name}이(가) 상담 중",
-      "done": "💬 질문을 보냈어요",
-      "failed": "💬 답변을 못 받았어요"
-    },
     "check_pending_tasks": {
       "running": "📋 {name}이(가) 안 끝난 일을 찾고 있어요",
       "done": "📋 {name} 확인 끝",
@@ -1219,13 +1214,7 @@
     "channelNoJoined": "아직 채널에 참여하지 않았어요",
     "unknownAction": "알 수 없는 동작: {action}",
     "cannotSelfDm": "자기 자신에게 DM을 보낼 수 없어요",
-    "agentNotFoundAvailable": "agent \"{id}\"를 찾을 수 없어요. 사용 가능: {ids}",
     "dmSent": "{name}에게 DM을 보냈어요",
-    "cannotCallSelf": "자기 자신은 호출할 수 없어요",
-    "noOtherAgents": "다른 사용 가능한 agent가 없어요.",
-    "askAgentNoTask": "작업 내용을 입력해 주세요.",
-    "agentNoReply": "({name}이(가) 응답하지 않았어요)",
-    "agentCallFailed": "{name} 호출 실패: {msg}",
     "cronNoJobs": "예약 작업이 없어요",
     "cronAddNeedParams": "오류: add에는 scheduleType, schedule, prompt 파라미터가 필요해요",
     "cronEveryMustBeNumber": "오류: every 타입의 schedule은 양의 정수(밀리초)여야 해요",
@@ -1279,10 +1268,8 @@
     "subagentMaxConcurrent": "현재 {max}개의 서브 에이전트가 실행 중이에요. 완료될 때까지 기다려 주세요.",
     "subagentFailed": "서브 에이전트 실행 실패: {msg}",
     "subagentTimeout": "서브 에이전트 실행 시간 초과 ({minutes}분)",
-    "askAgentTimeout": "{name} 응답 시간 초과 ({minutes}분)",
     "subagentNoOutput": "(서브 에이전트가 출력을 생성하지 않았어요)",
     "subagentDispatched": "서브 작업을 보냈어요 (task-id: {taskId}). 완료되면 결과가 자동으로 전달돼요.",
-    "askAgentDispatched": "{name}에게 요청을 보냈어요 (task-id: {taskId}). 답변이 오면 자동으로 전달돼요.",
     "installSkillDisabled": "자가 학습 스킬 기능이 활성화되지 않았어요. 설정에서 「Agent의 스킬 생성/설치 허용」을 켜주세요.",
     "installSkillGithubDisabled": "GitHub 스킬 가져오기가 활성화되지 않았어요. 설정에서 「GitHub에서 스킬 가져오기 허용」을 켜주세요.",
     "installSkillInvalidGithubUrl": "잘못된 GitHub URL: {url}",
@@ -1483,15 +1470,9 @@
       "contentDesc": "전체 콘텐츠 (HTML 소스 / 코드 / Markdown 텍스트)",
       "languageDesc": "프로그래밍 언어 (type=code일 때만 유효), 예: javascript, python, css"
     },
-    "askAgent": {
-      "label": "Agent 간 호출",
-      "description": "다른 agent에게 작업을 할당해요. 작업은 백그라운드에서 실행되고, 상대의 답변은 자동으로 현재 대화에 전달돼요.\n\n판단 기준:\n- 병렬로 진행할 수 있는 작업이 있으면 계속 진행하세요\n- 답변이 있어야 다음 단계로 넘어갈 수 있다면, 사용자에게 요청을 보냈고 답변을 기다리고 있다고 알려주세요\n\n적합한 경우: 상대에게 코드 리뷰, 번역, 전문적 관점의 분석 등.\n상대는 자신의 페르소나와 모델로 응답하고, 읽기 전용 도구(파일 읽기, 검색, web fetch)를 가지며, 파일 쓰기나 다른 agent 호출은 불가해요.\n팁: 어떤 agent를 호출할지 모르겠다면 agent=\"?\"로 모든 agent의 능력과 모델을 확인할 수 있어요.",
-      "agentDesc": "대상 agent의 ID. \"?\"로 전체 agent 목록 보기.",
-      "taskDesc": "작업 설명 (상대가 보는 전체 프롬프트)"
-    },
     "dm": {
       "label": "다이렉트 메시지",
-      "description": "다른 agent에게 다이렉트 메시지를 하나 보내서 무언가를 알려줄 때만 사용해요.\n이 도구로 작업을 맡기거나 결과를 받으려 하지 마세요. 그건 ask_agent의 역할이에요.",
+      "description": "다른 agent에게 다이렉트 메시지를 하나 보내서 무언가를 알려줄 때만 사용해요.\n이 도구로 작업을 맡기거나 결과를 받으려 하지 마세요. 그건 subagent의 역할이에요.",
       "toDesc": "대상 agent의 ID",
       "messageDesc": "메시지 내용"
     },
@@ -1545,8 +1526,9 @@
     },
     "subagent": {
       "label": "서브 에이전트 시작",
-      "description": "서브 에이전트를 시작하여 격리된 컨텍스트에서 독립 작업을 처리해요. 작업은 백그라운드에서 실행되고, 완료되면 결과가 자동으로 현재 대화에 전달돼요.\n\n판단 기준:\n- 병렬로 진행할 수 있는 작업이 있으면 계속 진행하세요\n- 결과가 있어야 다음 단계로 넘어갈 수 있다면, 사용자에게 작업을 보냈고 답변을 기다리고 있다고 알려주세요\n\n적합한 경우:\n- 대량의 검색, 읽기 후 간결한 결론으로 요약하는 조사 작업\n- 현재 작업과 병렬로 진행할 수 있는 독립적인 하위 문제\n- 여러 방향을 동시에 탐색해야 하는 작업 (여러 subagent를 동시에 호출 가능)\n적합하지 않은 경우: 파일 수정, 명령 실행 등 부작용이 있는 작업\n\n중요: task 파라미터에 완전한 지시와 필요한 배경 정보를 포함하세요. 서브 에이전트는 현재 대화 기록을 볼 수 없어요.",
+      "description": "서브 에이전트에게 작업을 위임해요. 다른 agent를 지정하거나(agent 파라미터), 생략하면 자기 자신이 분신으로 실행해요. agent=\"?\"로 사용 가능한 agent 목록을 확인할 수 있어요.\n\n판단 기준:\n- 병렬로 진행할 수 있는 작업이 있으면 계속 진행하세요\n- 결과가 있어야 다음 단계로 넘어갈 수 있다면, 사용자에게 작업을 보냈고 답변을 기다리고 있다고 알려주세요\n\n적합한 경우:\n- 대량의 검색, 읽기 후 간결한 결론으로 요약하는 조사 작업\n- 현재 작업과 병렬로 진행할 수 있는 독립적인 하위 문제\n- 여러 방향을 동시에 탐색해야 하는 작업 (여러 subagent를 동시에 호출 가능)\n- 다른 agent가 전문적 관점에서 작업을 처리하도록\n적합하지 않은 경우: 파일 수정, 명령 실행 등 부작용이 있는 작업\n\n중요: task 파라미터에 완전한 지시와 필요한 배경 정보를 포함하세요. 서브 에이전트는 현재 대화 기록을 볼 수 없어요.",
       "taskDesc": "서브 에이전트에 대한 완전한 지시, 필요한 배경 정보 포함",
+      "agentDesc": "대상 agent ID. 생략하면 자신이 실행, \"?\"로 사용 가능한 agent 목록 보기.",
       "modelDesc": "모델 지정 (선택, 기본값은 utility 모델)"
     },
     "installSkill": {

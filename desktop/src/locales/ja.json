@@ -398,11 +398,6 @@
       "done": "🧭 分身を送り出した",
       "failed": "🧭 分身がトラブった"
     },
-    "ask_agent": {
-      "running": "💬 {name} が相談中",
-      "done": "💬 質問を送った",
-      "failed": "💬 返事がない"
-    },
     "check_pending_tasks": {
       "running": "📋 {name} はやり残しを探している",
       "done": "📋 {name} 確認おわり",
@@ -1219,13 +1214,7 @@
     "channelNoJoined": "まだチャンネルに参加していません",
     "unknownAction": "不明な操作: {action}",
     "cannotSelfDm": "自分自身にDMは送れません",
-    "agentNotFoundAvailable": "agent \"{id}\" が見つかりません。利用可能：{ids}",
     "dmSent": "{name} にDMを送信しました",
-    "cannotCallSelf": "自分自身は呼び出せません",
-    "noOtherAgents": "他に利用可能な agent がありません。",
-    "askAgentNoTask": "タスク内容を入力してください。",
-    "agentNoReply": "（{name} は返信しませんでした）",
-    "agentCallFailed": "{name} の呼び出しに失敗しました: {msg}",
     "cronNoJobs": "スケジュールタスクはありません",
     "cronAddNeedParams": "エラー：add には scheduleType, schedule, prompt パラメータが必要です",
     "cronEveryMustBeNumber": "エラー：every タイプの schedule は正の整数（ミリ秒）である必要があります",
@@ -1279,10 +1268,8 @@
     "subagentMaxConcurrent": "現在 {max} 個のサブエージェントが実行中です。完了をお待ちください。",
     "subagentFailed": "サブエージェントの実行に失敗しました: {msg}",
     "subagentTimeout": "サブエージェントがタイムアウトしました（{minutes}分）",
-    "askAgentTimeout": "{name} がタイムアウトしました（{minutes}分）",
     "subagentNoOutput": "(サブエージェントは出力を生成しませんでした)",
     "subagentDispatched": "サブタスクを送信しました (task-id: {taskId})。完了後、結果は自動的に届きます。",
-    "askAgentDispatched": "{name} にリクエストを送信しました (task-id: {taskId})。返信は自動的に届きます。",
     "installSkillDisabled": "自己学習スキル機能が有効になっていません。設定で「Agent のスキル作成/インストールを許可」を有効にしてください。",
     "installSkillGithubDisabled": "GitHub スキル取得が有効になっていません。設定で「GitHub からのスキル取得を許可」を有効にしてください。",
     "installSkillInvalidGithubUrl": "無効な GitHub URL：{url}",
@@ -1483,15 +1470,9 @@
       "contentDesc": "完全なコンテンツ（HTML ソース / コード / Markdown テキスト）",
       "languageDesc": "プログラミング言語（type=code の場合のみ有効）、例：javascript, python, css"
     },
-    "askAgent": {
-      "label": "Agent 間呼び出し",
-      "description": "別の agent にタスクを割り当てます。タスクはバックグラウンドで実行され、相手の返答は自動的に現在の会話に届きます。\n\nあなたの判断：\n- 並行して進められる作業があれば、続けてください\n- 返答がないと次に進めない場合は、ユーザーにリクエスト送信済みで返信待ちであることを伝え、そのまま待ってください\n\n適している場面：相手にコードレビュー、翻訳、専門的な視点からの分析など。\n相手は独自のペルソナとモデルで返答し、読み取り専用ツール（ファイル読み取り、検索、web fetch）を持ち、ファイル書き込みや他の agent の呼び出しはできません。\nヒント：どの agent を呼ぶか迷った場合、agent=\"?\" で全 agent の能力とモデルを確認できます。",
-      "agentDesc": "対象 agent の ID。\"?\" で全 agent を一覧表示。",
-      "taskDesc": "タスクの説明（相手に見える完全なプロンプト）"
-    },
     "dm": {
       "label": "ダイレクトメッセージ",
-      "description": "別の agent に一通のダイレクトメッセージを送り、何かを知らせるためだけに使います。\nこのツールでタスクを割り当てたり結果を取得したりしないでください。それは ask_agent の役割です。",
+      "description": "別の agent に一通のダイレクトメッセージを送り、何かを知らせるためだけに使います。\nこのツールでタスクを割り当てたり結果を取得したりしないでください。それは subagent の役割です。",
       "toDesc": "対象 agent の ID",
       "messageDesc": "メッセージ内容"
     },
@@ -1545,8 +1526,9 @@
     },
     "subagent": {
       "label": "サブエージェントを起動",
-      "description": "サブエージェントを起動し、隔離されたコンテキストで独立タスクを処理します。タスクはバックグラウンドで実行され、完了後に結果が自動的に現在の会話に届きます。\n\nあなたの判断：\n- 並行して進められる作業があれば、続けてください\n- 結果がないと次に進めない場合は、ユーザーにタスクを送信済みで返信待ちであることを伝え、そのまま待ってください\n\n適している場面：\n- 大量の検索・読解の後に簡潔な結論にまとめる調査タスク\n- 現在の作業と並行できる独立したサブ問題\n- 複数の方向を同時に探索する必要があるタスク（複数の subagent を同時に呼び出せます）\n適さない場面：ファイル変更やコマンド実行など副作用のある操作\n\n重要：task パラメータには完全な指示と必要な背景情報を含めてください。サブエージェントは現在の会話履歴を参照できません。",
+      "description": "タスクをサブエージェントに委任します。別の agent を指定するか（agent パラメータ）、省略すると自分が分身として実行します。agent=\"?\" で利用可能な agent 一覧を確認できます。\n\nあなたの判断：\n- 並行して進められる作業があれば、続けてください\n- 結果がないと次に進めない場合は、ユーザーにタスクを送信済みで返信待ちであることを伝え、そのまま待ってください\n\n適している場面：\n- 大量の検索・読解の後に簡潔な結論にまとめる調査タスク\n- 現在の作業と並行できる独立したサブ問題\n- 複数の方向を同時に探索する必要があるタスク（複数の subagent を同時に呼び出せます）\n- 別の agent が専門的な視点でタスクを処理するケース\n適さない場面：ファイル変更やコマンド実行など副作用のある操作\n\n重要：task パラメータには完全な指示と必要な背景情報を含めてください。サブエージェントは現在の会話履歴を参照できません。",
       "taskDesc": "サブエージェントへの完全な指示、必要な背景情報を含む",
+      "agentDesc": "対象 agent の ID。省略すると自分が実行、\"?\" で利用可能な agent を一覧表示。",
       "modelDesc": "モデルを指定（オプション、デフォルトは utility モデル）"
     },
     "installSkill": {
