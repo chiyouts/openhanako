@@ -85,7 +85,16 @@ export const SubagentCard = memo(function SubagentCard({ block }: SubagentCardPr
     return unsub;
   }, [block.streamKey, status]);
 
-  const isInterrupted = status === 'running' && !block.streamKey;
+  // "已中断" 仅在历史加载时判断：组件首次 mount 时如果 streamKey 为空且 status=running，
+  // 等待一小段时间让 block_update 到达。如果一直没到才标记中断。
+  const [waitedForKey, setWaitedForKey] = useState(false);
+  useEffect(() => {
+    if (block.streamKey || status !== 'running') return;
+    const timer = setTimeout(() => setWaitedForKey(true), 3000);
+    return () => clearTimeout(timer);
+  }, [block.streamKey, status]);
+
+  const isInterrupted = status === 'running' && !block.streamKey && waitedForKey;
 
   return (
     <div className={`${styles.subagentCard} ${styles[`subagent-${status}`]}`}>
