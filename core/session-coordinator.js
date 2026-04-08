@@ -696,7 +696,11 @@ export class SessionCoordinator {
     // 准备阶段出错时需要自己清理 headlessOps
     let prepared = false;
     try {
-      const sessionDir = opts.persist || path.join(targetAgent.agentDir, '.ephemeral');
+      const sessionDir = typeof opts.persist === 'string'
+        ? opts.persist
+        : opts.persist
+          ? path.join(targetAgent.agentDir, 'subagent-sessions')
+          : path.join(targetAgent.agentDir, '.ephemeral');
       fs.mkdirSync(sessionDir, { recursive: true });
 
       const execCwd = opts.cwd || this._d.getHomeCwd() || process.cwd();
