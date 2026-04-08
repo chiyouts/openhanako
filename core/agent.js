@@ -370,9 +370,9 @@ export class Agent {
 
     // 11. subagent 工具
     this._subagentTool = createSubagentTool({
-      prepareIsolatedSession: (opts) => {
-        if (!this._cb?.prepareIsolatedSession) throw new Error("subagent 调用失败：engine 未初始化");
-        return this._cb.prepareIsolatedSession(opts);
+      executeIsolated: (prompt, opts) => {
+        if (!this._cb?.executeIsolated) throw new Error("subagent 调用失败：engine 未初始化");
+        return this._cb.executeIsolated(prompt, opts);
       },
       resolveUtilityModel: () => this._cb?.getCurrentModelId?.() || null,
       getDeferredStore: () => this._cb?.getDeferredResults?.(),

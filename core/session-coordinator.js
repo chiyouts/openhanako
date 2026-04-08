@@ -660,41 +660,37 @@ export class SessionCoordinator {
   // ── Isolated Execution ──
 
   /**
-   * 两阶段隔离执行：准备阶段。
+   * 隔离执行：在独立 session 中执行 prompt（原子操作）。
    *
-   * 完成 session 初始化（agent 查找、模型解析、SessionManager、createAgentSession），
-   * 但不调用 session.prompt()，让调用方能在 prompt 开始前拿到 sessionPath。
-   *
-   * 返回 { sessionPath, run } 其中：
-   *   - sessionPath: 子 session 文件路径（persist 模式下有值，否则为 null）
-   *   - run(prompt): 执行 prompt，返回 { sessionPath, replyText, error }（与 executeIsolated 一致）
-   *
-   * opts 支持：
-   *   agentId, cwd, model, persist, resumeSessionPath, toolFilter, builtinFilter,
-   *   withMemory, signal, emitEvents（true 时将 session 事件转发到 EventBus）
+   * opts:
+   *   agentId, cwd, model, persist (string 目录路径 | falsy), resumeSessionPath,
+   *   toolFilter, builtinFilter, withMemory, signal,
+   *   emitEvents (true 时将 session 事件转发到 EventBus),
+   *   onSessionReady (sessionPath => void) 回调，session 创建后、prompt 执行前触发
    */
-  async prepareIsolatedSession(opts = {}) {
+  async executeIsolated(prompt, opts = {}) {
     const targetAgent = opts.agentId ? this._d.getAgentById(opts.agentId) : this._d.getAgent();
     if (!targetAgent) throw new Error(t("error.agentNotInitialized", { id: opts.agentId }));
+
+    // abort signal：提前中止检查
+    if (opts.signal?.aborted) {
+      return { sessionPath: null, replyText: "", error: "aborted" };
+    }
 
     const bm = BrowserManager.instance();
     const wasBrowserRunning = bm.isRunning;
     const opId = `iso_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     this._headlessOps.add(opId);
     if (this._headlessOps.size === 1) bm.setHeadless(true);
-
     let tempSessionMgr;
     let isResumed = false;
     const cleanupTempSession = () => {
-      if (isResumed) return; // 持久 session 不删
+      if (isResumed) return;
       const sp = tempSessionMgr?.getSessionFile?.();
       if (sp) {
         try { fs.unlinkSync(sp); } catch {}
       }
     };
-
-    // 准备阶段出错时需要自己清理 headlessOps
-    let prepared = false;
     try {
       const sessionDir = opts.persist || path.join(targetAgent.agentDir, '.ephemeral');
       fs.mkdirSync(sessionDir, { recursive: true });
@@ -712,7 +708,6 @@ export class SessionCoordinator {
           resolvedModel = findModel(models.availableModels, modelId, modelProvider);
         }
         if (!resolvedModel) {
-          // agent 未配 models.chat 或配置的模型不在可用列表：fallback 到当前默认模型
           resolvedModel = models.defaultModel;
         }
         if (!resolvedModel) {
@@ -742,12 +737,10 @@ export class SessionCoordinator {
       const patrolAllowed = opts.toolFilter
         || targetAgent.config?.desk?.patrol_tools
         || PATROL_TOOLS_DEFAULT;
-      // "*" = allow all custom tools (subagent needs plugin query tools)
       const actCustomTools = patrolAllowed === "*"
         ? allCustomTools
         : allCustomTools.filter(t => new Set(patrolAllowed).has(t.name));
 
-      // builtin tools 过滤：传入 builtinFilter 时只保留白名单内的 builtin 工具
       const actTools = opts.builtinFilter
         ? allBuiltinTools.filter(t => opts.builtinFilter.includes(t.name))
         : allBuiltinTools;
@@ -755,8 +748,6 @@ export class SessionCoordinator {
       const agent = this._d.getAgent();
       const skills = this._d.getSkills();
       const resourceLoader = this._d.getResourceLoader();
-      // 快照 prompt，隔离于其他 session 的 prompt 变更
-      // withMemory: 临时开启记忆构建 prompt，再恢复（巡检用）
       let isolatedPrompt;
       if (opts.withMemory && !targetAgent.memoryEnabled) {
         const savedState = targetAgent.sessionMemoryEnabled;
@@ -788,120 +779,63 @@ export class SessionCoordinator {
         customTools: actCustomTools,
       });
 
-      // 读取 sessionPath（在 prompt 执行前即可获取，供 fire-and-forget 模式使用）
       const childSessionPath = session.sessionManager?.getSessionFile?.() || null;
 
-      prepared = true;
+      // 通知调用方 session 已就绪（subagent 用它来后补 streamKey）
+      try { opts.onSessionReady?.(childSessionPath); } catch {}
 
-      const run = async (prompt) => {
-        // abort signal：提前中止检查（覆盖 prepareIsolatedSession 调用到 run 调用之间的窗口）
-        if (opts.signal?.aborted) {
-          cleanupTempSession();
-          this._headlessOps.delete(opId);
-          if (this._headlessOps.size === 0) bm.setHeadless(false);
-          const browserNowRunning = bm.isRunning;
-          if (browserNowRunning !== wasBrowserRunning) {
-            this._d.emitEvent({ type: "browser_bg_status", running: browserNowRunning, url: bm.currentUrl }, null);
-          }
-          return { sessionPath: null, replyText: "", error: "aborted" };
-        }
-
-        let replyText = "";
-        const unsub = session.subscribe((event) => {
-          if (event.type === "message_update") {
-            const sub = event.assistantMessageEvent;
-            if (sub?.type === "text_delta") {
-              replyText += sub.delta || "";
-            }
-          }
-          // emitEvents：将 session 事件转发到 EventBus（附带 isolated 标记）
-          if (opts.emitEvents) {
-            this._d.emitEvent({ ...event, isolated: true }, childSessionPath);
-          }
-        });
-
-        // abort signal：监听中止，转发到子 session
-        const abortHandler = () => session.abort();
-        opts.signal?.addEventListener("abort", abortHandler, { once: true });
-
-        // 二次检查：覆盖 subscribe 和 addEventListener 之间的竞争窗口
-        if (opts.signal?.aborted) {
-          opts.signal.removeEventListener("abort", abortHandler);
-          unsub?.();
-          cleanupTempSession();
-          this._headlessOps.delete(opId);
-          if (this._headlessOps.size === 0) bm.setHeadless(false);
-          const browserNowRunning = bm.isRunning;
-          if (browserNowRunning !== wasBrowserRunning) {
-            this._d.emitEvent({ type: "browser_bg_status", running: browserNowRunning, url: bm.currentUrl }, null);
-          }
-          return { sessionPath: null, replyText: "", error: "aborted" };
-        }
-
-        try {
-          try {
-            await session.prompt(prompt);
-          } finally {
-            opts.signal?.removeEventListener("abort", abortHandler);
-            unsub?.();
-          }
-
-          const sessionPath = session.sessionManager?.getSessionFile?.() || null;
-
-          if (!opts.persist && sessionPath) {
-            try { fs.unlinkSync(sessionPath); } catch {}
-            return { sessionPath: null, replyText, error: null };
-          }
-
-          return { sessionPath, replyText, error: null };
-        } catch (err) {
-          log.error(`isolated execution failed: ${err.message}`);
-          if (!opts.persist && tempSessionMgr) {
-            cleanupTempSession();
-          }
-          return { sessionPath: null, replyText: "", error: err.message };
-        } finally {
-          this._headlessOps.delete(opId);
-          if (this._headlessOps.size === 0) bm.setHeadless(false);
-          const browserNowRunning = bm.isRunning;
-          if (browserNowRunning !== wasBrowserRunning) {
-            this._d.emitEvent({ type: "browser_bg_status", running: browserNowRunning, url: bm.currentUrl }, null);
+      let replyText = "";
+      const unsub = session.subscribe((event) => {
+        if (event.type === "message_update") {
+          const sub = event.assistantMessageEvent;
+          if (sub?.type === "text_delta") {
+            replyText += sub.delta || "";
           }
         }
-      };
+        if (opts.emitEvents && childSessionPath) {
+          this._d.emitEvent({ ...event, isolated: true }, childSessionPath);
+        }
+      });
 
-      return { sessionPath: childSessionPath, run };
-    } catch (err) {
-      if (!prepared) {
-        // 准备阶段失败：自行清理 headlessOps 和临时文件
-        if (!opts.persist && tempSessionMgr) {
-          cleanupTempSession();
-        }
-        this._headlessOps.delete(opId);
-        if (this._headlessOps.size === 0) bm.setHeadless(false);
-        const browserNowRunning = bm.isRunning;
-        if (browserNowRunning !== wasBrowserRunning) {
-          this._d.emitEvent({ type: "browser_bg_status", running: browserNowRunning, url: bm.currentUrl }, null);
-        }
+      const abortHandler = () => session.abort();
+      opts.signal?.addEventListener("abort", abortHandler, { once: true });
+
+      if (opts.signal?.aborted) {
+        opts.signal.removeEventListener("abort", abortHandler);
+        unsub?.();
+        cleanupTempSession();
+        return { sessionPath: null, replyText: "", error: "aborted" };
       }
-      throw err;
-    }
-  }
 
-  async executeIsolated(prompt, opts = {}) {
-    // abort signal：提前中止检查
-    if (opts.signal?.aborted) {
-      return { sessionPath: null, replyText: "", error: "aborted" };
-    }
+      try {
+        await session.prompt(prompt);
+      } finally {
+        opts.signal?.removeEventListener("abort", abortHandler);
+        unsub?.();
+      }
 
-    let prepared;
-    try {
-      prepared = await this.prepareIsolatedSession(opts);
+      const sessionPath = session.sessionManager?.getSessionFile?.() || null;
+
+      if (!opts.persist && sessionPath) {
+        try { fs.unlinkSync(sessionPath); } catch {}
+        return { sessionPath: null, replyText, error: null };
+      }
+
+      return { sessionPath, replyText, error: null };
     } catch (err) {
       log.error(`isolated execution failed: ${err.message}`);
+      if (!opts.persist && tempSessionMgr) {
+        cleanupTempSession();
+      }
       return { sessionPath: null, replyText: "", error: err.message };
+    } finally {
+      this._headlessOps.delete(opId);
+      if (this._headlessOps.size === 0) bm.setHeadless(false);
+      const browserNowRunning = bm.isRunning;
+      if (browserNowRunning !== wasBrowserRunning) {
+        this._d.emitEvent({ type: "browser_bg_status", running: browserNowRunning, url: bm.currentUrl }, null);
+      }
     }
-    return prepared.run(prompt);
   }
 
   /** 创建 session 专用 settings（控制 compaction + max_completion_tokens） */
