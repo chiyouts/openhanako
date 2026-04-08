@@ -82,6 +82,8 @@ function InputAreaInner() {
   const [slashResult, setSlashResult] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const isComposing = useRef(false);
+  const slashMenuRef = useRef<HTMLDivElement>(null);
+  const slashBtnRef = useRef<HTMLButtonElement>(null);
   const [inputText, setInputText] = useState('');
 
   // ── 全局 inline notice（截图等非斜杠命令的轻提示）──
@@ -225,6 +227,18 @@ function InputAreaInner() {
     editor.on('update', handler);
     return () => { editor.off('update', handler); };
   }, [editor]);
+
+  // 点击外部关闭斜杠菜单
+  useEffect(() => {
+    if (!slashMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (slashMenuRef.current?.contains(e.target as Node)) return;
+      if (slashBtnRef.current?.contains(e.target as Node)) return;
+      setSlashMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [slashMenuOpen]);
 
   // Can send?
   const hasContent = inputText.trim().length > 0 || attachedFiles.length > 0 || docContextAttached || !!quotedSelection
@@ -494,13 +508,12 @@ function InputAreaInner() {
           <TodoDisplay todos={sessionTodos} />
         </div>
       )}
-      {slashMenuOpen && filteredCommands.length > 0 && (
-        <>
-          <div className={styles['slash-backdrop']} onClick={() => setSlashMenuOpen(false)} />
+      <div className={styles['slash-menu-anchor']} ref={slashMenuRef}>
+        {slashMenuOpen && filteredCommands.length > 0 && (
           <SlashCommandMenu commands={filteredCommands} selected={slashSelected} busy={slashBusy}
             onSelect={handleSlashSelect} onHover={(i) => setSlashSelected(i)} />
-        </>
-      )}
+        )}
+      </div>
       <div className={styles['input-wrapper']}>
         <div
           onKeyDown={handleEditorKeyDown}
@@ -526,6 +539,7 @@ function InputAreaInner() {
               </svg>
             </button>
             <button
+              ref={slashBtnRef}
               className={styles['attach-btn']}
               title={t('input.commandMenu')}
               onClick={() => setSlashMenuOpen(v => !v)}

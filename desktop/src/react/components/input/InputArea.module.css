@@ -642,14 +642,14 @@
 }
 
 /* 斜杠命令菜单 */
-.slash-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 99;
+.slash-menu-anchor {
+    position: relative;
 }
 
 .slash-menu {
-    position: relative;
+    position: absolute;
+    bottom: 0;
+    left: 0;
     z-index: 100;
     display: flex;
     flex-direction: column;
