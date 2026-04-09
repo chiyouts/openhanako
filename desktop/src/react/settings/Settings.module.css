@@ -6,7 +6,11 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--bg);
+    background-color: var(--bg);
+    background-image: var(--bg-texture, none);
+    background-repeat: repeat;
+    background-size: 200px;
+    background-attachment: fixed;
 }
 
 :global(.settings-header) {
@@ -5172,4 +5176,88 @@ a.about-link:hover {
   font-size: 0.78rem;
   color: var(--text-muted);
   line-height: 1.4;
+}
+
+/* ═══ Bridge Agent Selector ═══ */
+
+.bridge-agent-select {
+    margin-bottom: var(--space-lg);
+}
+
+.bridge-agent-select-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.bridge-agent-trigger {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    width: 100%;
+    text-align: left;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: border-color 0.2s var(--ease-out);
+}
+
+.bridge-agent-trigger:hover {
+    border-color: var(--text-muted);
+}
+
+.bridge-agent-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.bridge-agent-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.bridge-agent-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.bridge-agent-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bridge-agent-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.bridge-agent-option:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.bridge-agent-option.selected {
+    background: rgba(180, 132, 108, 0.06);
+}
+
+.bridge-agent-check {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
 }
