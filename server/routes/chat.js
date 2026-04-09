@@ -2,7 +2,7 @@
  * WebSocket 聊天路由
  *
  * 桥接 Pi SDK streaming 事件 → WebSocket 消息
- * 支持多 session 并发：后台 session 静默运行，只转发当前活跃 session 的事件
+ * 支持多 session 并发：所有 session 事件平等广播，前端按 sessionPath 路由
  */
 import { Hono } from "hono";
 import { MoodParser, ThinkTagParser, CardParser } from "../../core/events.js";
@@ -172,7 +172,6 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       return;
     }
 
-    const isActive = sessionPath === engine.currentSessionPath;
     const ss = sessionPath ? getState(sessionPath) : null;
 
     // Helper: feed CardParser, emit card events or pass text through as text_delta
@@ -257,7 +256,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         // 不在这里关闭 thinking 状态
       } else if (sub === "error") {
         ss.hasError = true;
-        if (isActive) broadcast({ type: "error", message: event.assistantMessageEvent.error || "Unknown error", sessionPath });
+        broadcast({ type: "error", message: event.assistantMessageEvent.error || "Unknown error", sessionPath });
       }
     } else if (event.type === "tool_execution_start") {
       if (!ss) return;
@@ -302,8 +301,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         else stopBrowserThumbPoll();
       }
 
-      if (isActive && ["write", "edit", "bash"].includes(event.toolName)) {
-        broadcast({ type: "desk_changed" });
+      if (["write", "edit", "bash"].includes(event.toolName)) {
+        broadcast({ type: "desk_changed", sessionPath });
       }
     } else if (event.type === "jian_update") {
       broadcast({ type: "jian_update", content: event.content });
@@ -370,9 +369,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       if (!ss) return;
       if (event.message?.stopReason === "error") {
         ss.hasError = true;
-        if (isActive) {
-          broadcast({ type: "error", message: event.message.errorMessage || "Unknown error", sessionPath });
-        }
+        broadcast({ type: "error", message: event.message.errorMessage || "Unknown error", sessionPath });
       }
     } else if (event.type === "turn_end") {
       if (!ss) return;
@@ -428,7 +425,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
 
       // 空回复检测：本轮没有文本输出也没有工具调用，提示用户检查配置
       // 被 abort 的 turn 不弹此提示（用户主动停止 / WS 断开 / 连接超时）
-      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && !ss.isAborted && isActive) {
+      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && !ss.isAborted) {
         broadcast({ type: "error", message: t("error.modelNoResponse"), sessionPath });
       }
 
@@ -462,7 +459,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss._cardHints = [];
       ss._cardEmitted = false;
 
-      if (isActive) debugLog()?.log("ws", "assistant reply done");
+      debugLog()?.log("ws", `turn done (${sessionPath?.split("/").pop()})`);
       maybeGenerateFirstTurnTitle(sessionPath, ss);
     } else if (event.type === "auto_compaction_start") {
       broadcast({ type: "compaction_start", sessionPath });
