@@ -50,6 +50,7 @@ function makeCtx(mediaGen, busOverrides = {}) {
   return {
     _mediaGen: mediaGen,
     dataDir: "/tmp/test-data",
+    sessionPath: "/sessions/test.jsonl",
     bus: {
       request: vi.fn(async () => ({})),
       ...busOverrides,

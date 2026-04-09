@@ -81,10 +81,11 @@ export async function execute(input, ctx) {
       store.update(r.taskId, { files: r.files });
     }
 
-    // Register deferred notification (sessionPath auto-filled by handler)
+    // Register deferred notification
     try {
       await ctx.bus.request("deferred:register", {
         taskId: r.taskId,
+        sessionPath: ctx.sessionPath,
         meta: { type: "image-generation", prompt: input.prompt },
       });
     } catch (err) {

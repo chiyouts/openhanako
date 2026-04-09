@@ -181,10 +181,9 @@ engine.setDeferredResultStore(deferredResultStore);
 
 // Bus handlers for plugin access
 hub.eventBus.handle("deferred:register", ({ taskId, sessionPath, meta }) => {
-  const sp = sessionPath || engine.currentSessionPath;
-  if (!sp) return { ok: false, error: "no active session" };
-  deferredResultStore.defer(taskId, sp, meta);
-  return { ok: true, sessionPath: sp };
+  if (!sessionPath) return { ok: false, error: "sessionPath is required" };
+  deferredResultStore.defer(taskId, sessionPath, meta);
+  return { ok: true, sessionPath };
 });
 hub.eventBus.handle("deferred:resolve", ({ taskId, result }) => {
   deferredResultStore.resolve(taskId, result);

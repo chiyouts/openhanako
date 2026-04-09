@@ -91,6 +91,7 @@ export class Poller {
       // Re-register in DeferredResultStore so resolve/fail notifications work after restart
       this._bus.request("deferred:register", {
         taskId: task.taskId,
+        sessionPath: task.sessionPath,
         meta: { type: task.type === "video" ? "video-generation" : "image-generation", prompt: task.prompt },
       }).catch(() => {}); // ignore if no active session yet
     }
