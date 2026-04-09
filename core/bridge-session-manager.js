@@ -174,7 +174,7 @@ export class BridgeSessionManager {
       } else {
         // owner 模式：完整 agent
         const prefs = this._deps.getPreferences();
-        const bridgeReadOnly = !!prefs.bridge?.readOnly;
+        const bridgeReadOnly = !!agent.config?.bridge?.readOnly;
         const bridgeCwd = homeCwd;
         const { tools: baseTools, customTools: baseCustomTools } = this._deps.buildTools(bridgeCwd, agent.tools, { workspace: homeCwd, agentDir: agent.agentDir });
 

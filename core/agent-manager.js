@@ -87,14 +87,14 @@ export class AgentManager {
     this._activeAgentId = startId;
 
     const sharedModels = this._d.getSharedModels();
-    const getOwnerIds = () => this._d.getPrefs().getPreferences()?.bridge?.owner || {};
     const resolveModel = (bareId) =>
       this._d.getModels().resolveModelWithCredentials(bareId);
 
     const entries = this._scanAgentDirs();
     const initOne = async (agentId) => {
       const agentDir = path.join(this._d.agentsDir, agentId);
-      const ag = this._createAgentInstance(agentDir, getOwnerIds);
+      const ag = this._createAgentInstance(agentDir, () => ({}));
+      ag.setGetOwnerIds(this._makeOwnerIdsFn(ag));
       await ag.init(
         agentId === this._activeAgentId ? log : () => {},
         sharedModels,
@@ -111,7 +111,8 @@ export class AgentManager {
       // 仍然创建实例放入 map，让应用能启动；agent 自身已降级（记忆不可用等）
       if (!this._agents.has(this._activeAgentId)) {
         const agentDir = path.join(this._d.agentsDir, this._activeAgentId);
-        const ag = this._createAgentInstance(agentDir, getOwnerIds);
+        const ag = this._createAgentInstance(agentDir, () => ({}));
+        ag.setGetOwnerIds(this._makeOwnerIdsFn(ag));
         this._agents.set(this._activeAgentId, ag);
       }
     }
@@ -324,8 +325,8 @@ export class AgentManager {
     this._d.getChannelManager().setupChannelsForNewAgent(agentId);
 
     // 初始化并加入长驻 Map
-    const getOwnerIds = () => this._d.getPrefs().getPreferences()?.bridge?.owner || {};
-    const ag = this._createAgentInstance(agentDir, getOwnerIds);
+    const ag = this._createAgentInstance(agentDir, () => ({}));
+    ag.setGetOwnerIds(this._makeOwnerIdsFn(ag));
     const resolveModel = (bareId) =>
       this._d.getModels().resolveModelWithCredentials(bareId);
     try {
@@ -522,6 +523,19 @@ export class AgentManager {
       return fs.readdirSync(this._d.agentsDir, { withFileTypes: true })
         .filter(e => e.isDirectory() && fs.existsSync(path.join(this._d.agentsDir, e.name, "config.yaml")));
     } catch { return []; }
+  }
+
+  /** 构造 per-agent getOwnerIds 闭包：从 agent 自身的 config.bridge 读取 */
+  _makeOwnerIdsFn(ag) {
+    return () => {
+      const bridgeCfg = ag.config?.bridge || {};
+      const ids = {};
+      for (const [plat, cfg] of Object.entries(bridgeCfg)) {
+        if (plat === 'readOnly') continue;
+        if (typeof cfg === 'object' && cfg?.owner) ids[plat] = cfg.owner;
+      }
+      return ids;
+    };
   }
 
   _createAgentInstance(agentDir, getOwnerIds) {
