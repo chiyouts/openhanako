@@ -22,43 +22,42 @@ export function createBridgeRoute(engine, bridgeManager) {
     const prefs = engine.getPreferences();
     const bridge = prefs.bridge || {};
     const live = bridgeManager.getStatus();
+    const filterAgentId = c.req.query("agentId") || null;
 
-    // 直接返回完整凭证（本地 app，不经过公网）
+    // Helper: build platform status, filtered by agentId
+    const platformStatus = (plat, cfg, extraFields) => {
+      if (filterAgentId && (cfg?.agentId || null) !== filterAgentId) {
+        return { status: 'unconfigured', configured: false, enabled: false, agentId: cfg?.agentId || null };
+      }
+      return {
+        ...extraFields,
+        enabled: !!cfg?.enabled,
+        status: live[plat]?.status || "disconnected",
+        error: live[plat]?.error || null,
+        agentId: cfg?.agentId || null,
+      };
+    };
+
     const tgToken = bridge.telegram?.token || "";
     const fsAppId = bridge.feishu?.appId || "";
     const fsAppSecret = bridge.feishu?.appSecret || "";
 
     return c.json({
-      telegram: {
-        configured: !!tgToken,
-        enabled: !!bridge.telegram?.enabled,
-        status: live.telegram?.status || "disconnected",
-        error: live.telegram?.error || null,
-        token: tgToken,
-      },
-      feishu: {
-        configured: !!(fsAppId && fsAppSecret),
-        enabled: !!bridge.feishu?.enabled,
-        status: live.feishu?.status || "disconnected",
-        error: live.feishu?.error || null,
-        appId: fsAppId,
-        appSecret: fsAppSecret,
-      },
-      qq: {
+      telegram: platformStatus("telegram", bridge.telegram, {
+        configured: !!tgToken, token: tgToken,
+      }),
+      feishu: platformStatus("feishu", bridge.feishu, {
+        configured: !!(fsAppId && fsAppSecret), appId: fsAppId, appSecret: fsAppSecret,
+      }),
+      qq: platformStatus("qq", bridge.qq, {
         configured: !!(bridge.qq?.appID && (bridge.qq?.appSecret || bridge.qq?.token)),
-        enabled: !!bridge.qq?.enabled,
-        status: live.qq?.status || "disconnected",
-        error: live.qq?.error || null,
         appID: bridge.qq?.appID || "",
         appSecret: bridge.qq?.appSecret || bridge.qq?.token || "",
-      },
-      wechat: {
+      }),
+      wechat: platformStatus("wechat", bridge.wechat, {
         configured: !!bridge.wechat?.botToken,
-        enabled: !!bridge.wechat?.enabled,
-        status: live.wechat?.status || "disconnected",
-        error: live.wechat?.error || null,
         token: bridge.wechat?.botToken || "",
-      },
+      }),
       readOnly: !!bridge.readOnly,
       knownUsers: collectKnownUsers(engine.getBridgeIndex()),
       owner: bridge.owner || {},
@@ -88,36 +87,54 @@ export function createBridgeRoute(engine, bridgeManager) {
   /** 保存凭证 + 启停平台 */
   route.post("/bridge/config", async (c) => {
     const body = await safeJson(c);
-    const { platform, credentials, enabled } = body;
+    const { platform, credentials, enabled, agentId } = body;
     if (!platform || !KNOWN_PLATFORMS.includes(platform)) {
       return c.json({ error: "invalid platform" }, 400);
+    }
+
+    // Validate agentId if provided
+    if (agentId !== undefined && agentId !== null) {
+      if (!engine.getAgent(agentId)) {
+        return c.json({ error: "agent not found" }, 400);
+      }
     }
 
     const prefs = engine.getPreferences();
     if (!prefs.bridge) prefs.bridge = {};
     if (!prefs.bridge[platform]) prefs.bridge[platform] = {};
 
-    // 更新凭证
+    // Stop old adapter if agentId is changing
+    const oldAgentId = prefs.bridge[platform].agentId || null;
+    if (agentId !== undefined && oldAgentId && oldAgentId !== agentId) {
+      bridgeManager.stopPlatform(platform, oldAgentId);
+    }
+
+    // Update credentials
     if (credentials) {
       Object.assign(prefs.bridge[platform], credentials);
     }
 
-    // 更新启用状态
+    // Update enabled
     if (typeof enabled === "boolean") {
       prefs.bridge[platform].enabled = enabled;
     }
 
+    // Update agentId (only if explicitly provided)
+    if (agentId !== undefined) {
+      prefs.bridge[platform].agentId = agentId || null;
+    }
+
     engine.savePreferences(prefs);
 
-    // 启停（委托给 bridgeManager，由 ADAPTER_REGISTRY 决定凭证提取逻辑）
+    // Start/stop
     const cfg = prefs.bridge[platform];
     if (cfg.enabled) {
       bridgeManager.startPlatformFromConfig(platform, cfg);
     } else {
-      bridgeManager.stopPlatform(platform);
+      bridgeManager.stopPlatform(platform, cfg.agentId);
     }
 
-    debugLog()?.log("api", `POST /api/bridge/config platform=${platform} enabled=${!!cfg.enabled}`);
+    debugLog()?.log("api", `POST /api/bridge/config platform=${platform} enabled=${!!cfg.enabled} agentId=${cfg.agentId || 'none'}`);
     return c.json({ ok: true });
   });
 
@@ -136,15 +153,18 @@ export function createBridgeRoute(engine, bridgeManager) {
   /** 停止指定平台 */
   route.post("/bridge/stop", async (c) => {
     const body = await safeJson(c);
-    const { platform } = body;
+    const { platform, agentId: bodyAgentId } = body;
     if (!platform) {
       return c.json({ error: "platform required" }, 400);
     }
 
-    bridgeManager.stopPlatform(platform);
-
-    // 同步更新 preferences
+    // Prefer body agentId, fallback to prefs
     const prefs = engine.getPreferences();
+    const agentId = bodyAgentId || prefs.bridge?.[platform]?.agentId || null;
+
+    bridgeManager.stopPlatform(platform, agentId);
+
+    // Sync preferences
     if (prefs.bridge?.[platform]) {
       prefs.bridge[platform].enabled = false;
       engine.savePreferences(prefs);
