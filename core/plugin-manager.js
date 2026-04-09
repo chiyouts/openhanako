@@ -212,7 +212,10 @@ export class PluginManager {
           ...(mod.promptSnippet ? { promptSnippet: mod.promptSnippet } : {}),
           ...(mod.promptGuidelines ? { promptGuidelines: mod.promptGuidelines } : {}),
           execute: async (_toolCallId, params, runtimeCtx) => {
-            const sessionCtx = { sessionPath: this._getSessionPath() };
+            // 优先从 Pi SDK runtime ctx 获取 sessionPath，fallback 到焦点回调（过渡期）
+            const sessionPath = runtimeCtx?.sessionManager?.getSessionFile?.()
+              || this._getSessionPath?.();
+            const sessionCtx = { sessionPath };
             const mergedCtx = runtimeCtx
               ? { ...ctx, ...sessionCtx, ...runtimeCtx }
               : { ...ctx, ...sessionCtx };
