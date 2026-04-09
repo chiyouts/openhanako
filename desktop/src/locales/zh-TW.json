@@ -512,7 +512,9 @@
       "auto": "自動",
       "autoMode": "跟隨系統",
       "serifFont": "襯線字體",
-      "serifFontHint": "使用襯線體顯示正文內容"
+      "serifFontHint": "使用襯線體顯示正文內容",
+      "paperTexture": "紙質紋理",
+      "paperTextureHint": "為背景添加宣紙質感"
     },
     "locale": {
       "title": "語言和地區",
@@ -903,6 +905,7 @@
       "desktop": "電腦看"
     },
     "bridge": {
+      "agent": "Agent",
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
       "telegramHint": "從 @BotFather 取得",

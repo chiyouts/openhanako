@@ -512,7 +512,9 @@
       "auto": "자동",
       "autoMode": "시스템",
       "serifFont": "명조 글꼴",
-      "serifFontHint": "본문에 명조 글꼴을 사용해요"
+      "serifFontHint": "본문에 명조 글꼴을 사용해요",
+      "paperTexture": "종이 질감",
+      "paperTextureHint": "배경에 한지 질감을 추가해요"
     },
     "locale": {
       "title": "언어 및 지역",
@@ -903,6 +905,7 @@
       "desktop": "데스크톱"
     },
     "bridge": {
+      "agent": "Agent",
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
       "telegramHint": "@BotFather에서 받으세요",

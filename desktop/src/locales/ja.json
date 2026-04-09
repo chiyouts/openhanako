@@ -512,7 +512,9 @@
       "auto": "自動",
       "autoMode": "システム",
       "serifFont": "明朝体",
-      "serifFontHint": "本文に明朝体を使用する"
+      "serifFontHint": "本文に明朝体を使用する",
+      "paperTexture": "和紙の質感",
+      "paperTextureHint": "背景に和紙のテクスチャを追加する"
     },
     "locale": {
       "title": "言語と地域",
@@ -903,6 +905,7 @@
       "desktop": "デスクトップ"
     },
     "bridge": {
+      "agent": "Agent",
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
       "telegramHint": "@BotFather から取得",

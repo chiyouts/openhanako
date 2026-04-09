@@ -514,7 +514,9 @@
       "auto": "Auto",
       "autoMode": "System",
       "serifFont": "Serif Font",
-      "serifFontHint": "Use serif font for body text"
+      "serifFontHint": "Use serif font for body text",
+      "paperTexture": "Paper Texture",
+      "paperTextureHint": "Add a rice paper texture to the background"
     },
     "locale": {
       "title": "Language & Region",
@@ -933,6 +935,7 @@
       "desktopDesc": "Wider, for desktop saving & sharing"
     },
     "bridge": {
+      "agent": "Agent",
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
       "telegramHint": "Get from @BotFather",

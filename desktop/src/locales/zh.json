@@ -519,7 +519,9 @@
       "auto": "自动",
       "autoMode": "跟随系统",
       "serifFont": "衬线字体",
-      "serifFontHint": "使用衬线体显示正文内容"
+      "serifFontHint": "使用衬线体显示正文内容",
+      "paperTexture": "纸质纹理",
+      "paperTextureHint": "为背景添加宣纸质感"
     },
     "locale": {
       "title": "语言和地区",
@@ -938,6 +940,7 @@
       "desktopDesc": "更宽，适合电脑保存与分享"
     },
     "bridge": {
+      "agent": "Agent",
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
       "telegramHint": "从 @BotFather 获取",

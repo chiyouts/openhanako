@@ -5,6 +5,7 @@ import { Toggle } from '../widgets/Toggle';
 import { PlatformSection } from './bridge/PlatformSection';
 import { WechatSection } from './bridge/WechatSection';
 import { useBridgeState } from './bridge/useBridgeState';
+import { AgentSelect } from './bridge/AgentSelect';
 import styles from '../Settings.module.css';
 
 export function BridgeTab() {
@@ -18,6 +19,10 @@ export function BridgeTab() {
 
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="bridge">
+      <AgentSelect
+        value={b.selectedAgentId}
+        onChange={b.setSelectedAgentId}
+      />
       {/* 对外意识 */}
       <section className={styles['settings-section']}>
         <h2 className={styles['settings-section-title']}>{t('settings.agent.publicIshiki')}</h2>
