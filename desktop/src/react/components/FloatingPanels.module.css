@@ -622,34 +622,49 @@
     height: 85%;
 }
 
-/* ── Bridge Agent Selector (compact) ── */
+/* ── Bridge Agent Selector (compact, in sidebar) ── */
+
+.bridgeSidebarCol {
+    width: 180px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--overlay-light);
+}
+
+.bridgeSidebarCol > .bridgeSidebar {
+    width: auto;
+    border-right: none;
+}
 
 .bridgeAgentRow {
     position: relative;
-    padding: 0 var(--space-lg) var(--space-sm);
+    padding: var(--space-sm);
+    border-bottom: 1px solid var(--overlay-light);
 }
 
 .bridgeAgentBtn {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 10px;
-    background: none;
-    border: 1px solid var(--overlay-light);
+    padding: 5px 10px;
+    width: 100%;
+    background: var(--overlay-light);
+    border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 0.78rem;
     color: var(--text);
-    transition: border-color 0.15s;
+    transition: background 0.15s;
 }
 
 .bridgeAgentBtn:hover {
-    border-color: var(--text-muted);
+    background: var(--overlay-medium, rgba(0, 0, 0, 0.08));
 }
 
 .bridgeAgentAvatar {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     object-fit: cover;
     flex-shrink: 0;
@@ -657,25 +672,33 @@
 
 .bridgeAgentName {
     font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
 }
 
 .bridgeAgentArrow {
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     color: var(--text-muted);
-    margin-left: 2px;
+    flex-shrink: 0;
 }
 
 .bridgeAgentMenu {
     position: absolute;
-    top: 100%;
-    left: var(--space-lg);
+    top: calc(100% - 2px);
+    left: var(--space-sm);
+    right: var(--space-sm);
     z-index: 100;
     background: var(--bg-card, #fff);
     border: 1px solid var(--overlay-light);
     border-radius: var(--radius-sm);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    min-width: 180px;
     padding: 4px 0;
+    max-height: 240px;
+    overflow-y: auto;
 }
 
 .bridgeAgentMenuItem {
@@ -683,7 +706,7 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 6px 12px;
+    padding: 6px 10px;
     background: none;
     border: none;
     cursor: pointer;
@@ -700,12 +723,6 @@
 .bridgeAgentMenuItemActive {
     background: rgba(180, 132, 108, 0.08);
     font-weight: 600;
-}
-
-.bridgeTabsRow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
 }
 
 .bridgeTabs {
