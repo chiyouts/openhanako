@@ -7,16 +7,51 @@
     flex-direction: column;
     overflow: hidden;
     background-color: var(--bg);
-    background-image: var(--paper-texture);
+}
+
+/* ── 纸质纹理：Surface 层 ── */
+:global(body:not(.no-paper-texture)) :global(.settings-panel) {
+    background-image: url(../../assets/textures/rice-paper.png);
     background-repeat: repeat;
-    background-size: 120px;
+    background-size: 160px;
     background-attachment: fixed;
+}
+
+/* ── 纸质纹理：Card 层（所有 bg-card 元素，lighten 混合） ── */
+:global(body:not(.no-paper-texture)) .agent-card-inner,
+:global(body:not(.no-paper-texture)) .agent-context-menu,
+:global(body:not(.no-paper-texture)) .agent-create-card,
+:global(body:not(.no-paper-texture)) .agent-delete-card,
+:global(body:not(.no-paper-texture)) .agent-name-input,
+:global(body:not(.no-paper-texture)) .model-capsule-input,
+:global(body:not(.no-paper-texture)) .settings-input,
+:global(body:not(.no-paper-texture)) .settings-textarea,
+:global(body:not(.no-paper-texture)) .settings-select,
+:global(body:not(.no-paper-texture)) .settings-folder-browse,
+:global(body:not(.no-paper-texture)) .settings-folder-clear,
+:global(body:not(.no-paper-texture)) .tool-caps-item,
+:global(body:not(.no-paper-texture)) .skills-list-item,
+:global(body:not(.no-paper-texture)) .sdw-trigger,
+:global(body:not(.no-paper-texture)) .sdw-popup,
+:global(body:not(.no-paper-texture)) .cml-picker,
+:global(body:not(.no-paper-texture)) .cml-picker-group,
+:global(body:not(.no-paper-texture)) .cml-edit-panel-input,
+:global(body:not(.no-paper-texture)) .cml-combo-dropdown,
+:global(body:not(.no-paper-texture)) .mdw-trigger,
+:global(body:not(.no-paper-texture)) .mdw-popup,
+:global(body:not(.no-paper-texture)) .mdw-group-label,
+:global(body:not(.no-paper-texture)) .mdw-custom-input {
+    background-image: url(../../assets/textures/rice-paper.png);
+    background-repeat: repeat;
+    background-size: 160px;
+    background-attachment: fixed;
+    background-blend-mode: lighten;
 }
 
 :global(.settings-header) {
     display: flex;
     align-items: center;
-    padding: 44px 0 var(--space-md) 20px;
+    padding: 36px 0 var(--space-md) 20px;
     flex-shrink: 0;
     -webkit-app-region: drag;
 }
@@ -267,7 +302,7 @@
     transition: border-color 0.2s var(--ease-out),
                 box-shadow 0.2s var(--ease-out),
                 transform 0.2s var(--ease-out);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
 }
 
 .agent-card.selected .agent-card-inner {
@@ -378,7 +413,7 @@
 
 /* Agent 右键菜单 */
 .agent-context-menu {
-    background: var(--bg-card, #fff);
+    background-color: var(--bg-card);
     border-radius: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06);
     padding: 4px 0;
@@ -437,7 +472,7 @@
 }
 
 .agent-create-card {
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border-radius: var(--radius-lg);
     padding: var(--space-lg);
     width: 440px;
@@ -545,7 +580,7 @@
 }
 
 .agent-delete-card {
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border-radius: var(--radius-lg);
     padding: var(--space-lg);
     width: 320px;
@@ -705,7 +740,7 @@
     outline: none;
     font-size: 0.88rem;
     font-family: inherit;
-    background: var(--bg-card, #fff);
+    background-color: var(--bg-card);
     color: var(--text);
     text-align: center;
     text-overflow: ellipsis;
@@ -762,7 +797,7 @@
     outline: none;
     font-size: 0.88rem;
     font-family: inherit;
-    background: var(--bg-card, #fff);
+    background-color: var(--bg-card);
     color: var(--text);
     text-align: left;
     text-overflow: ellipsis;
@@ -858,7 +893,7 @@
     font-family: inherit;
     font-size: 0.85rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     padding: 0.45rem 0.65rem;
@@ -1025,7 +1060,7 @@
     justify-content: space-between;
     gap: var(--space-md);
     padding: 0.65rem var(--space-md);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
 }
 
 .tool-caps-item + .tool-caps-item {
@@ -1080,9 +1115,9 @@
     justify-content: space-between;
     gap: var(--space-md);
     padding: 0.65rem var(--space-md);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background-color 0.15s;
 }
 
 .skills-list-item + .skills-list-item {
@@ -1468,7 +1503,7 @@
     height: 32px;
     border: none;
     border-radius: var(--radius-sm);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s ease;
@@ -1489,7 +1524,7 @@
     font-family: inherit;
     font-size: 0.82rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     padding: 0.55rem 0.65rem;
@@ -1549,7 +1584,7 @@
     font-family: inherit;
     font-size: 0.85rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     padding: 0.45rem 2rem 0.45rem 0.65rem;
@@ -4219,7 +4254,7 @@ a.about-link:hover {
     font-family: inherit;
     font-size: 0.85rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     padding: 0.45rem 0.65rem;
@@ -4272,7 +4307,7 @@ a.about-link:hover {
     width: 100%;
     min-width: 180px;
     max-height: 240px;
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     box-shadow: 0 4px 16px var(--shadow);
@@ -4395,7 +4430,7 @@ a.about-link:hover {
     right: 0;
     margin-top: var(--space-xs);
     max-height: 320px;
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     box-shadow: 0 4px 16px var(--shadow);
@@ -4436,7 +4471,7 @@ a.about-link:hover {
     padding: 0.45rem 0.65rem 0.2rem;
     position: sticky;
     top: 0;
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     z-index: 1;
 }
 
@@ -4655,7 +4690,7 @@ a.about-link:hover {
     font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-sm) 0 0 var(--radius-sm);
     padding: 0.25rem 0.45rem;
@@ -4700,7 +4735,7 @@ a.about-link:hover {
     left: 0;
     right: 0;
     margin-bottom: 2px;
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border-radius: var(--radius-sm);
     box-shadow: 0 4px 12px var(--shadow);
     z-index: 100;
@@ -4816,7 +4851,7 @@ a.about-link:hover {
     font-family: inherit;
     font-size: 0.85rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     padding: 0.45rem 0.65rem;
@@ -4860,7 +4895,7 @@ a.about-link:hover {
     width: 100%;
     min-width: 200px;
     max-height: 320px;
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-md);
     box-shadow: 0 4px 16px var(--shadow);
@@ -4906,7 +4941,7 @@ a.about-link:hover {
     letter-spacing: 0.03em;
     position: sticky;
     top: 0;
-    background: var(--bg-card);
+    background-color: var(--bg-card);
 }
 
 .mdw-option {
@@ -4981,7 +5016,7 @@ a.about-link:hover {
     font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text);
-    background: var(--bg-card);
+    background-color: var(--bg-card);
     border: none;
     border-radius: var(--radius-sm) 0 0 var(--radius-sm);
     padding: 0.3rem 0.5rem;
@@ -5136,7 +5171,7 @@ a.about-link:hover {
   border-radius: 6px;
   overflow: hidden;
   background: var(--bg, #f8f5ed);
-  border: 3px solid #fff;
+  border: 3px solid var(--bg-card);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 

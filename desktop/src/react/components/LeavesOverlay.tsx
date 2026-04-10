@@ -39,25 +39,37 @@ export const LeavesOverlay = memo(function LeavesOverlay() {
   if (!enabled) return null;
 
   return (
-    <video
-      ref={videoRef}
-      autoPlay
-      loop
-      muted
-      playsInline
-      style={{
-        position: 'fixed',
-        inset: 0,
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        mixBlendMode: 'multiply',
-        opacity: 0.15,
-        pointerEvents: 'none',
-        zIndex: 140,
-      }}
-    >
-      <source src={leavesSrc} type="video/mp4" />
-    </video>
+    <>
+      {/* 亮度补偿（抵消 multiply 视频变暗） */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 139,
+          pointerEvents: 'none',
+          background: 'rgba(255, 253, 247, 0.12)',
+        }}
+      />
+      <video
+        ref={videoRef}
+        autoPlay
+        loop
+        muted
+        playsInline
+        style={{
+          position: 'fixed',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          mixBlendMode: 'multiply',
+          opacity: 0.28,
+          pointerEvents: 'none',
+          zIndex: 140,
+        }}
+      >
+        <source src={leavesSrc} type="video/mp4" />
+      </video>
+    </>
   );
 });

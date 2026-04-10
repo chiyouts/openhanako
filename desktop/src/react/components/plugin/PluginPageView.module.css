@@ -4,7 +4,7 @@
   flex-direction: column;
   position: relative;
   overflow: hidden;
-  padding-top: 52px; /* titlebar height */
+  padding-top: 44px; /* titlebar height */
   background: var(--bg);
 }
 .iframe {

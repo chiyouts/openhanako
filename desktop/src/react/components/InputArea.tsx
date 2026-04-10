@@ -275,18 +275,21 @@ function InputAreaInner() {
     }
   }, [addAttachedFile, t, supportsVision]);
 
-  // ── Load thinking level on mount + listen for plan mode sync ──
+  // ── Load thinking level once server port is ready + listen for plan mode sync ──
+  const serverPort = useStore(s => s.serverPort);
   useEffect(() => {
-    fetchConfig()
-      .then(d => { if (d.thinking_level) setThinkingLevel(d.thinking_level as ThinkingLevel); })
-      .catch((err: unknown) => console.warn('[InputArea] load config failed', err));
+    if (serverPort) {
+      fetchConfig()
+        .then(d => { if (d.thinking_level) setThinkingLevel(d.thinking_level as ThinkingLevel); })
+        .catch((err: unknown) => console.warn('[InputArea] load config failed', err));
+    }
 
     const handler = (e: Event) => {
       setPlanMode((e as CustomEvent).detail?.enabled ?? false);
     };
     window.addEventListener('hana-plan-mode', handler);
     return () => window.removeEventListener('hana-plan-mode', handler);
-  }, [setThinkingLevel]);
+  }, [serverPort, setThinkingLevel]);
 
   // ── Handle slash selection (builtin vs skill) ──
   const handleSlashSelect = useCallback((item: SlashItem) => {

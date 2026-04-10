@@ -7,6 +7,9 @@ const DEFAULT_TIMEOUT = 30_000;
  */
 export function hanaUrl(path: string): string {
   const { serverPort, serverToken } = useStore.getState();
+  if (!serverPort) {
+    throw new Error(`hanaUrl ${path}: serverPort not ready`);
+  }
   const sep = path.includes('?') ? '&' : '?';
   const tokenParam = serverToken ? `${sep}token=${serverToken}` : '';
   return `http://127.0.0.1:${serverPort}${path}${tokenParam}`;
@@ -22,6 +25,9 @@ export async function hanaFetch(
   opts: RequestInit & { timeout?: number } = {},
 ): Promise<Response> {
   const { serverPort, serverToken } = useStore.getState();
+  if (!serverPort) {
+    throw new Error(`hanaFetch ${path}: serverPort not ready`);
+  }
   const headers: Record<string, string> = { ...(opts.headers as Record<string, string>) };
   if (serverToken) {
     headers['Authorization'] = `Bearer ${serverToken}`;
