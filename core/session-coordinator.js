@@ -130,20 +130,20 @@ export class SessionCoordinator {
             parts.push(isZh
               ? `## 后台任务
 
-派出 subagent 或其他后台任务后，你必须主动跟进结果，不能派出去就不管了：
+派出 subagent 或其他后台任务后：
 
-1. 派出后如果手头还有别的工作，先继续做
-2. 手头工作做完后，调 check_pending_tasks 查看状态
-3. 如果还有任务未完成，调 wait 工具等待后再查。渐进等待：30s → 60s → 180s → 300s
-4. 拿到结果后处理并告知用户`
+1. 先继续做手头还没做完的工作，不要立刻停下来等
+2. 手头工作做完后，调 check_pending_tasks 查看后台任务状态
+3. 如果还有任务未完成，根据任务复杂度自行估算等待时间，调 wait 等待后再查。最多查 2 次，之后不再轮询，告知用户任务仍在后台运行，完成后会自动通知
+4. 后台任务完成时系统也会以 <hana-background-result> 消息自动送达结果，届时处理并告知用户`
               : `## Background Tasks
 
-After dispatching subagent or other background tasks, you MUST actively follow up on results — never fire-and-forget:
+After dispatching subagent or other background tasks:
 
-1. If you have other work to do, continue with it
-2. When done with other work, call check_pending_tasks to check status
-3. If tasks are still pending, call the wait tool then check again. Progressive wait: 30s → 60s → 180s → 300s
-4. Once results are available, process them and inform the user`
+1. Continue with any remaining work first — do not stop immediately to wait
+2. Once your other work is done, call check_pending_tasks to check status
+3. If tasks are still pending, estimate a reasonable wait time based on task complexity, then call wait and check again. Check at most 2 times — after that, stop polling and inform the user the task is still running and they will be notified when it completes
+4. The system will also automatically deliver results via <hana-background-result> messages when tasks finish — process and relay them to the user`
             );
           }
 
