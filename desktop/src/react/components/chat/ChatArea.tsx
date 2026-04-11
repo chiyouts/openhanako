@@ -67,7 +67,7 @@ function PanelHost() {
 
 // ── Panel：一个 session 的原生滚动容器 ──
 
-const SCROLL_THRESHOLD = 300;
+const SCROLL_THRESHOLD = 50;
 
 const Panel = memo(function Panel({ path, active }: { path: string; active: boolean }) {
   const items = useStore(s => s.chatSessions[path]?.items || EMPTY_ITEMS);
