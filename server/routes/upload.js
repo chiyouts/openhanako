@@ -87,12 +87,12 @@ export function createUploadRoute(engine) {
           results.push({ src: srcPath, error: "Path must be absolute" });
           continue;
         }
-        if (isSensitivePath(srcPath, engine.hanakoHome)) {
-          results.push({ src: srcPath, error: "sensitive path blocked" });
-          continue;
-        }
         if (!fs.existsSync(srcPath)) {
           results.push({ src: srcPath, error: t("error.pathNotFound") });
+          continue;
+        }
+        if (isSensitivePath(srcPath, engine.hanakoHome)) {
+          results.push({ src: srcPath, error: "sensitive path blocked" });
           continue;
         }
 

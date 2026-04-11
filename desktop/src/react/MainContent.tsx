@@ -66,17 +66,18 @@ export async function attachFilesFromPaths(
   if (deskBase) {
     const prefix = deskBase + '/';
     const deskFileMap = new Map(s.deskFiles.map((f: any) => [f.name, f]));
-    const isDeskPath = (p: string) => toSlash(p).startsWith(prefix);
+    const isDeskPath = (p: string) => { const s = toSlash(p); return s === deskBase || s.startsWith(prefix); };
     const deskPaths = srcPaths.filter(isDeskPath);
     srcPaths = srcPaths.filter((p) => !isDeskPath(p));
     for (const p of deskPaths) {
       if (useStore.getState().attachedFiles.length >= 9) break;
       const name = baseName(p);
+      const isRoot = toSlash(p) === deskBase;
       const knownFile = deskFileMap.get(name);
       useStore.getState().addAttachedFile({
         path: p,
         name,
-        isDirectory: knownFile?.isDir ?? false,
+        isDirectory: isRoot || (knownFile?.isDir ?? false),
       });
     }
   }
@@ -98,7 +99,7 @@ export async function attachFilesFromPaths(
           isDirectory: item.isDirectory || false,
         });
       } else if (item.error) {
-        failed.push(nameMap[item.src] || item.src.split('/').pop() || item.src);
+        failed.push(nameMap[item.src] || baseName(item.src));
       }
     }
     if (failed.length > 0) {
