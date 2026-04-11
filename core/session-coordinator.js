@@ -398,6 +398,15 @@ After dispatching subagent or other background tasks:
       const effectiveWindow = Math.floor(newModel.contextWindow * 0.9) - 4000;
 
       if (currentTokens > effectiveWindow) {
+        // 预检：最后一轮对话是否本身就超窗口（此时 compact/truncate 都救不了）
+        const lastUserIdx = msgs.findLastIndex(m => m.role === "user");
+        if (lastUserIdx >= 0) {
+          const lastTurnTokens = msgs.slice(lastUserIdx).reduce((s, m) => s + estimateTokens(m), 0);
+          if (lastTurnTokens > effectiveWindow) {
+            throw new Error("当前对话无法适配目标模型的上下文窗口");
+          }
+        }
+
         // 尝试压缩
         try {
           await this._compactWithModel(session, effectiveWindow, oldModel);
@@ -442,8 +451,8 @@ After dispatching subagent or other background tasks:
     const sm = session.sessionManager;
     const pathEntries = sm.getBranch();
 
-    // 计算 keepRecentTokens：保留的 token 数（不超过窗口的 60%）
-    const keepRecentTokens = Math.floor(effectiveWindow * 0.6);
+    // keepRecentTokens = effectiveWindow：保留尽可能多的近期上下文
+    const keepRecentTokens = effectiveWindow;
 
     // 找到有 message 的 entry 的范围
     const messageEntries = pathEntries.filter(e => e.type === "message");
@@ -532,7 +541,8 @@ After dispatching subagent or other background tasks:
     const sm = session.sessionManager;
     const pathEntries = sm.getBranch();
 
-    const keepRecentTokens = Math.floor(effectiveWindow * 0.6);
+    // keepRecentTokens = effectiveWindow：保留尽可能多的近期上下文
+    const keepRecentTokens = effectiveWindow;
 
     const messageEntries = pathEntries.filter(e => e.type === "message");
     if (messageEntries.length < 2) {

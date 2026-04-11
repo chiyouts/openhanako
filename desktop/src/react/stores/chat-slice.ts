@@ -129,8 +129,12 @@ export const createChatSlice = (
 
   updateSessionModel: (path, model) => set((s) => {
     const session = s.chatSessions[path];
-    if (!session) return {};
-    return { chatSessions: { ...s.chatSessions, [path]: { ...session, model } } };
+    // session 可能还没被 initSession 创建（如 switchSession 返回早于消息加载），
+    // 此时先创建一个 stub entry 只存 model，initSession 会保留它
+    const updated = session
+      ? { ...session, model }
+      : { items: [], hasMore: false, loadingMore: false, model };
+    return { chatSessions: { ...s.chatSessions, [path]: updated } };
   }),
 
   setLoadingMore: (path, loading) => set((s) => {

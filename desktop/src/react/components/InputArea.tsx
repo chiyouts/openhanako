@@ -356,6 +356,7 @@ function InputAreaInner() {
     if ((!text && !hasFiles && !docContextAttached && !useStore.getState().quotedSelection) || !connected) return;
     if (isStreaming) return;
     if (sending) return;
+    if (modelSwitching) return;
     setSending(true);
 
     try {
