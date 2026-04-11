@@ -4,12 +4,18 @@ import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { useI18n } from '../../hooks/use-i18n';
 import styles from './InputArea.module.css';
 
-export function ModelSelector({ models, disabled }: { models: Array<{ id: string; name: string; provider?: string; isCurrent?: boolean }>; disabled?: boolean }) {
+export function ModelSelector({ models, sessionModel }: {
+  models: Array<{ id: string; name: string; provider?: string; isCurrent?: boolean; vision?: boolean; reasoning?: boolean; xhigh?: boolean }>;
+  sessionModel?: { id: string; name: string; provider: string };
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const current = models.find(m => m.isCurrent);
+  const current = sessionModel
+    ? { ...models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider), ...sessionModel }
+    : models.find(m => m.isCurrent);
 
   // Close on outside click
   useEffect(() => {
@@ -23,26 +29,64 @@ export function ModelSelector({ models, disabled }: { models: Array<{ id: string
 
   const switchModel = useCallback(async (modelId: string, provider?: string) => {
     try {
-      await hanaFetch('/api/models/set', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelId, provider }),
-      });
-      // 如果当前有活跃 session，切模型 = 开新对话
-      const { currentSessionPath, pendingNewSession } = useStore.getState();
-      if (currentSessionPath && !pendingNewSession) {
-        const { createNewSession } = await import('../../stores/session-actions');
-        await createNewSession();
+      const { currentSessionPath, pendingNewSession, chatSessions } = useStore.getState();
+      const sessionHasMessages = !!(currentSessionPath && chatSessions[currentSessionPath]?.items?.length);
+
+      if (sessionHasMessages && currentSessionPath) {
+        // Same-model guard
+        const sm = chatSessions[currentSessionPath]?.model;
+        const curId = sm?.id || models.find(m => m.isCurrent)?.id;
+        const curProvider = sm?.provider || models.find(m => m.isCurrent)?.provider;
+        if (modelId === curId && (provider || '') === (curProvider || '')) { setOpen(false); return; }
+
+        // Per-session switch
+        setLoading(true);
+        useStore.getState().setModelSwitching(true);
+        const res = await hanaFetch('/api/models/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionPath: currentSessionPath, modelId, provider }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'switch failed');
+
+        if (data.model) {
+          useStore.getState().updateSessionModel(currentSessionPath, data.model);
+        }
+
+        if (data.adaptations?.length) {
+          const msgs: Record<string, string> = {
+            compacted: '已压缩对话历史以适配新模型',
+            truncated: '早期对话已被截断以适配新模型',
+          };
+          const text = data.adaptations.map((a: string) => msgs[a] || a).join('；');
+          useStore.getState().addToast(text, 'info');
+        }
+
+        setLoading(false);
+        useStore.getState().setModelSwitching(false);
+      } else {
+        // New session path — existing logic unchanged
+        await hanaFetch('/api/models/set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelId, provider }),
+        });
+        if (currentSessionPath && !pendingNewSession) {
+          const { createNewSession } = await import('../../stores/session-actions');
+          await createNewSession();
+        }
+        const res = await hanaFetch('/api/models');
+        const data = await res.json();
+        useStore.setState({ models: data.models || [] });
       }
-      // 刷新模型列表
-      const res = await hanaFetch('/api/models');
-      const data = await res.json();
-      useStore.setState({ models: data.models || [] });
     } catch (err) {
       console.error('[model] switch failed:', err);
+      setLoading(false);
+      useStore.getState().setModelSwitching(false);
     }
     setOpen(false);
-  }, []);
+  }, [models]);
 
   // 按 provider 分组
   const grouped = useMemo(() => {
@@ -56,7 +100,7 @@ export function ModelSelector({ models, disabled }: { models: Array<{ id: string
     if (current && !models.find(m => m.id === current.id && m.provider === current.provider)) {
       const key = current.provider || '';
       if (!groups[key]) groups[key] = [];
-      groups[key].unshift(current);
+      groups[key].unshift(current as typeof models[0]);
     }
     return groups;
   }, [models, current]);
@@ -66,8 +110,11 @@ export function ModelSelector({ models, disabled }: { models: Array<{ id: string
 
   return (
     <div className={`${styles['model-selector']}${open ? ` ${styles.open}` : ''}`} ref={ref}>
-      <button className={`${styles['model-pill']}${disabled ? ` ${styles['model-pill-disabled']}` : ''}`} onClick={(e) => { e.stopPropagation(); if (!disabled) setOpen(!open); }}>
-        <span>{current?.name || t('model.unknown') || '...'}</span>
+      <button
+        className={`${styles['model-pill']}${loading ? ` ${styles['model-pill-disabled']}` : ''}`}
+        onClick={(e) => { e.stopPropagation(); if (!loading) setOpen(!open); }}
+      >
+        <span>{loading ? '...' : (current?.name || t('model.unknown') || '...')}</span>
         <span className={styles['model-arrow']}>▾</span>
       </button>
       {open && (
@@ -82,7 +129,7 @@ export function ModelSelector({ models, disabled }: { models: Array<{ id: string
                 {items.map(m => (
                   <button
                     key={`${m.provider}/${m.id}`}
-                    className={`${styles['model-option']}${m.isCurrent ? ` ${styles.active}` : ''}`}
+                    className={`${styles['model-option']}${(m.id === current?.id && m.provider === current?.provider) ? ` ${styles.active}` : ''}`}
                     onClick={() => switchModel(m.id, m.provider)}
                   >
                     {m.name}
