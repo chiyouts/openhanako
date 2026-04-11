@@ -10,7 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { useStore } from '../stores';
-import { selectArtifacts } from '../stores/artifact-slice';
+import { selectArtifacts, selectActiveTabId } from '../stores/artifact-slice';
 import { isImageFile } from '../utils/format';
 import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
@@ -63,7 +63,7 @@ function InputAreaInner() {
   const docContextAttached = useStore(s => s.docContextAttached);
   const quotedSelection = useStore(s => s.quotedSelection);
   const artifacts = useStore(selectArtifacts);
-  const activeTabId = useStore(s => s.activeTabId);
+  const activeTabId = useStore(selectActiveTabId);
   const previewOpen = useStore(s => s.previewOpen);
   const models = useStore(s => s.models);
   const agentYuan = useStore(s => s.agentYuan);

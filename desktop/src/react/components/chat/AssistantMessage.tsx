@@ -257,12 +257,6 @@ const FileBlock = memo(function FileBlock({ block }: { block: any }) {
 const ArtifactBlock = memo(function ArtifactBlock({ block }: { block: any }) {
   const handleClick = () => {
     const artifact = { id: block.artifactId, type: block.artifactType, title: block.title, content: block.content, language: block.language };
-    const s = useStore.getState();
-    const arts = [...s.artifacts];
-    const idx = arts.findIndex(a => a.id === block.artifactId);
-    if (idx >= 0) arts[idx] = artifact;
-    else arts.push(artifact);
-    s.setArtifacts(arts);
     openPreview(artifact);
   };
 
@@ -287,18 +281,13 @@ const PluginCardWrapper = memo(function PluginCardWrapper({ block }: { block: an
 
 const ScreenshotBlock = memo(function ScreenshotBlock({ block }: { block: any }) {
   const handleClick = () => {
-    const artId = `browser-ss-${Date.now()}`;
     const artifact = {
-      id: artId,
+      id: `browser-ss-${Date.now()}`,
       type: 'image',
       title: window.t('chat.browserScreenshot'),
       content: block.base64,
       ext: block.mimeType === 'image/jpeg' ? 'jpg' : 'png',
     };
-    const s = useStore.getState();
-    const arts = [...s.artifacts];
-    if (!arts.find(a => a.id === artId)) arts.push(artifact);
-    s.setArtifacts(arts);
     openPreview(artifact);
   };
 

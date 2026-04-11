@@ -1,15 +1,13 @@
 import { useStore } from '../../stores';
-import { selectArtifacts } from '../../stores/artifact-slice';
+import { selectArtifacts, selectOpenTabs, selectActiveTabId, getPreviewOwner } from '../../stores/artifact-slice';
+import { closeTabForOwner, closePreview, setActiveTabForOwner } from '../../stores/artifact-actions';
 import type { Artifact } from '../../types';
-import { closePreview } from '../../stores/artifact-actions';
 import styles from './TabBar.module.css';
 
 export function TabBar() {
-  const openTabs = useStore(s => s.openTabs);
-  const activeTabId = useStore(s => s.activeTabId);
+  const openTabs = useStore(selectOpenTabs);
+  const activeTabId = useStore(selectActiveTabId);
   const artifacts = useStore(selectArtifacts);
-  const setActiveTab = useStore(s => s.setActiveTab);
-  const closeTab = useStore(s => s.closeTab);
 
   const getTitle = (id: string): string => {
     const a = artifacts.find((art: Artifact) => art.id === id);
@@ -18,9 +16,16 @@ export function TabBar() {
 
   const handleCloseTab = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    closeTab(id);
-    const after = useStore.getState();
-    if (after.openTabs.length === 0) closePreview();
+    const owner = getPreviewOwner(useStore.getState());
+    closeTabForOwner(owner, id);
+    const { previewByOwner } = useStore.getState();
+    const after = previewByOwner[owner];
+    if (!after || after.openTabs.length === 0) closePreview();
+  };
+
+  const handleSetActive = (id: string) => {
+    const owner = getPreviewOwner(useStore.getState());
+    setActiveTabForOwner(owner, id);
   };
 
   return (
@@ -30,7 +35,7 @@ export function TabBar() {
           <div
             key={id}
             className={`${styles.tab}${id === activeTabId ? ` ${styles.tabActive}` : ''}`}
-            onClick={() => setActiveTab(id)}
+            onClick={() => handleSetActive(id)}
           >
             <span className={styles.tabTitle}>{getTitle(id)}</span>
             <span className={styles.tabClose} onClick={e => handleCloseTab(e, id)}>

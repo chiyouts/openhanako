@@ -9,7 +9,8 @@
 
 import { useStore } from './index';
 import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
-import { closePreview } from './artifact-actions';
+import { closePreview, clearOwnerPreview } from './artifact-actions';
+import { getPreviewOwner } from './artifact-slice';
 
 declare function t(key: string, vars?: Record<string, string>): any;
 declare const i18n: { defaultName: string };
@@ -24,17 +25,14 @@ export function clearChat(): void {
     s.clearSession?.(sessionPath);
   }
 
-  // 清除 compat 全局 artifacts + keyed store 中当前 session 的 artifacts
-  const artifactsPatch: Record<string, unknown> = {
+  // 清除当前 owner 的预览状态
+  clearOwnerPreview(getPreviewOwner(s));
+
+  useStore.setState({
     welcomeVisible: true,
     memoryEnabled: true,
     sessionTodos: [],
-    artifacts: [],
-  };
-  if (sessionPath) {
-    artifactsPatch.artifactsBySession = { ...s.artifactsBySession, [sessionPath]: [] };
-  }
-  useStore.setState(artifactsPatch);
+  });
 
   if (s.previewOpen) closePreview();
 }

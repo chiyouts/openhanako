@@ -4,7 +4,6 @@
  * 从 file-cards-shim.ts 提取，供 React 组件直接 import。
  */
 
-import { useStore } from '../stores';
 import type { Artifact } from '../types';
 import { openPreview } from '../stores/artifact-actions';
 
@@ -56,7 +55,6 @@ export async function openFilePreview(filePath: string, label: string, ext: stri
         title: name,
         content: body,
       };
-      upsertArtifact(artifact);
       openPreview(artifact);
       return;
     }
@@ -79,7 +77,6 @@ export async function openFilePreview(filePath: string, label: string, ext: stri
         ext,
         language: previewType === 'code' ? ext : undefined,
       };
-      upsertArtifact(artifact);
       openPreview(artifact);
       return;
     }
@@ -94,7 +91,6 @@ export async function openFilePreview(filePath: string, label: string, ext: stri
     filePath,
     ext,
   };
-  upsertArtifact(artifact);
   openPreview(artifact);
 }
 
@@ -111,29 +107,6 @@ export async function openSkillPreview(skillName: string, skillFilePath: string)
       title: skillName,
       content: body,
     };
-    upsertArtifact(artifact);
     openPreview(artifact);
-  }
-}
-
-/** 插入或更新 artifacts store */
-function upsertArtifact(artifact: Artifact): void {
-  const s = useStore.getState();
-  const arts = [...s.artifacts];
-  const idx = arts.findIndex(a => a.id === artifact.id);
-  if (idx >= 0) arts[idx] = artifact;
-  else arts.push(artifact);
-  s.setArtifacts(arts);
-
-  // 同步写入 keyed store
-  const sp = s.currentSessionPath;
-  if (sp) {
-    useStore.setState(prev => {
-      const sessionArts = [...(prev.artifactsBySession[sp] || [])];
-      const sIdx = sessionArts.findIndex(a => a.id === artifact.id);
-      if (sIdx >= 0) sessionArts[sIdx] = artifact;
-      else sessionArts.push(artifact);
-      return { artifactsBySession: { ...prev.artifactsBySession, [sp]: sessionArts } };
-    });
   }
 }

@@ -12,7 +12,7 @@ import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
 import { buildItemsFromHistory } from '../utils/history-builder';
 import { loadAvatars as loadAvatarsAction, clearChat as clearChatAction } from './agent-actions';
 import { loadDeskFiles } from './desk-actions';
-import { saveTabState, restoreTabState } from './artifact-actions';
+import { syncPreviewPanelForOwner } from './artifact-actions';
 import { loadModels } from '../utils/ui-helpers';
 import { updateKeyed } from './create-keyed-slice';
 
@@ -141,18 +141,8 @@ export async function switchSession(path: string): Promise<void> {
       agentPatch.agentAvatarUrl = ag?.hasAvatar ? hanaUrl(`/api/agents/${data.agentId}/avatar?t=${Date.now()}`) : null;
     }
 
-    // 保存当前 session 的 tab 状态
-    const currentPath = s.currentSessionPath;
-    if (currentPath) saveTabState(currentPath);
-
-    // 保存当前 session 的 artifacts 到 keyed store
-    if (currentPath && state.artifacts.length) {
-      useStore.setState(prev => ({
-        artifactsBySession: { ...prev.artifactsBySession, [currentPath]: prev.artifacts },
-      }));
-    }
-
     // 保存当前 session 的附件到 keyed store
+    const currentPath = s.currentSessionPath;
     const currentAttachments = state.attachedFiles;
     if (currentPath && currentAttachments.length) {
       useStore.setState(prev => ({
@@ -160,8 +150,7 @@ export async function switchSession(path: string): Promise<void> {
       }));
     }
 
-    // 批量更新 store（从 keyed store 恢复目标 session 的 artifacts）
-    const targetArtifacts = useStore.getState().artifactsBySession[path] || [];
+    // 批量更新 store（artifacts/tabs 已按 owner 分区，切 currentSessionPath 即切视图）
     useStore.setState({
       currentSessionPath: path,
       pendingNewSession: false,
@@ -170,7 +159,6 @@ export async function switchSession(path: string): Promise<void> {
       welcomeVisible: false,
       memoryEnabled: data.memoryEnabled !== false,
       streamingSessions,
-      artifacts: targetArtifacts,
       attachedFiles: state.attachedFilesBySession[path] || [],
       deskContextAttached: false,
       docContextAttached: false,
@@ -186,8 +174,8 @@ export async function switchSession(path: string): Promise<void> {
       });
     }
 
-    // 恢复目标 session 的 tab 状态 + 清除 quotedSelection
-    restoreTabState(path);
+    // 根据目标 session 的 tab 状态同步面板开关
+    syncPreviewPanelForOwner(path);
     useStore.getState().clearQuotedSelection();
 
     // Sync plan mode for the switched-to session

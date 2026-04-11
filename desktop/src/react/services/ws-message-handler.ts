@@ -155,9 +155,9 @@ export function handleServerMessage(msg: any): void {
       const sp = msg.sessionPath;
       if (sp) useStore.getState().addCompactingSession(sp);
     }
-    // content_block 中的 artifact 需要通知 artifacts shim 更新预览
+    // content_block 中的 artifact 需要通知预览系统更新
     if (msg.type === 'content_block' && msg.block?.type === 'artifact' && state.currentTab === 'chat') {
-      handleArtifact(msg.block);
+      handleArtifact({ ...msg.block, sessionPath: msg.sessionPath });
     }
     return;
   }
