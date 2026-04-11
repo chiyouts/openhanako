@@ -23,6 +23,7 @@ const SENSITIVE_DIRS = [".ssh", ".gnupg", ".aws", ".config/gcloud", ".kube"];
  * @returns {boolean}
  */
 export function isSensitivePath(srcPath, hanakoHome) {
+  if (!path.isAbsolute(srcPath)) return true; // fail-closed on relative input
   const resolved = realPath(srcPath);
   if (!resolved) return true; // fail-closed
   const home = os.homedir();

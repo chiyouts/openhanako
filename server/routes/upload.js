@@ -7,18 +7,15 @@
  * 纯粹的"搬运"操作：把文件或文件夹复制到统一的 uploads 目录。
  * 不做任何业务判断（PDF 解析、图片识别等由 skill 层处理）。
  *
- * 存储位置：
- *   - 有工作目录时：{cwd}/.hanako-uploads/
- *   - 无工作目录时：{os.tmpdir()}/.hanako-uploads/
- *
- * 返回复制后的新路径列表，供 agent 通过 read_file / list_files 访问。
+ * 存储位置：{hanakoHome}/uploads/
+ * 清理策略：24 小时过期自动删除。
  */
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
 import { t } from "../i18n.js";
+import { isSensitivePath } from "../utils/path-security.js";
 
 const MAX_FILES = 9;
 
@@ -78,11 +75,7 @@ export function createUploadRoute(engine) {
     }
 
     // 确定 uploads 目录
-    const cwd = engine.cwd;
-    const isRealCwd = cwd !== process.cwd();
-    const uploadsDir = isRealCwd
-      ? path.join(cwd, ".hanako-uploads")
-      : path.join(os.tmpdir(), ".hanako-uploads");
+    const uploadsDir = path.join(engine.hanakoHome, "uploads");
 
     fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -95,6 +88,10 @@ export function createUploadRoute(engine) {
       try {
         if (!path.isAbsolute(srcPath)) {
           results.push({ src: srcPath, error: "Path must be absolute" });
+          continue;
+        }
+        if (isSensitivePath(srcPath, engine.hanakoHome)) {
+          results.push({ src: srcPath, error: "sensitive path blocked" });
           continue;
         }
         if (!fs.existsSync(srcPath)) {
