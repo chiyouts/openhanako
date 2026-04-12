@@ -1506,7 +1506,7 @@
       "activeFormDesc": "執行中態的描述文字（用於 UI 展示 in_progress 時）",
       "statusDesc": "三態：pending / in_progress / completed",
       "todosDesc": "完整的 todo 清單，每次呼叫都會覆蓋舊清單",
-      "summaryEmpty": "清空待辦",
+      "summaryEmpty": "已清空待辦",
       "summaryStats": "共 {total} 條待辦：{completed} 完成，{in_progress} 進行中，{pending} 待處理"
     },
     "pinnedMemory": {

@@ -1556,7 +1556,7 @@
       "activeFormDesc": "执行中态的描述文本（用于 UI 展示 in_progress 时）",
       "statusDesc": "三态：pending / in_progress / completed",
       "todosDesc": "完整的 todo 列表，每次调用都会覆盖旧列表",
-      "summaryEmpty": "清空待办",
+      "summaryEmpty": "已清空待办",
       "summaryStats": "共 {total} 条待办：{completed} 完成，{in_progress} 进行中，{pending} 待处理"
     },
     "pinnedMemory": {

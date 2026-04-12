@@ -1506,7 +1506,7 @@
       "activeFormDesc": "実行中の形式の説明（UI で in_progress 表示時に使用）",
       "statusDesc": "pending / in_progress / completed のいずれか",
       "todosDesc": "完全な TODO リスト。呼び出すたびに以前のリストを置き換えます",
-      "summaryEmpty": "TODO をクリア",
+      "summaryEmpty": "TODO をクリアしました",
       "summaryStats": "合計 {total} 件：{completed} 完了、{in_progress} 進行中、{pending} 保留中"
     },
     "pinnedMemory": {

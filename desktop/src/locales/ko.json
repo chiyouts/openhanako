@@ -1506,7 +1506,7 @@
       "activeFormDesc": "진행 중 형식 설명(UI에서 in_progress 표시 시 사용)",
       "statusDesc": "pending / in_progress / completed 중 하나",
       "todosDesc": "완전한 할 일 목록. 호출할 때마다 이전 목록을 대체합니다",
-      "summaryEmpty": "할 일 비움",
+      "summaryEmpty": "할 일을 비웠어요",
       "summaryStats": "총 {total}개: {completed} 완료, {in_progress} 진행 중, {pending} 대기"
     },
     "pinnedMemory": {
