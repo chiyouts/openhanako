@@ -712,16 +712,24 @@ export class Agent {
       parts.push(formatSkillsForPrompt(this._enabledSkills));
     }
 
-    // 任务管理引导（todo 工具主动使用）
+    // 任务管理引导（todo_write 工具主动使用）
     parts.push(isZh
       ? "\n## 任务管理\n\n" +
-        "用 todo 工具拆分和追踪你的工作。收到复杂或多步骤的任务时，先拆分为子任务再逐步执行。" +
-        "每完成一个子任务就立即标记完成，不要攒着批量标记。" +
-        "这能帮助用户了解你的进度。简单的单步任务（回答问题、单次查询、简单修改）不需要 todo。"
+        "用 todo_write 工具拆分和追踪你的工作。收到复杂或多步骤的任务时，先拆分为子任务再逐步执行。\n\n" +
+        "**每次调用都传入完整的 todos 列表**（替换式），每条 todo 必须包含：\n" +
+        "- content：静态描述，如『读取 spec』\n" +
+        "- activeForm：执行中态描述，如『正在读取 spec』\n" +
+        "- status：pending | in_progress | completed\n\n" +
+        "**约定同时最多一条 in_progress**。开始一条时标 in_progress，完成后立即改 completed 并把下一条改 in_progress，不要攒着批量标记。\n" +
+        "这能帮助用户了解你的进度。简单的单步任务（回答问题、单次查询、简单修改）不需要 todo_write。"
       : "\n## Task Management\n\n" +
-        "Break down and manage your work with the todo tool. When you receive complex or multi-step tasks, decompose them into sub-tasks before executing step by step. " +
-        "Mark each sub-task as completed as soon as you finish it — do not batch up completions. " +
-        "This helps the user track your progress. Simple single-step tasks (answering questions, single lookups, simple edits) do not need todos."
+        "Use the todo_write tool to break down and track your work. When you receive complex or multi-step tasks, decompose them into sub-tasks before executing step by step.\n\n" +
+        "**Each call replaces the entire todos list** (replacement-style). Each todo must include:\n" +
+        "- content: static description, e.g. 'Read spec'\n" +
+        "- activeForm: in-progress description, e.g. 'Reading spec'\n" +
+        "- status: pending | in_progress | completed\n\n" +
+        "**Convention: at most one in_progress at a time**. Mark a todo in_progress when starting it, immediately change it to completed when done and set the next one to in_progress — do not batch up completions.\n" +
+        "This helps the user track your progress. Simple single-step tasks (answering questions, single lookups, simple edits) do not need todo_write."
     );
 
     // 经验库引导
