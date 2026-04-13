@@ -1386,9 +1386,9 @@
       "selectSkill": "스킬 선택",
       "selectPlugin": "플러그인 선택",
       "launchFailedTitle": "Hanako 실행 실패",
-      "launchFailedBody": "{detail}\n\n상세 로그 저장 위치:\n{logPath}\n\n이 스크린샷이나 로그 파일을 개발자에게 보내주세요.",
-      "serverRestartFailed": "Server가 충돌 후 재시작에 실패했어요.\n{error}\n\n앱을 다시 시작해 주세요.",
-      "serverMultipleCrash": "Server가 여러 번 충돌했어요 ({reason}).\n\n앱을 다시 시작해 주세요.",
+      "launchFailedBody": "Hanako v{version}\n\n{detail}\n\n상세 로그 저장 위치:\n{logPath}\n\n이 스크린샷이나 로그 파일을 개발자에게 보내주세요.",
+      "serverRestartFailed": "Hanako v{version}\n\nServer가 충돌 후 재시작에 실패했어요.\n{error}\n\n앱을 다시 시작해 주세요.",
+      "serverMultipleCrash": "Hanako v{version}\n\nServer가 여러 번 충돌했어요 ({reason}).\n\n앱을 다시 시작해 주세요.",
       "serverStartTimeout": "Server 시작 시간 초과 (60초)",
       "serverKilledBySignal": "Server가 시그널로 종료되었어요 ({signal})",
       "serverExitedWithCode": "Server가 종료되었어요. 코드: {code}"

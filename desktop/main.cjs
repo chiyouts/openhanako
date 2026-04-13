@@ -480,11 +480,17 @@ function monitorServer() {
       } catch (err) {
         console.error("[desktop] Server 重启失败:", err.message);
         writeCrashLog(`Server 重启失败: ${err.message}`);
-        dialog.showErrorBox("Hanako Server", mt("dialog.serverRestartFailed", { error: err.message }));
+        dialog.showErrorBox("Hanako Server", mt("dialog.serverRestartFailed", {
+          version: app?.getVersion?.() || "unknown",
+          error: err.message,
+        }));
       }
     } else {
       writeCrashLog(`Server 多次崩溃 (${reason})，放弃重启`);
-      dialog.showErrorBox("Hanako Server", mt("dialog.serverMultipleCrash", { reason }));
+      dialog.showErrorBox("Hanako Server", mt("dialog.serverMultipleCrash", {
+        version: app?.getVersion?.() || "unknown",
+        reason,
+      }));
     }
   });
 }
@@ -586,6 +592,7 @@ function writeCrashLog(errorMessage) {
 
   const content = [
     `=== Hanako Crash Log ===`,
+    `Hanako: v${app?.getVersion?.() || "unknown"}`,
     `Time: ${timestamp}`,
     `Error: ${errorMessage}`,
     `Platform: ${process.platform} ${process.arch}`,
@@ -2599,7 +2606,11 @@ app.whenReady().then(async () => {
     const tail = crashInfo.length > 800 ? "...\n" + crashInfo.slice(-800) : crashInfo;
     dialog.showErrorBox(
       mt("dialog.launchFailedTitle", null, "Hanako Launch Failed"),
-      mt("dialog.launchFailedBody", { detail: tail, logPath: path.join(hanakoHome, "crash.log") })
+      mt("dialog.launchFailedBody", {
+        version: app?.getVersion?.() || "unknown",
+        detail: tail,
+        logPath: path.join(hanakoHome, "crash.log"),
+      })
     );
     forceQuitApp = true;
     app.quit();
