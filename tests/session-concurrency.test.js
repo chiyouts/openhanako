@@ -86,6 +86,7 @@ describe("createSession 返回值结构", () => {
       session: {
         sessionManager: { getSessionFile: () => "/tmp/sessions/test-session.jsonl" },
         subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
         model: { id: "test-model", name: "test-model" },
       },
     });
@@ -118,6 +119,7 @@ describe("createSession 返回值结构", () => {
       session: {
         sessionManager: { getSessionFile: () => null },
         subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
         model: { id: "test-model" },
       },
     });

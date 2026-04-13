@@ -40,6 +40,7 @@ describe("SessionCoordinator", () => {
       session: {
         sessionManager: { getSessionFile: () => "/tmp/session.jsonl" },
         subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
       },
     });
   });

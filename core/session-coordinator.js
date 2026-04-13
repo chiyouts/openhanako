@@ -15,6 +15,7 @@ import { BrowserManager } from "../lib/browser/browser-manager.js";
 import { t, getLocale } from "../server/i18n.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
 import { findModel } from "../shared/model-ref.js";
+import { computeToolSnapshot } from "../shared/tool-categories.js";
 
 const log = createModuleLogger("session");
 
@@ -192,12 +193,42 @@ After dispatching subagent or other background tasks:
     const old = this._sessions.get(mapKey);
     if (old) old.unsub();
 
+    // ── Tool snapshot for session-tool-isolation (parallels session-model-isolation) ──
+    // Three branches:
+    //   A. restore=true + meta has toolNames  → replay the snapshot (applied below)
+    //   B. restore=true + meta missing        → legacy session, keep all tools
+    //   C. restore=false                       → fresh compute from agent config
+    const allToolNames = (agent.tools || []).map((t) => t.name).filter(Boolean);
+    let snapshotToolNames = null;  // null signals "do not call setActiveToolsByName"
+
+    if (restore) {
+      if (sessionPath) {
+        const metaPathForRestore = path.join(this._d.getAgent().sessionDir, "session-meta.json");
+        let metaEntry = null;
+        try {
+          const meta = await this._readMetaCached(metaPathForRestore);
+          metaEntry = meta[path.basename(sessionPath)];
+        } catch {
+          // treat as Case B
+        }
+        if (metaEntry && Array.isArray(metaEntry.toolNames)) {
+          snapshotToolNames = metaEntry.toolNames;  // Case A
+        }
+        // else Case B: snapshotToolNames stays null
+      }
+    } else {
+      // Case C
+      const disabled = agent.config?.tools?.disabled || [];
+      snapshotToolNames = computeToolSnapshot(allToolNames, disabled);
+    }
+
     Object.assign(sessionEntry, {
       session,
       agentId: this._d.getActiveAgentId(),
       memoryEnabled,
       modelId: resolvedModel?.id || effectiveModel?.id || null,
       modelProvider: resolvedModel?.provider || effectiveModel?.provider || null,
+      toolNames: snapshotToolNames,  // null for legacy sessions (Case B), array otherwise
       lastTouchedAt: Date.now(),
       unsub,
     });
@@ -208,6 +239,23 @@ After dispatching subagent or other background tasks:
       const agent = this._d.getAgent();
       const customNames = (agent.tools || []).map(t => t.name);
       session.setActiveToolsByName([...READ_ONLY_BUILTIN_TOOLS, ...customNames]);
+    }
+
+    // Apply tool snapshot (Case A / Case C). Plan mode takes precedence:
+    // if initialPlanMode fired above, its restricted tool list wins and the
+    // snapshot is not re-applied. Case B leaves snapshotToolNames === null
+    // so this branch is a no-op and the session keeps all tools.
+    if (!initialPlanMode && snapshotToolNames !== null) {
+      session.setActiveToolsByName(snapshotToolNames);
+    }
+
+    // Persist snapshot for Case C only. Case A already had it in meta; Case B
+    // intentionally leaves meta untouched (adding a toolNames field to a legacy
+    // session's meta would lock it into the current tool list, breaking
+    // "upgrade is zero-noise"). writeSessionMeta is serialized and never
+    // rejects; awaiting gives createSession a clean post-return state.
+    if (!restore && snapshotToolNames !== null && sessionPath) {
+      await this.writeSessionMeta(sessionPath, { toolNames: snapshotToolNames });
     }
 
     // LRU 淘汰：按 lastTouchedAt 排序，跳过 streaming 和焦点 session
