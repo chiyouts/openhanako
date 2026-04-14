@@ -51,7 +51,15 @@ export function createSkillsRoute(engine) {
   route.get("/skills", async (c) => {
     try {
       const agentId = c.req.query("agentId");
-      return c.json({ skills: engine.getAllSkills(agentId || undefined) });
+      // 必须显式指定 agentId — 不允许从全局焦点指针推导，避免前后端 agent 错位
+      // 后用户在 desk 上 toggle skill 时把错位 agent 的列表写入当前 agent (#397)
+      if (!agentId) {
+        return c.json({ error: "agentId is required" }, 400);
+      }
+      if (!validateId(agentId) || !agentExists(engine, agentId)) {
+        return c.json({ error: "agent not found" }, 404);
+      }
+      return c.json({ skills: engine.getAllSkills(agentId) });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -69,15 +77,26 @@ export function createSkillsRoute(engine) {
         return c.json({ error: "enabled must be an array of skill names" }, 400);
       }
 
-      const partial = { skills: { enabled } };
-      const configPath = path.join(engine.agentsDir, id, "config.yaml");
-      saveConfig(configPath, partial);
+      // 防御性过滤：把请求体里的 enabled 与该 agent 实际可见的 skill 集合做交集，
+      // 防止前端因 store 错位（例如 agent 切换 race）把别的 agent 的列表写进来 (#397)
+      const visible = engine.getAllSkills(id).map(s => s.name);
+      const visibleSet = new Set(visible);
+      const filtered = enabled.filter(name => visibleSet.has(name));
 
-      // active agent 需要额外触发 skill 同步
+      const partial = { skills: { enabled: filtered } };
+
+      // 走 engine.updateConfig (ConfigCoordinator)，它会在 partial.skills 存在时
+      // 调用 syncAgentSkills 把新 enabled 列表同步到 agent 的内存态和 system prompt。
+      // 直接调 agent.updateConfig 会绕过这一步，导致写盘成功但内存未刷新。
       const agent = engine.getAgent(id);
-      if (agent) await agent.updateConfig(partial);
+      if (agent) {
+        await engine.updateConfig(partial, { agentId: id });
+      } else {
+        const configPath = path.join(engine.agentsDir, id, "config.yaml");
+        saveConfig(configPath, partial);
+      }
 
-      return c.json({ ok: true });
+      return c.json({ ok: true, enabled: filtered });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -181,7 +200,7 @@ export function createSkillsRoute(engine) {
       // 重新加载 skills 并自动启用
       await engine.reloadSkills();
 
-      // 将新技能加入当前 agent 的 enabled 列表
+      // 将新技能加入指定 agent 的 enabled 列表
       const agentId = c.req.query("agentId");
       if (!agentId) return c.json({ error: "agentId query param is required" }, 400);
       const configPath = path.join(engine.agentsDir, agentId, "config.yaml");
@@ -190,12 +209,12 @@ export function createSkillsRoute(engine) {
         const cfg = loadConfig(configPath);
         const enabled = new Set(cfg?.skills?.enabled || []);
         enabled.add(safeName);
-        saveConfig(configPath, { skills: { enabled: [...enabled] } });
-        // 同步 engine 内存状态
-        await engine.updateConfig({ skills: { enabled: [...enabled] } });
+        // 走 ConfigCoordinator 路径：写盘 + syncAgentSkills 同步内存态
+        // 必须传 agentId，否则 fallback 到焦点 agent 会同步错对象 (#397)
+        await engine.updateConfig({ skills: { enabled: [...enabled] } }, { agentId });
       }
 
-      const skill = engine.getAllSkills().find(s => s.name === safeName);
+      const skill = engine.getAllSkills(agentId).find(s => s.name === safeName);
       return c.json({
         ok: true,
         skill: skill || { name: safeName, type: "user" },
@@ -247,8 +266,9 @@ export function createSkillsRoute(engine) {
         return c.json({ error: t("error.skillInvalidName") }, 400);
       }
 
-      // 外部技能不可删除
-      const allSkills = engine.getAllSkills();
+      // 外部技能不可删除（用任意已存在 agent 的视角查 readonly 即可，与 enabled 无关）
+      const anyAgentId = path.basename(resolveAgent(engine, c)?.agentDir || "");
+      const allSkills = anyAgentId ? engine.getAllSkills(anyAgentId) : [];
       const target = allSkills.find(s => s.name === name);
       if (target?.readonly) {
         return c.json({ error: t("error.skillExternalCannotDelete") }, 403);
@@ -304,7 +324,8 @@ export function createSkillsRoute(engine) {
     return withInstallLock(async () => {
     try {
       await engine.reloadSkills();
-      return c.json({ ok: true, skills: engine.getAllSkills() });
+      // 不返回 skills 列表（缺乏 agent 上下文），前端会 fallback 到 GET /skills?agentId=X
+      return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

@@ -65,7 +65,12 @@ export function SkillViewerOverlay() {
   async function onCopy() {
     if (!data?.baseDir) return;
     try {
-      const res = await hanaFetch('/api/skills/install', {
+      const agentId = useStore.getState().currentAgentId || '';
+      if (!agentId) {
+        showToast(`${t('skillViewer.installFailed')}no current agent`);
+        return;
+      }
+      const res = await hanaFetch(`/api/skills/install?agentId=${encodeURIComponent(agentId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: data.baseDir }),

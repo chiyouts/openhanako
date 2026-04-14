@@ -299,6 +299,43 @@ describe("syncModels", () => {
     expect(result.providers.deepseek.models[0].name).toBe("DeepSeek Chat");
   });
 
+  it("sets compat.supportsStore=false for gemini provider (avoid 400 from /v1beta/openai)", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      gemini: {
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gemini-2.0-flash"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.gemini.models[0].compat).toBeDefined();
+    expect(result.providers.gemini.models[0].compat.supportsStore).toBe(false);
+  });
+
+  it("sets compat.supportsStore=false when base_url points at generativelanguage even with non-gemini provider id", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      "my-gemini-proxy": {
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gemini-2.0-flash"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers["my-gemini-proxy"].models[0].compat.supportsStore).toBe(false);
+  });
+
   it("skips models with type: image from models.json output", async () => {
     const syncModels = await loadSync();
 

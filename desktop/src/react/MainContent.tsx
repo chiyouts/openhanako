@@ -21,7 +21,15 @@ declare function t(key: string, vars?: Record<string, string | number>): string;
 
 async function installSkillFile(filePath: string): Promise<void> {
   try {
-    const res = await hanaFetch('/api/skills/install', {
+    const agentId = useStore.getState().currentAgentId || '';
+    if (!agentId) {
+      useStore.getState().addToast(
+        t('settings.skills.installError') + ': no current agent',
+        'error',
+      );
+      return;
+    }
+    const res = await hanaFetch(`/api/skills/install?agentId=${encodeURIComponent(agentId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: filePath }),

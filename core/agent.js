@@ -33,7 +33,6 @@ import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.js";
 import { createWaitTool } from "../lib/tools/wait-tool.js";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
-import { formatSkillsForPrompt } from "../lib/pi-sdk/index.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
 
@@ -188,31 +187,32 @@ export class Agent {
       console.log(`[agent] utility_large 模型未配置，使用聊天模型作为记忆模型`);
     }
 
-    // 预解析记忆模型凭证（统一解析层）
-    this._resolvedMemoryModel = null;
-    this._memoryModelUnavailableReason = null;
-    if (this._memoryModel && resolveModel) {
+    // 保存解析函数：每次 tick 现场调用，拿到最新凭证。
+    // 不缓存解析结果——provider key/url/api 变更后 tick 自动恢复，无需重启 agent。
+    this._resolveModel = resolveModel || null;
+
+    // 启动时试探性 resolve 一次，只为打一条启动告警（运行时由 ticker 各调用点的 try/catch 处理）
+    if (this._memoryModel && this._resolveModel) {
       try {
-        this._resolvedMemoryModel = resolveModel(this._memoryModel, this._config);
+        this._resolveModel(this._memoryModel, this._config);
       } catch (err) {
-        this._memoryModelUnavailableReason = err.message;
         const src = userSetUtilityLarge ? "utility_large" : "聊天模型 fallback";
-        console.warn(`[memory] ${src} 解析失败，记忆系统暂不可用 — ${err.message}`);
-        this._cb?.emitDevLog?.(`记忆系统未启动：${src} 解析失败 — ${err.message}`, "warn");
+        console.warn(`[memory] ${src} 解析失败，记忆系统暂不可用（改完凭证后 tick 会自动恢复） — ${err.message}`);
+        this._cb?.emitDevLog?.(`记忆系统暂不可用：${src} 解析失败 — ${err.message}`, "warn");
       }
     } else if (!this._memoryModel) {
-      this._memoryModelUnavailableReason = "utility_large 未配置且无聊天模型可 fallback";
       console.warn("[memory] 记忆系统未启动：utility_large 未配置且无聊天模型可 fallback");
       this._cb?.emitDevLog?.("记忆系统未启动：未配置工具模型且无聊天模型可 fallback", "warn");
     }
 
-    if (this._resolvedMemoryModel) {
+    if (this._memoryModel && this._resolveModel) {
       log(`  [agent] 4. memoryTicker...`);
       this._memoryTicker = createMemoryTicker({
         summaryManager: this._summaryManager,
         configPath: this.configPath,
         factStore: this._factStore,
-        getResolvedMemoryModel: () => this._resolvedMemoryModel,
+        // 现场 resolve：每次 tick 拿到 yaml 最新凭证
+        getResolvedMemoryModel: () => this._resolveModel(this._memoryModel, this._config),
         getMemoryMasterEnabled: () => this._memoryMasterEnabled,
         isSessionMemoryEnabled: (sessionPath) => this.isSessionMemoryEnabledFor(sessionPath),
         onCompiled: () => {
@@ -447,6 +447,8 @@ export class Agent {
   get config() { return this._config; }
   get factStore() { return this._factStore; }
   get systemPrompt() { return this._systemPrompt; }
+  /** 当前已 sync 进 agent 的 enabled skills（由 SkillManager.syncAgentSkills 注入） */
+  get enabledSkills() { return this._enabledSkills; }
   /** 综合记忆状态：master && session 都开启才为 true */
   get memoryEnabled() { return this._memoryMasterEnabled && this._memorySessionEnabled; }
   /** agent 级别总开关 */
@@ -457,9 +459,29 @@ export class Agent {
   get publicIshiki() { return this._readPublicIshiki(); }
   get utilityModel() { return this._utilityModel; }
   get memoryModel() { return this._memoryModel; }
-  get resolvedMemoryModel() { return this._resolvedMemoryModel; }
-  /** 记忆模型不可用的原因（null 表示可用） */
-  get memoryModelUnavailableReason() { return this._memoryModelUnavailableReason; }
+  /**
+   * 当前记忆模型凭证（现场 resolve，不缓存）
+   * 用户改完 provider key/url/api 后这里立即反映最新值
+   */
+  get resolvedMemoryModel() {
+    if (!this._memoryModel || !this._resolveModel) return null;
+    try {
+      return this._resolveModel(this._memoryModel, this._config);
+    } catch {
+      return null;
+    }
+  }
+  /** 记忆模型不可用的原因（null 表示可用，现场 resolve） */
+  get memoryModelUnavailableReason() {
+    if (!this._memoryModel) return "utility_large 未配置且无聊天模型可 fallback";
+    if (!this._resolveModel) return null;
+    try {
+      this._resolveModel(this._memoryModel, this._config);
+      return null;
+    } catch (err) {
+      return err.message;
+    }
+  }
   get summaryManager() { return this._summaryManager; }
   get memoryTicker() { return this._memoryTicker; }
   get tools() {
@@ -707,10 +729,9 @@ export class Agent {
       }
     }
 
-    // Skills 注入（用 SDK 原版 formatSkillsForPrompt）
-    if (this._enabledSkills?.length > 0) {
-      parts.push(formatSkillsForPrompt(this._enabledSkills));
-    }
+    // Skills 注入由 Pi SDK 内部统一处理：SDK 会在 buildSystemPrompt 的 customPrompt
+    // 分支末尾追加一份 formatSkillsForPrompt(skills)。这里再追加一次会重复（#399）。
+    // 显示路径（GET /system-prompt）会自行拼接 skills 以保持开发者视图一致。
 
     // 任务管理引导（todo_write 工具主动使用）
     parts.push(isZh

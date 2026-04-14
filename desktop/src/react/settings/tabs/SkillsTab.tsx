@@ -131,11 +131,25 @@ export function SkillsTab() {
   };
 
   const toggleSkill = async (name: string, enable: boolean) => {
+    const agentId = useSettingsStore.getState().getSettingsAgentId();
+    if (!agentId) return;
+
+    // 乐观更新本地 UI
     const updated = skillsList.map(s => s.name === name ? { ...s, enabled: enable } : s);
     useSettingsStore.setState({ skillsList: updated });
-    const enabledList = updated.filter(s => s.enabled).map(s => s.name);
+
     try {
-      const agentId = useSettingsStore.getState().getSettingsAgentId();
+      // 关键：重新拉取当前 settingsAgentId 的最新 skill 列表，再在 fresh list 上派生 enabledList
+      // 避免本地 store 是错位 agent 的状态导致把别人的列表写到当前 agent (#397)
+      const freshRes = await hanaFetch(`/api/skills?agentId=${encodeURIComponent(agentId)}`);
+      const freshData = await freshRes.json();
+      if (freshData.error) throw new Error(freshData.error);
+      const freshSkills = (freshData.skills || []) as Array<{ name: string; enabled: boolean }>;
+      const enabledList = freshSkills
+        .map(s => s.name === name ? { ...s, enabled: enable } : s)
+        .filter(s => s.enabled)
+        .map(s => s.name);
+
       const res = await hanaFetch(`/api/agents/${agentId}/skills`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

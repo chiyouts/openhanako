@@ -419,8 +419,12 @@ export class HanaEngine {
   _syncAgentSkills() { this._skills.syncAgentSkills(this.agent); }
   _syncAllAgentSkills() { for (const ag of this._agentMgr.agents.values()) this._skills.syncAgentSkills(ag); }
   getAllSkills(agentId) {
-    const ag = agentId ? this._agentMgr.getAgent(agentId) : this.agent;
-    return this._skills.getAllSkills(ag || this.agent);
+    // 不接受 fallback 到 this.agent — 调用方必须显式指定 agentId，
+    // 否则前后端 agent 错位会导致 desk skill toggle 把错位列表写入当前 agent (#397)
+    if (!agentId) throw new Error("getAllSkills requires explicit agentId");
+    const ag = this._agentMgr.getAgent(agentId);
+    if (!ag) throw new Error(`agent not found: ${agentId}`);
+    return this._skills.getAllSkills(ag);
   }
   _getSkillsForAgent(ag) { return this._skills.getSkillsForAgent(ag); }
   get skillsDir() { return this._skills?.skillsDir; }
@@ -509,10 +513,12 @@ export class HanaEngine {
   /**
    * Provider 配置变更后的统一操作序列。
    * reload registry → sync models.json → refresh available → normalize utility prefs
+   * → 通知 active session 重新解析 model 对象（baseUrl 等字段烤在对象上）
    */
   async onProviderChanged() {
     await this._models.reloadAndSync();
     this._configCoord.normalizeUtilityApiPreferences();
+    this._sessionCoord.refreshAllSessionsModels();
   }
   getRegistryModelsForProvider(name) { return this._models.getRegistryModelsForProvider(name); }
 

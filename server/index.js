@@ -98,8 +98,20 @@ if (engine.currentModel) {
   console.log("[server] ③ Session created");
   dlog.log("server", `session created, model=${engine.currentModel.name}`);
 } else {
-  console.warn("[server] ⚠ 无可用模型，跳过 session 创建。请在设置中配置 API key。");
-  dlog.warn("server", "no models available, session creation skipped");
+  // 诊断信息：区分三种 currentModel=null 的情况，方便用户排查 (#414)
+  const availableCount = engine.availableModels?.length ?? 0;
+  const chatRef = engine.agent?.config?.models?.chat;
+  const chatRefStr = typeof chatRef === "object" ? JSON.stringify(chatRef) : (chatRef || "(empty)");
+  let reason;
+  if (availableCount === 0) {
+    reason = "available models list is empty (no provider has valid api_key + models)";
+  } else if (!chatRef) {
+    reason = `agent.config.models.chat is empty, but ${availableCount} models are available`;
+  } else {
+    reason = `models.chat=${chatRefStr} not found in ${availableCount} available models`;
+  }
+  console.warn(`[server] ⚠ 无可用模型，跳过 session 创建：${reason}`);
+  dlog.warn("server", `session creation skipped: ${reason}`);
 }
 
 // 写日志头部

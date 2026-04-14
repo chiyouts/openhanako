@@ -11,14 +11,18 @@ const DESK_SKILLS_KEY = 'hana-desk-skills-collapsed';
 
 export function DeskSkillsSection() {
   const skills = useStore(s => s.deskSkills);
+  const currentAgentId = useStore(s => s.currentAgentId);
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(DESK_SKILLS_KEY) === '1',
   );
 
   const loadDeskSkillsFn = useCallback(async () => {
     try {
-      const res = await hanaFetch('/api/skills');
+      const agentId = useStore.getState().currentAgentId;
+      if (!agentId) return; // currentAgentId 未就绪时跳过，避免错位
+      const res = await hanaFetch(`/api/skills?agentId=${encodeURIComponent(agentId)}`);
       const data = await res.json();
+      if (data.error) return;
       const all = (data.skills || []) as Array<{
         name: string; enabled: boolean; hidden?: boolean;
         source?: string; externalLabel?: string | null;
@@ -38,7 +42,7 @@ export function DeskSkillsSection() {
     loadDeskSkillsFn();
     window.__loadDeskSkills = loadDeskSkillsFn;
     return () => { delete window.__loadDeskSkills; };
-  }, [loadDeskSkillsFn]);
+  }, [loadDeskSkillsFn, currentAgentId]);
 
   const toggleCollapse = useCallback(() => {
     setCollapsed(prev => {
@@ -50,13 +54,26 @@ export function DeskSkillsSection() {
 
   const toggleSkill = useCallback(async (name: string, enable: boolean) => {
     const prev = useStore.getState().deskSkills;
+    const agentId = useStore.getState().currentAgentId || '';
+    if (!agentId) return;
+
+    // 乐观更新
     useStore.getState().setDeskSkills(
       prev.map(s => s.name === name ? { ...s, enabled: enable } : s),
     );
-    const enabledList = prev.map(s => s.name === name ? { ...s, enabled: enable } : s)
-      .filter(s => s.enabled).map(s => s.name);
+
     try {
-      const agentId = useStore.getState().currentAgentId || '';
+      // 关键：重新拉取当前 agent 的最新 skill 列表，再在 fresh list 上派生 enabledList
+      // 避免本地 store 是错位 agent 的状态导致把别人的列表写到当前 agent (#397)
+      const freshRes = await hanaFetch(`/api/skills?agentId=${encodeURIComponent(agentId)}`);
+      const freshData = await freshRes.json();
+      if (freshData.error) throw new Error(freshData.error);
+      const freshSkills = (freshData.skills || []) as Array<{ name: string; enabled: boolean }>;
+      const enabledList = freshSkills
+        .map(s => s.name === name ? { ...s, enabled: enable } : s)
+        .filter(s => s.enabled)
+        .map(s => s.name);
+
       await hanaFetch(`/api/agents/${agentId}/skills`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

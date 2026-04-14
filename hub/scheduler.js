@@ -252,6 +252,7 @@ export class Scheduler {
       agentId,
       persist: activityDir,
       signal,
+      activityType: type,
       ...restOpts,
     });
     const { sessionPath, error } = result;

@@ -20,8 +20,12 @@ export function useSkillSlashItems(): SlashItem[] {
   const agentId = useStore(s => s.currentAgentId);
 
   useEffect(() => {
+    if (!agentId) {
+      setSkills([]);
+      return;
+    }
     let cancelled = false;
-    hanaFetch(`/api/skills?agentId=${agentId || ''}`)
+    hanaFetch(`/api/skills?agentId=${encodeURIComponent(agentId)}`)
       .then(r => r.json())
       .then(data => {
         if (!cancelled && data.skills) setSkills(data.skills);

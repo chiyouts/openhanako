@@ -12,6 +12,7 @@ import { getRawConfig, clearConfigCache } from "../../lib/memory/config-loader.j
 import { FactStore } from "../../lib/memory/fact-store.js";
 import { splitByScope, injectGlobalFields } from '../../shared/config-scope.js';
 import { resolveAgent, resolveAgentStrict, AgentNotFoundError } from "../utils/resolve-agent.js";
+import { formatSkillsForPrompt } from "../../lib/pi-sdk/index.js";
 import {
   buildInlineProviderCredentialUpdate,
   clearInlineProviderCredentialFields,
@@ -137,10 +138,18 @@ export function createConfigRoute(engine) {
   });
 
   // ── System Prompt（只读，供 DevTools 查看）──
+  // 注意：agent.systemPrompt 不含 skills 块（#399 修复后由 SDK 内部统一注入），
+  // 这里手动拼接以保持开发者视图与 SDK 实际发送给 LLM 的 prompt 一致。
 
   route.get("/system-prompt", async (c) => {
     try {
-      return c.json({ content: resolveAgent(engine, c).systemPrompt || "" });
+      const agent = resolveAgent(engine, c);
+      let content = agent.systemPrompt || "";
+      const enabledSkills = agent.enabledSkills || [];
+      if (enabledSkills.length > 0) {
+        content += formatSkillsForPrompt(enabledSkills);
+      }
+      return c.json({ content });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

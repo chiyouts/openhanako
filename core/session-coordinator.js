@@ -8,7 +8,7 @@
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
-import { createAgentSession, SessionManager, estimateTokens, findCutPoint, generateSummary, emitSessionShutdown } from "../lib/pi-sdk/index.js";
+import { createAgentSession, SessionManager, estimateTokens, findCutPoint, generateSummary, emitSessionShutdown, refreshSessionModelFromRegistry } from "../lib/pi-sdk/index.js";
 import { createDefaultSettings } from "./session-defaults.js";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { BrowserManager } from "../lib/browser/browser-manager.js";
@@ -840,6 +840,25 @@ After dispatching subagent or other background tasks:
     log.log("sessions cleaned up");
   }
 
+  /**
+   * Provider 配置变更后，强制所有 active session 从 ModelRegistry 重新解析
+   * 当前 model 对象。
+   *
+   * 必要性：Pi SDK 把 baseUrl 烤在 model 对象字段里，session 持的是创建时
+   * 的对象引用。Hanako 这边 ModelRegistry.refresh() 之后会重建模型对象，
+   * 但 session 还指向旧对象——下一个 turn 仍用旧 baseUrl 发请求。
+   * 本方法由 engine.onProviderChanged() 触发。
+   */
+  refreshAllSessionsModels() {
+    for (const entry of this._sessions.values()) {
+      try {
+        refreshSessionModelFromRegistry(entry.session);
+      } catch (err) {
+        log.warn(`refreshAllSessionsModels: ${err.message}`);
+      }
+    }
+  }
+
   // ── Session 查询 ──
 
   getSessionByPath(sessionPath) {
@@ -884,7 +903,11 @@ After dispatching subagent or other background tasks:
           }
         }
         return sessions;
-      } catch { return []; }
+      } catch (err) {
+        // 显式日志：之前静默吞错会让用户看到「对话框列表为空」却没有任何线索 (#414)
+        log.warn(`listSessions: agent="${agent.id}" sessionDir="${sessionDir}" failed: ${err?.message || err}`);
+        return [];
+      }
     }));
     const allSessions = perAgent.flat();
 
@@ -1170,9 +1193,13 @@ After dispatching subagent or other background tasks:
       const patrolAllowed = opts.toolFilter
         || targetAgent.config?.desk?.patrol_tools
         || PATROL_TOOLS_DEFAULT;
+      // heartbeat 巡检中屏蔽 cron 工具：agent 在巡检里 cron.create 一个 3 分钟任务
+      // 会让该任务持续触发后续巡检/活动，看起来像「巡检间隔被破坏」(#398)
+      const isHeartbeat = opts.activityType === "heartbeat";
+      const heartbeatBlocked = new Set(isHeartbeat ? ["cron"] : []);
       const actCustomTools = patrolAllowed === "*"
-        ? allCustomTools
-        : allCustomTools.filter(t => new Set(patrolAllowed).has(t.name));
+        ? allCustomTools.filter(t => !heartbeatBlocked.has(t.name))
+        : allCustomTools.filter(t => new Set(patrolAllowed).has(t.name) && !heartbeatBlocked.has(t.name));
 
       const actTools = opts.builtinFilter
         ? allBuiltinTools.filter(t => opts.builtinFilter.includes(t.name))
