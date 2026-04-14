@@ -11,7 +11,7 @@ import { useStore } from './stores';
 import { hanaFetch } from './hooks/use-hana-fetch';
 import { applyAgentIdentity, loadAgents, loadAvatars } from './stores/agent-actions';
 import { loadSessions } from './stores/session-actions';
-import { connectWebSocket } from './services/websocket';
+import { connectWebSocket, getWebSocket } from './services/websocket';
 import { setStatus, loadModels } from './utils/ui-helpers';
 import { initJian, loadDeskFiles } from './stores/desk-actions';
 import { loadChannels } from './stores/channel-actions';
@@ -215,9 +215,19 @@ export async function initApp(): Promise<void> {
           useStore.setState({ locale: i18n.locale });
         });
         break;
-      case 'models-changed':
+      case 'models-changed': {
         loadModels();
+        // 模型配置变更可能改变 contextWindow（用户把 1M 模型改成 256k 等），
+        // 主动补发一次 context_usage 让 ContextRing 立即吃到新分母。
+        const sp = useStore.getState().currentSessionPath;
+        if (sp) {
+          const ws = getWebSocket();
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'context_usage', sessionPath: sp }));
+          }
+        }
         break;
+      }
       case 'agent-created':
       case 'agent-deleted':
         loadAgents();
