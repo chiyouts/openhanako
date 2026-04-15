@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import YAML from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { deepMerge } from "../lib/memory/config-loader.js";
 
 // ── Mocks ──────────────────────────────────────────────────────
 //
@@ -25,13 +26,9 @@ vi.mock("../core/agent.js", () => ({
       const existing = fs.existsSync(cfgPath)
         ? YAML.load(fs.readFileSync(cfgPath, "utf-8")) || {}
         : {};
-      for (const [k, v] of Object.entries(partial)) {
-        existing[k] = typeof v === "object" && !Array.isArray(v)
-          ? { ...(existing[k] || {}), ...v }
-          : v;
-      }
-      fs.writeFileSync(cfgPath, YAML.dump(existing));
-      this.config = existing;
+      const merged = deepMerge(existing, partial);
+      fs.writeFileSync(cfgPath, YAML.dump(merged));
+      this.config = merged;
     };
     this.setGetOwnerIds = vi.fn();
     this.setCallbacks = vi.fn();

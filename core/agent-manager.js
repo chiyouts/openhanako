@@ -267,6 +267,17 @@ export class AgentManager {
 
   // ── Create ──
 
+  /**
+   * Best-effort rollback of createAgent's partial state.
+   * Called when any step between fs.mkdirSync and this._agents.set fails.
+   * All cleanup is wrapped in try/catch so a cleanup failure doesn't mask
+   * the original error.
+   */
+  _rollbackAgentCreation(agentDir, agentId) {
+    try { fs.rmSync(agentDir, { recursive: true, force: true }); } catch {}
+    try { this._d.getChannelManager().cleanupAgentFromChannels(agentId); } catch {}
+  }
+
   async createAgent({ name, id, yuan }) {
     if (!name?.trim()) throw new Error(t("error.agentNameEmpty"));
 
@@ -341,8 +352,8 @@ export class AgentManager {
     try {
       await ag.init(() => {}, this._d.getSharedModels(), resolveModel);
     } catch (err) {
-      // init 失败：回滚已创建的目录，防止孤儿残留
-      try { fs.rmSync(agentDir, { recursive: true, force: true }); } catch {}
+      // init 失败：回滚已创建的目录和频道状态，防止孤儿残留
+      this._rollbackAgentCreation(agentDir, agentId);
       throw err;
     }
     // #419: 新建 agent 继承当前已装 user/SDK skill 快照;空快照时保留 template 默认
@@ -352,8 +363,7 @@ export class AgentManager {
         ag.updateConfig({ skills: { enabled: defaultEnabled } });
         this._d.getSkills().syncAgentSkills(ag);
       } catch (err) {
-        try { fs.rmSync(agentDir, { recursive: true, force: true }); } catch {}
-        try { this._d.getChannelManager().cleanupAgentFromChannels(agentId); } catch {}
+        this._rollbackAgentCreation(agentDir, agentId);
         throw err;
       }
     }
