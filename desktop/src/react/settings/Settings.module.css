@@ -1246,12 +1246,8 @@
     margin: var(--space-md) 0 var(--space-lg);
 }
 
-.agent-skill-sub-block {
+.agent-skill-sub-block + .agent-skill-sub-block {
     margin-top: var(--space-lg);
-}
-
-.agent-skill-sub-block:first-of-type {
-    margin-top: 0;
 }
 
 .agent-skill-sub-title {
