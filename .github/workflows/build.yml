@@ -111,12 +111,13 @@ jobs:
           echo "Pre-signing complete."
 
       # macOS 打包（签名 + 公证）
+      # --publish never：所有 publish 由 release job 单点控制，避免多 job 并发上传造成
+      # latest-mac.yml 互相覆盖的时间窗口（那是 v0.98.4 "检查更新失败" 的根因之一）。
       - name: Build macOS (DMG + ZIP)
         if: runner.os == 'macOS'
         run: |
           ulimit -n 65536
-          PUBLISH_FLAG=${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
-          npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish $PUBLISH_FLAG
+          npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -127,12 +128,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # Windows 打包
+      # --publish never：和 mac 同理，由 release job 单点上传。
       - name: Build Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $publishFlag = if ("${{ github.ref }}".StartsWith("refs/tags/v")) { "always" } else { "never" }
-          npx electron-builder --win nsis --publish $publishFlag
+          npx electron-builder --win nsis --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
@@ -173,7 +174,24 @@ jobs:
         with:
           path: artifacts
 
-      - name: Merge latest-mac.yml (dual architecture)
+      # build job 改为 --publish never 后，draft release 不再由 electron-builder 自动创建，
+      # 由 release job 显式创建，并通过 --generate-notes 从上一个 tag 的 commit 自动生成 changelog。
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            echo "Release ${{ github.ref_name }} already exists, skipping create"
+          else
+            gh release create "${{ github.ref_name }}" \
+              --draft \
+              --prerelease \
+              --title "${{ github.ref_name }}" \
+              --generate-notes
+          fi
+
+      # 合并双架构的 latest-mac.yml（本地生成，不上传；上传由下一步统一处理）
+      - name: Generate merged latest-mac.yml
         run: |
           ARM64_YML=$(find artifacts -path '*arm64*' -name 'latest-mac.yml' | head -1)
           X64_YML=$(find artifacts -path '*x64*' -name 'latest-mac.yml' | head -1)
@@ -196,7 +214,7 @@ jobs:
                     currentFile.size = parseInt(line.split('size:')[1].trim());
                   } else if (!line.startsWith(' ') && !line.startsWith('-')) {
                     const kv = line.match(/^(\w+):\s*(.+)/);
-                    if (kv && kv[1] !== 'files') obj[kv[1]] = kv[2].trim().replace(/^'(.*)'$/, '$1');
+                    if (kv && kv[1] !== 'files') obj[kv[1]] = kv[2].trim().replace(/^'(.*)'$/, '\$1');
                     currentFile = null;
                   }
                 }
@@ -232,14 +250,78 @@ jobs:
               fs.writeFileSync('latest-mac.yml', dumpYml(merged));
               console.log('Merged latest-mac.yml with', merged.files.length, 'files');
             "
-            gh release upload "${{ github.ref_name }}" latest-mac.yml --clobber
           elif [ -n "$ARM64_YML" ]; then
-            echo "Only arm64 yml found, uploading as-is"
+            echo "Only arm64 yml found, using as-is"
+            cp "$ARM64_YML" latest-mac.yml
           elif [ -n "$X64_YML" ]; then
-            echo "Only x64 yml found, uploading as-is"
+            echo "Only x64 yml found, using as-is"
+            cp "$X64_YML" latest-mac.yml
+          else
+            echo "::error::No mac latest-mac.yml found in any artifact"
+            exit 1
           fi
+
+      # 单点上传所有 release assets（dmg/zip/exe/yml），blockmap 不上传
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          echo "=== Uploading installers ==="
+          find artifacts \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) -print0 |
+            while IFS= read -r -d '' f; do
+              echo "  $f"
+              gh release upload "${{ github.ref_name }}" "$f" --clobber
+            done
+
+          echo "=== Uploading latest.yml (Windows) ==="
+          WIN_YML=$(find artifacts -name 'latest.yml' | head -1)
+          if [ -n "$WIN_YML" ]; then
+            echo "  $WIN_YML"
+            gh release upload "${{ github.ref_name }}" "$WIN_YML" --clobber
+          else
+            echo "::warning::latest.yml not found (Windows build may have failed)"
+          fi
+
+          echo "=== Uploading latest-mac.yml (merged) ==="
+          gh release upload "${{ github.ref_name }}" latest-mac.yml --clobber
+
+      # 硬约束：release 必须包含所有必需产物，缺一个 CI 就 fail，draft 状态留给人手动检查。
+      # 防止以后再有 shell 写漏 / electron-builder 配置改坏 / 单架构构建挂掉 造成的 yml 缺失。
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ASSETS=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name')
+          echo "=== Release assets ==="
+          echo "$ASSETS"
+          echo ""
+
+          MISSING=()
+          echo "$ASSETS" | grep -qx 'latest-mac.yml' || MISSING+=("latest-mac.yml")
+          echo "$ASSETS" | grep -qx 'latest.yml' || MISSING+=("latest.yml")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-macOS-arm64\.dmg$' || MISSING+=("macOS-arm64.dmg")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-macOS-arm64\.zip$' || MISSING+=("macOS-arm64.zip")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-macOS-x64\.dmg$' || MISSING+=("macOS-x64.dmg")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-macOS-x64\.zip$' || MISSING+=("macOS-x64.zip")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-Windows-x64\.exe$' || MISSING+=("Windows-x64.exe")
+
+          # 清洁性检查：不应该有 blockmap 漏进来
+          if echo "$ASSETS" | grep -qE '\.blockmap$'; then
+            echo "::warning::blockmap files leaked into release (should be excluded by design):"
+            echo "$ASSETS" | grep -E '\.blockmap$'
+          fi
+
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo ""
+            echo "::error::Missing required assets: ${MISSING[*]}"
+            echo "Release will remain as draft for manual inspection."
+            exit 1
+          fi
+          echo ""
+          echo "✓ All required assets present"
 
       - name: Publish release (un-draft, pre-release)
         env:
