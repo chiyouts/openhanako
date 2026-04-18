@@ -13,7 +13,7 @@ export const parameters = {
   type: "object",
   properties: {
     prompt:     { type: "string", description: "图片描述（中英文均可）" },
-    count:      { type: "number", description: "并发生成张数，默认 1，最大 4" },
+    count:      { type: "number", description: "并发生成张数，默认 1，最大 9" },
     image:      { type: "string", description: "参考图路径（图生图）" },
     ratio:      { type: "string", description: "长宽比：1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 21:9" },
     resolution: { type: "string", description: "分辨率：2k, 4k（默认 2k）" },
@@ -41,7 +41,7 @@ export async function execute(input, ctx) {
     return { content: [{ type: "text", text: "没有可用的图片生成 provider" }] };
   }
 
-  const count = Math.min(Math.max(input.count || 1, 1), 4);
+  const count = Math.min(Math.max(input.count || 1, 1), 9);
   const batchId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
   const params = {

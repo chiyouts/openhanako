@@ -223,7 +223,7 @@ describe("generate-image tool — count=3 concurrent submits", () => {
     expect(result.content[0].text).toContain("已提交 3 张");
   });
 
-  it("clamps count to max 4", async () => {
+  it("clamps count to max 9", async () => {
     let callIndex = 0;
     const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: `t-${++callIndex}` })),
@@ -232,7 +232,7 @@ describe("generate-image tool — count=3 concurrent submits", () => {
 
     await execute({ prompt: "clouds", count: 10 }, ctx);
 
-    expect(store.add).toHaveBeenCalledTimes(4);
+    expect(store.add).toHaveBeenCalledTimes(9);
   });
 
   it("clamps count to min 1", async () => {

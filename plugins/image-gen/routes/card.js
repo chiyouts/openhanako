@@ -1,9 +1,9 @@
 /**
  * image-gen/routes/card.js
  *
- * Iframe card for chat messages. Server-rendered.
- * Reads aspect ratio from task params — works for both new and old cards.
- * ResizeObserver reports final size after image loads.
+ * Iframe card for chat messages. Server-rendered initial state + client-side
+ * polling with per-cell DOM swap. 已加载完整的 cell 在后续轮询中不动，避免
+ * meta refresh 整页重载导致的"逐行重绘"撕裂感。
  */
 
 export default function (app, ctx) {
@@ -20,42 +20,45 @@ export default function (app, ctx) {
     const hanaCss = c.req.query("hana-css") || "";
 
     const hasPending = tasks.some((t) => t.status === "pending");
-
-    // Read ratio from task params (works for old cards without aspectRatio in card details)
     const ratio = tasks[0]?.params?.ratio || "1:1";
 
-    let cellsHtml = "";
-    for (const t of tasks) {
-      if (t.status === "pending") {
-        cellsHtml += `<div class="skeleton"></div>`;
-      } else if (t.status === "done" && t.files?.length) {
+    function renderCellInner(t) {
+      if (t.status === "done" && t.files?.length) {
         const file = t.files[0];
         const isVideo = file.endsWith(".mp4") || file.endsWith(".mov");
         if (isVideo) {
           const videoUrl = `${mediaBase}/media/${esc(file)}${tokenParam}`;
           const openUrl = `${mediaBase}/media/open/${esc(file)}${tokenParam ? tokenParam + '&' : '?'}token=${token}`;
-          cellsHtml += `<div class="video-wrap" onclick="fetch('${openUrl}',{method:'POST'})"><video src="${videoUrl}" preload="metadata" muted playsinline></video><div class="play-btn">▶</div></div>`;
-        } else {
-          cellsHtml += `<img src="${mediaBase}/media/${esc(file)}${tokenParam}">`;
+          return `<div class="video-wrap" onclick="fetch('${openUrl}',{method:'POST'})"><video src="${videoUrl}" preload="metadata" muted playsinline></video><div class="play-btn">▶</div></div>`;
         }
-      } else if (t.status === "failed") {
-        cellsHtml += `<div class="failed">${esc(t.failReason || "生成失败")}</div>`;
+        return `<img src="${mediaBase}/media/${esc(file)}${tokenParam}">`;
       }
+      if (t.status === "failed") {
+        return `<div class="failed">${esc(t.failReason || "生成失败")}</div>`;
+      }
+      // pending / cancelled / unknown → skeleton
+      return `<div class="skeleton"></div>`;
     }
 
+    let cellsHtml = "";
+    for (const t of tasks) {
+      const state = t.status || "pending";
+      cellsHtml += `<div class="cell" data-task-id="${esc(t.taskId)}" data-state="${esc(state)}">${renderCellInner(t)}</div>`;
+    }
     if (!tasks.length) cellsHtml = `<div class="failed">任务不存在</div>`;
 
-    // Parse ratio for CSS
     const [rw, rh] = ratio.split(":").map(Number);
     const cssRatio = (rw && rh) ? `${rw}/${rh}` : "1/1";
 
+    const pollApi = `${mediaBase}/tasks/batch/${encodeURIComponent(batchId)}${tokenParam}`;
+
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-${hasPending ? '<meta http-equiv="refresh" content="5">' : ''}
 ${hanaCss ? `<link rel="stylesheet" href="${hanaCss}">` : ''}
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg-card,#FCFAF5);padding:6px}
+.cell{display:block}
 img{display:block;max-width:100%;border-radius:8px}
 .skeleton{aspect-ratio:${cssRatio};max-height:580px;background:linear-gradient(90deg,#f0ede8 25%,#e8e4de 50%,#f0ede8 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:4px}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
@@ -66,25 +69,105 @@ img{display:block;max-width:100%;border-radius:8px}
 </style></head>
 <body>${cellsHtml}
 <script>
-// Wait for images to load, then report final size
-var imgs = document.querySelectorAll('img');
-var pending = imgs.length;
-function done() {
-  var w = document.body.scrollWidth, h = document.body.scrollHeight;
-  parent.postMessage({ type: 'resize-request', payload: { width: w, height: h } }, '*');
-  parent.postMessage({ type: 'ready' }, '*');
-}
-if (!pending) { requestAnimationFrame(done); }
-else {
-  [].forEach.call(imgs, function(img) {
-    if (img.complete) { if (--pending === 0) done(); }
-    else { img.onload = img.onerror = function() { if (--pending === 0) done(); }; }
-  });
-}
-// ResizeObserver for ongoing changes
-new ResizeObserver(function() {
-  parent.postMessage({ type: 'resize-request', payload: { width: document.body.scrollWidth, height: document.body.scrollHeight } }, '*');
-}).observe(document.body);
+(function(){
+  var pollApi = ${JSON.stringify(pollApi)};
+  var mediaBase = ${JSON.stringify(mediaBase)};
+  var tokenParam = ${JSON.stringify(tokenParam)};
+  var token = ${JSON.stringify(token)};
+  var hasPending = ${hasPending ? "true" : "false"};
+  var POLL_MS = 2000;
+  var ERROR_BACKOFF_MS = 3000;
+  var timer = null;
+
+  function escHtml(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function buildInner(t) {
+    if (t.status === 'done' && t.files && t.files.length) {
+      var file = t.files[0];
+      var isVideo = /\\.(mp4|mov)$/i.test(file);
+      var encoded = escHtml(file);
+      if (isVideo) {
+        var videoUrl = mediaBase + '/media/' + encoded + tokenParam;
+        var openUrl = mediaBase + '/media/open/' + encoded + (tokenParam ? tokenParam + '&' : '?') + 'token=' + token;
+        return '<div class="video-wrap" onclick="fetch(\\'' + openUrl + '\\',{method:\\'POST\\'})">' +
+               '<video src="' + videoUrl + '" preload="metadata" muted playsinline></video>' +
+               '<div class="play-btn">▶</div></div>';
+      }
+      return '<img src="' + mediaBase + '/media/' + encoded + tokenParam + '">';
+    }
+    if (t.status === 'failed') {
+      return '<div class="failed">' + escHtml(t.failReason || '生成失败') + '</div>';
+    }
+    return '<div class="skeleton"></div>';
+  }
+
+  function findCell(taskId) {
+    // taskId 是 base36 字符串（无引号/斜杠），直接拼 selector 安全；仍兜底 escape
+    var safe = String(taskId).replace(/[^a-zA-Z0-9_-]/g, '');
+    if (safe !== String(taskId)) return null;
+    return document.querySelector('[data-task-id="' + safe + '"]');
+  }
+
+  async function poll() {
+    timer = null;
+    try {
+      var res = await fetch(pollApi, { cache: 'no-store' });
+      if (!res.ok) throw new Error('http ' + res.status);
+      var data = await res.json();
+      var tasks = (data && data.tasks) || [];
+      var stillPending = false;
+      for (var i = 0; i < tasks.length; i++) {
+        var t = tasks[i];
+        if (t.status === 'pending') stillPending = true;
+        var cell = findCell(t.taskId);
+        if (!cell) continue;
+        if (cell.dataset.state === t.status) continue;
+        // 状态变了——只替换这一个 cell 的 innerHTML
+        // 其他 cell（包括已 done 的 img）完全不动，不会被重新解码
+        cell.innerHTML = buildInner(t);
+        cell.dataset.state = t.status;
+      }
+      if (stillPending) {
+        timer = setTimeout(poll, POLL_MS);
+      }
+    } catch (e) {
+      timer = setTimeout(poll, ERROR_BACKOFF_MS);
+    }
+  }
+
+  function notifyResize() {
+    parent.postMessage({
+      type: 'resize-request',
+      payload: { width: document.body.scrollWidth, height: document.body.scrollHeight },
+    }, '*');
+  }
+
+  // 初次加载：等现有 img 加载完毕再报 ready（避免 iframe 显示成半透明）
+  var imgs = document.querySelectorAll('img');
+  var remaining = imgs.length;
+  function initialReady() {
+    notifyResize();
+    parent.postMessage({ type: 'ready' }, '*');
+  }
+  if (!remaining) {
+    requestAnimationFrame(initialReady);
+  } else {
+    [].forEach.call(imgs, function(img) {
+      if (img.complete) { if (--remaining === 0) initialReady(); }
+      else img.onload = img.onerror = function() { if (--remaining === 0) initialReady(); };
+    });
+  }
+
+  // DOM 尺寸变化（cell 替换后）自动通知父窗口
+  new ResizeObserver(notifyResize).observe(document.body);
+
+  // 只有还有 pending 任务时才启动轮询；全 done/failed 直接静止
+  if (hasPending) timer = setTimeout(poll, POLL_MS);
+})();
 </script>
 </body></html>`;
 
