@@ -1,4 +1,11 @@
 import type { ActivePanel, TabType } from '../types';
+import type { FileRef } from '../types/file-ref';
+
+export interface MediaViewerState {
+  files: FileRef[];
+  currentId: string;
+  origin: 'desk' | 'session';
+}
 
 export interface UiSlice {
   sidebarOpen: boolean;
@@ -12,6 +19,8 @@ export interface UiSlice {
   locale: string;
   /** Skill 预览 overlay 数据（null = 关闭） */
   skillViewerData: { name: string; baseDir: string; filePath?: string; installed?: boolean } | null;
+  /** 媒体预览 overlay 状态（null = 关闭） */
+  mediaViewer: MediaViewerState | null;
   /** 频道创建弹窗是否可见 */
   channelCreateOverlayVisible: boolean;
   setSidebarOpen: (open: boolean) => void;
@@ -23,6 +32,9 @@ export interface UiSlice {
   setCurrentTab: (tab: TabType) => void;
   setActivePanel: (panel: ActivePanel) => void;
   setChannelCreateOverlayVisible: (visible: boolean) => void;
+  setMediaViewer: (state: MediaViewerState | null) => void;
+  setMediaViewerCurrent: (id: string) => void;
+  closeMediaViewer: () => void;
   toggleSidebar: () => void;
   toggleJian: () => void;
 }
@@ -42,6 +54,7 @@ export const createUiSlice = (
   // locale sync always triggers a rerender, even for the default zh locale.
   locale: '',
   skillViewerData: null,
+  mediaViewer: null,
   channelCreateOverlayVisible: false,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSidebarAutoCollapsed: (collapsed) => set({ sidebarAutoCollapsed: collapsed }),
@@ -52,6 +65,11 @@ export const createUiSlice = (
   setCurrentTab: (tab) => set({ currentTab: tab }),
   setActivePanel: (panel) => set({ activePanel: panel }),
   setChannelCreateOverlayVisible: (visible) => set({ channelCreateOverlayVisible: visible }),
+  setMediaViewer: (state) => set({ mediaViewer: state }),
+  setMediaViewerCurrent: (id) => set((s) => ({
+    mediaViewer: s.mediaViewer ? { ...s.mediaViewer, currentId: id } : null,
+  })),
+  closeMediaViewer: () => set({ mediaViewer: null }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleJian: () => set((s) => ({ jianOpen: !s.jianOpen })),
 });

@@ -61,9 +61,9 @@ type SessionStateShape = StateShape & {
 };
 
 const cachedSession = new Map<string, { items: ChatListItem[]; result: FileRef[] }>();
-const EMPTY_SESSION_RESULT: FileRef[] = [];
+const EMPTY_SESSION_RESULT: readonly FileRef[] = Object.freeze([]);
 
-export function selectSessionFiles(state: SessionStateShape, sessionPath: string): FileRef[] {
+export function selectSessionFiles(state: SessionStateShape, sessionPath: string): readonly FileRef[] {
   const items = state.chatSessions?.[sessionPath]?.items;
   if (!items) return EMPTY_SESSION_RESULT;
   const cached = cachedSession.get(sessionPath);

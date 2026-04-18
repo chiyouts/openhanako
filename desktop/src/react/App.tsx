@@ -39,6 +39,7 @@ import { ToastContainer } from './components/ToastContainer';
 import { InputContextMenu } from './components/InputContextMenu';
 import { StatusBar } from './components/StatusBar';
 import { LeavesOverlay } from './components/LeavesOverlay';
+import { MediaViewer } from './components/shared/MediaViewer/MediaViewer';
 import { initTheme, initDragPrevention } from './bootstrap';
 import { initApp } from './app-init';
 import { MainContent } from './MainContent';
@@ -415,6 +416,9 @@ function App() {
 
       {/* Leaves shadow overlay */}
       <LeavesOverlay />
+
+      {/* Media viewer overlay */}
+      <MediaViewer />
 
       {/* Input context menu (cut/copy/paste) */}
       <InputContextMenu />
