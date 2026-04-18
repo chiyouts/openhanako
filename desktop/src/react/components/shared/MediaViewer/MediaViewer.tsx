@@ -77,13 +77,19 @@ export function MediaViewer() {
     return () => window.removeEventListener('keydown', onKey);
   }, [state, closeMediaViewer, goPrev, goNext]);
 
+  // 自动关闭：当前文件丢失或非媒体类型
+  useEffect(() => {
+    if (!state) return;
+    const current = state.files.find(f => f.id === state.currentId);
+    if (!current || !isMediaKind(current.kind)) {
+      closeMediaViewer();
+    }
+  }, [state, closeMediaViewer]);
+
   if (!state) return null;
 
   const current = state.files[currentIndex];
-  if (!current || !isMediaKind(current.kind)) {
-    closeMediaViewer();
-    return null;
-  }
+  if (!current || !isMediaKind(current.kind)) return null;
   const prev = canPrev ? state.files[currentIndex - 1] : undefined;
   const next = canNext ? state.files[currentIndex + 1] : undefined;
   const multi = state.files.length > 1;
