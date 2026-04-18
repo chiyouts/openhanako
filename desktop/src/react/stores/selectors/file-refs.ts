@@ -1,6 +1,6 @@
 import type { FileRef } from '../../types/file-ref';
 import type { DeskFile } from '../../types';
-import type { ChatListItem, UserAttachment } from '../chat-types';
+import type { ChatListItem } from '../chat-types';
 import { inferKindByExt, buildFileRefId } from '../../utils/file-kind';
 
 type StateShape = {
@@ -61,9 +61,11 @@ type SessionStateShape = StateShape & {
 };
 
 const cachedSession = new Map<string, { items: ChatListItem[]; result: FileRef[] }>();
+const EMPTY_SESSION_RESULT: FileRef[] = [];
 
 export function selectSessionFiles(state: SessionStateShape, sessionPath: string): FileRef[] {
-  const items = state.chatSessions?.[sessionPath]?.items ?? [];
+  const items = state.chatSessions?.[sessionPath]?.items;
+  if (!items) return EMPTY_SESSION_RESULT;
   const cached = cachedSession.get(sessionPath);
   if (cached && cached.items === items) return cached.result;
 

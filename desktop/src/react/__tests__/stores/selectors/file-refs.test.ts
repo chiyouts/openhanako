@@ -81,12 +81,19 @@ function sessionState(items: ChatListItem[], path = '/s/1') {
 }
 
 describe('selectSessionFiles', () => {
-  it('空 session 返回 []', () => {
-    expect(selectSessionFiles(sessionState([]), '/s/1')).toEqual([]);
+  it('空 session 返回 []（引用稳定）', () => {
+    const s = sessionState([]);
+    const r1 = selectSessionFiles(s, '/s/1');
+    const r2 = selectSessionFiles(s, '/s/1');
+    expect(r1).toEqual([]);
+    expect(r1).toBe(r2);
   });
 
-  it('未知 sessionPath 返回 []', () => {
-    expect(selectSessionFiles(sessionState([]), '/never')).toEqual([]);
+  it('未知 sessionPath 返回 []（引用稳定）', () => {
+    const r1 = selectSessionFiles(sessionState([]), '/never');
+    const r2 = selectSessionFiles(sessionState([]), '/nowhere');
+    expect(r1).toEqual([]);
+    expect(r1).toBe(r2);
   });
 
   it('抽取 user attachments（过滤目录）', () => {
