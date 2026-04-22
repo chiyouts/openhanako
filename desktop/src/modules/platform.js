@@ -36,11 +36,15 @@
     readDocxHtml: (p) => apiFetch(`/api/fs/docx-html?path=${encodeURIComponent(p)}`).then(r => r.ok ? r.text() : null),
     readXlsxHtml: (p) => apiFetch(`/api/fs/xlsx-html?path=${encodeURIComponent(p)}`).then(r => r.ok ? r.text() : null),
 
-    // 文件写入 / 监听 → Web 不支持
+    // 文件写入 / 监听 / 派生 viewer 窗口 → Web 不支持
     writeFile: async () => false,
     watchFile: async () => false,
     unwatchFile: async () => false,
     onFileChanged: () => {},
+    spawnViewer: async () => null,
+    onViewerLoad: () => {},
+    viewerClose: () => {},
+    onViewerClosed: () => {},
 
     // 文件路径（Web 不支持系统路径）
     getFilePath: () => null,

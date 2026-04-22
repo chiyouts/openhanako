@@ -11,6 +11,52 @@ import { updateLayout } from '../components/SidebarLayout';
 import type { Artifact } from '../types';
 import type { ArtifactSlice } from './artifact-slice';
 
+// ── Viewer spawn（派生只读窗口） ──
+
+/** artifact 是否允许派生到 viewer 窗口：有 filePath 且类型在 viewer 支持集合里 */
+const VIEWER_SUPPORTED_TYPES = new Set(['markdown', 'code', 'csv']);
+
+export function canSpawnViewer(artifact: Artifact | null): boolean {
+  if (!artifact?.filePath) return false;
+  return VIEWER_SUPPORTED_TYPES.has(artifact.type);
+}
+
+/**
+ * 把当前 artifact 派生到独立 viewer 窗口（只读 live）。
+ * 成功后把 windowId 记入 pinnedViewers store。
+ * 失败（如非可编辑类型、无 filePath、Electron 异常）静默返回。
+ */
+export async function spawnViewer(artifact: Artifact): Promise<void> {
+  if (!canSpawnViewer(artifact)) return;
+  if (!artifact.filePath) return; // TS 窄化，canSpawnViewer 已保证
+
+  const windowId = await window.platform?.spawnViewer?.({
+    filePath: artifact.filePath,
+    title: artifact.title,
+    type: artifact.type,
+    language: artifact.language,
+  });
+
+  if (typeof windowId !== 'number') return;
+
+  useStore.getState().addPinnedViewer({
+    windowId,
+    filePath: artifact.filePath,
+    title: artifact.title,
+  });
+}
+
+/**
+ * 注册 viewer-closed 事件监听：当派生 viewer 窗口关闭时，
+ * 主 renderer 从 pinnedViewers store 删掉对应条目。
+ * App mount 时调用一次。
+ */
+export function initViewerEvents(): void {
+  window.platform?.onViewerClosed?.((windowId: number) => {
+    useStore.getState().removePinnedViewer(windowId);
+  });
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any -- IPC callback data */
 
 let _artifactCounter = 0;

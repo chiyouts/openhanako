@@ -855,6 +855,10 @@ function createMainWindow() {
       // 同时隐藏子窗口
       if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.hide();
       if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.hide();
+      // 派生 viewer 跟着主窗口一起隐藏（不保留后台 viewer）
+      for (const [, vw] of _viewerWindows) {
+        if (vw && !vw.isDestroyed()) vw.hide();
+      }
     }
   });
 
@@ -868,6 +872,11 @@ function createMainWindow() {
       browserViewerWindow.destroy();
       browserViewerWindow = null;
     }
+    // 销毁所有派生 viewer
+    for (const [, vw] of _viewerWindows) {
+      if (vw && !vw.isDestroyed()) vw.destroy();
+    }
+    _viewerWindows.clear();
     if (_screenshotWin && !_screenshotWin.isDestroyed()) {
       _screenshotWin.destroy();
       _screenshotWin = null;
@@ -2040,8 +2049,62 @@ wrapIpcHandler("browser-emergency-stop", () => {
   }
 });
 
-// ── 编辑器独立窗口 ──
-// 旧 detach/dock 编辑器窗口机制已拆除。下阶段由 viewer spawn（只读副本）取代。
+// ── 派生 Viewer 窗口（只读文件副本，多实例） ──
+// 语义：接 spawn-viewer → 开新 BrowserWindow，把文件元信息通过 `viewer-load` 推给
+// viewer-window-entry.tsx。Viewer 自己 watchFile 做 live 只读刷新，不跟主面板互通；
+// 窗口 close 时只广播一个 `viewer-closed` 给主 renderer 清 pinnedViewers store。
+const _viewerWindows = new Map(); // windowId -> BrowserWindow
+
+wrapIpcHandler("spawn-viewer", (_event, data) => {
+  if (!data?.filePath || !path.isAbsolute(data.filePath)) return null;
+
+  const isDark = nativeTheme.shouldUseDarkColors;
+  const theme = isDark ? "midnight" : "warm-paper";
+
+  const win = new BrowserWindow({
+    width: 720,
+    height: 800,
+    minWidth: 400,
+    minHeight: 300,
+    title: data.title || "Viewer",
+    frame: false,
+    backgroundColor: THEME_BG[theme] || THEME_BG["warm-paper"],
+    hasShadow: true,
+    show: true,
+    acceptFirstMouse: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.bundle.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  const windowId = win.id;
+  _viewerWindows.set(windowId, win);
+
+  loadWindowURL(win, "viewer-window");
+
+  win.webContents.on("did-finish-load", () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send("viewer-load", { ...data, windowId });
+    }
+  });
+
+  win.on("closed", () => {
+    _viewerWindows.delete(windowId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("viewer-closed", windowId);
+    }
+  });
+
+  return windowId;
+});
+
+wrapIpcHandler("viewer-close", (event) => {
+  // 由 viewer 窗口内"关闭"按钮触发；关闭发起窗口自身
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) win.close();
+});
 
 // 设置窗口 → 主窗口的消息转发
 wrapIpcOn("settings-changed", (_event, type, data) => {

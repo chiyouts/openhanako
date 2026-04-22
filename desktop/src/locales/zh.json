@@ -1788,5 +1788,7 @@
   "status.reconnect": "重新连接",
   "action.retry": "重试",
   "subagentAbort": "终止",
-  "subagentAborted": "已终止"
+  "subagentAborted": "已终止",
+  "preview.openInNewWindow": "在新窗口查看",
+  "preview.openInNewWindowUnsupported": "此类型不支持新窗口查看"
 }

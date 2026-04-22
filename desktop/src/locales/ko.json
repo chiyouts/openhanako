@@ -1729,5 +1729,7 @@
   "status.reconnect": "Reconnect",
   "action.retry": "Retry",
   "subagentAbort": "중지",
-  "subagentAborted": "중지됨"
+  "subagentAborted": "중지됨",
+  "preview.openInNewWindow": "새 창에서 보기",
+  "preview.openInNewWindowUnsupported": "이 파일 형식은 지원되지 않습니다"
 }

@@ -10,6 +10,7 @@ import {
   selectArtifacts,
   selectOpenTabs,
   selectActiveTabId,
+  selectPinnedViewers,
 } from '../../stores/artifact-slice';
 import {
   upsertArtifact,
@@ -20,6 +21,7 @@ import {
   openPreview,
   closePreview,
   handleArtifact,
+  canSpawnViewer,
 } from '../../stores/artifact-actions';
 import type { Artifact } from '../../types';
 
@@ -234,6 +236,83 @@ describe('artifact slice (user-level flat state)', () => {
       const arts = selectArtifacts(testStore.getState());
       expect(arts).toHaveLength(1);
       expect(arts[0].id).toBe('stream-2');
+    });
+  });
+
+  describe('pinnedViewers（派生只读 viewer 窗口）', () => {
+    it('初始为空数组', () => {
+      expect(selectPinnedViewers(testStore.getState())).toEqual([]);
+    });
+
+    it('addPinnedViewer 追加一条', () => {
+      testStore.getState().addPinnedViewer({ windowId: 7, filePath: '/a/b.md', title: 'b' });
+      expect(selectPinnedViewers(testStore.getState())).toEqual([
+        { windowId: 7, filePath: '/a/b.md', title: 'b' },
+      ]);
+    });
+
+    it('addPinnedViewer 同 windowId 防重（理论上 Electron 不复用，但兜底）', () => {
+      testStore.getState().addPinnedViewer({ windowId: 7, filePath: '/a/b.md', title: 'b' });
+      testStore.getState().addPinnedViewer({ windowId: 7, filePath: '/a/other.md', title: 'other' });
+      expect(selectPinnedViewers(testStore.getState())).toHaveLength(1);
+      expect(selectPinnedViewers(testStore.getState())[0].filePath).toBe('/a/b.md');
+    });
+
+    it('removePinnedViewer 按 windowId 精确删除', () => {
+      testStore.getState().addPinnedViewer({ windowId: 1, filePath: '/a.md', title: 'a' });
+      testStore.getState().addPinnedViewer({ windowId: 2, filePath: '/b.md', title: 'b' });
+      testStore.getState().addPinnedViewer({ windowId: 3, filePath: '/c.md', title: 'c' });
+      testStore.getState().removePinnedViewer(2);
+      expect(selectPinnedViewers(testStore.getState()).map(v => v.windowId)).toEqual([1, 3]);
+    });
+
+    it('removePinnedViewer 不存在的 windowId 为 no-op', () => {
+      testStore.getState().addPinnedViewer({ windowId: 1, filePath: '/a.md', title: 'a' });
+      testStore.getState().removePinnedViewer(999);
+      expect(selectPinnedViewers(testStore.getState())).toHaveLength(1);
+    });
+
+    it('clearPinnedViewers 清空全部', () => {
+      testStore.getState().addPinnedViewer({ windowId: 1, filePath: '/a.md', title: 'a' });
+      testStore.getState().addPinnedViewer({ windowId: 2, filePath: '/b.md', title: 'b' });
+      testStore.getState().clearPinnedViewers();
+      expect(selectPinnedViewers(testStore.getState())).toEqual([]);
+    });
+  });
+
+  describe('canSpawnViewer', () => {
+    it('markdown + filePath → true', () => {
+      const a: Artifact = { id: '1', type: 'markdown', title: 't', content: 'c', filePath: '/x.md' };
+      expect(canSpawnViewer(a)).toBe(true);
+    });
+
+    it('code + filePath → true', () => {
+      const a: Artifact = { id: '1', type: 'code', title: 't', content: 'c', filePath: '/x.py' };
+      expect(canSpawnViewer(a)).toBe(true);
+    });
+
+    it('csv + filePath → true', () => {
+      const a: Artifact = { id: '1', type: 'csv', title: 't', content: 'c', filePath: '/x.csv' };
+      expect(canSpawnViewer(a)).toBe(true);
+    });
+
+    it('memory markdown（无 filePath）→ false', () => {
+      const a: Artifact = { id: '1', type: 'markdown', title: 't', content: 'c' };
+      expect(canSpawnViewer(a)).toBe(false);
+    });
+
+    it('html 类型（有 filePath）→ false，暂不支持', () => {
+      const a: Artifact = { id: '1', type: 'html', title: 't', content: 'c', filePath: '/x.html' };
+      expect(canSpawnViewer(a)).toBe(false);
+    });
+
+    it('pdf → false', () => {
+      const a: Artifact = { id: '1', type: 'pdf', title: 't', content: 'c', filePath: '/x.pdf' };
+      expect(canSpawnViewer(a)).toBe(false);
+    });
+
+    it('null → false', () => {
+      expect(canSpawnViewer(null)).toBe(false);
     });
   });
 });

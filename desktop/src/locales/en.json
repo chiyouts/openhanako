@@ -1783,5 +1783,7 @@
   "status.reconnect": "Reconnect",
   "action.retry": "Retry",
   "subagentAbort": "Stop",
-  "subagentAborted": "Stopped"
+  "subagentAborted": "Stopped",
+  "preview.openInNewWindow": "Open in new window",
+  "preview.openInNewWindowUnsupported": "Not supported for this type"
 }

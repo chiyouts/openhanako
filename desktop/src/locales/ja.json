@@ -1729,5 +1729,7 @@
   "status.reconnect": "Reconnect",
   "action.retry": "Retry",
   "subagentAbort": "停止",
-  "subagentAborted": "停止済み"
+  "subagentAborted": "停止済み",
+  "preview.openInNewWindow": "新しいウィンドウで表示",
+  "preview.openInNewWindowUnsupported": "このファイル形式は対応していません"
 }

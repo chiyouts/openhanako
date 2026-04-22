@@ -44,6 +44,11 @@ export interface ArtifactEditorProps {
   mode: 'markdown' | 'code' | 'csv' | 'text';
   language?: string | null;
   onSelectionChange?: (view: EditorView) => void;
+  /**
+   * 只读模式：禁用编辑、不挂 autosave listener、不挂 file watch。
+   * 调用方（如派生 viewer 窗口）自己管 watchFile → setContent 即可。
+   */
+  readOnly?: boolean;
 }
 
 const SAVE_DELAY = 600;
@@ -64,7 +69,7 @@ function setupFileChangeListener() {
 /* ── Editor Component ── */
 
 export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorProps>(
-  function ArtifactEditor({ content, filePath, mode, language, onSelectionChange }, ref) {
+  function ArtifactEditor({ content, filePath, mode, language, onSelectionChange, readOnly = false }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,15 +113,20 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
         bracketMatching(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (!update.docChanged) return;
-          const text = update.state.doc.toString();
-          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-          saveTimerRef.current = setTimeout(() => {
-            saveTimerRef.current = null;
-            saveToFile(text);
-          }, SAVE_DELAY);
-        }),
+        // 只读模式：禁用编辑 + 关闭 autosave；不挂 file watch（调用方自理）
+        ...(readOnly
+          ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+          : [
+              EditorView.updateListener.of((update) => {
+                if (!update.docChanged) return;
+                const text = update.state.doc.toString();
+                if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = setTimeout(() => {
+                  saveTimerRef.current = null;
+                  saveToFile(text);
+                }, SAVE_DELAY);
+              }),
+            ]),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet && selectionCbRef.current) {
             selectionCbRef.current(update.view);
@@ -149,7 +159,7 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
         view.destroy();
         viewRef.current = null;
       };
-    }, [mode, language]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 mode/language 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
+    }, [mode, language, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 mode/language/readOnly 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
 
     // content prop change → update editor (skip if already in sync)
     useEffect(() => {
@@ -163,9 +173,9 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
       }
     }, [content]);
 
-    // File watching
+    // File watching（只读模式下由调用方自理，这里跳过避免重复监听）
     useEffect(() => {
-      if (!filePath) return;
+      if (!filePath || readOnly) return;
       setupFileChangeListener();
       window.platform?.watchFile(filePath);
 
@@ -192,7 +202,7 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
         _fileChangeEmitter.removeEventListener('change', handler);
         window.platform?.unwatchFile(filePath);
       };
-    }, [filePath]);
+    }, [filePath, readOnly]);
 
     return <div className={`artifact-editor mode-${mode}`} ref={containerRef} />;
   },

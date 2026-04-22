@@ -1,5 +1,20 @@
 import type { Artifact } from '../types';
 
+// ── Types ──
+
+/**
+ * 派生 viewer 窗口（"在新窗口查看"）的元信息。
+ *
+ * 每个 viewer 是主面板当前 tab 的只读副本，派生后两侧互不通信（viewer 自己
+ * watchFile 做 live reload，但不与主面板 preview 互通、不回写文件）。
+ */
+export interface PinnedViewer {
+  /** Electron BrowserWindow.id，唯一稳定标识 */
+  windowId: number;
+  filePath: string;
+  title: string;
+}
+
 // ── Slice ──
 
 export interface ArtifactSlice {
@@ -9,14 +24,29 @@ export interface ArtifactSlice {
   openTabs: string[];
   /** 当前激活的 tab id */
   activeTabId: string | null;
+  /** 当前派生出的只读 viewer 窗口（按 windowId keyed） */
+  pinnedViewers: PinnedViewer[];
+  addPinnedViewer: (viewer: PinnedViewer) => void;
+  removePinnedViewer: (windowId: number) => void;
+  clearPinnedViewers: () => void;
 }
 
 export const createArtifactSlice = (
-  _set: (partial: Partial<ArtifactSlice> | ((s: ArtifactSlice) => Partial<ArtifactSlice>)) => void
+  set: (partial: Partial<ArtifactSlice> | ((s: ArtifactSlice) => Partial<ArtifactSlice>)) => void
 ): ArtifactSlice => ({
   artifacts: [],
   openTabs: [],
   activeTabId: null,
+  pinnedViewers: [],
+  addPinnedViewer: (viewer) =>
+    set((s) => {
+      // 防重：同 windowId 存在则跳过（理论上 Electron 不会复用 id）
+      if (s.pinnedViewers.some((v) => v.windowId === viewer.windowId)) return {};
+      return { pinnedViewers: [...s.pinnedViewers, viewer] };
+    }),
+  removePinnedViewer: (windowId) =>
+    set((s) => ({ pinnedViewers: s.pinnedViewers.filter((v) => v.windowId !== windowId) })),
+  clearPinnedViewers: () => set({ pinnedViewers: [] }),
 });
 
 // ── Selectors ──
@@ -24,3 +54,4 @@ export const createArtifactSlice = (
 export const selectArtifacts = (s: ArtifactSlice): Artifact[] => s.artifacts;
 export const selectOpenTabs = (s: ArtifactSlice): string[] => s.openTabs;
 export const selectActiveTabId = (s: ArtifactSlice): string | null => s.activeTabId;
+export const selectPinnedViewers = (s: ArtifactSlice): PinnedViewer[] => s.pinnedViewers;
