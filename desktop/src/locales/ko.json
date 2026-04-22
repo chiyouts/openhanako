@@ -148,7 +148,10 @@
     "diaryFailed": "일기 작성 실패",
     "xing": "대화에서 스킬 만들기",
     "compact": "컨텍스트 압축",
-    "compactBusy": "압축 중..."
+    "compactBusy": "압축 중...",
+    "stop": "현재 응답 중지",
+    "new": "새 세션 시작 (기록 보관)",
+    "reset": "세션 초기화 (기록 삭제)"
   },
   "welcome": {
     "messages": [

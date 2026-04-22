@@ -26,7 +26,7 @@ import { SkillBadge } from './input/extensions/skill-badge';
 import { serializeEditor } from '../utils/editor-serializer';
 import { useSkillSlashItems } from '../hooks/use-slash-items';
 import {
-  XING_PROMPT, executeDiary, executeCompact, buildSlashCommands, getSlashMatches,
+  XING_PROMPT, executeDiary, executeCompact, executeSlashViaWs, buildSlashCommands, getSlashMatches,
   resolveSlashSubmitSelection,
   type SlashItem,
 } from './input/slash-commands';
@@ -209,9 +209,19 @@ function InputAreaInner() {
 
   const skillItems = useSkillSlashItems();
 
+  const slashViaWsFn = useCallback(
+    (cmd: string) => executeSlashViaWs(
+      cmd,
+      setSlashBusy,
+      () => { editor?.commands.clearContent(); },
+      setSlashMenuOpen,
+    ),
+    [editor],
+  );
+
   const slashCommands = useMemo(
-    () => [...buildSlashCommands(t, diaryFn, xingFn, compactFn), ...skillItems],
-    [diaryFn, xingFn, compactFn, t, skillItems],
+    () => [...buildSlashCommands(t, diaryFn, xingFn, compactFn, slashViaWsFn), ...skillItems],
+    [diaryFn, xingFn, compactFn, slashViaWsFn, t, skillItems],
   );
 
   const filteredCommands = useMemo(() => {

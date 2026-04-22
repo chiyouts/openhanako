@@ -114,13 +114,44 @@ export function executeCompact(
   };
 }
 
+/**
+ * 通用的 WS slash 命令发送器。
+ * 一期服务 /stop /new /reset 三条系统命令；未来扩展时（插件命令、skill 命令）也共用这条 WS 通道。
+ * 后端在 server/routes/chat.js 接收 {type:'slash'}，走 engine.slashDispatcher.tryDispatch。
+ */
+export function executeSlashViaWs(
+  cmd: string,
+  setBusy: (name: string | null) => void,
+  setInput: (text: string) => void,
+  setMenuOpen: (open: boolean) => void,
+): () => Promise<void> {
+  return async () => {
+    setBusy(cmd);
+    setInput('');
+    setMenuOpen(false);
+    try {
+      const ws = getWebSocket();
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'slash',
+          text: '/' + cmd,
+          sessionPath: useStore.getState().currentSessionPath,
+        }));
+      }
+    } finally {
+      setTimeout(() => setBusy(null), 800);
+    }
+  };
+}
+
 export function buildSlashCommands(
   t: (key: string) => string,
   executeDiaryFn: () => Promise<void>,
   executeXingFn: () => Promise<void>,
   executeCompactFn: () => Promise<void>,
+  slashViaWsFactory?: (cmd: string) => () => Promise<void>,
 ): SlashItem[] {
-  return [
+  const list: SlashItem[] = [
     {
       name: 'diary',
       label: '/diary',
@@ -149,4 +180,37 @@ export function buildSlashCommands(
       execute: executeCompactFn,
     },
   ];
+  // slashViaWsFactory 由 InputArea 注入；没传则兼容既有调用方（如测试）
+  if (slashViaWsFactory) {
+    list.push(
+      {
+        name: 'stop',
+        label: '/stop',
+        description: t('slash.stop'),
+        busyLabel: '',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
+        type: 'builtin',
+        execute: slashViaWsFactory('stop'),
+      },
+      {
+        name: 'new',
+        label: '/new',
+        description: t('slash.new'),
+        busyLabel: '',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+        type: 'builtin',
+        execute: slashViaWsFactory('new'),
+      },
+      {
+        name: 'reset',
+        label: '/reset',
+        description: t('slash.reset'),
+        busyLabel: '',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg>',
+        type: 'builtin',
+        execute: slashViaWsFactory('reset'),
+      },
+    );
+  }
+  return list;
 }

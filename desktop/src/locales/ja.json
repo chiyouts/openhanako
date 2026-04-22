@@ -148,7 +148,10 @@
     "diaryFailed": "日記の作成に失敗しました",
     "xing": "会話からスキルを作成",
     "compact": "コンテキストを圧縮",
-    "compactBusy": "圧縮中..."
+    "compactBusy": "圧縮中...",
+    "stop": "現在の返信を停止",
+    "new": "新しいセッションを開始（履歴を保管）",
+    "reset": "セッションをリセット（履歴を消去）"
   },
   "welcome": {
     "messages": [

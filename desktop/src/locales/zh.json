@@ -149,7 +149,10 @@
     "diaryFailed": "日记写入失败",
     "xing": "从对话中提炼技能",
     "compact": "压缩上下文",
-    "compactBusy": "正在压缩..."
+    "compactBusy": "正在压缩...",
+    "stop": "停止当前回复",
+    "new": "开启新会话（归档历史）",
+    "reset": "重置会话（清除历史）"
   },
   "welcome": {
     "messages": [

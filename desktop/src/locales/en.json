@@ -149,7 +149,10 @@
     "diaryFailed": "Failed to write diary",
     "xing": "Create skill from conversation",
     "compact": "Compact context",
-    "compactBusy": "Compacting..."
+    "compactBusy": "Compacting...",
+    "stop": "Stop current reply",
+    "new": "Start new session (archive history)",
+    "reset": "Reset session (clear history)"
   },
   "welcome": {
     "messages": [

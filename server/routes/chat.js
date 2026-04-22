@@ -606,6 +606,35 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               return;
             }
 
+            if (msg.type === "slash" && typeof msg.text === "string") {
+              const sp = requireSessionPath(msg, ws); if (!sp) return;
+              const dispatcher = engine.slashDispatcher;
+              if (!dispatcher) {
+                wsSend(ws, { type: "error", message: "slash system not ready", sessionPath: sp });
+                return;
+              }
+              const session = engine.getSessionByPath(sp);
+              const agentId = session?.agentId || msg.agentId;
+              if (!agentId) {
+                wsSend(ws, { type: "error", message: "agentId required", sessionPath: sp });
+                return;
+              }
+              const sendReply = async (text) => {
+                wsSend(ws, { type: "slash_result", sessionPath: sp, text });
+              };
+              const res = await dispatcher.tryDispatch(msg.text.trim(), {
+                sessionRef: { kind: "desktop", agentId, sessionPath: sp },
+                source: "desktop",
+                senderId: "desktop",
+                isOwner: true,
+                reply: sendReply,
+              });
+              if (!res.handled) {
+                wsSend(ws, { type: "slash_result", sessionPath: sp, text: `[未知命令] ${msg.text}` });
+              }
+              return;
+            }
+
             if (msg.type === "compact") {
               const compactPath = requireSessionPath(msg, ws); if (!compactPath) return;
               const session = engine.getSessionByPath(compactPath);
