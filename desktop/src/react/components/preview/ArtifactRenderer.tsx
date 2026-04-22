@@ -13,6 +13,47 @@ import { openFilePreview } from '../../utils/file-preview';
 import { useStore } from '../../stores';
 import type { Artifact } from '../../types';
 
+// ── LegacyMediaFallback ──
+// image / svg 旧类型 artifact 的隔离渲染组件。
+// currentSessionPath 订阅收窄到此组件，不影响 html/markdown/code/csv 等主流路径。
+
+function LegacyMediaFallback({ artifact }: { artifact: Artifact }) {
+  const currentSessionPath = useStore(s => s.currentSessionPath);
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn('[ArtifactRenderer] 旧类型 image/svg artifact，走 fallback，请通过文件重新打开以使用新 MediaViewer');
+  }
+
+  const onOpen = () => {
+    if (!artifact.filePath || !artifact.ext) return;
+    const context = currentSessionPath
+      ? { origin: 'session' as const, sessionPath: currentSessionPath }
+      : { origin: 'desk' as const };
+    openFilePreview(artifact.filePath, artifact.title, artifact.ext, context);
+  };
+
+  return (
+    <div
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 200,
+        color: 'var(--text-muted)',
+        cursor: 'pointer',
+        fontSize: '0.85rem',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+    >
+      <span>此图片预览已升级，点此在新查看器打开</span>
+    </div>
+  );
+}
+
 interface ArtifactRendererProps {
   artifact: Artifact;
 }
@@ -121,7 +162,6 @@ function FileInfoPreview({ artifact }: { artifact: Artifact }) {
 // ── ArtifactRenderer ──
 
 export function ArtifactRenderer({ artifact }: ArtifactRendererProps) {
-  const currentSessionPath = useStore(s => s.currentSessionPath);
   switch (artifact.type) {
     case 'html':
       return (
@@ -149,38 +189,8 @@ export function ArtifactRenderer({ artifact }: ArtifactRendererProps) {
     // image / svg：旧类型 artifact 的 fallback。新路径不再产生此类 artifact，
     // 持久化或旧 session 恢复时可能命中。点击后按 owner 路由到统一的 MediaViewer。
     case 'image':
-    case 'svg': {
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('[ArtifactRenderer] 旧类型 image/svg artifact，走 fallback，请通过文件重新打开以使用新 MediaViewer');
-      }
-      const onOpen = () => {
-        if (!artifact.filePath || !artifact.ext) return;
-        const context = currentSessionPath
-          ? { origin: 'session' as const, sessionPath: currentSessionPath }
-          : { origin: 'desk' as const };
-        openFilePreview(artifact.filePath, artifact.title, artifact.ext, context);
-      };
-      return (
-        <div
-          onClick={onOpen}
-          role="button"
-          tabIndex={0}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: 200,
-            color: 'var(--text-muted)',
-            cursor: 'pointer',
-            fontSize: '0.85rem',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}
-        >
-          <span>此图片预览已升级，点此在新查看器打开</span>
-        </div>
-      );
-    }
+    case 'svg':
+      return <LegacyMediaFallback artifact={artifact} />;
 
     case 'pdf':
       return <PdfPreview content={artifact.content} />;
