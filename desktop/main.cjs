@@ -16,6 +16,7 @@ const fs = require("fs");
 const { pathToFileURL } = require("url");
 const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, getState: getUpdateState } = require("./auto-updater.cjs");
 const { wrapIpcHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
+const themeRegistry = require('./src/shared/theme-registry.cjs');
 
 // preload 缺失时 Electron 会静默忽略，renderer 拿不到 window.hana →
 // onboarding/主窗口白屏且无前端报错。此处硬崩，拒绝以不可用状态启动。
@@ -115,7 +116,7 @@ function isAllowedBrowserUrl(url) {
     return p.protocol === "http:" || p.protocol === "https:";
   } catch { return false; }
 }
-let _browserViewerTheme = "warm-paper"; // 当前主题（用于 backgroundColor）
+let _browserViewerTheme = themeRegistry.DEFAULT_THEME; // 当前主题（用于 backgroundColor）
 const TITLEBAR_HEIGHT = 44;        // 浏览器窗口标题栏高度（px）
 let serverProcess = null;
 let serverPort = null;
@@ -885,13 +886,6 @@ function createMainWindow() {
 }
 
 
-const THEME_BG = {
-  "warm-paper":   "#F8F5ED",
-  "midnight":     "#2D4356",
-  "high-contrast":"#FAF9F6",
-  "grass-aroma":  "#F5F8F3",
-  "contemplation":"#F3F5F7",
-};
 
 // ── 创建设置窗口 ──
 function createSettingsWindow(tab, theme) {
@@ -917,7 +911,7 @@ function createSettingsWindow(tab, theme) {
     minHeight: 500,
     title: "Settings",
     ...titleBarOpts({ x: 16, y: 14 }),
-    backgroundColor: THEME_BG[theme || _browserViewerTheme] || THEME_BG["warm-paper"],
+    backgroundColor: (themeRegistry.THEMES[theme || _browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -1024,7 +1018,7 @@ function createBrowserViewerWindow(opts = {}) {
     minHeight: 360,
     title: "Browser",
     frame: false,
-    backgroundColor: THEME_BG[_browserViewerTheme] || THEME_BG["warm-paper"],
+    backgroundColor: (themeRegistry.THEMES[_browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
     hasShadow: true,
     show: shouldShow,
     acceptFirstMouse: true, // macOS: 第一次点击不仅激活窗口，还穿透到内容
@@ -2059,7 +2053,7 @@ wrapIpcHandler("spawn-viewer", (_event, data) => {
   if (!data?.filePath || !path.isAbsolute(data.filePath)) return null;
 
   const isDark = nativeTheme.shouldUseDarkColors;
-  const theme = isDark ? "midnight" : "warm-paper";
+  const { concrete: theme } = themeRegistry.resolveSavedTheme('auto', isDark);
 
   const win = new BrowserWindow({
     width: 720,
@@ -2068,7 +2062,7 @@ wrapIpcHandler("spawn-viewer", (_event, data) => {
     minHeight: 300,
     title: data.title || "Viewer",
     frame: false,
-    backgroundColor: THEME_BG[theme] || THEME_BG["warm-paper"],
+    backgroundColor: (themeRegistry.THEMES[theme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
     hasShadow: true,
     show: true,
     acceptFirstMouse: true,
@@ -2113,9 +2107,7 @@ wrapIpcOn("settings-changed", (_event, type, data) => {
   }
   if (type === "theme-changed" && data?.theme) {
     const name = data.theme;
-    _browserViewerTheme = name === "auto"
-      ? (nativeTheme.shouldUseDarkColors ? "midnight" : "warm-paper")
-      : name;
+    _browserViewerTheme = themeRegistry.resolveSavedTheme(name, nativeTheme.shouldUseDarkColors).concrete;
     if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
       browserViewerWindow.webContents.send("settings-changed", type, data);
     }
