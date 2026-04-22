@@ -1113,6 +1113,7 @@ After dispatching subagent or other background tasks:
    * opts:
    *   agentId, cwd, model, persist (string 目录路径 | falsy),
    *   toolFilter, builtinFilter, withMemory, signal,
+   *   subagentContext (true = 走 subagent 专用 prompt：跳过记忆三段和团队名单),
    *   emitEvents (true 时将 session 事件转发到 EventBus),
    *   onSessionReady (sessionPath => void) 回调，session 创建后、prompt 执行前触发
    */
@@ -1189,7 +1190,11 @@ After dispatching subagent or other background tasks:
       const skills = this._d.getSkills();
       const resourceLoader = this._d.getResourceLoader();
       let isolatedPrompt;
-      if (opts.withMemory && !targetAgent.memoryEnabled) {
+      if (opts.subagentContext) {
+        // Subagent 专用 prompt：跳过长期记忆、pinned、记忆规则、团队 agent 名单。
+        // 不走 cached systemPrompt getter，因为它返回"完整 prompt"的缓存。
+        isolatedPrompt = targetAgent.buildSystemPrompt({ forSubagent: true });
+      } else if (opts.withMemory && !targetAgent.memoryEnabled) {
         const savedState = targetAgent.sessionMemoryEnabled;
         targetAgent.setMemoryEnabled(true);
         isolatedPrompt = targetAgent.systemPrompt;

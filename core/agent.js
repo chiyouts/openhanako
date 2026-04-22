@@ -671,8 +671,15 @@ export class Agent {
     return fill(raw);
   }
 
-  /** 组装 system prompt */
-  buildSystemPrompt() {
+  /**
+   * 组装 system prompt
+   * @param {object} [options]
+   * @param {boolean} [options.forSubagent] - 为 subagent 构造的轻量 prompt：
+   *   跳过记忆三段（规则 + pinned.md + memory.md）和团队 agent 名单。
+   *   Subagent 是一次性隔离任务，不需要长期记忆和多 agent 协作上下文。
+   */
+  buildSystemPrompt(options = {}) {
+    const forSubagent = !!options.forSubagent;
     const isZh = String(this._config.locale || "").startsWith("zh");
 
     const readFile = (filePath) => safeReadFile(filePath, "");
@@ -710,7 +717,8 @@ export class Agent {
       ));
     }
     // 记忆整体开关：master && session 都开启才注入记忆相关 prompt
-    if (this.memoryEnabled) {
+    // Subagent 场景下整块跳过（无记忆工具 = 规则和 pinned 也是孤儿噪音）
+    if (this.memoryEnabled && !forSubagent) {
       const memoryRule = isZh ? [
         "",
         "## 记忆使用规则",
@@ -896,7 +904,8 @@ export class Agent {
     }
 
     // 团队协作（仅当存在其他 agent 时注入）
-    if (this._listAgents) {
+    // Subagent 场景下跳过：subagent 没有 subagent 工具，知道其他 agent 也使不上
+    if (this._listAgents && !forSubagent) {
       const myId = this.id;
       const allAgents = this._listAgents();
       const others = allAgents.filter(a => a.id !== myId);
