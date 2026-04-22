@@ -201,3 +201,37 @@ describe("POST /api/sessions/archived/delete", () => {
     expect(fs.existsSync(bogus)).toBe(true);
   });
 });
+
+describe("POST /api/sessions/cleanup (titles orphan cleanup)", () => {
+  let tmpDir, engine, app;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-cleanup-titles-"));
+    const sessDir = path.join(tmpDir, "agents", "a", "sessions");
+    const archDir = path.join(sessDir, "archived");
+    fs.mkdirSync(archDir, { recursive: true });
+    const oldFile = path.join(archDir, "old.jsonl");
+    fs.writeFileSync(oldFile, "{}\n");
+    const oldTs = (Date.now() - 100 * 86400_000) / 1000;
+    fs.utimesSync(oldFile, oldTs, oldTs);
+
+    engine = makeEngine(tmpDir);
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    app = new Hono();
+    app.route("/api", createSessionsRoute(engine));
+  });
+
+  it("clears titles entries for deleted archived sessions", async () => {
+    const res = await app.request("/api/sessions/cleanup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxAgeDays: 90 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.deleted).toBe(1);
+    const activeKey = path.join(tmpDir, "agents", "a", "sessions", "old.jsonl");
+    expect(engine.clearSessionTitle).toHaveBeenCalledWith(activeKey);
+  });
+});

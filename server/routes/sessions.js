@@ -421,6 +421,9 @@ export function createSessionsRoute(engine) {
             if (stat.mtime.getTime() < cutoff) {
               await fs.unlink(fp);
               deleted++;
+              // 清理 titles.json 孤儿（key = 对应的活跃路径）
+              const activeKey = path.join(agentsDir, agentId, "sessions", f);
+              try { await engine.clearSessionTitle(activeKey); } catch {}
             }
           } catch {}
         }
