@@ -437,6 +437,78 @@ export async function archiveSession(path: string): Promise<void> {
 }
 
 // ══════════════════════════════════════════════════════
+// 归档管理：列出 / 恢复 / 永久删 / 批量清理
+// ══════════════════════════════════════════════════════
+
+export interface ArchivedSession {
+  path: string;
+  title: string | null;
+  archivedAt: string;
+  sizeBytes: number;
+  agentId: string;
+  agentName: string;
+}
+
+export type RestoreResult = 'ok' | 'conflict' | 'error';
+
+export async function listArchivedSessions(): Promise<ArchivedSession[]> {
+  try {
+    const res = await hanaFetch('/api/sessions/archived');
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err) {
+    console.error('[archived] list failed:', err);
+    return [];
+  }
+}
+
+export async function restoreSession(path: string): Promise<RestoreResult> {
+  try {
+    const res = await hanaFetch('/api/sessions/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (res.status === 409) return 'conflict';
+    if (!res.ok) return 'error';
+    return 'ok';
+  } catch (err) {
+    console.error('[archived] restore failed:', err);
+    return 'error';
+  }
+}
+
+export async function deleteArchivedSession(path: string): Promise<boolean> {
+  try {
+    const res = await hanaFetch('/api/sessions/archived/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[archived] delete failed:', err);
+    return false;
+  }
+}
+
+export async function cleanupArchivedSessions(maxAgeDays: 30 | 90): Promise<{ deleted: number }> {
+  try {
+    const res = await hanaFetch('/api/sessions/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxAgeDays }),
+    });
+    if (!res.ok) return { deleted: 0 };
+    const data = await res.json();
+    return { deleted: data.deleted ?? 0 };
+  } catch (err) {
+    console.error('[archived] cleanup failed:', err);
+    return { deleted: 0 };
+  }
+}
+
+// ══════════════════════════════════════════════════════
 // 重命名 Session
 // ══════════════════════════════════════════════════════
 
