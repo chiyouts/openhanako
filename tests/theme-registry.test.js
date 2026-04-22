@@ -52,6 +52,13 @@ describe('theme-registry', () => {
         expect(t.i18nMode).toMatch(/^settings\.appearance\..+Mode$/);
       }
     );
+
+    it('THEMES 及每个条目都是 frozen（防止意外 mutation）', () => {
+      expect(Object.isFrozen(reg.THEMES)).toBe(true);
+      for (const id of Object.keys(reg.THEMES)) {
+        expect(Object.isFrozen(reg.THEMES[id])).toBe(true);
+      }
+    });
   });
 
   describe('migrateSavedTheme', () => {
@@ -128,6 +135,11 @@ describe('theme-registry', () => {
         expect(o).toHaveProperty('i18nName');
         expect(o).toHaveProperty('i18nMode');
       });
+    });
+
+    it('getAllUIOptions 最后一项是 auto（UI 顺序约束）', () => {
+      const opts = reg.getAllUIOptions();
+      expect(opts[opts.length - 1].id).toBe('auto');
     });
   });
 });

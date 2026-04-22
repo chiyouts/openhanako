@@ -5,25 +5,38 @@ export interface ThemeEntry {
   i18nMode: string;
 }
 
+export type ThemeId =
+  | 'warm-paper'
+  | 'midnight'
+  | 'high-contrast'
+  | 'grass-aroma'
+  | 'contemplation'
+  | 'absolutely'
+  | 'delve'
+  | 'deep-think'
+  | 'claude-design';
+
+export type StoredThemeSelection = ThemeId | 'auto';
+
 export interface ThemeUIOption {
-  id: string;
+  id: ThemeId | 'auto';
   i18nName: string;
   i18nMode: string;
 }
 
 export interface ResolvedTheme {
-  stored: string;
-  concrete: string;
+  stored: StoredThemeSelection;
+  concrete: ThemeId;
 }
 
 export const STORAGE_KEY: 'hana-theme';
-export const DEFAULT_THEME: string;
-export const AUTO_LIGHT_DEFAULT: string;
-export const AUTO_DARK_DEFAULT: string;
+export const DEFAULT_THEME: 'warm-paper';
+export const AUTO_LIGHT_DEFAULT: 'warm-paper';
+export const AUTO_DARK_DEFAULT: 'midnight';
 export const AUTO_OPTION: ThemeUIOption;
-export const THEMES: Readonly<Record<string, ThemeEntry>>;
+export const THEMES: Readonly<Record<ThemeId, ThemeEntry>>;
 
-export function migrateSavedTheme(raw: unknown): string;
+export function migrateSavedTheme(raw: unknown): StoredThemeSelection;
 export function resolveSavedTheme(raw: unknown, isDark: boolean): ResolvedTheme;
-export function getThemeIds(): string[];
+export function getThemeIds(): ThemeId[];
 export function getAllUIOptions(): ThemeUIOption[];

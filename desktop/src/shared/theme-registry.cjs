@@ -17,62 +17,77 @@ const AUTO_OPTION = Object.freeze({
   i18nMode: 'settings.appearance.autoMode',
 });
 
-const THEMES = Object.freeze({
-  'warm-paper': {
-    cssPath: 'themes/warm-paper.css',
-    backgroundColor: '#F8F5ED',
-    i18nName: 'settings.appearance.warmPaper',
-    i18nMode: 'settings.appearance.warmPaperMode',
-  },
-  'midnight': {
-    cssPath: 'themes/midnight.css',
-    backgroundColor: '#2D4356',
-    i18nName: 'settings.appearance.midnight',
-    i18nMode: 'settings.appearance.midnightMode',
-  },
-  'high-contrast': {
-    cssPath: 'themes/high-contrast.css',
-    backgroundColor: '#FAF9F6',
-    i18nName: 'settings.appearance.highContrast',
-    i18nMode: 'settings.appearance.highContrastMode',
-  },
-  'grass-aroma': {
-    cssPath: 'themes/grass-aroma.css',
-    backgroundColor: '#F5F8F3',
-    i18nName: 'settings.appearance.grassAroma',
-    i18nMode: 'settings.appearance.grassAromaMode',
-  },
-  'contemplation': {
-    cssPath: 'themes/contemplation.css',
-    backgroundColor: '#F3F5F7',
-    i18nName: 'settings.appearance.contemplation',
-    i18nMode: 'settings.appearance.contemplationMode',
-  },
-  'absolutely': {
-    cssPath: 'themes/absolutely.css',
-    backgroundColor: '#F4F3EE',
-    i18nName: 'settings.appearance.absolutely',
-    i18nMode: 'settings.appearance.absolutelyMode',
-  },
-  'delve': {
-    cssPath: 'themes/delve.css',
-    backgroundColor: '#FFFFFF',
-    i18nName: 'settings.appearance.delve',
-    i18nMode: 'settings.appearance.delveMode',
-  },
-  'deep-think': {
-    cssPath: 'themes/deep-think.css',
-    backgroundColor: '#FCFCFD',
-    i18nName: 'settings.appearance.deepThink',
-    i18nMode: 'settings.appearance.deepThinkMode',
-  },
-  'claude-design': {
-    cssPath: 'themes/claude-design.css',
-    backgroundColor: '#F5EFE4',
-    i18nName: 'settings.appearance.claudeDesign',
-    i18nMode: 'settings.appearance.claudeDesignMode',
-  },
-});
+const THEMES = Object.freeze(Object.fromEntries(
+  Object.entries({
+    'warm-paper': {
+      cssPath: 'themes/warm-paper.css',
+      backgroundColor: '#F8F5ED',
+      i18nName: 'settings.appearance.warmPaper',
+      i18nMode: 'settings.appearance.warmPaperMode',
+    },
+    'midnight': {
+      cssPath: 'themes/midnight.css',
+      backgroundColor: '#2D4356',
+      i18nName: 'settings.appearance.midnight',
+      i18nMode: 'settings.appearance.midnightMode',
+    },
+    'high-contrast': {
+      cssPath: 'themes/high-contrast.css',
+      backgroundColor: '#FAF9F6',
+      i18nName: 'settings.appearance.highContrast',
+      i18nMode: 'settings.appearance.highContrastMode',
+    },
+    'grass-aroma': {
+      cssPath: 'themes/grass-aroma.css',
+      backgroundColor: '#F5F8F3',
+      i18nName: 'settings.appearance.grassAroma',
+      i18nMode: 'settings.appearance.grassAromaMode',
+    },
+    'contemplation': {
+      cssPath: 'themes/contemplation.css',
+      backgroundColor: '#F3F5F7',
+      i18nName: 'settings.appearance.contemplation',
+      i18nMode: 'settings.appearance.contemplationMode',
+    },
+    'absolutely': {
+      cssPath: 'themes/absolutely.css',
+      backgroundColor: '#F4F3EE',
+      i18nName: 'settings.appearance.absolutely',
+      i18nMode: 'settings.appearance.absolutelyMode',
+    },
+    'delve': {
+      cssPath: 'themes/delve.css',
+      backgroundColor: '#FFFFFF',
+      i18nName: 'settings.appearance.delve',
+      i18nMode: 'settings.appearance.delveMode',
+    },
+    'deep-think': {
+      cssPath: 'themes/deep-think.css',
+      backgroundColor: '#FCFCFD',
+      i18nName: 'settings.appearance.deepThink',
+      i18nMode: 'settings.appearance.deepThinkMode',
+    },
+    'claude-design': {
+      cssPath: 'themes/claude-design.css',
+      backgroundColor: '#F5EFE4',
+      i18nName: 'settings.appearance.claudeDesign',
+      i18nMode: 'settings.appearance.claudeDesignMode',
+    },
+  }).map(([k, v]) => [k, Object.freeze(v)])
+));
+
+// Spec-required startup assertion: every theme entry must have all 4 fields.
+// Fails at module-load time (not at consumer call time) so misconfigurations
+// surface clearly in every process that requires the registry.
+// (All existing tests indirectly verify this by successfully loading the module.)
+for (const [id, entry] of Object.entries(THEMES)) {
+  if (!entry.cssPath || !entry.backgroundColor || !entry.i18nName || !entry.i18nMode) {
+    throw new Error(`theme-registry: theme "${id}" is missing required fields (cssPath / backgroundColor / i18nName / i18nMode)`);
+  }
+  if (!/^#[0-9A-F]{6}$/i.test(entry.backgroundColor)) {
+    throw new Error(`theme-registry: theme "${id}" has invalid backgroundColor "${entry.backgroundColor}" (must be 6-digit hex)`);
+  }
+}
 
 /** 合法值原样返回（含 'auto'），非法 / null / undefined → DEFAULT_THEME。不主动覆写 localStorage。 */
 function migrateSavedTheme(raw) {
