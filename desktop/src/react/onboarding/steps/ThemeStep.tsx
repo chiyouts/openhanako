@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react';
+import registry from '../../../shared/theme-registry.cjs';
 import settingsStyles from '../../settings/Settings.module.css';
 import { OB_THEMES, themeKey } from '../constants';
 import { StepContainer } from '../onboarding-ui';
@@ -12,7 +13,9 @@ interface ThemeStepProps {
 }
 
 export function ThemeStep({ goToStep }: ThemeStepProps) {
-  const [activeTheme, setActiveTheme] = useState(() => localStorage.getItem('hana-theme') || 'auto');
+  const [activeTheme, setActiveTheme] = useState(() =>
+    registry.migrateSavedTheme(localStorage.getItem(registry.STORAGE_KEY))
+  );
 
   return (
     <StepContainer>
