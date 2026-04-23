@@ -51,6 +51,7 @@ function getPlatform(): ViewerPlatform | null {
 function ViewerApp() {
   const [payload, setPayload] = useState<ViewerLoadPayload | null>(null);
   const [content, setContent] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // 1. 等 IPC 送来文件元信息
   useEffect(() => {
@@ -58,6 +59,7 @@ function ViewerApp() {
     if (!platform?.onViewerLoad) return;
     platform.onViewerLoad((data) => {
       setPayload(data);
+      setLoadError(null);
       document.title = data.title || 'Viewer';
     });
   }, []);
@@ -70,22 +72,35 @@ function ViewerApp() {
 
     let cancelled = false;
 
-    // 初始内容
-    platform.readFile(payload.filePath).then((c) => {
+    const fail = (err: unknown) => {
       if (cancelled) return;
-      setContent(c ?? '');
-    });
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[viewer] live file load failed:', err);
+      setLoadError(message);
+    };
+
+    // 初始内容
+    platform.readFile(payload.filePath)
+      .then((c) => {
+        if (cancelled) return;
+        setLoadError(null);
+        setContent(c ?? '');
+      })
+      .catch(fail);
 
     // Live watch
     platform.watchFile(payload.filePath);
     platform.onFileChanged((changedPath) => {
       if (cancelled) return;
       if (changedPath !== payload.filePath) return;
-      platform.readFile(payload.filePath).then((c) => {
-        if (cancelled) return;
-        if (c == null) return;
-        setContent(c);
-      });
+      platform.readFile(payload.filePath)
+        .then((c) => {
+          if (cancelled) return;
+          if (c == null) return;
+          setLoadError(null);
+          setContent(c);
+        })
+        .catch(fail);
     });
 
     return () => {
@@ -100,6 +115,14 @@ function ViewerApp() {
     return (
       <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
         Loading…
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
+        Failed to load file: {loadError}
       </div>
     );
   }

@@ -2107,6 +2107,15 @@ body.resizing .jian-sidebar-inner {
     background: var(--overlay-subtle);
 }
 
+.context-menu-item.disabled {
+    color: var(--text-faint, rgba(0, 0, 0, 0.35));
+    cursor: default;
+}
+
+.context-menu-item.disabled:hover {
+    background: transparent;
+}
+
 .context-menu-item.danger {
     color: var(--danger);
 }

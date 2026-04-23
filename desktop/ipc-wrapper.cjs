@@ -1,17 +1,42 @@
 const { ipcMain } = require('electron');
 
+function normalizeIpcError(err) {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function logIpcError(channel, err) {
+  const traceId = Math.random().toString(16).slice(2, 10);
+  console.error(`[IPC][${channel}][${traceId}] ${err?.message || err}`, err);
+  return traceId;
+}
+
 /**
- * Non-breaking IPC handler wrapper.
- * Adds structured error logging as a safety net. Does NOT change return format.
- * If an error escapes the handler, it is logged and undefined is returned.
+ * Strict IPC handler wrapper.
+ * Preserves invoke/handle semantics: successful handlers resolve their value,
+ * unexpected handler errors are logged and rejected back to the renderer.
  */
 function wrapIpcHandler(channel, handler) {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
       return await handler(event, ...args);
     } catch (err) {
-      const traceId = Math.random().toString(16).slice(2, 10);
-      console.error(`[IPC][${channel}][${traceId}] ${err?.message || err}`);
+      logIpcError(channel, err);
+      throw normalizeIpcError(err);
+    }
+  });
+}
+
+/**
+ * Best-effort IPC handler wrapper.
+ * Use for fire-and-forget UI actions where we only want structured logging
+ * and explicitly do not expose failures as invoke rejections.
+ */
+function wrapIpcBestEffortHandler(channel, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    try {
+      return await handler(event, ...args);
+    } catch (err) {
+      logIpcError(channel, err);
       return undefined;
     }
   });
@@ -32,4 +57,4 @@ function wrapIpcOn(channel, handler) {
   });
 }
 
-module.exports = { wrapIpcHandler, wrapIpcOn };
+module.exports = { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn };

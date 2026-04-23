@@ -30,15 +30,19 @@ function isTextInput(el: EventTarget | null): el is HTMLElement {
 interface MenuState {
   position: { x: number; y: number };
   target: HTMLElement;
+  selectionSnapshot: SelectionSnapshot | null;
 }
 
-function getSelection(): string {
-  return window.getSelection()?.toString() || '';
+interface SelectionSnapshot {
+  type: 'text-control' | 'contenteditable';
+  start?: number | null;
+  end?: number | null;
+  range?: Range | null;
 }
 
 function getContent(el: HTMLElement): string {
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value;
-  return el.textContent || '';
+  return findEditableRoot(el).textContent || '';
 }
 
 function findEditableRoot(el: HTMLElement): HTMLElement {
@@ -54,6 +58,57 @@ function isEditable(el: HTMLElement): boolean {
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return !el.readOnly && !el.disabled;
   const root = findEditableRoot(el);
   return root.isContentEditable;
+}
+
+function getContentSelectionText(el: HTMLElement): string {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    return start === end ? '' : el.value.slice(start, end);
+  }
+  const root = findEditableRoot(el);
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return '';
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return '';
+  return sel.toString();
+}
+
+function captureSelection(el: HTMLElement): SelectionSnapshot | null {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    return {
+      type: 'text-control',
+      start: el.selectionStart,
+      end: el.selectionEnd,
+    };
+  }
+  const root = findEditableRoot(el);
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+  return {
+    type: 'contenteditable',
+    range: range.cloneRange(),
+  };
+}
+
+function restoreSelection(target: HTMLElement, snapshot: SelectionSnapshot | null): void {
+  if (!snapshot) return;
+  if (snapshot.type === 'text-control' && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+    target.focus();
+    if (snapshot.start != null && snapshot.end != null) {
+      target.setSelectionRange(snapshot.start, snapshot.end);
+    }
+    return;
+  }
+  if (snapshot.type === 'contenteditable' && snapshot.range) {
+    const root = findEditableRoot(target);
+    root.focus();
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(snapshot.range);
+  }
 }
 
 function selectAll(el: HTMLElement): void {
@@ -84,7 +139,11 @@ export function InputContextMenu() {
       if ((target as HTMLElement).closest('[data-no-input-ctx]')) return;
 
       e.preventDefault();
-      setMenu({ position: { x: e.clientX, y: e.clientY }, target });
+      setMenu({
+        position: { x: e.clientX, y: e.clientY },
+        target,
+        selectionSnapshot: captureSelection(target),
+      });
     };
 
     document.addEventListener('contextmenu', handleContextMenu);
@@ -95,38 +154,44 @@ export function InputContextMenu() {
 
   if (!menu) return null;
 
-  const { target } = menu;
-  const hasSelection = getSelection().length > 0;
+  const { target, selectionSnapshot } = menu;
+  const hasSelection = getContentSelectionText(target).length > 0;
   const hasContent = getContent(target).length > 0;
   const editable = isEditable(target);
+
+  const runEditCommand = async (command: 'cut' | 'copy' | 'paste' | 'selectAll') => {
+    if (command === 'paste' || command === 'selectAll') {
+      findEditableRoot(target).focus();
+    } else {
+      restoreSelection(target, selectionSnapshot);
+    }
+    try {
+      await window.platform?.runEditCommand?.(command);
+    } catch (err) {
+      console.warn('[InputContextMenu] edit command failed:', err);
+    }
+  };
 
   const items: ContextMenuItem[] = [];
 
   if (editable) {
     items.push({
       label: t('ctx.cut'),
-      action: () => {
-        if (!hasSelection) return;
-        document.execCommand('cut');
-      },
+      disabled: !hasSelection,
+      action: () => void runEditCommand('cut'),
     });
   }
 
   items.push({
     label: t('ctx.copy'),
-    action: () => {
-      if (!hasSelection) return;
-      document.execCommand('copy');
-    },
+    disabled: !hasSelection,
+    action: () => void runEditCommand('copy'),
   });
 
   if (editable) {
     items.push({
       label: t('ctx.paste'),
-      action: () => {
-        target.focus();
-        document.execCommand('paste');
-      },
+      action: () => void runEditCommand('paste'),
     });
   }
 
@@ -134,7 +199,13 @@ export function InputContextMenu() {
     items.push({ divider: true });
     items.push({
       label: t('ctx.selectAll'),
-      action: () => selectAll(target),
+      action: () => {
+        if (window.platform?.runEditCommand) {
+          void runEditCommand('selectAll');
+          return;
+        }
+        selectAll(target);
+      },
     });
   }
 

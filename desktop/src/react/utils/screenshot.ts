@@ -4,6 +4,16 @@ import { selectSelectedIdsBySession } from '../stores/session-selectors';
 import { extractScreenshotPayload, buildThemeName } from './screenshot-extract';
 import type { ChatMessage } from '../stores/chat-types';
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function dispatchInlineNotice(text: string, type: 'success' | 'error', deskDir?: string) {
+  window.dispatchEvent(new CustomEvent('hana-inline-notice', {
+    detail: { text, type, deskDir },
+  }));
+}
+
 /**
  * 截图指定消息并保存到文件（离屏渲染管线）。
  */
@@ -68,21 +78,19 @@ export async function takeScreenshot(targetMessageId: string, sessionPath: strin
   const t = window.t ?? ((p: string) => p);
   const hana = (window as any).hana;
   if (!hana?.screenshotRender) {
-    window.dispatchEvent(new CustomEvent('hana-inline-notice', {
-      detail: { text: t('common.screenshotFailed'), type: 'error' },
-    }));
+    dispatchInlineNotice(t('common.screenshotFailed'), 'error');
     return;
   }
 
-  const result = await hana.screenshotRender(payload);
-  if (result.success) {
-    window.dispatchEvent(new CustomEvent('hana-inline-notice', {
-      detail: { text: t('common.screenshotSaved'), type: 'success', deskDir: result.dir },
-    }));
-  } else {
-    window.dispatchEvent(new CustomEvent('hana-inline-notice', {
-      detail: { text: `${t('common.screenshotFailed')}: ${result.error}`, type: 'error' },
-    }));
+  try {
+    const result = await hana.screenshotRender(payload);
+    if (result.success) {
+      dispatchInlineNotice(t('common.screenshotSaved'), 'success', result.dir);
+    } else {
+      dispatchInlineNotice(`${t('common.screenshotFailed')}: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    dispatchInlineNotice(`${t('common.screenshotFailed')}: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -97,28 +105,26 @@ export async function takeArticleScreenshot(markdown: string): Promise<void> {
   const t = window.t ?? ((p: string) => p);
   const hana = (window as any).hana;
   if (!hana?.screenshotRender) {
-    window.dispatchEvent(new CustomEvent('hana-inline-notice', {
-      detail: { text: t('common.screenshotFailed'), type: 'error' },
-    }));
+    dispatchInlineNotice(t('common.screenshotFailed'), 'error');
     return;
   }
 
   const homeFolder = useStore.getState().homeFolder || null;
-  const result = await hana.screenshotRender({
-    mode: 'article',
-    theme,
-    markdown,
-    saveDir: homeFolder,
-  });
+  try {
+    const result = await hana.screenshotRender({
+      mode: 'article',
+      theme,
+      markdown,
+      saveDir: homeFolder,
+    });
 
-  if (result.success) {
-    window.dispatchEvent(new CustomEvent('hana-inline-notice', {
-      detail: { text: t('common.screenshotSaved'), type: 'success', deskDir: result.dir },
-    }));
-  } else {
-    window.dispatchEvent(new CustomEvent('hana-inline-notice', {
-      detail: { text: `${t('common.screenshotFailed')}: ${result.error}`, type: 'error' },
-    }));
+    if (result.success) {
+      dispatchInlineNotice(t('common.screenshotSaved'), 'success', result.dir);
+    } else {
+      dispatchInlineNotice(`${t('common.screenshotFailed')}: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    dispatchInlineNotice(`${t('common.screenshotFailed')}: ${getErrorMessage(err)}`, 'error');
   }
 }
 

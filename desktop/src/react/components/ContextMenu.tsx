@@ -12,6 +12,7 @@ export interface ContextMenuItem {
   label?: string;
   action?: () => void;
   danger?: boolean;
+  disabled?: boolean;
   divider?: boolean;
 }
 
@@ -84,9 +85,16 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
         return (
           <div
             key={`${item.label || 'item'}-${i}`}
-            className={`context-menu-item${item.danger ? ' danger' : ''}`}
+            className={`context-menu-item${item.danger ? ' danger' : ''}${item.disabled ? ' disabled' : ''}`}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={(e) => handleItemClick(e, item.action)}
+            onClick={(e) => {
+              if (item.disabled) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
+              handleItemClick(e, item.action);
+            }}
           >
             {item.label || ''}
           </div>

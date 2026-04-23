@@ -18,7 +18,7 @@ const { promisify } = require("util");
 const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, getState: getUpdateState } = require("./auto-updater.cjs");
 const { createFileWatchRegistry } = require("./file-watch-registry.cjs");
 const { MAX_SCREENSHOT_STITCH_RAW_BYTES } = require("./screenshot-stitch-worker.cjs");
-const { wrapIpcHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
+const { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 const themeRegistry = require('./src/shared/theme-registry.cjs');
 
 const execFileAsync = promisify(execFile);
@@ -2051,6 +2051,14 @@ async function screenshotCapture(htmlContent, width) {
 // ── IPC ──
 wrapIpcHandler("get-server-port", () => serverPort);
 wrapIpcHandler("get-server-token", () => serverToken);
+wrapIpcHandler("run-edit-command", (event, command) => {
+  const allowed = new Set(["cut", "copy", "paste", "selectAll"]);
+  if (!allowed.has(command)) {
+    throw new Error(`Unknown edit command: ${command}`);
+  }
+  event.sender[command]();
+  return true;
+});
 wrapIpcHandler("get-app-version", () => app.getVersion());
 // 旧版兼容：check-update 返回 auto-updater 状态中的可用版本信息
 wrapIpcHandler("check-update", () => {
@@ -2061,20 +2069,20 @@ wrapIpcHandler("check-update", () => {
   return null;
 });
 
-wrapIpcHandler("open-settings", (_event, tab, theme) => createSettingsWindow(tab, theme));
+wrapIpcBestEffortHandler("open-settings", (_event, tab, theme) => createSettingsWindow(tab, theme));
 
 // 浏览器查看器窗口
-wrapIpcHandler("open-browser-viewer", (_event, theme) => {
+wrapIpcBestEffortHandler("open-browser-viewer", (_event, theme) => {
   if (theme) _browserViewerTheme = theme;
   createBrowserViewerWindow();
 });
-wrapIpcHandler("browser-go-back", () => { if (_browserWebView) _browserWebView.webContents.goBack(); });
-wrapIpcHandler("browser-go-forward", () => { if (_browserWebView) _browserWebView.webContents.goForward(); });
-wrapIpcHandler("browser-reload", () => { if (_browserWebView) _browserWebView.webContents.reload(); });
-wrapIpcHandler("close-browser-viewer", () => {
+wrapIpcBestEffortHandler("browser-go-back", () => { if (_browserWebView) _browserWebView.webContents.goBack(); });
+wrapIpcBestEffortHandler("browser-go-forward", () => { if (_browserWebView) _browserWebView.webContents.goForward(); });
+wrapIpcBestEffortHandler("browser-reload", () => { if (_browserWebView) _browserWebView.webContents.reload(); });
+wrapIpcBestEffortHandler("close-browser-viewer", () => {
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.close();
 });
-wrapIpcHandler("browser-emergency-stop", () => {
+wrapIpcBestEffortHandler("browser-emergency-stop", () => {
   // 紧急停止：销毁当前浏览器实例，释放 AI 控制
   if (_browserWebView) {
     if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
@@ -2098,7 +2106,7 @@ wrapIpcHandler("browser-emergency-stop", () => {
 // 窗口 close 时只广播一个 `viewer-closed` 给主 renderer 清 pinnedViewers store。
 const _viewerWindows = new Map(); // windowId -> BrowserWindow
 
-wrapIpcHandler("spawn-viewer", (_event, data) => {
+wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
   if (!data?.filePath || !path.isAbsolute(data.filePath)) return null;
 
   const isDark = nativeTheme.shouldUseDarkColors;
@@ -2143,7 +2151,7 @@ wrapIpcHandler("spawn-viewer", (_event, data) => {
   return windowId;
 });
 
-wrapIpcHandler("viewer-close", (event) => {
+wrapIpcBestEffortHandler("viewer-close", (event) => {
   // 由 viewer 窗口内"关闭"按钮触发；关闭发起窗口自身
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win && !win.isDestroyed()) win.close();
@@ -2215,7 +2223,7 @@ wrapIpcHandler("get-splash-info", () => {
 });
 
 // 选择文件夹（系统原生对话框）
-wrapIpcHandler("select-folder", async (event) => {
+wrapIpcBestEffortHandler("select-folder", async (event) => {
   // 找到发起请求的窗口
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return null;
@@ -2228,7 +2236,7 @@ wrapIpcHandler("select-folder", async (event) => {
 });
 
 // 选择附件文件（多选，支持文件和文件夹）
-wrapIpcHandler("select-files", async (event) => {
+wrapIpcBestEffortHandler("select-files", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return [];
   const result = await dialog.showOpenDialog(win, {
@@ -2240,7 +2248,7 @@ wrapIpcHandler("select-files", async (event) => {
 });
 
 // 选择技能文件/文件夹（支持 .zip / .skill / 文件夹）
-wrapIpcHandler("select-skill", async (event) => {
+wrapIpcBestEffortHandler("select-skill", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return null;
   const result = await dialog.showOpenDialog(win, {
@@ -2255,7 +2263,7 @@ wrapIpcHandler("select-skill", async (event) => {
   return result.filePaths[0];
 });
 
-wrapIpcHandler("select-plugin", async (event) => {
+wrapIpcBestEffortHandler("select-plugin", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return null;
   const result = await dialog.showOpenDialog(win, {
@@ -2271,7 +2279,7 @@ wrapIpcHandler("select-plugin", async (event) => {
 });
 
 // ── Skill 预览窗口 IPC ──
-wrapIpcHandler("open-skill-viewer", (_event, data) => {
+wrapIpcBestEffortHandler("open-skill-viewer", (_event, data) => {
   if (!data) return;
   const fromSettings = settingsWindow && !settingsWindow.isDestroyed()
     && _event.sender === settingsWindow.webContents;
@@ -2335,7 +2343,7 @@ wrapIpcHandler("open-skill-viewer", (_event, data) => {
   _showSkillViewer(data, fromSettings);
 });
 
-wrapIpcHandler("skill-viewer-list-files", (_event, baseDir) => {
+wrapIpcBestEffortHandler("skill-viewer-list-files", (_event, baseDir) => {
   if (!baseDir || !path.isAbsolute(baseDir)) return [];
   try {
     if (!fs.statSync(baseDir).isDirectory()) return [];
@@ -2345,7 +2353,7 @@ wrapIpcHandler("skill-viewer-list-files", (_event, baseDir) => {
   }
 });
 
-wrapIpcHandler("skill-viewer-read-file", (_event, filePath) => {
+wrapIpcBestEffortHandler("skill-viewer-read-file", (_event, filePath) => {
   if (!filePath || !path.isAbsolute(filePath)) return null;
   // 安全检查：只允许读取文本文件，限制大小
   try {
@@ -2358,10 +2366,10 @@ wrapIpcHandler("skill-viewer-read-file", (_event, filePath) => {
 });
 
 // close-skill-viewer: overlay 模式下由渲染进程 setState 关闭，保留 handler 避免 preload 报错
-wrapIpcHandler("close-skill-viewer", () => {});
+wrapIpcBestEffortHandler("close-skill-viewer", () => {});
 
 // 在系统文件管理器中打开文件夹（限制为目录且为绝对路径）
-wrapIpcHandler("open-folder", (_event, folderPath) => {
+wrapIpcBestEffortHandler("open-folder", (_event, folderPath) => {
   if (!folderPath || !path.isAbsolute(folderPath)) return;
   try {
     if (!fs.statSync(folderPath).isDirectory()) return;
@@ -2388,12 +2396,12 @@ wrapIpcOn("start-drag", async (event, filePaths) => {
   }
 });
 
-wrapIpcHandler("show-in-finder", (_event, filePath) => {
+wrapIpcBestEffortHandler("show-in-finder", (_event, filePath) => {
   if (!filePath || !path.isAbsolute(filePath)) return;
   shell.showItemInFolder(filePath);
 });
 
-wrapIpcHandler("open-file", (_event, filePath) => {
+wrapIpcBestEffortHandler("open-file", (_event, filePath) => {
   if (!filePath || !path.isAbsolute(filePath)) return;
   try {
     if (!fs.statSync(filePath).isFile()) return;
@@ -2401,7 +2409,7 @@ wrapIpcHandler("open-file", (_event, filePath) => {
   shell.openPath(filePath);
 });
 
-wrapIpcHandler("open-external", (_event, url) => {
+wrapIpcBestEffortHandler("open-external", (_event, url) => {
   if (!url) return;
   try {
     const parsed = new URL(url);
@@ -2424,7 +2432,7 @@ wrapIpcHandler("read-file", (_event, filePath) => {
 });
 
 // 写入文本文件（artifact 编辑用）
-wrapIpcHandler("write-file", (_event, filePath, content) => {
+wrapIpcBestEffortHandler("write-file", (_event, filePath, content) => {
   if (!filePath || !path.isAbsolute(filePath)) return false;
   try {
     fs.writeFileSync(filePath, content, "utf-8");
@@ -2433,7 +2441,7 @@ wrapIpcHandler("write-file", (_event, filePath, content) => {
 });
 
 // 写入二进制文件（截图用）— 支持 ~ 开头路径
-wrapIpcHandler("write-file-binary", (_event, filePath, base64Data) => {
+wrapIpcBestEffortHandler("write-file-binary", (_event, filePath, base64Data) => {
   if (!filePath) return false;
   const resolved = filePath.startsWith("~")
     ? path.join(os.homedir(), filePath.slice(1))
@@ -2492,7 +2500,7 @@ const _fileWatchRegistry = createFileWatchRegistry({
     wc.send("file-changed", filePath);
   },
 });
-wrapIpcHandler("watch-file", (event, filePath) => {
+wrapIpcBestEffortHandler("watch-file", (event, filePath) => {
   if (!filePath || !path.isAbsolute(filePath)) return false;
   const subscriberId = event.sender.id;
   if (!_watchedRendererIds.has(subscriberId)) {
@@ -2505,7 +2513,7 @@ wrapIpcHandler("watch-file", (event, filePath) => {
   return _fileWatchRegistry.watchFile(filePath, subscriberId);
 });
 
-wrapIpcHandler("unwatch-file", (event, filePath) => {
+wrapIpcBestEffortHandler("unwatch-file", (event, filePath) => {
   if (!filePath || !path.isAbsolute(filePath)) return true;
   return _fileWatchRegistry.unwatchFile(filePath, event.sender.id);
 });
@@ -2561,14 +2569,14 @@ wrapIpcHandler("read-xlsx-html", async (_event, filePath) => {
 });
 
 // 重新加载主窗口（DevTools 用）
-wrapIpcHandler("reload-main-window", () => {
+wrapIpcBestEffortHandler("reload-main-window", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.reload();
   }
 });
 
 // 系统通知（由 agent 的 notify 工具触发）
-wrapIpcHandler("show-notification", (_event, title, body) => {
+wrapIpcBestEffortHandler("show-notification", (_event, title, body) => {
   if (!Notification.isSupported()) return;
   const notif = new Notification({
     title: title || "Hana",
@@ -2586,7 +2594,7 @@ wrapIpcHandler("show-notification", (_event, title, body) => {
 });
 
 // Debug: 打开 Onboarding 窗口（DevTools 用）
-wrapIpcHandler("debug-open-onboarding", () => {
+wrapIpcBestEffortHandler("debug-open-onboarding", () => {
   if (onboardingWindow && !onboardingWindow.isDestroyed()) {
     onboardingWindow.focus();
     return;
@@ -2595,7 +2603,7 @@ wrapIpcHandler("debug-open-onboarding", () => {
 });
 
 // Debug: 预览模式打开 Onboarding（不调 API 不写配置）
-wrapIpcHandler("debug-open-onboarding-preview", () => {
+wrapIpcBestEffortHandler("debug-open-onboarding-preview", () => {
   if (onboardingWindow && !onboardingWindow.isDestroyed()) {
     onboardingWindow.focus();
     return;
@@ -2620,14 +2628,14 @@ wrapIpcHandler("onboarding-complete", () => {
 
 // ── 窗口控制 IPC（Windows/Linux 自绘标题栏用）──
 wrapIpcHandler("get-platform", () => process.platform);
-wrapIpcHandler("window-minimize", (event) => {
+wrapIpcBestEffortHandler("window-minimize", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
 });
-wrapIpcHandler("window-maximize", (event) => {
+wrapIpcBestEffortHandler("window-maximize", (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win?.isMaximized()) win.restore(); else win?.maximize();
 });
-wrapIpcHandler("window-close", (event) => {
+wrapIpcBestEffortHandler("window-close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 wrapIpcHandler("window-is-maximized", (event) => {
@@ -2635,7 +2643,7 @@ wrapIpcHandler("window-is-maximized", (event) => {
 });
 
 // 前端初始化完成后调用，关闭 splash / onboarding，显示主窗口
-wrapIpcHandler("app-ready", () => {
+wrapIpcBestEffortHandler("app-ready", () => {
   if (mainWindow) {
     mainWindow.show();
   }

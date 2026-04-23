@@ -144,6 +144,7 @@ export interface PluginWidgetInfo {
 export interface PlatformApi {
   getServerPort(): Promise<string>;
   getServerToken(): Promise<string>;
+  runEditCommand?(command: 'cut' | 'copy' | 'paste' | 'selectAll'): Promise<boolean>;
   openSettings(tab?: string): void;
   openBrowserViewer(url?: string, theme?: string): void;
   selectFolder(): Promise<string | null>;

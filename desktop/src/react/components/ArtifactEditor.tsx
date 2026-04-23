@@ -53,6 +53,10 @@ export interface ArtifactEditorProps {
 
 const SAVE_DELAY = 600;
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /* ── File change emitter (global singleton) ── */
 
 const _fileChangeEmitter = new EventTarget();
@@ -97,7 +101,13 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
       const fp = filePathRef.current;
       if (!fp) return;
       lastSavedContentRef.current = text;
-      window.platform?.writeFile(fp, text);
+      void window.platform?.writeFile(fp, text).catch((err) => {
+        console.warn('[ArtifactEditor] write failed:', err);
+        const tFn = window.t ?? ((p: string) => p);
+        window.dispatchEvent(new CustomEvent('hana-inline-notice', {
+          detail: { text: `${tFn('settings.saveFailed')}: ${getErrorMessage(err)}`, type: 'error' },
+        }));
+      });
     }, []);
 
     // Create editor
@@ -182,19 +192,23 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
       const handler = (e: Event) => {
         const changedPath = (e as CustomEvent).detail;
         if (changedPath !== filePath) return;
-        window.platform?.readFile(filePath).then((newContent) => {
-          if (newContent == null) return;
-          // Content comparison: same as last write → self-write, ignore
-          if (newContent === lastSavedContentRef.current) return;
-          const view = viewRef.current;
-          if (!view) return;
-          const current = view.state.doc.toString();
-          if (current === newContent) return;
-          lastSavedContentRef.current = newContent;
-          view.dispatch({
-            changes: { from: 0, to: current.length, insert: newContent },
+        void window.platform?.readFile(filePath)
+          .then((newContent) => {
+            if (newContent == null) return;
+            // Content comparison: same as last write → self-write, ignore
+            if (newContent === lastSavedContentRef.current) return;
+            const view = viewRef.current;
+            if (!view) return;
+            const current = view.state.doc.toString();
+            if (current === newContent) return;
+            lastSavedContentRef.current = newContent;
+            view.dispatch({
+              changes: { from: 0, to: current.length, insert: newContent },
+            });
+          })
+          .catch((err) => {
+            console.warn('[ArtifactEditor] reload watched file failed:', err);
           });
-        });
       };
 
       _fileChangeEmitter.addEventListener('change', handler);

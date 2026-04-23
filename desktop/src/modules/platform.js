@@ -29,6 +29,7 @@
     getServerPort: async () => location.port || "3000",
     getServerToken: async () => token,
     appReady: async () => {},
+    runEditCommand: async () => false,
 
     // 文件 I/O → server HTTP
     readFile: (p) => apiFetch(`/api/fs/read?path=${encodeURIComponent(p)}`).then(r => r.ok ? r.text() : null),
