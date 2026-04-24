@@ -931,18 +931,21 @@ export class Agent {
       const others = allAgents.filter(a => a.id !== myId);
       if (others.length > 0) {
         const roster = allAgents.map(a => {
-          const tag = a.id === myId ? "（你）" : "";
+          const tag = a.id === myId ? (isZh ? "（你）" : " (you)") : "";
           const model = a.model ? ` [${a.model}]` : "";
           const desc = a.summary ? ` — ${a.summary}` : "";
-          return `- **${a.name}** (id: ${a.id})${tag}${model}${desc}`;
+          const nameLabel = a.name && a.name !== a.id ? `（${a.name}）` : "";
+          return `- \`${a.id}\`${nameLabel}${tag}${model}${desc}`;
         }).join("\n");
         parts.push(isZh
           ? `\n## 团队\n\n` +
             `你不是独自工作。当前环境中有多个 agent，各有不同的专长和模型：\n\n${roster}\n\n` +
+            `调用 subagent 或 dm 工具时，agent 参数必须传上面反引号里的 id 字段值，不是括号里的显示名。\n` +
             `遇到明显更适合其他 agent 专长的任务，或需要不同视角审核重要结论时，用 subagent 并指定 agent 参数请求协助。` +
             `先判断这件事自己做合不合适，再决定是否交出去。不确定找谁时传 \`agent="?"\` 查看详情。`
           : `\n## Team\n\n` +
             `You are not working alone. Multiple agents are available, each with different strengths and models:\n\n${roster}\n\n` +
+            `When calling subagent or dm tools, the agent parameter must be the id field value shown in backticks above, not the display name in parentheses.\n` +
             `When a task clearly falls within another agent's expertise, or when an important conclusion would benefit from a different perspective, use subagent with the agent parameter to request help. ` +
             `Judge whether you're the best fit for the job before deciding to delegate. Pass \`agent="?"\` if unsure who to ask.`
         );

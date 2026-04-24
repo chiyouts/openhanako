@@ -427,6 +427,28 @@ describe("subagent-tool (executeIsolated 原子模式)", () => {
     expect(noopExecute).not.toHaveBeenCalled();
   });
 
+  // 9b. LLM 把 roster 里的显示名当 id 用：name → id 兜底匹配
+  it("resolves display name to id when caller passes name instead of id", async () => {
+    const captureExecute = makeExecuteIsolated({ replyText: "ok", error: null, sessionPath: "/test/child.jsonl" });
+    const tool = createSubagentTool(makeDeps({
+      executeIsolated: captureExecute,
+      getDeferredStore: () => mockStore,
+      listAgents: () => [
+        { id: "hana", name: "Hana" },
+        { id: "ming", name: "明" },
+      ],
+      currentAgentId: "hana",
+    }));
+
+    const result = await tool.execute("call_1", { task: "委派", agent: "明" }, null, null, mockCtx());
+
+    expect(result.details.agentId).toBe("ming");
+    expect(captureExecute).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ agentId: "ming" }),
+    );
+  });
+
   // 10. sync fallback when deferred store is unavailable
   it("falls back to sync execution when deferred store is unavailable", async () => {
     const syncExecute = makeExecuteIsolated({ replyText: "sync result", error: null, sessionPath: null });
