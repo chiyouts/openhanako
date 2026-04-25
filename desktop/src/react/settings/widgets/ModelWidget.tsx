@@ -13,11 +13,16 @@ interface ModelInfo {
   contextWindow?: number | null;
 }
 
+interface ModelRef {
+  id: string;
+  provider: string;
+}
+
 interface ModelWidgetProps {
   /** @deprecated 不再使用，保留兼容签名 */
   providers?: Record<string, { models?: string[]; base_url?: string }>;
-  value: string;
-  onSelect: (ref: { id: string; provider: string }) => void;
+  value?: ModelRef | null;
+  onSelect: (ref: ModelRef) => void;
   placeholder?: string;
   lookupModelMeta?: (id: string) => any;
   formatContext?: (n: number) => string;
@@ -59,6 +64,12 @@ export function ModelWidget({
   }, [open]);
 
   const query = search.toLowerCase();
+  const valueKey = value?.id && value?.provider ? `${value.provider}/${value.id}` : '';
+  const selectedModel = valueKey
+    ? models.find(m => m.id === value?.id && m.provider === value?.provider)
+    : null;
+  const displayValue = selectedModel?.name
+    || (value?.id ? (value.provider ? `${value.provider}/${value.id}` : value.id) : '');
 
   // 按 provider 分组
   const grouped = useMemo(() => {
@@ -75,7 +86,12 @@ export function ModelWidget({
   const handleCustomSubmit = () => {
     const val = customInput.trim();
     if (!val) return;
-    onSelect({ id: val, provider: '' });
+    const slashIdx = val.indexOf('/');
+    if (slashIdx <= 0 || slashIdx >= val.length - 1) return;
+    const provider = val.slice(0, slashIdx).trim();
+    const id = val.slice(slashIdx + 1).trim();
+    if (!provider || !id) return;
+    onSelect({ id, provider });
     setCustomInput('');
     setOpen(false);
   };
@@ -87,7 +103,7 @@ export function ModelWidget({
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
       >
-        <span className={styles['mdw-value']}>{value || `— ${placeholder || t('settings.api.selectModel')} —`}</span>
+        <span className={styles['mdw-value']}>{displayValue || `— ${placeholder || t('settings.api.selectModel')} —`}</span>
         <span className={styles['mdw-arrow']}>▾</span>
       </button>
       <div className={`${styles['mdw-popup']}${open ? ' ' + styles['open'] : ''}`}>
@@ -108,7 +124,7 @@ export function ModelWidget({
               {items.map(m => (
                 <button
                   key={`${m.provider}/${m.id}`}
-                  className={`${styles['mdw-option']}${m.id === value ? ' ' + styles['selected'] : ''}`}
+                  className={`${styles['mdw-option']}${`${m.provider}/${m.id}` === valueKey ? ' ' + styles['selected'] : ''}`}
                   type="button"
                   onClick={() => { onSelect({ id: m.id, provider: m.provider }); setOpen(false); }}
                 >

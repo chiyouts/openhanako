@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { createModuleLogger } from "../lib/debug-log.js";
-import { findModel, parseModelRef } from "../shared/model-ref.js";
+import { findModel, parseModelRef, requireModelRef } from "../shared/model-ref.js";
 import { t } from "../server/i18n.js";
 
 const log = createModuleLogger("config");
@@ -24,6 +24,33 @@ export const SHARED_MODEL_KEYS = [
   ["summarizer",     "summarizer_model"],
   ["compiler",       "compiler_model"],
 ];
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+export function normalizeSharedModelsPatch(partial) {
+  if (!partial || typeof partial !== "object" || Array.isArray(partial)) {
+    throw new Error("shared models patch must be an object");
+  }
+
+  const result = {};
+  for (const [field] of SHARED_MODEL_KEYS) {
+    if (!hasOwn(partial, field)) continue;
+    const raw = partial[field];
+    if (raw === undefined) continue;
+    if (raw === null || raw === "") {
+      result[field] = null;
+      continue;
+    }
+    try {
+      result[field] = requireModelRef(raw);
+    } catch (err) {
+      throw new Error(`shared model ${field}: ${err.message}`);
+    }
+  }
+  return result;
+}
 
 export class ConfigCoordinator {
   /**
@@ -112,13 +139,14 @@ export class ConfigCoordinator {
   }
 
   setSharedModels(partial) {
+    const normalized = normalizeSharedModelsPatch(partial);
     const prefs = this._prefs();
     const changed = [];
     for (const [field, prefKey] of SHARED_MODEL_KEYS) {
-      if (partial[field] !== undefined) {
-        if (partial[field] !== null && partial[field] !== "") prefs[prefKey] = partial[field];
+      if (hasOwn(normalized, field)) {
+        if (normalized[field] !== null && normalized[field] !== "") prefs[prefKey] = normalized[field];
         else delete prefs[prefKey];
-        const v = partial[field];
+        const v = normalized[field];
         const repr = !v ? "(cleared)"
           : typeof v === "object" ? `${v.provider || "?"}/${v.id || "?"}`
           : String(v);
@@ -128,11 +156,27 @@ export class ConfigCoordinator {
     this._savePrefs(prefs);
     if (changed.length) {
       const fresh = this.getSharedModels();
-      const agent = this._d.getAgent();
-      agent.setUtilityModel(fresh.utility || null);
-      agent.setMemoryModel?.(fresh.utility_large || null);
+      this._syncSharedModelsToAgents(fresh);
       log.log(`setSharedModels: ${changed.join(", ")}`);
     }
+  }
+
+  _syncSharedModelsToAgents(sharedModels) {
+    const agents = this._d.getAgents?.();
+    if (agents instanceof Map && agents.size) {
+      for (const agent of agents.values()) {
+        this._syncSharedModelsToAgent(agent, sharedModels);
+      }
+      return;
+    }
+    this._syncSharedModelsToAgent(this._d.getAgent?.(), sharedModels);
+  }
+
+  _syncSharedModelsToAgent(agent, sharedModels) {
+    if (!agent) return;
+    const chatModel = agent.config?.models?.chat || null;
+    agent.setUtilityModel?.(sharedModels.utility || agent.config?.models?.utility || chatModel);
+    agent.setMemoryModel?.(sharedModels.utility_large || agent.config?.models?.utility_large || chatModel);
   }
 
   // ── Search Config ──
@@ -186,10 +230,15 @@ export class ConfigCoordinator {
     log.log(`setUtilityApi: provider=${partial.provider || "-"}, base_url=${partial.base_url || "-"}`);
   }
 
-  resolveUtilityConfig() {
+  resolveUtilityConfig(options = {}) {
+    const { agentId } = options || {};
+    const agent = agentId ? this._d.getAgentById?.(agentId) : this._d.getAgent();
+    if (!agent) {
+      throw new Error(`resolveUtilityConfig: agent ${agentId || "(focus)"} not found`);
+    }
     const models = this._d.getModels();
     return models.resolveUtilityConfig(
-      this._d.getAgent().config,
+      agent.config,
       this.getSharedModels(),
       this.getUtilityApi(),
     );

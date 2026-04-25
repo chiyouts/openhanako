@@ -248,7 +248,7 @@ export class AgentManager {
         if (match?.[1] === hash) return; // 没变化，跳过
       } catch {} // 文件不存在，继续生成
 
-      const utilConfig = this._d.resolveUtilityConfig();
+      const utilConfig = this._d.resolveUtilityConfig({ agentId });
       const locale = ag.config?.locale || "zh";
       const desc = await generateDescription(utilConfig, personality, locale);
       if (!desc) {
@@ -651,7 +651,7 @@ export class AgentManager {
       getSkillsDir:         () => getEngine()?.skillsDir ?? null,
       getLearnSkills:       () => getEngine()?.getLearnSkills?.() ?? {},
       isChannelsEnabled:    () => getEngine()?.isChannelsEnabled?.() ?? false,
-      resolveUtilityConfig: () => getEngine()?.resolveUtilityConfig?.(),
+      resolveUtilityConfig: () => getEngine()?.resolveUtilityConfig?.({ agentId: ag.id }),
       getCwd:               () => getEngine()?.cwd ?? "",
       getTimezone:          () => getEngine()?.getTimezone?.() ?? "",
       getEngine,  // update-settings-tool 仍需要完整 engine

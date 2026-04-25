@@ -836,7 +836,7 @@ async function generateSessionTitle(engine, notify, opts = {}) {
     if (!userText || !assistantText) return false;
 
     // 超时由 callText 内部的 AbortSignal 统一控制：超时即取消 Pi SDK 连接，无空跑
-    let title = await engine.summarizeTitle(userText, assistantText, { timeoutMs: 15_000 });
+    let title = await engine.summarizeTitle(userText, assistantText, { timeoutMs: 15_000, sessionPath });
 
     // API 失败时，用用户第一条消息截取作为 fallback 标题
     if (!title) {

@@ -116,7 +116,7 @@ export class HanaEngine {
       getHub: () => this._hubCallbacks,
       getSkills: () => this._skills,
       getSearchConfig: () => this.getSearchConfig(),
-      resolveUtilityConfig: () => this.resolveUtilityConfig(),
+      resolveUtilityConfig: (options) => this.resolveUtilityConfig(options),
       getSharedModels: () => this._configCoord.getSharedModels(),
       getChannelManager: () => this._channels,
       getSessionCoordinator: () => this._sessionCoord,
@@ -437,7 +437,8 @@ export class HanaEngine {
   setSearchConfig(p) { return this._configCoord.setSearchConfig(p); }
   getUtilityApi() { return this._configCoord.getUtilityApi(); }
   setUtilityApi(p) { return this._configCoord.setUtilityApi(p); }
-  resolveUtilityConfig() { return this._configCoord.resolveUtilityConfig(); }
+  resolveUtilityConfig(options) { return this._configCoord.resolveUtilityConfig(options); }
+  resolveUtilityConfigForAgent(agentId) { return this.resolveUtilityConfig({ agentId }); }
   readAgentOrder() { return this._configCoord.readAgentOrder(); }
   saveAgentOrder(o) { return this._configCoord.saveAgentOrder(o); }
   async syncModelsAndRefresh() { return this._configCoord.syncAndRefresh(); }
@@ -1119,16 +1120,26 @@ export class HanaEngine {
     });
   }
 
-  async summarizeTitle(ut, at, opts) {
-    return _summarizeTitle(this.resolveUtilityConfig(), ut, at, opts);
+  _utilityOptionsForContext(opts = {}) {
+    if (opts?.agentId) return { agentId: opts.agentId };
+    if (opts?.sessionPath) {
+      const agentId = this.agentIdFromSessionPath(opts.sessionPath);
+      if (agentId) return { agentId };
+    }
+    return undefined;
+  }
+
+  async summarizeTitle(ut, at, opts = {}) {
+    return _summarizeTitle(this.resolveUtilityConfig(this._utilityOptionsForContext(opts)), ut, at, opts);
   }
 
   async translateSkillNames(names, lang) {
     return _translateSkillNames(this.resolveUtilityConfig(), names, lang);
   }
 
-  async summarizeActivity(sp, preloaded) {
-    return _summarizeActivity(this.resolveUtilityConfig(), sp, (msg) => this.emitDevLog(msg), preloaded);
+  async summarizeActivity(sp, preloaded, opts = {}) {
+    const utilityOptions = this._utilityOptionsForContext({ ...opts, sessionPath: opts.sessionPath || sp });
+    return _summarizeActivity(this.resolveUtilityConfig(utilityOptions), sp, (msg) => this.emitDevLog(msg), preloaded);
   }
 
   async summarizeActivityQuick(activityId) {
@@ -1140,7 +1151,7 @@ export class HanaEngine {
     }
     if (!entry?.sessionFile) return null;
     const sessionPath = path.join(this.agentsDir, foundAgentId, "activity", entry.sessionFile);
-    return _summarizeActivityQuick(this.resolveUtilityConfig(), sessionPath);
+    return _summarizeActivityQuick(this.resolveUtilityConfig({ agentId: foundAgentId }), sessionPath);
   }
 
   // ════════════════════════════

@@ -273,7 +273,7 @@ export class Scheduler {
     let summary = null;
     if (typeof sessionPath === "string" && sessionPath) {
       try {
-        summary = await engine.summarizeActivity(sessionPath);
+        summary = await engine.summarizeActivity(sessionPath, undefined, { agentId });
       } catch {}
     }
 

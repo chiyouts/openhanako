@@ -97,14 +97,48 @@ describe("model sync related routes", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         models: {
-          utility: "test-model",
+          utility: { id: "test-model", provider: "test-provider" },
         },
       }),
     });
 
     expect(res.status).toBe(200);
-    expect(engine.setSharedModels).toHaveBeenCalledWith({ utility: "test-model" });
+    expect(engine.setSharedModels).toHaveBeenCalledWith({
+      utility: { id: "test-model", provider: "test-provider" },
+    });
     expect(engine.syncModelsAndRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("shared model preference updates reject providerless refs before saving", async () => {
+    const { createPreferencesRoute } = await import("../server/routes/preferences.js");
+    const app = new Hono();
+    const engine = {
+      getSharedModels: vi.fn(() => ({})),
+      getSearchConfig: vi.fn(() => ({ provider: null, api_key: null })),
+      getUtilityApi: vi.fn(() => ({ provider: null, base_url: null, api_key: null })),
+      setSharedModels: vi.fn(),
+      setSearchConfig: vi.fn(),
+      setUtilityApi: vi.fn(),
+      syncModelsAndRefresh: vi.fn().mockResolvedValue(true),
+    };
+
+    app.route("/api", createPreferencesRoute(engine));
+
+    const res = await app.request("/api/preferences/models", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        models: {
+          utility: { id: "test-model" },
+        },
+      }),
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain("provider");
+    expect(engine.setSharedModels).not.toHaveBeenCalled();
+    expect(engine.syncModelsAndRefresh).not.toHaveBeenCalled();
   });
 
   it("inline 凭证缺少显式 provider 时返回 400", async () => {

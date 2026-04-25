@@ -43,7 +43,9 @@ export async function summarizeSessionForRc(engine, agent, sessionPath) {
 
   // Tier 1: utility
   let utilConfig = null;
-  try { utilConfig = engine.resolveUtilityConfig?.(); } catch { /* ignore, fall through */ }
+  try {
+    utilConfig = engine.resolveUtilityConfig?.(agent?.id ? { agentId: agent.id } : undefined);
+  } catch { /* ignore, fall through */ }
 
   if (utilConfig?.utility && utilConfig.api_key && utilConfig.base_url && utilConfig.api) {
     const text = await _safeCall({

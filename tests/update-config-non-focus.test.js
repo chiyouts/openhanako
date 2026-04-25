@@ -3,8 +3,16 @@ import { ConfigCoordinator } from "../core/config-coordinator.js";
 
 describe("updateConfig with agentId", () => {
   function makeDeps(overrides = {}) {
-    const focusAgent = { id: "focus", updateConfig: vi.fn() };
-    const targetAgent = { id: "target", updateConfig: vi.fn() };
+    const focusAgent = {
+      id: "focus",
+      config: { models: { chat: { id: "focus-chat", provider: "openai" } } },
+      updateConfig: vi.fn(),
+    };
+    const targetAgent = {
+      id: "target",
+      config: { models: { chat: { id: "target-chat", provider: "deepseek" } } },
+      updateConfig: vi.fn(),
+    };
     return {
       focusAgent,
       targetAgent,
@@ -68,6 +76,64 @@ describe("updateConfig with agentId", () => {
 
     expect(focusAgent.setUtilityModel).toHaveBeenCalledWith({ id: "deepseek-v4-flash", provider: "deepseek" });
     expect(focusAgent.setMemoryModel).toHaveBeenCalledWith({ id: "deepseek-v4-pro", provider: "deepseek" });
+  });
+
+  it("resolveUtilityConfig 传入 agentId 时使用目标 agent 配置", () => {
+    const resolveUtilityConfig = vi.fn(() => ({ ok: true }));
+    const { targetAgent, deps } = makeDeps({
+      getModels: () => ({ resolveUtilityConfig }),
+    });
+    const coord = new ConfigCoordinator(deps);
+
+    expect(coord.resolveUtilityConfig({ agentId: "target" })).toEqual({ ok: true });
+
+    expect(resolveUtilityConfig).toHaveBeenCalledWith(
+      targetAgent.config,
+      expect.objectContaining({
+        utility: null,
+        utility_large: null,
+      }),
+      expect.objectContaining({
+        provider: null,
+        base_url: null,
+        api_key: null,
+      }),
+    );
+  });
+
+  it("resolveUtilityConfig 传入未知 agentId 时 fail closed", () => {
+    const { deps } = makeDeps({
+      getModels: () => ({ resolveUtilityConfig: vi.fn() }),
+    });
+    const coord = new ConfigCoordinator(deps);
+
+    expect(() => coord.resolveUtilityConfig({ agentId: "missing" }))
+      .toThrow(/agent missing not found/);
+  });
+
+  it("setSharedModels 同步所有已加载 agent，并在清空时回到各自 chat fallback", () => {
+    let prefs = {
+      utility_model: { id: "util", provider: "openai" },
+      utility_large_model: { id: "large", provider: "openai" },
+    };
+    const { focusAgent, targetAgent, deps } = makeDeps({
+      getPrefs: () => ({
+        getPreferences: () => prefs,
+        savePreferences: (next) => { prefs = { ...next }; },
+      }),
+    });
+    focusAgent.setUtilityModel = vi.fn();
+    focusAgent.setMemoryModel = vi.fn();
+    targetAgent.setUtilityModel = vi.fn();
+    targetAgent.setMemoryModel = vi.fn();
+    const coord = new ConfigCoordinator(deps);
+
+    coord.setSharedModels({ utility: null, utility_large: null });
+
+    expect(focusAgent.setUtilityModel).toHaveBeenCalledWith({ id: "focus-chat", provider: "openai" });
+    expect(focusAgent.setMemoryModel).toHaveBeenCalledWith({ id: "focus-chat", provider: "openai" });
+    expect(targetAgent.setUtilityModel).toHaveBeenCalledWith({ id: "target-chat", provider: "deepseek" });
+    expect(targetAgent.setMemoryModel).toHaveBeenCalledWith({ id: "target-chat", provider: "deepseek" });
   });
 
   it("agentId 等于焦点 agent 时，模型切换逻辑正常执行", async () => {

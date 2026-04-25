@@ -197,8 +197,8 @@ export class Agent {
 
     // utility 模型：用户未配置时 fallback 到聊天模型
     const chatModelRef = this._config.models?.chat || null;
-    const userSetUtility = sharedModels.utility || null;
-    const userSetUtilityLarge = sharedModels.utility_large || null;
+    const userSetUtility = sharedModels.utility || this._config.models?.utility || null;
+    const userSetUtilityLarge = sharedModels.utility_large || this._config.models?.utility_large || null;
 
     this._utilityModel = userSetUtility || chatModelRef;
     this._memoryModel = userSetUtilityLarge || chatModelRef;

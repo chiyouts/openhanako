@@ -8,6 +8,7 @@
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
 import { debugLog } from "../../lib/debug-log.js";
+import { normalizeSharedModelsPatch } from "../../core/config-coordinator.js";
 
 export function createPreferencesRoute(engine) {
   const route = new Hono();
@@ -48,7 +49,13 @@ export function createPreferencesRoute(engine) {
       let needsModelSync = false;
       // 共享模型（utility / utility_large）
       if (body.models) {
-        engine.setSharedModels(body.models);
+        let modelsPatch;
+        try {
+          modelsPatch = normalizeSharedModelsPatch(body.models);
+        } catch (err) {
+          return c.json({ error: err.message }, 400);
+        }
+        engine.setSharedModels(modelsPatch);
         sections.push("models");
         needsModelSync = true;
       }

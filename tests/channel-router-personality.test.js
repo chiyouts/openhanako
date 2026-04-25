@@ -40,6 +40,17 @@ describe("ChannelRouter._executeCheck personality 来源", () => {
 
     const mockAgentsMap = new Map([["hana", mockAgent]]);
 
+    const resolveUtilityConfig = vi.fn(() => ({
+      utility: "test-model",
+      utility_large: "test-model-large",
+      api_key: "test-key",
+      base_url: "https://test.api",
+      api: "openai-completions",
+      large_api_key: "test-key",
+      large_base_url: "https://test.api",
+      large_api: "openai-completions",
+    }));
+
     const router = new ChannelRouter({
       hub: {
         engine: {
@@ -47,16 +58,7 @@ describe("ChannelRouter._executeCheck personality 来源", () => {
           channelsDir: "/fake/channels",
           userDir: "/fake/user",
           agents: mockAgentsMap,
-          resolveUtilityConfig: () => ({
-            utility: "test-model",
-            utility_large: "test-model-large",
-            api_key: "test-key",
-            base_url: "https://test.api",
-            api: "openai-completions",
-            large_api_key: "test-key",
-            large_base_url: "https://test.api",
-            large_api: "openai-completions",
-          }),
+          resolveUtilityConfig,
         },
         eventBus: { emit: vi.fn() },
       },
@@ -75,6 +77,7 @@ describe("ChannelRouter._executeCheck personality 来源", () => {
     expect(callTextSpy).toHaveBeenCalledTimes(1);
     const callArgs = callTextSpy.mock.calls[0][0];
     expect(callArgs.systemPrompt).toContain("我是 Hana，一个温柔的助手。这是内存中的 personality。");
+    expect(resolveUtilityConfig).toHaveBeenCalledWith({ agentId: "hana" });
   });
 
   it("当 engine.agents 为 undefined 时 fallback 到磁盘读取", async () => {

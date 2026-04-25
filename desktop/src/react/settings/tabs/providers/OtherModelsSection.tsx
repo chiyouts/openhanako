@@ -10,6 +10,8 @@ import { ModelWidget } from '../../widgets/ModelWidget';
 import { KeyInput } from '../../widgets/KeyInput';
 import styles from '../../Settings.module.css';
 
+type ModelRef = { id: string; provider: string };
+
 function ToolModelTestBtn({ modelRef }: { modelRef: unknown }) {
   const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
 
@@ -101,15 +103,26 @@ export function OtherModelsSection({ providers }: { providers: Record<string, { 
     }
   };
 
-  // 工具模型配置可能是 {id, provider} 对象或裸字符串，提取 model ID 供 ModelWidget 使用
-  const toModelId = (raw: unknown): string => {
-    if (!raw) return '';
-    if (typeof raw === 'object' && (raw as any).id) return (raw as { id: string }).id;
-    return String(raw);
+  // 工具模型配置可能来自老数据。展示层可读裸 id；保存路径必须重新选择成 {id, provider}。
+  const toModelRef = (raw: unknown): ModelRef | null => {
+    if (!raw) return null;
+    if (typeof raw === 'object' && (raw as any).id) {
+      return {
+        id: String((raw as any).id || ''),
+        provider: String((raw as any).provider || ''),
+      };
+    }
+    const s = String(raw || '').trim();
+    if (!s) return null;
+    const slashIdx = s.indexOf('/');
+    if (slashIdx > 0 && slashIdx < s.length - 1) {
+      return { provider: s.slice(0, slashIdx), id: s.slice(slashIdx + 1) };
+    }
+    return { id: s, provider: '' };
   };
 
-  const utilityVal = toModelId(globalModelsConfig?.models?.utility);
-  const utilityLargeVal = toModelId(globalModelsConfig?.models?.utility_large);
+  const utilityVal = toModelRef(globalModelsConfig?.models?.utility);
+  const utilityLargeVal = toModelRef(globalModelsConfig?.models?.utility_large);
 
   return (
     <div style={{ padding: 'var(--space-md)' }}>
