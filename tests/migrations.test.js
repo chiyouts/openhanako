@@ -247,7 +247,7 @@ describe("migration #1: cleanDanglingProviderRefs", () => {
   it("preferences 中字符串格式的悬空共享模型也被清空", () => {
     const prefs = makePrefs(userDir);
     prefs.savePreferences({
-      summarizer_model: "dead-provider/fast-model",
+      utility_model: "dead-provider/fast-model",
     });
     fs.mkdirSync(agentsDir, { recursive: true });
 
@@ -258,7 +258,7 @@ describe("migration #1: cleanDanglingProviderRefs", () => {
     });
 
     const p = prefs.getPreferences();
-    expect(p.summarizer_model).toBeNull();
+    expect(p.utility_model).toBeNull();
   });
 
   it("多个 agent 同时修复", () => {
@@ -504,7 +504,7 @@ describe("migration #3 — migrateWorkspaceToPerAgent", () => {
 
     const p = prefs.getPreferences();
     expect(p.home_folder).toBeUndefined();
-    expect(p._dataVersion).toBe(9);
+    expect(p._dataVersion).toBe(10);
   });
 
   it("skips when home_folder is empty", () => {
@@ -516,7 +516,7 @@ describe("migration #3 — migrateWorkspaceToPerAgent", () => {
 
     const config = readAgentConfig(agentsDir, "hana");
     expect(config.desk).toBeUndefined();
-    expect(prefs.getPreferences()._dataVersion).toBe(9);
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
   });
 
   it("falls back to first agent when primaryAgent not found", () => {
@@ -581,7 +581,7 @@ describe("migration #3 — migrateWorkspaceToPerAgent", () => {
     });
 
     runMigration3(prefs);
-    expect(prefs.getPreferences()._dataVersion).toBe(9);
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
 
     // Manually reset _dataVersion to 2 to simulate forced rerun
     const p2 = prefs.getPreferences();
@@ -590,7 +590,7 @@ describe("migration #3 — migrateWorkspaceToPerAgent", () => {
     runMigration3(prefs);
 
     // home_folder is gone from prefs, so migration skips cleanly
-    expect(prefs.getPreferences()._dataVersion).toBe(9);
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
     const config = readAgentConfig(agentsDir, "hana");
     expect(config.desk.home_folder).toBe("/workspace");
   });
@@ -885,7 +885,7 @@ describe("#7 migrateVisionToImage", () => {
     expect(models[0].vision).toBeUndefined();
     expect(models[1]).toEqual({ id: "qwen-plus", image: false });
     expect(models[2]).toBe("qwen-turbo");
-    expect(prefs.getPreferences()._dataVersion).toBe(9);
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
   });
 
   it("幂等：已迁移过的 added-models.yaml 重跑不改写", () => {
@@ -944,7 +944,7 @@ describe("#7 migrateVisionToImage", () => {
 
     runMigration7(prefs);
 
-    expect(prefs.getPreferences()._dataVersion).toBe(9);
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
   });
 });
 
@@ -982,6 +982,89 @@ describe("migration #8 — repairPostMigrationModelRefs", () => {
 
     const cfg = readAgentConfig(agentsDir, "hana");
     expect(cfg.models.chat).toEqual({ id: "qwen3.6-flash", provider: "dashscope" });
-    expect(prefs.getPreferences()._dataVersion).toBe(9);
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
+  });
+});
+
+describe("migration #10 — cleanupSummarizerCompilerRemnants", () => {
+  let tmpDir, userDir, agentsDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    userDir = path.join(tmpDir, "user");
+    agentsDir = path.join(tmpDir, "agents");
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it("删除 preferences 里的 summarizer_model / compiler_model 字段（key 整体消失）", () => {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({
+      _dataVersion: 9,
+      utility_model: "openai/gpt-4o-mini",
+      summarizer_model: "openai/gpt-4o-mini",
+      compiler_model: { id: "gpt-4o", provider: "openai" },
+    });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry(["openai"]),
+      log: () => {},
+    });
+
+    const p = prefs.getPreferences();
+    expect("summarizer_model" in p).toBe(false);
+    expect("compiler_model" in p).toBe(false);
+    expect(p.utility_model).toBe("openai/gpt-4o-mini");
+  });
+
+  it("删除每个 agent config.yaml 的 models.summarizer / models.compiler", () => {
+    writeAgentConfig(agentsDir, "hana", {
+      models: {
+        chat: { id: "claude-opus-4-7", provider: "anthropic" },
+        utility: { id: "claude-haiku-4-5", provider: "anthropic" },
+        summarizer: "openai/gpt-4o-mini",
+        compiler: { id: "gpt-4o", provider: "openai" },
+      },
+    });
+    writeAgentConfig(agentsDir, "butter", {
+      models: { chat: { id: "claude-haiku-4-5", provider: "anthropic" } },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 9 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry(["anthropic", "openai"]),
+      log: () => {},
+    });
+
+    const hana = readAgentConfig(agentsDir, "hana");
+    expect("summarizer" in hana.models).toBe(false);
+    expect("compiler" in hana.models).toBe(false);
+    expect(hana.models.chat).toEqual({ id: "claude-opus-4-7", provider: "anthropic" });
+    expect(hana.models.utility).toEqual({ id: "claude-haiku-4-5", provider: "anthropic" });
+
+    // 没有残留的 agent 不被影响
+    const butter = readAgentConfig(agentsDir, "butter");
+    expect(butter.models.chat).toEqual({ id: "claude-haiku-4-5", provider: "anthropic" });
+  });
+
+  it("幂等：没有残留字段时不抛错，version 仍推进", () => {
+    writeAgentConfig(agentsDir, "hana", {
+      models: { chat: { id: "claude-opus-4-7", provider: "anthropic" } },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 9 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry(["anthropic"]),
+      log: () => {},
+    });
+
+    expect(prefs.getPreferences()._dataVersion).toBe(10);
   });
 });

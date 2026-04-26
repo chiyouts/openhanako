@@ -21,8 +21,6 @@ export const READ_ONLY_BUILTIN_TOOLS = ["read", "grep", "find", "ls"];
 export const SHARED_MODEL_KEYS = [
   ["utility",        "utility_model"],
   ["utility_large",  "utility_large_model"],
-  ["summarizer",     "summarizer_model"],
-  ["compiler",       "compiler_model"],
 ];
 
 function hasOwn(obj, key) {

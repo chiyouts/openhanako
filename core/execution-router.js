@@ -12,8 +12,6 @@
  *   models.utility        -> 同上
  *   models.utility_large  -> 同上
  *   models.embed          -> 同上
- *   models.summarizer     -> 同上
- *   models.compiler       -> 同上
  *
  * 设计来源：Hana 自己的三通道 API 概念（两个参考项目都没有）
  */
@@ -25,8 +23,6 @@ import { isLocalBaseUrl } from "../shared/net-utils.js";
 const ROLE_TO_PREF_KEY = {
   utility: "utility_model",
   utility_large: "utility_large_model",
-  summarizer: "summarizer_model",
-  compiler: "compiler_model",
 };
 
 export class ExecutionRouter {
@@ -43,7 +39,7 @@ export class ExecutionRouter {
    * 解析角色 -> 完整执行参数
    *
    * @param {string} roleOrRef
-   *   角色名（"chat"/"utility"/"utility_large"/"embed"/"summarizer"/"compiler"）
+   *   角色名（"chat"/"utility"/"utility_large"/"embed"）
    *   或直接是模型引用（"provider/model" 或裸 modelId）
    * @param {object} agentConfig - agent config 对象（来自 config.yaml）
    * @param {object} [sharedModels] - 全局共享角色模型（来自 preferences）
@@ -107,7 +103,7 @@ export class ExecutionRouter {
    * 显示用途（如 server banner）取 .id 字段：utilConfig.utility?.id。
    *
    * @param {object} agentConfig
-   * @param {{ utility?: string|object, utility_large?: string|object, summarizer?: string, compiler?: string }} sharedModels
+   * @param {{ utility?: string|object, utility_large?: string|object }} sharedModels
    * @param {{ provider?: string, api_key?: string, base_url?: string }} utilApiOverride
    * @returns {{
    *   utility: object,
@@ -204,10 +200,6 @@ export class ExecutionRouter {
         return sharedModels?.utility || cfg.models?.utility || null;
       case "utility_large":
         return sharedModels?.utility_large || cfg.models?.utility_large || null;
-      case "summarizer":
-        return sharedModels?.summarizer || cfg.models?.summarizer || null;
-      case "compiler":
-        return sharedModels?.compiler || cfg.models?.compiler || null;
       case "embed":
         return cfg.embedding_api?.model || null;
       default:

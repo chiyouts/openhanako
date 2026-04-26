@@ -43,6 +43,8 @@ const migrations = {
   8: repairPostMigrationModelRefs,
   // bridge.readOnly 从 agent scope 收敛回全局 preferences
   9: migrateBridgeReadOnlyToGlobal,
+  // summarizer / compiler 角色从未接通业务，删除 preferences 与 agent config 里的残留字段
+  10: cleanupSummarizerCompilerRemnants,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -125,7 +127,7 @@ function cleanDanglingProviderRefs(ctx) {
 
     // models.* — 字符串 "provider/model" 或 { id, provider } 对象
     if (config.models) {
-      for (const role of ["chat", "utility", "utility_large", "summarizer", "compiler", "embedding"]) {
+      for (const role of ["chat", "utility", "utility_large", "embedding"]) {
         const ref = config.models[role];
         if (!ref) continue;
 
@@ -156,8 +158,8 @@ function cleanDanglingProviderRefs(ctx) {
   const preferences = prefs.getPreferences();
   let prefsChanged = false;
 
-  // 共享模型字段：utility_model, utility_large_model, summarizer_model, compiler_model
-  for (const key of ["utility_model", "utility_large_model", "summarizer_model", "compiler_model"]) {
+  // 共享模型字段：utility_model, utility_large_model
+  for (const key of ["utility_model", "utility_large_model"]) {
     const val = preferences[key];
     if (!val) continue;
 
@@ -483,9 +485,9 @@ function migrateSubagentExecutorMetadata(ctx) {
  *   3. {id, provider: ""} 半成品对象          → 视作裸 id 推断
  *
  * 作用范围：
- *   - 每个 agent 目录下 config.yaml 里的 models.{chat,utility,utility_large,summarizer,compiler}
+ *   - 每个 agent 目录下 config.yaml 里的 models.{chat,utility,utility_large}
  *     （embedding 角色不在复合键范围内——走 embedding_api 独立配置）
- *   - preferences.json 的 {utility,utility_large,summarizer,compiler}_model
+ *   - preferences.json 的 {utility,utility_large}_model
  *
  * 推断规则：
  *   - "provider/id" → {provider, id}（直接拆）
@@ -535,7 +537,7 @@ function normalizeCompositeModelRefs(ctx, { migrationId }) {
     return { value: ref, changed: false };
   }
 
-  const ROLES = ["chat", "utility", "utility_large", "summarizer", "compiler"];
+  const ROLES = ["chat", "utility", "utility_large"];
 
   // ── agent config.yaml ──
   let agentDirs;
@@ -569,7 +571,7 @@ function normalizeCompositeModelRefs(ctx, { migrationId }) {
   // ── preferences.json (shared models) ──
   const preferences = prefs.getPreferences();
   let prefsChanged = false;
-  const prefKeys = ["utility_model", "utility_large_model", "summarizer_model", "compiler_model"];
+  const prefKeys = ["utility_model", "utility_large_model"];
   for (const key of prefKeys) {
     const { value, changed } = normalize(preferences[key]);
     if (changed) {
@@ -904,4 +906,64 @@ function migrateVisionToImage(ctx) {
   }
 
   log(`[migrations] #7: vision→image renamed (added-models.yaml=${ymlCount}, agent overrides=${overrideCount})`);
+}
+
+/**
+ * #10 — 清除 summarizer / compiler 残留字段
+ *
+ * 这两个角色在 v0.55 架构重构时被列入 schema，但业务路径从未接通过任何调用，
+ * 此次连同 ROLE_TO_PREF_KEY / SHARED_MODEL_KEYS / config.example.yaml 一起清理。
+ * 用户机器上可能有以下残留，全部 delete key（不是写 null）：
+ *   - preferences.json 的 summarizer_model / compiler_model
+ *   - 每个 agent config.yaml 的 models.summarizer / models.compiler
+ *
+ * 幂等：缺失字段直接跳过；不抛错，避免拦住启动。
+ */
+function cleanupSummarizerCompilerRemnants(ctx) {
+  const { agentsDir, prefs, log } = ctx;
+
+  // ── preferences ──
+  const preferences = prefs.getPreferences();
+  let prefsChanged = false;
+  for (const key of ["summarizer_model", "compiler_model"]) {
+    if (Object.prototype.hasOwnProperty.call(preferences, key)) {
+      delete preferences[key];
+      prefsChanged = true;
+      log(`[migrations] #10: removed preferences.${key}`);
+    }
+  }
+  if (prefsChanged) prefs.savePreferences(preferences);
+
+  // ── agent config.yaml ──
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    agentDirs = [];
+  }
+
+  for (const dir of agentDirs) {
+    const cfgPath = path.join(agentsDir, dir.name, "config.yaml");
+    const config = safeReadYAMLSync(cfgPath, null, YAML);
+    if (!config?.models || typeof config.models !== "object") continue;
+
+    let changed = false;
+    for (const role of ["summarizer", "compiler"]) {
+      if (Object.prototype.hasOwnProperty.call(config.models, role)) {
+        delete config.models[role];
+        changed = true;
+        log(`[migrations] #10 ${dir.name}: removed models.${role}`);
+      }
+    }
+
+    if (changed) {
+      const tmp = cfgPath + ".tmp";
+      fs.writeFileSync(
+        tmp,
+        YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+        "utf-8"
+      );
+      fs.renameSync(tmp, cfgPath);
+    }
+  }
 }

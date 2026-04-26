@@ -23,9 +23,8 @@ embedding_api:
 # 模型配置
 models:
   chat: ""                         # 主对话模型
-  summarizer: ""                   # 旁路摘要模型（便宜快）
-  compiler: ""                     # 记忆编译模型（启动快）
   utility: ""                      # 工具模型（对话摘要等轻量任务）
+  utility_large: ""                # 大工具模型（记忆编译、深度分析等需要理解力的任务）
   embedding: ""                    # 向量模型
   embedding_dimensions: 1024       # 向量维度
 
