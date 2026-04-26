@@ -4,7 +4,7 @@
  * 架构：dispatcher + 子模块。所有 provider-specific 补丁拆到 ./provider-compat/<name>.js。
  * 完整规范见 ./provider-compat/README.md。
  *
- * 两条调用路径共享本入口（commit f5b5d69 立的纪律）：
+ * 两条调用路径共享本入口（commit f5b5d69 — chat 路径与 utility 路径合一的纪律）：
  *   - core/llm-client.js 的 callText（非流式 / utility 路径）
  *   - core/engine.js 的 Pi SDK before_provider_request 扩展（流式 / chat 路径）
  *

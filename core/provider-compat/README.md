@@ -48,6 +48,8 @@
  *   - 优先用 provider / baseUrl / quirks 等数据声明字段，避免按 model.id 字符串硬匹配
  *   - 必须容忍字段缺失：遇到 model = null/undefined 或目标字段不存在时返回 false，
  *     不抛错（dispatcher 不能因为某个子模块的 matches 崩溃影响其他模块）
+ *   - 不可依赖 `this`：dispatcher 通过 `import * as mod` 的 namespace object 调用，
+ *     namespace 是 frozen 的且无 `this` 上下文。matches 与 apply 都必须是顶层导出的独立函数
  */
 export function matches(model) { ... }
 ```
@@ -62,6 +64,7 @@ export function matches(model) { ... }
  *   - 不可变契约：返回新对象（或原对象，未修改时）；不直接 mutate 调用方传入的 payload
  *   - 必须能处理 mode: "chat" 和 mode: "utility" 两种调用上下文
  *   - 必须能容忍 model 字段缺失（保守处理，宁可不补也别错补）
+ *   - `options` 字段是开放扩展的：dispatcher 把调用方传入的整个 options 透传给所有子模块；子模块按需读取自己关心的字段，未识别的字段必须忽略，不报错
  */
 export function apply(payload, model, options) { ... }
 ```
