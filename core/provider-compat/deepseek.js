@@ -241,8 +241,7 @@ export function apply(payload, model, options = {}) {
     // 兜底：disableThinking 已 strip 历史 reasoning_content，但 tool_calls 轮次仍需占位
     const ensured = ensureReasoningContentForToolCalls(next.messages);
     if (ensured !== next.messages) {
-      const e = editable();
-      e.messages = ensured;
+      editable().messages = ensured;
     }
     return next;
   }
@@ -251,11 +250,10 @@ export function apply(payload, model, options = {}) {
 
   if (mode === "utility") {
     disableThinking(editable());
-    // 同上：utility 路径也要兜底
+    // utility 路径也走 disableThinking，strip 后同样需要补 tool_calls 占位（DeepSeek server 对 disabled+tool_calls 仍可能严格校验）
     const ensured = ensureReasoningContentForToolCalls(next.messages);
     if (ensured !== next.messages) {
-      const e = editable();
-      e.messages = ensured;
+      editable().messages = ensured;
     }
     return next;
   }
@@ -266,7 +264,8 @@ export function apply(payload, model, options = {}) {
   enableThinking(p);
   ensureThinkingTokenBudget(p, model);
 
-  // chat mode 思考开启：兜底 tool_calls 历史的 reasoning_content（覆盖 transform-messages 降级）
+  // chat mode 思考开启：兜底 tool_calls 历史的 reasoning_content（覆盖 transform-messages 降级）。
+  // 守卫与上方 off-path / utility-path 风格对称；此处 p 已是副本，去掉守卫直接赋值也对，但保持三处同形便于阅读。
   const ensured = ensureReasoningContentForToolCalls(p.messages);
   if (ensured !== p.messages) {
     p.messages = ensured;

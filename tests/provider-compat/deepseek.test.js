@@ -362,9 +362,47 @@ describe("provider-compat/deepseek — apply 主流程接入 ensure 兜底", () 
     const result = deepseek.apply(payload, deepseekModel, { mode: "chat" });
     expect(Object.prototype.hasOwnProperty.call(result.messages[1], "reasoning_content")).toBe(false);
   });
+
+  it("chat mode + 思考开启：多轮工具调用混合状态各自命中正确档位", () => {
+    const payload = {
+      model: "deepseek-v4-flash",
+      messages: [
+        { role: "user", content: "round 1" },
+        // 档 1：已有 reasoning_content（上一轮保留下来的）
+        {
+          role: "assistant",
+          content: null,
+          reasoning_content: "上轮思考",
+          tool_calls: [{ id: "call_1", type: "function", function: { name: "x", arguments: "{}" } }],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "ok1" },
+        { role: "user", content: "round 2" },
+        // 档 2：无 reasoning_content 但 content 是降级 text（跨 V4 子版本切换后的状态）
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "本轮思考被降级" }],
+          tool_calls: [{ id: "call_2", type: "function", function: { name: "y", arguments: "{}" } }],
+        },
+        { role: "tool", tool_call_id: "call_2", content: "ok2" },
+        { role: "user", content: "round 3" },
+        // 档 3：无 reasoning_content 也无原文可恢复
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "call_3", type: "function", function: { name: "z", arguments: "{}" } }],
+        },
+      ],
+      tools: [{ type: "function", function: { name: "x" } }],
+    };
+    const result = deepseek.apply(payload, deepseekModel, { mode: "chat", reasoningLevel: "high" });
+    // 三条 assistant 各自命中正确档位
+    expect(result.messages[1].reasoning_content).toBe("上轮思考");      // 档 1：保留
+    expect(result.messages[4].reasoning_content).toBe("本轮思考被降级"); // 档 2：从 text 恢复
+    expect(result.messages[7].reasoning_content).toBe("");              // 档 3：空字符串占位
+  });
 });
 
-describe("provider-compat/deepseek — apply 不可变性（M-1 回归保护）", () => {
+describe("provider-compat/deepseek — apply 不可变性（防止 mutate 输入 payload）", () => {
   it("apply 不 mutate 输入 payload（chat mode + 思考开启）", () => {
     const original = {
       model: "deepseek-reasoner",
