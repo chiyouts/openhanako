@@ -5396,3 +5396,37 @@ a.about-link:hover {
 .settings-toast {
     -webkit-app-region: no-drag;
 }
+.pv-inline-action-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+}
+
+.pv-inline-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input, 4px);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s var(--ease-out), border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+
+.pv-inline-icon-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-light);
+}
+
+.pv-inline-icon-btn.danger:hover {
+    color: var(--danger, #c55);
+    border-color: var(--danger, #c55);
+    background: rgba(197, 85, 85, 0.08);
+}

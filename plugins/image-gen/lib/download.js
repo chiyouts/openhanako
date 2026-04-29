@@ -9,14 +9,14 @@ const MIME_TO_EXT = {
 };
 
 /**
- * Save image buffer to disk.
+ * Save image buffer to a specific directory.
  * @param {Buffer} buffer
  * @param {string} mimeType
- * @param {string} dataDir - plugin data directory (ctx.dataDir)
- * @param {string} [customName] - optional filename without extension (e.g. "sunset-cat")
+ * @param {string} dir
+ * @param {string} [customName]
  * @returns {Promise<{ filename: string, filePath: string }>}
  */
-export async function saveImage(buffer, mimeType, dataDir, customName) {
+export async function saveImageToDir(buffer, mimeType, dir, customName) {
   const ext = MIME_TO_EXT[mimeType] || "png";
   const hash = crypto.createHash("md5").update(buffer).digest("hex").slice(0, 8);
   // sanitize custom name: keep alphanumeric, CJK, hyphens, underscores
@@ -26,9 +26,20 @@ export async function saveImage(buffer, mimeType, dataDir, customName) {
   const filename = safeName
     ? `${safeName}-${hash}.${ext}`
     : `${Date.now()}-${hash}.${ext}`;
-  const dir = path.join(dataDir, "generated");
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, filename);
   await fs.promises.writeFile(filePath, buffer);
   return { filename, filePath };
+}
+
+/**
+ * Save image buffer using the legacy plugin dataDir/generated convention.
+ * @param {Buffer} buffer
+ * @param {string} mimeType
+ * @param {string} dataDir
+ * @param {string} [customName]
+ * @returns {Promise<{ filename: string, filePath: string }>}
+ */
+export async function saveImage(buffer, mimeType, dataDir, customName) {
+  return saveImageToDir(buffer, mimeType, path.join(dataDir, "generated"), customName);
 }

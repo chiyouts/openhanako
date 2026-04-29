@@ -1010,6 +1010,10 @@
       "name": "GPT Image 1.5",
       "type": "image"
     },
+    "gpt-image-2": {
+      "name": "GPT Image 2",
+      "type": "image"
+    },
     "gpt-image-1-mini": {
       "name": "GPT Image 1 Mini",
       "type": "image"

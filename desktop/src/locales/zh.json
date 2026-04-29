@@ -727,6 +727,11 @@
       "followGlobal": "跟随全局默认",
       "default": "默认"
     },
+    "mediaExtra": {
+      "outputDir": "生成文件保存目录",
+      "chooseOutputDir": "选择目录",
+      "resetOutputDir": "重置目录"
+    },
     "oauth": {
       "title": "快速登录",
       "login": "登录",

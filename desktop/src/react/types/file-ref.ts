@@ -22,6 +22,7 @@ export interface FileRef {
   name: string;
   /** 当 source === 'session-block-screenshot' 时为 '' */
   path: string;
+  remoteUrl?: string;
   ext?: string;
   mime?: string;
   timestamp?: number;

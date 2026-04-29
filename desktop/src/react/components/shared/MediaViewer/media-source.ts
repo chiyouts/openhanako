@@ -30,6 +30,9 @@ export async function loadMediaSource(ref: FileRef): Promise<MediaSource> {
   if (ref.path) {
     return { url: platform.getFileUrl(ref.path) };
   }
+  if (ref.remoteUrl) {
+    return { url: ref.remoteUrl };
+  }
 
   // 2) 仅无 path 的 inline 数据（如 screenshot）才走 data URL。
   if (ref.inlineData) {

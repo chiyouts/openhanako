@@ -5,6 +5,10 @@ vi.stubGlobal("fetch", mockFetch);
 
 // saveImage writes to disk — mock it out so tests stay pure
 vi.mock("../plugins/image-gen/lib/download.js", () => ({
+  saveImageToDir: vi.fn(async (_buf, _mime, _dir, customName) => {
+    const filename = customName ? `${customName}-abc.png` : `1234-abc.png`;
+    return { filename, filePath: `/tmp/generated/${filename}` };
+  }),
   saveImage: vi.fn(async (_buf, _mime, _dir, customName) => {
     const filename = customName ? `${customName}-abc.png` : `1234-abc.png`;
     return { filename, filePath: `/tmp/generated/${filename}` };
@@ -28,6 +32,7 @@ function makeBusCtx(apiKey, baseUrl, providerId = "volcengine") {
       }),
     },
     dataDir: "/tmp/test-data",
+    generatedDir: "/tmp/generated",
     log: vi.fn(),
   };
 }
@@ -184,6 +189,26 @@ describe("openai adapter", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.background).toBe("transparent");
+  });
+
+  it("uses a custom provider id while still targeting the OpenAI-compatible adapter", async () => {
+    const { openaiImageAdapter } = await import("../plugins/image-gen/adapters/openai.js");
+
+    const fakeB64 = Buffer.from("img").toString("base64");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: [{ b64_json: fakeB64 }] }),
+    });
+
+    const ctx = makeBusCtx("relay-key", "https://relay.example.com/v1", "custom-openai");
+    await openaiImageAdapter.submit({
+      prompt: "test",
+      model: "gpt-image-2",
+      providerId: "custom-openai",
+    }, ctx);
+
+    expect(ctx.bus.request).toHaveBeenCalledWith("provider:credentials", { providerId: "custom-openai" });
+    expect(mockFetch.mock.calls[0][0]).toBe("https://relay.example.com/v1/images/generations");
   });
 
   it("throws on API error", async () => {

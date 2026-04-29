@@ -481,6 +481,55 @@ describe("syncModels", () => {
     expect(result.providers["my-gemini-proxy"].models[0].compat.supportsStore).toBe(false);
   });
 
+  it("uses conservative compat for OpenAI provider routed through a custom relay", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      openai: {
+        base_url: "https://relay.example.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gpt-4o"],
+        _isBuiltin: true,
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.openai.models[0].compat).toMatchObject({
+      supportsDeveloperRole: false,
+      supportsStore: false,
+      supportsUsageInStreaming: false,
+      supportsReasoningEffort: false,
+      supportsStrictMode: false,
+    });
+  });
+
+  it("uses conservative compat for synthetic custom OpenAI-compatible providers", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      "self-relay": {
+        base_url: "https://relay.example.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gpt-4o"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers["self-relay"].models[0].compat).toMatchObject({
+      supportsDeveloperRole: false,
+      supportsStore: false,
+      supportsUsageInStreaming: false,
+      supportsReasoningEffort: false,
+      supportsStrictMode: false,
+    });
+  });
+
   it("skips models with type: image from models.json output", async () => {
     const syncModels = await loadSync();
 

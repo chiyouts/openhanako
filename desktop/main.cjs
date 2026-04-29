@@ -2326,6 +2326,18 @@ wrapIpcBestEffortHandler("select-folder", async (event) => {
   return result.filePaths[0];
 });
 
+wrapIpcBestEffortHandler("save-file-as", async (event, options = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win) return null;
+  const result = await dialog.showSaveDialog(win, {
+    title: options.title || "Save As",
+    defaultPath: options.defaultPath || undefined,
+    filters: Array.isArray(options.filters) ? options.filters : undefined,
+  });
+  if (result.canceled || !result.filePath) return null;
+  return result.filePath;
+});
+
 // 选择附件文件（多选，支持文件和文件夹）
 wrapIpcBestEffortHandler("select-files", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;

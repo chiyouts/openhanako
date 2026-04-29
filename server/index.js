@@ -22,9 +22,11 @@ import { HanaEngine } from "../core/engine.js";
 import { ensureFirstRun } from "../core/first-run.js";
 import { initDebugLog } from "../lib/debug-log.js";
 import { safeJson } from "./hono-helpers.js";
+import { installOpenAIRelayFetchSanitizer } from "./openai-relay-fetch.js";
 
 // Pi SDK 的 fetch 请求会累积 AbortSignal listener，提高上限避免无害警告
 setMaxListeners(50);
+installOpenAIRelayFetchSanitizer();
 
 import { loadLocale } from "./i18n.js";
 import { createChatRoute } from "./routes/chat.js";

@@ -39,7 +39,7 @@ export class Poller {
    *   store: import("./task-store.js").TaskStore,
    *   registry: import("./adapter-registry.js").AdapterRegistry,
    *   bus: object,
-   *   generatedDir: string,
+   *   generatedDir: string | (() => string),
    *   log: object,
    * }} opts
    */
@@ -142,9 +142,16 @@ export class Poller {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  async _readImageDimensions(files) {
+  _getGeneratedDir(task) {
+    if (task?.generatedDir) return task.generatedDir;
+    return typeof this._generatedDir === "function"
+      ? this._generatedDir(task)
+      : this._generatedDir;
+  }
+
+  async _readImageDimensions(task, files) {
     if (!files?.length) return { imageWidth: null, imageHeight: null };
-    const filePath = pathJoin(this._generatedDir, files[0]);
+    const filePath = pathJoin(this._getGeneratedDir(task), files[0]);
     const size = await readImageSize(filePath).catch(() => null);
     return size
       ? { imageWidth: size.width, imageHeight: size.height }
@@ -189,7 +196,7 @@ export class Poller {
 
     // Fake-async: adapter populated files synchronously during submit.
     if (task.files && task.files.length > 0) {
-      const dims = await this._readImageDimensions(task.files);
+      const dims = await this._readImageDimensions(task, task.files);
       this._store.update(taskId, {
         status: "done",
         ...dims,
@@ -217,7 +224,7 @@ export class Poller {
     }
 
     const ctx = {
-      generatedDir: this._generatedDir,
+      generatedDir: this._getGeneratedDir(task),
       bus: this._bus,
       log: this._log,
     };
@@ -254,7 +261,7 @@ export class Poller {
 
     if (status === "success") {
       const files = result.files ?? [];
-      const dims = await this._readImageDimensions(files);
+      const dims = await this._readImageDimensions(task, files);
       this._store.update(taskId, {
         status: "done",
         files,

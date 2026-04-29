@@ -11,6 +11,57 @@ import { lookupKnown } from "../shared/known-models.js";
 import { withThinkingFormatCompat } from "../shared/model-capabilities.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
+const KNOWN_OPENAI_COMPAT_PROVIDER_IDS = new Set([
+  "openai",
+  "deepseek",
+  "gemini",
+  "openrouter",
+  "ollama",
+  "minimax",
+  "siliconflow",
+  "zhipu",
+  "moonshot",
+  "baichuan",
+  "stepfun",
+  "volcengine",
+  "hunyuan",
+  "baidu-cloud",
+  "modelscope",
+  "infini",
+  "mimo",
+  "groq",
+  "together",
+  "fireworks",
+  "mistral",
+  "perplexity",
+  "xai",
+  "dashscope",
+  "dashscope-coding",
+  "kimi-coding",
+  "volcengine-coding",
+]);
+
+function isOfficialOpenAIBaseUrl(baseUrl) {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
+function needsConservativeCompat({ provider, baseUrl, api, isBuiltin }) {
+  const isOpenAIApi = api === "openai-completions"
+    || api === "openai-responses"
+    || api === "openai-codex-responses";
+  if (!isOpenAIApi) return false;
+
+  if (provider === "openai") {
+    return !!baseUrl && !isLocalBaseUrl(baseUrl) && !isOfficialOpenAIBaseUrl(baseUrl);
+  }
+
+  if (isBuiltin) return false;
+  return !KNOWN_OPENAI_COMPAT_PROVIDER_IDS.has(provider);
+}
 
 /**
  * 模型 ID → 人类可读名
@@ -38,7 +89,7 @@ function extractApiKey(entry) {
  * @param {string|{id:string, name?:string, context?:number, maxOutput?:number}} modelEntry
  * @param {string} provider - provider 名称（查词典用）
  */
-function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-completions") {
+function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-completions", { isBuiltin = false } = {}) {
   const isObj = typeof modelEntry === "object" && modelEntry !== null;
   const id = isObj ? modelEntry.id : modelEntry;
   const known = lookupKnown(provider, id);
@@ -71,6 +122,17 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
       compat.supportsStore = false;
     }
     entry.compat = compat;
+  }
+
+  if (needsConservativeCompat({ provider, baseUrl, api, isBuiltin })) {
+    entry.compat = {
+      ...(entry.compat || {}),
+      supportsDeveloperRole: false,
+      supportsStore: false,
+      supportsUsageInStreaming: false,
+      supportsReasoningEffort: false,
+      supportsStrictMode: false,
+    };
   }
 
   return withThinkingFormatCompat(entry, { provider, api });
@@ -135,7 +197,13 @@ export function syncModels(providers, opts = {}) {
         const known = lookupKnown(name, id);
         const type = (isObj && m.type) || known?.type || "chat";
         return type === "chat";
-      }).map(m => buildModelEntry(m, name, p.base_url, p.api || "openai-completions")),
+      }).map(m => buildModelEntry(
+        m,
+        name,
+        p.base_url,
+        p.api || "openai-completions",
+        { isBuiltin: p._isBuiltin === true },
+      )),
     };
   }
 

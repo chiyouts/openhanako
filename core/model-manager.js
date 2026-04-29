@@ -127,6 +127,7 @@ export class ModelManager {
         ...raw,
         base_url: raw.base_url || entry?.baseUrl || "",
         api: raw.api || entry?.api || "openai-completions",
+        _isBuiltin: entry?.isBuiltin === true,
       };
     }
     const changed = syncModels(providers, {

@@ -1044,12 +1044,15 @@ export class HanaEngine {
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;
+    const extraReadOnlyPaths = this._getResolvedExternalSkillPaths(effectiveWorkspace)
+      .map((entry) => entry.dirPath);
 
     let result = createSandboxedTools(cwd, allTools, {
       agentDir: effectiveAgentDir,
       workspace: effectiveWorkspace,
       workspaceFolders: opts.workspaceFolders || [],
       hanakoHome: this.hanakoHome,
+      extraReadOnlyPaths,
       getSandboxEnabled: () => this._readPreferences().sandbox !== false,
     });
 

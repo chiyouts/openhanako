@@ -42,4 +42,31 @@ describe("sandbox workspace roots", () => {
     expect(guard.getAccessLevel(path.join(extra, "note.md"))).toBe(AccessLevel.FULL);
     expect(guard.check(path.join(sibling, "secret.md"), "read").allowed).toBe(false);
   });
+
+  it("grants read-only access to extra plugin skill roots outside the workspace", () => {
+    const agentDir = path.join(tempRoot, "agents", "hana");
+    const hanakoHome = path.join(tempRoot, "home");
+    const workspace = path.join(tempRoot, "project");
+    const pluginSkills = path.join(tempRoot, "plugins", "image-gen", "skills");
+    const skillFile = path.join(pluginSkills, "image-gen-guide", "SKILL.md");
+
+    fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.mkdirSync(hanakoHome, { recursive: true });
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.writeFileSync(skillFile, "# skill");
+
+    const policy = deriveSandboxPolicy({
+      agentDir,
+      hanakoHome,
+      workspace,
+      mode: "standard",
+      extraReadOnlyPaths: [pluginSkills],
+    });
+    const guard = new PathGuard(policy);
+
+    expect(guard.getAccessLevel(skillFile)).toBe(AccessLevel.READ_ONLY);
+    expect(guard.check(skillFile, "read").allowed).toBe(true);
+    expect(guard.check(skillFile, "write").allowed).toBe(false);
+  });
 });

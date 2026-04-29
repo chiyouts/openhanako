@@ -1,33 +1,42 @@
-// plugins/image-gen/index.js
-import path from "node:path";
-import fs from "node:fs";
 import { AdapterRegistry } from "./lib/adapter-registry.js";
 import { TaskStore } from "./lib/task-store.js";
 import { Poller } from "./lib/poller.js";
 import { volcengineImageAdapter } from "./adapters/volcengine.js";
 import { openaiImageAdapter } from "./adapters/openai.js";
+import {
+  ensureWritableGeneratedDir,
+  removeGeneratedFiles,
+  resolveGeneratedDir,
+} from "./lib/generated-dir.js";
 
 export default class ImageGenPlugin {
   async onload() {
-    const { dataDir, bus, log } = this.ctx;
+    const { bus, log } = this.ctx;
 
-    const generatedDir = path.join(dataDir, "generated");
-    fs.mkdirSync(generatedDir, { recursive: true });
-
-    // Infrastructure
     const registry = new AdapterRegistry();
-    const store = new TaskStore(dataDir);
-    const poller = new Poller({ store, registry, bus, generatedDir, log });
+    const store = new TaskStore(this.ctx.dataDir);
+    const poller = new Poller({
+      store,
+      registry,
+      bus,
+      generatedDir: () => resolveGeneratedDir(this.ctx),
+      log,
+    });
 
-    // Built-in adapters
     registry.register(volcengineImageAdapter);
     registry.register({ ...volcengineImageAdapter, id: "volcengine-coding" });
     registry.register(openaiImageAdapter);
 
-    // Attach to ctx for tools
-    this.ctx._mediaGen = { registry, store, poller, generatedDir };
+    const getGeneratedDir = () => resolveGeneratedDir(this.ctx);
+    const getWritableGeneratedDir = (options) => ensureWritableGeneratedDir(this.ctx, options);
+    this.ctx._mediaGen = {
+      registry,
+      store,
+      poller,
+      getGeneratedDir,
+      getWritableGeneratedDir,
+    };
 
-    // Bus handlers — adapter registration (for external plugins like dreamina)
     this.register(bus.handle("media-gen:register-adapter", ({ adapter }) => {
       registry.register(adapter);
       log.info(`adapter registered: ${adapter.id}`);
@@ -40,7 +49,6 @@ export default class ImageGenPlugin {
       return { ok: true };
     }));
 
-    // Listen for fire-and-forget unregister events (plugin teardown is sync)
     this.register(bus.subscribe((event) => {
       if (event.type === "media-gen:adapter-removed" && event.adapterId) {
         registry.unregister(event.adapterId);
@@ -49,15 +57,14 @@ export default class ImageGenPlugin {
     }));
 
     this.register(bus.handle("media-gen:list-adapters", () => {
-      return { adapters: registry.list().map((a) => ({ id: a.id, name: a.name, types: a.types })) };
+      return { adapters: registry.list().map((adapter) => ({ id: adapter.id, name: adapter.name, types: adapter.types })) };
     }));
 
-    // Bus handlers — task CRUD (for external panels like dreamina)
     this.register(bus.handle("media-gen:get-tasks", ({ adapterId, batchId, status } = {}) => {
       let tasks = store.listAll();
-      if (adapterId) tasks = tasks.filter((t) => t.adapterId === adapterId);
-      if (batchId) tasks = tasks.filter((t) => t.batchId === batchId);
-      if (status) tasks = tasks.filter((t) => t.status === status);
+      if (adapterId) tasks = tasks.filter((task) => task.adapterId === adapterId);
+      if (batchId) tasks = tasks.filter((task) => task.batchId === batchId);
+      if (status) tasks = tasks.filter((task) => task.status === status);
       return { tasks };
     }));
 
@@ -75,9 +82,7 @@ export default class ImageGenPlugin {
     this.register(bus.handle("media-gen:remove-task", ({ taskId }) => {
       const task = store.get(taskId);
       if (task) {
-        for (const f of task.files || []) {
-          try { fs.unlinkSync(path.join(generatedDir, f)); } catch { /* ok */ }
-        }
+        removeGeneratedFiles(this.ctx, task.files || []);
         store.remove(taskId);
       }
       return { ok: true };
@@ -85,24 +90,19 @@ export default class ImageGenPlugin {
 
     this.register(bus.handle("media-gen:remove-unfavorited", () => {
       const removed = store.removeUnfavorited();
-      for (const t of removed) {
-        for (const f of t.files || []) {
-          try { fs.unlinkSync(path.join(generatedDir, f)); } catch { /* ok */ }
-        }
+      for (const task of removed) {
+        removeGeneratedFiles(this.ctx, task.files || []);
       }
       return { ok: true, removed: removed.length };
     }));
 
-    // Start poller
     poller.start();
 
-    // Register media-generation task handler for TaskRegistry
     bus.request("task:register-handler", {
       type: "media-generation",
       abort: (taskId) => { poller.cancel(taskId); },
     }).catch(() => {});
 
-    // Cleanup
     this.register(() => {
       poller.stop();
       store.destroy();
@@ -110,6 +110,6 @@ export default class ImageGenPlugin {
       log.info("image-gen plugin unloaded");
     });
 
-    log.info("image-gen plugin loaded (unified media-gen)");
+    log.info("image-gen plugin loaded");
   }
 }

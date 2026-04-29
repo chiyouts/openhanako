@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { hanaUrl } from '../../hooks/use-hana-fetch';
 import type { PluginCardDetails } from '../../types';
+import { useStore } from '../../stores';
 import s from './PluginCardBlock.module.css';
 import { DEFAULT_THEME } from '../../../shared/theme-registry.cjs';
 import { getPluginIframeOrigin, isTrustedPluginIframeMessage } from '../../utils/plugin-iframe-security';
@@ -23,6 +24,7 @@ export function PluginCardBlock({ card, agentId }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
+  const setMediaViewer = useStore((state) => state.setMediaViewer);
 
   // Compute initial size from aspectRatio hint; 0 means unknown
   const ratio = parseRatio(card.aspectRatio);
@@ -59,11 +61,30 @@ export function PluginCardBlock({ card, agentId }: Props) {
           h: typeof height === 'number' && height >= 30 ? Math.min(height, MAX_H) : prev.h,
         }));
       }
+      if (e.data?.type === 'open-media-viewer') {
+        const payload = e.data.payload || {};
+        if (!payload.url || !payload.name || !payload.kind) return;
+        const normalizedUrl = new URL(String(payload.url), src || window.location.href).toString();
+        const fileId = `plugin-card:${card.pluginId}:${normalizedUrl}`;
+        setMediaViewer({
+          files: [{
+            id: fileId,
+            kind: payload.kind as 'image' | 'svg' | 'video',
+            source: 'desk',
+            name: payload.name,
+            path: '',
+            remoteUrl: normalizedUrl,
+            ext: payload.ext,
+          }],
+          currentId: fileId,
+          origin: 'desk',
+        });
+      }
     };
     window.addEventListener('message', onMessage);
     const timeout = setTimeout(() => setReady(true), 5000);
     return () => { window.removeEventListener('message', onMessage); clearTimeout(timeout); };
-  }, [isIframe, expectedOrigin, src]);
+  }, [isIframe, expectedOrigin, src, card.pluginId, setMediaViewer]);
 
   if (!isIframe || error) {
     if (!card.description) return null;

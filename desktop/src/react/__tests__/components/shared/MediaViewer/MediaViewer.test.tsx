@@ -7,8 +7,13 @@ import { useStore } from '../../../../stores';
 import { MediaViewer } from '../../../../components/shared/MediaViewer/MediaViewer';
 import type { FileRef } from '../../../../types/file-ref';
 
-const f = (id: string, kind: FileRef['kind'] = 'image'): FileRef => ({
-  id, kind, source: 'desk', name: `${id}.png`, path: `/${id}.png`, ext: 'png',
+const fileRef = (id: string, kind: FileRef['kind'] = 'image'): FileRef => ({
+  id,
+  kind,
+  source: 'desk',
+  name: `${id}.png`,
+  path: `/${id}.png`,
+  ext: 'png',
 });
 
 describe('MediaViewer interaction', () => {
@@ -17,111 +22,112 @@ describe('MediaViewer interaction', () => {
     (window as any).platform = {
       readFileBase64: vi.fn(async () => 'BASE64'),
       getFileUrl: vi.fn((p: string) => `file://${p}`),
+      saveFileAs: vi.fn(async () => '/saved/output.png'),
+      writeFileBinary: vi.fn(async () => true),
     };
   });
-  afterEach(() => { cleanup(); useStore.getState().closeMediaViewer(); delete (window as any).platform; });
 
-  it('ESC 关闭', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b')], currentId: 'a', origin: 'desk' });
+  afterEach(() => {
+    cleanup();
+    useStore.getState().closeMediaViewer();
+    delete (window as any).platform;
+  });
+
+  it('closes on Escape', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b')], currentId: 'a', origin: 'desk' });
     render(<MediaViewer />);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useStore.getState().mediaViewer).toBeNull();
   });
 
-  it('点击遮罩关闭', () => {
-    useStore.getState().setMediaViewer({ files: [f('a')], currentId: 'a', origin: 'desk' });
+  it('closes when clicking the overlay', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
     const { getByTestId } = render(<MediaViewer />);
     fireEvent.click(getByTestId('media-viewer-overlay'));
     expect(useStore.getState().mediaViewer).toBeNull();
   });
 
-  it('点击关闭按钮关闭', () => {
-    useStore.getState().setMediaViewer({ files: [f('a')], currentId: 'a', origin: 'desk' });
+  it('closes when clicking the close button', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
     const { getByTestId } = render(<MediaViewer />);
     fireEvent.click(getByTestId('media-viewer-close'));
     expect(useStore.getState().mediaViewer).toBeNull();
   });
 
-  it('→ 切到下一张', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b'), f('c')], currentId: 'a', origin: 'desk' });
+  it('navigates forward and backward with arrow keys', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b'), fileRef('c')], currentId: 'a', origin: 'desk' });
     render(<MediaViewer />);
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     expect(useStore.getState().mediaViewer?.currentId).toBe('b');
-  });
-
-  it('← 切到上一张', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b')], currentId: 'b', origin: 'desk' });
-    render(<MediaViewer />);
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(useStore.getState().mediaViewer?.currentId).toBe('a');
   });
 
-  it('首张 ← 不变', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b')], currentId: 'a', origin: 'desk' });
+  it('keeps the current file at the boundaries', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b')], currentId: 'a', origin: 'desk' });
     render(<MediaViewer />);
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(useStore.getState().mediaViewer?.currentId).toBe('a');
-  });
 
-  it('末张 → 不变', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b')], currentId: 'b', origin: 'desk' });
-    render(<MediaViewer />);
+    useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b')], currentId: 'b', origin: 'desk' });
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     expect(useStore.getState().mediaViewer?.currentId).toBe('b');
   });
 
-  it('单张图时左右箭头不渲染', () => {
-    useStore.getState().setMediaViewer({ files: [f('a')], currentId: 'a', origin: 'desk' });
-    const { queryByTestId } = render(<MediaViewer />);
-    expect(queryByTestId('media-viewer-prev')).toBeNull();
-    expect(queryByTestId('media-viewer-next')).toBeNull();
+  it('renders navigation buttons only for multi-file sequences', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
+    let view = render(<MediaViewer />);
+    expect(view.queryByTestId('media-viewer-prev')).toBeNull();
+    expect(view.queryByTestId('media-viewer-next')).toBeNull();
+    cleanup();
+
+    useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b')], currentId: 'a', origin: 'desk' });
+    view = render(<MediaViewer />);
+    expect(view.getByTestId('media-viewer-prev')).toBeTruthy();
+    expect(view.getByTestId('media-viewer-next')).toBeTruthy();
   });
 
-  it('多张图时左右箭头渲染', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b')], currentId: 'a', origin: 'desk' });
-    const { getByTestId } = render(<MediaViewer />);
-    expect(getByTestId('media-viewer-prev')).toBeTruthy();
-    expect(getByTestId('media-viewer-next')).toBeTruthy();
-  });
-
-  it('video kind 渲染 VideoStage，Space 在 video 未聚焦时不处理', async () => {
+  it('renders VideoStage for video files', async () => {
     useStore.getState().setMediaViewer({
-      files: [{ ...f('v'), kind: 'video', ext: 'mp4' }],
-      currentId: 'v', origin: 'desk',
+      files: [{ ...fileRef('v'), kind: 'video', ext: 'mp4' }],
+      currentId: 'v',
+      origin: 'desk',
     });
     const { getByTestId } = render(<MediaViewer />);
     await waitFor(() => expect(getByTestId('video-stage-video')).toBeTruthy());
   });
 
-  it('顶栏显示 序号 n/total + 文件名', () => {
-    useStore.getState().setMediaViewer({ files: [f('a'), f('b'), f('c')], currentId: 'b', origin: 'desk' });
+  it('shows the file name and sequence index in the top bar', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b'), fileRef('c')], currentId: 'b', origin: 'desk' });
     const { getByTestId } = render(<MediaViewer />);
     expect(getByTestId('media-viewer-index').textContent).toContain('2 / 3');
     expect(getByTestId('media-viewer-name').textContent).toContain('b.png');
   });
 
-  it('+ 键触发 zoomIn 命令', () => {
-    useStore.getState().setMediaViewer({ files: [f('a')], currentId: 'a', origin: 'desk' });
+  it('dispatches zoom commands from keyboard shortcuts', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
     const { container } = render(<MediaViewer />);
+
     fireEvent.keyDown(window, { key: '=' });
-    // 通过 data-zoom-seq 属性断言命令已派发
+    fireEvent.keyDown(window, { key: '-' });
+    fireEvent.keyDown(window, { key: '0' });
+
     const stage = container.querySelector('[data-testid="image-stage"]') as HTMLElement;
     expect(stage.dataset.zoomInSeq).toBe('1');
-  });
-
-  it('- 键触发 zoomOut 命令', () => {
-    useStore.getState().setMediaViewer({ files: [f('a')], currentId: 'a', origin: 'desk' });
-    const { container } = render(<MediaViewer />);
-    fireEvent.keyDown(window, { key: '-' });
-    const stage = container.querySelector('[data-testid="image-stage"]') as HTMLElement;
     expect(stage.dataset.zoomOutSeq).toBe('1');
+    expect(stage.dataset.resetSeq).toBe('1');
   });
 
-  it('0 键触发 reset 命令', () => {
-    useStore.getState().setMediaViewer({ files: [f('a')], currentId: 'a', origin: 'desk' });
-    const { container } = render(<MediaViewer />);
-    fireEvent.keyDown(window, { key: '0' });
-    const stage = container.querySelector('[data-testid="image-stage"]') as HTMLElement;
-    expect(stage.dataset.resetSeq).toBe('1');
+  it('writes the current media to the chosen Save As path', async () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
+    const { getByTestId } = render(<MediaViewer />);
+
+    await act(async () => {
+      fireEvent.click(getByTestId('media-viewer-save'));
+      await Promise.resolve();
+    });
+
+    expect((window as any).platform.saveFileAs).toHaveBeenCalled();
+    expect((window as any).platform.writeFileBinary).toHaveBeenCalledWith('/saved/output.png', 'BASE64');
   });
 });

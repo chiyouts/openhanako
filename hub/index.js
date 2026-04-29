@@ -26,6 +26,8 @@ import {
   isValidSessionPath,
 } from "../core/message-utils.js";
 import { submitDesktopSessionMessage } from "../core/desktop-session-submit.js";
+import { deriveSandboxPolicy } from "../lib/sandbox/policy.js";
+import { PathGuard } from "../lib/sandbox/path-guard.js";
 
 export class Hub {
   /**
@@ -359,11 +361,59 @@ export class Hub {
       return { apiKey: creds.apiKey, baseUrl: creds.baseUrl, api: creds.api };
     }));
 
+    this._sessionHandlerCleanups.push(bus.handle("provider:entry", async ({ providerId }) => {
+      const entry = engine.providerRegistry.get(providerId);
+      if (!entry) return { error: "not_found" };
+      return { entry };
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("provider:list", async () => {
+      const providers = [...engine.providerRegistry.getAll().values()].map((entry) => ({
+        id: entry.id,
+        displayName: entry.displayName,
+        baseUrl: entry.baseUrl,
+        api: entry.api,
+        authType: entry.authType,
+        isBuiltin: entry.isBuiltin,
+      }));
+      return { providers };
+    }));
+
     this._sessionHandlerCleanups.push(bus.handle("provider:models-by-type", async ({ type, providerId }) => {
       if (providerId) {
         return { models: engine.providerRegistry.getModelsByType(providerId, type) };
       }
       return { models: engine.providerRegistry.getAllModelsByType(type) };
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("sandbox:check-path", async ({ path: rawPath, operation = "read", agentId, workspace, workspaceFolders } = {}) => {
+      if (!rawPath || typeof rawPath !== "string") {
+        return { allowed: false, reason: "path is required" };
+      }
+      if (engine.getSandbox && engine.getSandbox() === false) {
+        return { allowed: true };
+      }
+
+      const targetAgentId = agentId || engine.currentAgentId;
+      const targetAgent = targetAgentId ? engine.getAgent?.(targetAgentId) : null;
+      const agentDir = targetAgent?.agentDir || engine.agentDir;
+      const effectiveWorkspace = workspace || engine.getHomeCwd?.(targetAgentId) || engine.homeCwd || engine.hanakoHome;
+      const extraReadOnlyPaths = (engine._getResolvedExternalSkillPaths?.(effectiveWorkspace) || [])
+        .map((entry) => entry.dirPath);
+
+      const policy = deriveSandboxPolicy({
+        agentDir,
+        workspace: effectiveWorkspace,
+        workspaceFolders: Array.isArray(workspaceFolders) ? workspaceFolders : [],
+        hanakoHome: engine.hanakoHome,
+        mode: "standard",
+        extraReadOnlyPaths,
+      });
+      const guard = new PathGuard(policy);
+      const result = guard.check(rawPath, operation);
+      return result.allowed
+        ? { allowed: true }
+        : { allowed: false, reason: result.reason };
     }));
 
     this._sessionHandlerCleanups.push(bus.handle("agent:config", async ({ agentId }) => {

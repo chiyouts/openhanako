@@ -720,7 +720,15 @@
       "models": "Image Models",
       "globalDefault": "Global Default",
       "followGlobal": "Follow global default",
-      "default": "Default"
+      "default": "Default",
+      "outputDir": "Output Directory",
+      "chooseOutputDir": "Choose",
+      "resetOutputDir": "Reset"
+    },
+    "mediaExtra": {
+      "outputDir": "Output Directory",
+      "chooseOutputDir": "Choose",
+      "resetOutputDir": "Reset"
     },
     "oauth": {
       "title": "Quick Login",
