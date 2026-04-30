@@ -296,7 +296,13 @@ export class Agent {
     });
     this._stageFilesTool = createStageFilesTool();
     this._artifactTool = createArtifactTool();
-    this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.());
+    this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.(), {
+      getSessionModel: (sessionPath) => {
+        const engine = this._cb?.getEngine?.();
+        return engine?.getSessionByPath?.(sessionPath)?.model || null;
+      },
+      getVisionBridge: () => this._cb?.getEngine?.()?.getVisionBridge?.() || null,
+    });
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
     });

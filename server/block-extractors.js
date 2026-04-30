@@ -34,11 +34,12 @@ export const BLOCK_EXTRACTORS = {
   browser: (details, toolResult) => {
     if (details.action !== "screenshot") return null;
     const imgBlock = toolResult?.content?.find(c => c.type === "image");
-    if (!imgBlock?.data) return null;
+    const data = imgBlock?.data || details.thumbnail;
+    if (!data) return null;
     return [{
       type: "screenshot",
-      base64: imgBlock.data,
-      mimeType: imgBlock.mimeType || "image/jpeg",
+      base64: data,
+      mimeType: imgBlock?.mimeType || details.mimeType || "image/jpeg",
     }];
   },
 
