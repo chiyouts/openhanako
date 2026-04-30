@@ -1925,12 +1925,14 @@ html[data-platform="linux"] .tb-toggle-right {
     padding: 0 var(--space-lg) var(--space-lg);
     background: transparent;
     z-index: 5;
+    pointer-events: none;
 }
 
 .input-area > * {
     max-width: 646px;
     margin-left: auto;
     margin-right: auto;
+    pointer-events: auto;
 }
 
 /* (输入区子组件样式已迁移到 InputArea.module.css) */

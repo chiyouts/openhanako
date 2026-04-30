@@ -1003,6 +1003,7 @@
 /* ── Session Panel ── */
 
 .sessionPanel {
+    --chat-scrollbar-bottom-inset: calc(var(--input-card-h, 0px) / 2);
     position: absolute;
     top: 0;
     left: 0;
@@ -1014,6 +1015,10 @@
 
 /* 静默滚动条：默认 thumb 透明（track 已是 transparent），hover 或正在滚动时才显色。
    不改宽度，避免布局抖动。is-scrolling class 由 Panel 的 scroll handler 在滚动时打上、800ms 无滚动后摘掉。 */
+.sessionPanel::-webkit-scrollbar-track {
+    margin-bottom: var(--chat-scrollbar-bottom-inset);
+}
+
 .sessionPanel::-webkit-scrollbar-thumb {
     background: transparent;
     transition: background 0.25s ease-out;
