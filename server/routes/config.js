@@ -5,11 +5,17 @@ import fs from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import { Hono } from "hono";
+import { emitAppEvent } from "../app-events.js";
 import { safeJson } from "../hono-helpers.js";
 import { t } from "../i18n.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { getRawConfig, clearConfigCache } from "../../lib/memory/config-loader.js";
 import { FactStore } from "../../lib/memory/fact-store.js";
+import {
+  writeCompiledResetMarker,
+  clearCompiledMemoryArtifacts,
+  clearCompiledSummarySources,
+} from "../../lib/memory/compiled-memory-state.js";
 import { splitByScope, injectGlobalFields } from '../../shared/config-scope.js';
 import { mergeWorkspaceHistory, normalizeWorkspacePath } from "../../shared/workspace-history.js";
 import { resolveAgent, resolveAgentStrict, AgentNotFoundError } from "../utils/resolve-agent.js";
@@ -19,6 +25,32 @@ import {
   clearInlineProviderCredentialFields,
   hasInlineProviderCredentialPatch,
 } from "./provider-credentials.js";
+
+function hasOwn(value, key) {
+  return !!value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function getGlobalValue(globalFields, key) {
+  return globalFields.find((field) => field.key === key)?.value;
+}
+
+function emitConfigAppEvents(engine, { globalFields, agentPartial, providersChanged }) {
+  const agentId = engine.currentAgentId || null;
+  if (
+    providersChanged
+    || hasOwn(agentPartial, "api")
+    || hasOwn(agentPartial, "embedding_api")
+    || hasOwn(agentPartial, "utility_api")
+    || hasOwn(agentPartial, "models")
+  ) {
+    emitAppEvent(engine, "models-changed", { agentId });
+  }
+
+  const locale = getGlobalValue(globalFields, "locale");
+  if (locale !== undefined) {
+    emitAppEvent(engine, "locale-changed", { locale });
+  }
+}
 
 export function createConfigRoute(engine) {
   const route = new Hono();
@@ -131,24 +163,25 @@ export function createConfigRoute(engine) {
 
       // providers 变更后确保运行时刷新
       if (providersChanged) {
-        try {
-          await engine.onProviderChanged();
-          debugLog()?.log("api", `onProviderChanged OK after provider change (${engine.availableModels.length} models)`);
-        } catch (e) {
-          console.error("[config] onProviderChanged failed:", e.message);
-        }
+        await engine.onProviderChanged();
+        debugLog()?.log("api", `onProviderChanged OK after provider change (${engine.availableModels?.length ?? 0} models)`);
       }
 
       if (providersChanged && Object.keys(agentPartial).length === 0) {
         clearConfigCache();
         await engine.updateConfig({});
+        emitConfigAppEvents(engine, { globalFields, agentPartial, providersChanged });
         return c.json({ ok: true });
       }
 
-      if (Object.keys(agentPartial).length === 0) return c.json({ ok: true });
+      if (Object.keys(agentPartial).length === 0) {
+        emitConfigAppEvents(engine, { globalFields, agentPartial, providersChanged });
+        return c.json({ ok: true });
+      }
       debugLog()?.log("api", `PUT /api/config keys=[${Object.keys(agentPartial).join(",")}]`);
       if (providersChanged) clearConfigCache();
       await engine.updateConfig(agentPartial);
+      emitConfigAppEvents(engine, { globalFields, agentPartial, providersChanged });
       return c.json({ ok: true });
     } catch (err) {
       debugLog()?.error("api", `PUT /api/config failed: ${err.message}`);
@@ -382,19 +415,16 @@ export function createConfigRoute(engine) {
   // 清除编译产物（today/week/longterm/facts/memory.md + fingerprints）
   route.delete("/memories/compiled", async (c) => {
     try {
-      const agent = resolveAgent(engine, c);
+      const agent = resolveAgentStrict(engine, c);
       const memDir = path.dirname(agent.memoryMdPath);
-      const targets = ["memory.md", "today.md", "week.md", "longterm.md", "facts.md"];
-      for (const f of targets) {
-        const p = path.join(memDir, f);
-        await fs.writeFile(p, "", "utf-8").catch(() => {});
-        await fs.unlink(p + ".fingerprint").catch(() => {});
-      }
+      writeCompiledResetMarker(memDir);
+      clearCompiledMemoryArtifacts(memDir);
+      clearCompiledSummarySources(agent.summariesDir, agent.summaryManager);
       debugLog()?.log("api", `DELETE /api/memories/compiled agent=${agent.id}`);
-      const resolvedAgent = engine.getAgent(agent.id);
-      if (resolvedAgent) await resolvedAgent.updateConfig({});
+      await engine.updateConfig({}, { agentId: agent.id });
       return c.json({ ok: true });
     } catch (err) {
+      if (err instanceof AgentNotFoundError) return c.json({ error: err.message }, 404);
       return c.json({ error: err.message }, 500);
     }
   });
@@ -403,17 +433,19 @@ export function createConfigRoute(engine) {
   route.delete("/memories", async (c) => {
     let tempStore = null;
     try {
-      const agent = resolveAgent(engine, c);
-      const { store, isTemp } = getStoreForAgent(c.req.query("agentId"));
+      const agent = resolveAgentStrict(engine, c);
+      const { store, isTemp } = getStoreForAgent(agent.id);
       if (isTemp) tempStore = store;
+      const memDir = path.dirname(agent.memoryMdPath);
+      writeCompiledResetMarker(memDir);
       store.clearAll();
-      const mdPath = agent.memoryMdPath;
-      await fs.writeFile(mdPath, "", "utf-8");
+      clearCompiledMemoryArtifacts(memDir);
+      clearCompiledSummarySources(agent.summariesDir, agent.summaryManager);
       debugLog()?.log("api", `DELETE /api/memories agent=${agent.id}`);
-      const resolvedAgent = engine.getAgent(agent.id);
-      if (resolvedAgent) await resolvedAgent.updateConfig({});
+      await engine.updateConfig({}, { agentId: agent.id });
       return c.json({ ok: true });
     } catch (err) {
+      if (err instanceof AgentNotFoundError) return c.json({ error: err.message }, 404);
       return c.json({ error: err.message }, 500);
     } finally {
       tempStore?.close();

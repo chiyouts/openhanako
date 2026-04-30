@@ -50,7 +50,8 @@
     "jian": "书桌",
     "bridge": "接入社交平台",
     "toggle": "侧边栏",
-    "bridgeShort": "接入社交平台"
+    "bridgeShort": "接入社交平台",
+    "pinned": "置顶"
   },
   "session": {
     "untitled": "新对话",
@@ -59,6 +60,10 @@
     "createFailed": "新建 session 失败",
     "archiveFailed": "归档 session 失败",
     "rename": "重命名",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "pinFailed": "置顶 session 失败",
+    "unpinFailed": "取消置顶失败",
     "archived": {
       "entry": "已归档的聊天",
       "title": "已归档的聊天",
@@ -509,6 +514,7 @@
     "save": "保存",
     "saved": "保存成功 ✿",
     "saveFailed": "保存失败",
+    "fileChangedOnDisk": "文件已被外部修改，已跳过旧版本保存",
     "noChanges": "没有需要保存的更改",
     "autoSaved": "已自动保存 ✿",
     "tabs": {
@@ -628,6 +634,8 @@
       "updateChecking": "正在检查更新…",
       "updateDownloading": "{agentName}正在准备新家 {percent}%",
       "updateReadyInstall": "v{version} 已就绪",
+      "updateInstalling": "正在安装更新，Hanako 会自动重启…",
+      "updateInstallOnQuit": "退出 Hanako 时也会自动安装",
       "updateInstall": "重启更新",
       "updateProgress": "{percent}%",
       "updateError": "检查更新失败",

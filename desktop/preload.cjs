@@ -31,7 +31,11 @@ contextBridge.exposeInMainWorld("hana", {
   autoUpdateInstall: () => ipcRenderer.invoke("auto-update-install"),
   autoUpdateState: () => ipcRenderer.invoke("auto-update-state"),
   autoUpdateSetChannel: (ch) => ipcRenderer.invoke("auto-update-set-channel", ch),
-  onAutoUpdateState: (cb) => ipcRenderer.on("auto-update-state", (_, state) => cb(state)),
+  onAutoUpdateState: (cb) => {
+    const handler = (_, state) => cb(state);
+    ipcRenderer.on("auto-update-state", handler);
+    return () => ipcRenderer.removeListener("auto-update-state", handler);
+  },
   appReady: () => ipcRenderer.invoke("app-ready"),
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   saveFileAs: (options) => ipcRenderer.invoke("save-file-as", options),
@@ -44,6 +48,8 @@ contextBridge.exposeInMainWorld("hana", {
   showInFinder: (path) => ipcRenderer.invoke("show-in-finder", path),
   readFile: (path) => ipcRenderer.invoke("read-file", path),
   writeFile: (filePath, content) => ipcRenderer.invoke("write-file", filePath, content),
+  readFileSnapshot: (path) => ipcRenderer.invoke("read-file-snapshot", path),
+  writeFileIfUnchanged: (filePath, content, expectedVersion) => ipcRenderer.invoke("write-file-if-unchanged", filePath, content, expectedVersion),
   writeFileBinary: (filePath, base64Data) => ipcRenderer.invoke("write-file-binary", filePath, base64Data),
   screenshotRender: (payload) => ipcRenderer.invoke("screenshot-render", payload),
   watchFile: (filePath) => ipcRenderer.invoke("watch-file", filePath),

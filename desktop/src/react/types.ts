@@ -1,7 +1,7 @@
 // ── Auto-update ──
 
 export interface AutoUpdateState {
-  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error' | 'latest';
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'latest';
   version: string | null;
   releaseNotes: string | null;
   releaseUrl: string | null;
@@ -26,6 +26,7 @@ export interface Session {
   agentId: string | null;
   agentName: string | null;
   cwd: string | null;
+  pinnedAt?: string | null;
   rcAttachment?: {
     sessionKey: string;
     platform: string;
@@ -97,6 +98,7 @@ export interface Artifact {
   language?: string | null;
   filePath?: string;
   ext?: string;
+  fileVersion?: FileVersion | null;
 }
 
 export interface DeskFile {
@@ -117,6 +119,23 @@ export interface TodoItem {
 // ── 浮动面板类型 ──
 export type ActivePanel = 'activity' | 'automation' | 'bridge' | null;
 export type TabType = 'chat' | 'channels' | `plugin:${string}`;
+
+export interface FileVersion {
+  mtimeMs: number;
+  size: number;
+  sha256?: string;
+}
+
+export interface TextFileSnapshot {
+  content: string;
+  version: FileVersion;
+}
+
+export interface VersionedWriteResult {
+  ok: boolean;
+  conflict?: boolean;
+  version?: FileVersion | null;
+}
 
 // ── Plugin Card Protocol ──
 
@@ -159,6 +178,8 @@ export interface PlatformApi {
   selectPlugin?(): Promise<string | null>;
   readFile(path: string): Promise<string | null>;
   writeFile(filePath: string, content: string): Promise<boolean>;
+  readFileSnapshot?(path: string): Promise<TextFileSnapshot | null>;
+  writeFileIfUnchanged?(filePath: string, content: string, expectedVersion?: FileVersion | null): Promise<VersionedWriteResult>;
   watchFile(filePath: string): Promise<boolean>;
   unwatchFile(filePath: string): Promise<boolean>;
   onFileChanged(callback: (filePath: string) => void): void;
@@ -225,16 +246,13 @@ export interface PlatformApi {
   // ── Auto-update (Windows) ──
   autoUpdateCheck?(): Promise<string | null>;
   autoUpdateDownload?(): Promise<boolean>;
-  autoUpdateInstall?(): void;
+  autoUpdateInstall?(): Promise<boolean>;
   autoUpdateState?(): Promise<AutoUpdateState>;
   autoUpdateSetChannel?(channel: 'stable' | 'beta'): Promise<void>;
-  onAutoUpdateState?(callback: (state: AutoUpdateState) => void): void;
+  onAutoUpdateState?(callback: (state: AutoUpdateState) => void): (() => void) | void;
 
   // ── Skill viewer overlay ──
   onShowSkillViewer?(callback: (data: unknown) => void): void;
-
-  // ── Inter-window communication ──
-  notifyMainWindow?(event: string, payload?: unknown): void;
 
   [key: string]: unknown;
 }

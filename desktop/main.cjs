@@ -14,14 +14,17 @@ const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
-const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, getState: getUpdateState } = require("./auto-updater.cjs");
+const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, getState: getUpdateState, installDownloadedUpdate } = require("./auto-updater.cjs");
 const { createFileWatchRegistry } = require("./file-watch-registry.cjs");
+const { readTextFileSnapshot, writeTextFileIfUnchanged } = require("./file-text-io.cjs");
 const { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 const themeRegistry = require('./src/shared/theme-registry.cjs');
 const {
   buildBrowserSearchExtractionScript,
   buildBrowserSearchUrl,
 } = require("../lib/browser/browser-search-extractors.cjs");
+
+const APP_USER_MODEL_ID = "com.hanako.app"; // Keep in sync with package.json build.appId.
 
 // preload 缺失时 Electron 会静默忽略，renderer 拿不到 window.hana →
 // onboarding/主窗口白屏且无前端报错。此处硬崩，拒绝以不可用状态启动。
@@ -79,6 +82,10 @@ if (hanakoHome !== defaultHome) {
   const suffix = path.basename(hanakoHome).replace(/^\./, ""); // "hanako-dev"
   const appName = suffix.charAt(0).toUpperCase() + suffix.slice(1); // "Hanako-dev"
   app.setPath("userData", path.join(app.getPath("appData"), appName));
+}
+
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
 }
 
 let splashWindow = null;
@@ -201,13 +208,26 @@ function killPid(pid, force = false) {
 }
 
 /** 跨平台标题栏选项：macOS hiddenInset + 红绿灯，Windows/Linux 无框 */
+function windowIconOpts() {
+  if (process.platform === "win32") {
+    return { icon: path.join(__dirname, "src", "icon.ico") };
+  }
+  if (process.platform === "linux") {
+    return { icon: path.join(__dirname, "src", "icon.png") };
+  }
+  return {};
+}
+
+function framelessWindowOpts() {
+  return { frame: false, ...windowIconOpts() };
+}
+
 function titleBarOpts(trafficLight = { x: 16, y: 16 }) {
   if (process.platform === "darwin") {
     return { titleBarStyle: "hiddenInset", trafficLightPosition: trafficLight };
   }
   // Windows/Linux：无框窗口 + 前端自绘 window controls
-  const icoPath = path.join(__dirname, "src", "assets", "tray.ico");
-  return { frame: false, icon: icoPath };
+  return framelessWindowOpts();
 }
 
 /**
@@ -752,51 +772,6 @@ function createSplashWindow() {
   });
 }
 
-// ── "正在安装更新" 小窗口 ──
-// auto-updater 的 quitAndInstall 会关掉主窗口、跑系统级文件替换、重启应用，
-// 中间用户看不到任何反馈。这个独立窗口从 install 触发到应用真的重启（或失败）
-// 期间一直在屏上，避免"整个 app 凭空消失"的体验。
-let installingWindow = null;
-function createInstallingWindow(version) {
-  if (installingWindow && !installingWindow.isDestroyed()) return;
-  installingWindow = new BrowserWindow({
-    width: 380,
-    height: 280,
-    resizable: false,
-    frame: false,
-    title: "Hanako",
-    ...titleBarOpts({ x: 12, y: 12 }),
-    transparent: true,
-    show: false,
-    alwaysOnTop: true,
-    skipTaskbar: false,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.bundle.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  loadWindowURL(installingWindow, "splash", {
-    query: { mode: "installing", version: String(version || "") },
-  });
-  installingWindow.once("ready-to-show", () => {
-    if (installingWindow && !installingWindow.isDestroyed()) installingWindow.show();
-  });
-  installingWindow.on("closed", () => { installingWindow = null; });
-}
-
-function failInstallingWindow(msg) {
-  if (installingWindow && !installingWindow.isDestroyed()) {
-    try { installingWindow.close(); } catch {}
-  }
-  try {
-    dialog.showErrorBox(
-      mt("dialog.installFailedTitle", null, "Hanako Update"),
-      mt("dialog.installFailedBody", { error: msg || "unknown" })
-    );
-  } catch {}
-}
-
 // ── 窗口状态记忆 ──
 const windowStatePath = path.join(hanakoHome, "user", "window-state.json");
 
@@ -861,8 +836,6 @@ function createMainWindow() {
       shutdownServer,
       setIsUpdating: (v) => { _isUpdating = v; },
       hanakoHome,
-      showInstalling: createInstallingWindow,
-      failInstalling: failInstallingWindow,
     });
     _autoUpdaterInitialized = true;
   } else {
@@ -931,7 +904,7 @@ function createMainWindow() {
 
   // macOS 风格：点关闭按钮只是隐藏窗口，Dock 保留黑点
   mainWindow.on("close", (e) => {
-    if (!isQuitting) {
+    if (!isQuitting && !_isUpdating && !forceQuitApp) {
       e.preventDefault();
       mainWindow.hide();
       // 不调 app.dock.hide()，Dock 上保留图标和黑点
@@ -1100,7 +1073,7 @@ function createBrowserViewerWindow(opts = {}) {
     minWidth: 480,
     minHeight: 360,
     title: "Browser",
-    frame: false,
+    ...framelessWindowOpts(),
     backgroundColor: (themeRegistry.THEMES[_browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
     hasShadow: true,
     show: shouldShow,
@@ -2209,7 +2182,7 @@ wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
     minWidth: 400,
     minHeight: 300,
     title: data.title || "Viewer",
-    frame: false,
+    ...framelessWindowOpts(),
     backgroundColor: (themeRegistry.THEMES[theme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
     hasShadow: true,
     show: true,
@@ -2526,11 +2499,14 @@ wrapIpcBestEffortHandler("open-external", (_event, url) => {
 wrapIpcHandler("read-file", (_event, filePath) => {
   if (!filePath || !path.isAbsolute(filePath)) return null;
   try {
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) return null;
-    // 限制 5MB，防止读大文件卡死
-    if (stat.size > 5 * 1024 * 1024) return null;
-    return fs.readFileSync(filePath, "utf-8");
+    return readTextFileSnapshot(filePath)?.content ?? null;
+  } catch { return null; }
+});
+
+wrapIpcHandler("read-file-snapshot", (_event, filePath) => {
+  if (!filePath || !path.isAbsolute(filePath)) return null;
+  try {
+    return readTextFileSnapshot(filePath);
   } catch { return null; }
 });
 
@@ -2541,6 +2517,15 @@ wrapIpcBestEffortHandler("write-file", (_event, filePath, content) => {
     fs.writeFileSync(filePath, content, "utf-8");
     return true;
   } catch { return false; }
+});
+
+wrapIpcBestEffortHandler("write-file-if-unchanged", (_event, filePath, content, expectedVersion) => {
+  if (!filePath || !path.isAbsolute(filePath)) return { ok: false };
+  try {
+    return writeTextFileIfUnchanged(filePath, content, expectedVersion || null);
+  } catch {
+    return { ok: false };
+  }
 });
 
 // 写入二进制文件（截图用）— 支持 ~ 开头路径
@@ -2922,6 +2907,19 @@ app.on("before-quit", async (event) => {
 
   // auto-updater 已完成 server 清理，直接放行
   if (_isUpdating) return;
+
+  if (getUpdateState().status === "downloaded") {
+    event.preventDefault();
+    const started = await installDownloadedUpdate("app-quit");
+    if (!started) {
+      isExitingServer = true;
+      if ((serverProcess && !serverProcess.killed) || reusedServerPid) {
+        await shutdownServer();
+      }
+      app.quit();
+    }
+    return;
+  }
 
   isExitingServer = true;
 

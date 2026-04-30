@@ -50,7 +50,8 @@
     "jian": "Desk",
     "bridge": "Social Platforms",
     "toggle": "Sidebar",
-    "bridgeShort": "Bridge"
+    "bridgeShort": "Bridge",
+    "pinned": "Pinned"
   },
   "session": {
     "untitled": "New Chat",
@@ -59,6 +60,10 @@
     "createFailed": "Failed to create session",
     "archiveFailed": "Failed to archive session",
     "rename": "Rename",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinFailed": "Failed to pin session",
+    "unpinFailed": "Failed to unpin session",
     "archived": {
       "entry": "Archived Chats",
       "title": "Archived Chats",
@@ -504,6 +509,7 @@
     "save": "Save",
     "saved": "Saved ✿",
     "saveFailed": "Failed to save",
+    "fileChangedOnDisk": "The file changed on disk, so the stale save was skipped",
     "noChanges": "Nothing to save",
     "autoSaved": "Auto-saved ✿",
     "tabs": {
@@ -623,6 +629,8 @@
       "updateChecking": "Checking for updates…",
       "updateDownloading": "{agentName} is preparing a new home {percent}%",
       "updateReadyInstall": "v{version} ready to install",
+      "updateInstalling": "Installing update. Hanako will restart automatically…",
+      "updateInstallOnQuit": "Hanako will also install it when you quit",
       "updateInstall": "Restart to update",
       "updateProgress": "{percent}%",
       "updateError": "Update check failed",

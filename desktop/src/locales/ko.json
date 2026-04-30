@@ -49,7 +49,8 @@
     "jian": "책상",
     "bridge": "소셜 플랫폼",
     "toggle": "사이드바",
-    "bridgeShort": "연결"
+    "bridgeShort": "연결",
+    "pinned": "고정"
   },
   "session": {
     "untitled": "새 대화",
@@ -58,6 +59,10 @@
     "createFailed": "세션 생성 실패",
     "archiveFailed": "세션 보관 실패",
     "rename": "이름 변경",
+    "pin": "고정",
+    "unpin": "고정 해제",
+    "pinFailed": "세션 고정 실패",
+    "unpinFailed": "세션 고정 해제 실패",
     "archived": {
       "entry": "보관된 대화",
       "title": "보관된 대화",
@@ -502,6 +507,7 @@
     "save": "저장",
     "saved": "저장됨 ✿",
     "saveFailed": "저장 실패",
+    "fileChangedOnDisk": "파일이 외부에서 변경되어 오래된 저장을 건너뛰었습니다",
     "noChanges": "저장할 내용이 없어요",
     "autoSaved": "자동 저장됨 ✿",
     "tabs": {
@@ -618,6 +624,8 @@
       "updateChecking": "업데이트 확인 중…",
       "updateDownloading": "{agentName}이(가) 새 집을 준비하는 중 {percent}%",
       "updateReadyInstall": "v{version} 설치 준비 완료",
+      "updateInstalling": "업데이트를 설치하는 중입니다. Hanako가 자동으로 다시 시작됩니다…",
+      "updateInstallOnQuit": "Hanako를 종료할 때도 자동으로 설치합니다",
       "updateInstall": "재시작하여 업데이트",
       "updateProgress": "{percent}%",
       "updateError": "업데이트 확인 실패",
@@ -625,7 +633,8 @@
       "updateCheckBtn": "업데이트 확인",
       "updateNeedInstall": "먼저 Hanako를 응용 프로그램 폴더로 이동하세요",
       "updateDiskSpace": "디스크 공간이 부족하여 업데이트를 다운로드할 수 없습니다",
-      "betaUpdates": "베타 업데이트 수신"
+      "betaUpdates": "베타 업데이트 수신",
+      "autoCheckUpdates": "업데이트 자동 확인"
     },
     "security": {
       "sandbox": "샌드박스",
