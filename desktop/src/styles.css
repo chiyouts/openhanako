@@ -868,6 +868,16 @@ html[data-platform="linux"] .tb-toggle-right {
     margin-bottom: 0;
 }
 
+/* 普通 Markdown 图片必须收进正文列，避免大图撑宽聊天区。 */
+.md-content img {
+    display: block;
+    max-width: 100%;
+    max-height: min(520px, 70vh);
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
 /* 行内代码 */
 .md-content code {
     font-family: var(--font-mono);
