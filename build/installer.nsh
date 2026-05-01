@@ -1,9 +1,10 @@
-; installer.nsh — NSIS custom hooks for Hanako installer
+; installer.nsh - NSIS custom hooks for Hanako installer
 ;
-; Kills running Hanako processes before install/uninstall to prevent
-; "file in use" errors on Windows overlay installs.
+; Owns the Windows overlay boundary for Hanako installs. The installer may
+; replace Hana-owned program files, while user/runtime state stays outside
+; $INSTDIR.
 
-; Disable CRC integrity check — electron-builder's post-compilation PE editing
+; Disable CRC integrity check. electron-builder's post-compilation PE editing
 ; (signtool + rcedit) corrupts the NSIS CRC when no signing cert is configured,
 ; causing "Installer integrity check has failed" on Windows.
 CRCCheck off
@@ -11,7 +12,7 @@ CRCCheck off
 !include LogicLib.nsh
 
 !macro hanakoFindProcess _NAME _RETURN
-  nsExec::ExecToLog `"$CmdPath" /C tasklist /FI "IMAGENAME eq ${_NAME}" /FO CSV | "$FindPath" "${_NAME}"`
+  nsExec::ExecToLog `"$SYSDIR\cmd.exe" /D /C tasklist /FI "IMAGENAME eq ${_NAME}" /FO CSV | "$SYSDIR\find.exe" "${_NAME}"`
   Pop ${_RETURN}
 !macroend
 
@@ -30,7 +31,7 @@ CRCCheck off
   ${Else}
     StrCpy $0 ""
   ${EndIf}
-  nsExec::ExecToLog `"$CmdPath" /C taskkill $0 /IM "${_NAME}"`
+  nsExec::ExecToLog `"$SYSDIR\cmd.exe" /D /C taskkill $0 /T /IM "${_NAME}"`
   Pop $1
   Pop $1
   Pop $0
@@ -41,7 +42,52 @@ CRCCheck off
   !insertmacro hanakoKillProcess hana-server.exe ${_FORCE}
 !macroend
 
+!macro hanakoWriteInstallDirProcessCleaner _SCRIPT
+  Push $0
+  FileOpen $0 "${_SCRIPT}" w
+  FileWrite $0 `$$ErrorActionPreference = 'SilentlyContinue'$\r$\n`
+  FileWrite $0 `$$installDir = [Environment]::GetEnvironmentVariable('HANA_INSTALL_DIR')$\r$\n`
+  FileWrite $0 `if ([string]::IsNullOrWhiteSpace($$installDir)) { exit 0 }$\r$\n`
+  FileWrite $0 `$$installFull = [System.IO.Path]::GetFullPath($$installDir).TrimEnd('\')$\r$\n`
+  FileWrite $0 `$$installPrefix = $$installFull + '\'$\r$\n`
+  FileWrite $0 `$$selfPid = $$PID$\r$\n`
+  FileWrite $0 `function Test-HanaPath([string]$$value) {$\r$\n`
+  FileWrite $0 `  if ([string]::IsNullOrWhiteSpace($$value)) { return $$false }$\r$\n`
+  FileWrite $0 `  try {$\r$\n`
+  FileWrite $0 `    $$full = [System.IO.Path]::GetFullPath($$value)$\r$\n`
+  FileWrite $0 `    return $$full.Equals($$installFull, [StringComparison]::OrdinalIgnoreCase) -or $$full.StartsWith($$installPrefix, [StringComparison]::OrdinalIgnoreCase)$\r$\n`
+  FileWrite $0 `  } catch { return $$false }$\r$\n`
+  FileWrite $0 `}$\r$\n`
+  FileWrite $0 `function Test-HanaCommand([string]$$value) {$\r$\n`
+  FileWrite $0 `  if ([string]::IsNullOrWhiteSpace($$value)) { return $$false }$\r$\n`
+  FileWrite $0 `  return $$value.IndexOf($$installFull, [StringComparison]::OrdinalIgnoreCase) -ge 0$\r$\n`
+  FileWrite $0 `}$\r$\n`
+  FileWrite $0 `Get-CimInstance Win32_Process | Where-Object {$\r$\n`
+  FileWrite $0 `  $$_.ProcessId -ne $$selfPid -and ((Test-HanaPath $$_.ExecutablePath) -or (Test-HanaCommand $$_.CommandLine))$\r$\n`
+  FileWrite $0 `} | ForEach-Object {$\r$\n`
+  FileWrite $0 `  Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue$\r$\n`
+  FileWrite $0 `}$\r$\n`
+  FileClose $0
+  Pop $0
+!macroend
+
+!macro hanakoStopInstallDirProcesses
+  ; Stop every process launched from this install root. This catches renamed
+  ; helper processes and stale child processes that do not use fixed image names.
+  Push $0
+  Push $1
+  InitPluginsDir
+  StrCpy $1 "$PLUGINSDIR\hanako-stop-install-dir.ps1"
+  !insertmacro hanakoWriteInstallDirProcessCleaner "$1"
+  System::Call 'kernel32::SetEnvironmentVariable(t "HANA_INSTALL_DIR", t "$INSTDIR") i.r0'
+  nsExec::ExecToLog `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$1"`
+  Pop $0
+  Pop $1
+  Pop $0
+!macroend
+
 !macro customCheckAppRunning
+  !insertmacro hanakoStopInstallDirProcesses
   !insertmacro hanakoFindRunningProcesses $R0
   ${If} $R0 == 0
     DetailPrint "Detected Hanako.exe or hana-server.exe; closing them before install."
@@ -82,33 +128,72 @@ CRCCheck off
     RMDir /r "$INSTDIR\resources\server"
 !macroend
 
+!macro hanakoRemoveOwnedInstallTrees
+  DetailPrint "Removing Hana-owned install files"
+  SetOutPath "$TEMP"
+  RMDir /r "$INSTDIR\resources\server"
+  RMDir /r "$INSTDIR\resources\git"
+  RMDir /r "$INSTDIR\resources\screenshot-themes"
+  RMDir /r "$INSTDIR\resources\app.asar.unpacked"
+  Delete "$INSTDIR\resources\app.asar"
+  Delete "$INSTDIR\resources\app-update.yml"
+  Delete "$INSTDIR\resources\elevate.exe"
+  RMDir "$INSTDIR\resources"
+  RMDir /r "$INSTDIR\locales"
+  RMDir /r "$INSTDIR\swiftshader"
+  Delete "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  Delete "$INSTDIR\${UNINSTALL_FILENAME}"
+  Delete "$INSTDIR\uninstallerIcon.ico"
+  Delete "$INSTDIR\*.pak"
+  Delete "$INSTDIR\*.bin"
+  Delete "$INSTDIR\*.dat"
+  Delete "$INSTDIR\*.dll"
+  Delete "$INSTDIR\*.json"
+  Delete "$INSTDIR\*.html"
+  Delete "$INSTDIR\LICENSE*"
+  Delete "$INSTDIR\*.ico"
+!macroend
+
+!macro hanakoPrepareOwnedOverlay
+  !insertmacro hanakoStopInstallDirProcesses
+  !insertmacro hanakoRemoveOwnedInstallTrees
+  ClearErrors
+!macroend
+
 !macro customInit
-  ; Kill Electron main process
-  nsExec::ExecToLog 'taskkill /F /IM "Hanako.exe"'
-  ; Kill bundled server process (renamed node.exe)
-  nsExec::ExecToLog 'taskkill /F /IM "hana-server.exe"'
-  ; Wait for file handles to release
+  !insertmacro hanakoStopInstallDirProcesses
+  ; Wait for file handles to release.
   Sleep 2000
 !macroend
 
 !macro customUnInstallCheck
-  ; Preserve electron-builder's default handling: a missing stale uninstaller
-  ; can fall through to a clean overlay, but a real non-zero uninstaller exit
-  ; must stop the install instead of silently mixing old and new files.
   ${If} ${Errors}
-    DetailPrint `Uninstall was not successful. Not able to launch uninstaller; continuing with clean overlay.`
-    ClearErrors
+    DetailPrint `Previous uninstaller could not be launched; preparing a Hana-owned overlay.`
   ${ElseIf} $R0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "$(uninstallFailed): $R0"
-    DetailPrint `Uninstall was not successful. Uninstaller error code: $R0.`
-    SetErrorLevel 2
-    Quit
+    DetailPrint `Previous uninstaller exited with code $R0; preparing a Hana-owned overlay.`
   ${EndIf}
-  !insertmacro hanakoCleanBundledServer
+  !insertmacro hanakoPrepareOwnedOverlay
+  ClearErrors
+!macroend
+
+!macro customUnInstallCheckCurrentUser
+  ${If} ${Errors}
+    DetailPrint `Previous current-user uninstaller could not be launched; continuing with Hana-owned overlay.`
+  ${ElseIf} $R0 != 0
+    DetailPrint `Previous current-user uninstaller exited with code $R0; continuing with Hana-owned overlay.`
+  ${EndIf}
+  !insertmacro hanakoPrepareOwnedOverlay
+  ClearErrors
+!macroend
+
+!macro customRemoveFiles
+  !insertmacro hanakoStopInstallDirProcesses
+  Delete "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  !insertmacro hanakoRemoveOwnedInstallTrees
+  RMDir "$INSTDIR"
 !macroend
 
 !macro customUnInit
-  nsExec::ExecToLog 'taskkill /F /IM "Hanako.exe"'
-  nsExec::ExecToLog 'taskkill /F /IM "hana-server.exe"'
+  !insertmacro hanakoStopInstallDirProcesses
   Sleep 2000
 !macroend
