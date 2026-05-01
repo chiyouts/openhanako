@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computerUseHelperOutputDir,
   patchCuaDriverAppStateSource,
+  patchCuaDriverClickToolSource,
   shouldBuildComputerUseHelper,
   swiftBuildScratchPath,
   swiftArchForNodeArch,
@@ -88,5 +89,31 @@ describe("Computer Use helper build script", () => {
     expect(patched).toContain("shouldAssertAccessibilityForAXClientSignals");
     expect(patched).toContain("descendantLabelSummary");
     expect(patchCuaDriverAppStateSource(patched)).toBe(patched);
+  });
+
+  it("patches Cua ClickTool to expose AXShowDefaultUI as a semantic action", () => {
+    const source = `Other values:
+                  \`show_menu\` (right-click equivalent), \`pick\` (open a
+                    "action": [
+                        "type": "string",
+                        "enum": ["press", "show_menu", "pick", "confirm", "cancel", "open"],
+                        "description":
+                            "AX action name (element_index path only). Default: press.",
+                    ],
+    private static let axActionByName: [String: String] = [
+        "press": "AXPress",
+        "show_menu": "AXShowMenu",
+        "pick": "AXPick",
+        "confirm": "AXConfirm",
+        "cancel": "AXCancel",
+        "open": "AXOpen",
+    ]
+`;
+
+    const patched = patchCuaDriverClickToolSource(source);
+
+    expect(patched).toContain('"show_default_ui"');
+    expect(patched).toContain('"show_default_ui": "AXShowDefaultUI"');
+    expect(patchCuaDriverClickToolSource(patched)).toBe(patched);
   });
 });

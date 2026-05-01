@@ -40,8 +40,19 @@ const CUA_APP_STATE_RELATIVE_PATH = path.join(
   "AppState",
   "AppState.swift",
 );
+const CUA_CLICK_TOOL_RELATIVE_PATH = path.join(
+  "checkouts",
+  "cua",
+  "libs",
+  "cua-driver",
+  "Sources",
+  "CuaDriverServer",
+  "Tools",
+  "ClickTool.swift",
+);
 
 const CUA_AX_PATCH_SENTINEL = "cuaDriverAXMessagingTimeoutSeconds";
+const CUA_CLICK_PATCH_SENTINEL = '"show_default_ui": "AXShowDefaultUI"';
 
 function replaceRequired(source, needle, replacement, label) {
   if (!source.includes(needle)) {
@@ -318,18 +329,67 @@ private func applyCuaDriverAXMessagingTimeout(_ element: AXUIElement) -> AXError
   return patched;
 }
 
+export function patchCuaDriverClickToolSource(source) {
+  if (source.includes(CUA_CLICK_PATCH_SENTINEL)) return source;
+  let patched = source;
+
+  patched = replaceRequired(
+    patched,
+    `"enum": ["press", "show_menu", "pick", "confirm", "cancel", "open"],`,
+    `"enum": ["press", "show_menu", "show_default_ui", "pick", "confirm", "cancel", "open"],`,
+    "ClickTool action schema",
+  );
+
+  patched = replaceRequired(
+    patched,
+    `"show_menu": "AXShowMenu",
+        "pick": "AXPick",`,
+    `"show_menu": "AXShowMenu",
+        "show_default_ui": "AXShowDefaultUI",
+        "pick": "AXPick",`,
+    "ClickTool AXShowDefaultUI action mapping",
+  );
+
+  patched = replaceRequired(
+    patched,
+    "Other values:\n                  `show_menu` (right-click equivalent), `pick` (open a",
+    "Other values:\n                  `show_menu` (right-click equivalent), `show_default_ui`\n                  (select a row/list item via AXShowDefaultUI), `pick` (open a",
+    "ClickTool action description",
+  );
+
+  return patched;
+}
+
 export function applyCuaDriverSourcePatches({ scratchPath } = {}) {
   const appStatePath = path.join(scratchPath, CUA_APP_STATE_RELATIVE_PATH);
   if (!fs.existsSync(appStatePath)) {
     throw new Error(`[computer-use-helper] Cua AppState.swift not found at ${appStatePath}`);
   }
-  const source = fs.readFileSync(appStatePath, "utf8");
-  const patched = patchCuaDriverAppStateSource(source);
-  if (patched === source) return false;
-  fs.chmodSync(appStatePath, 0o644);
-  fs.writeFileSync(appStatePath, patched);
-  console.log("[computer-use-helper] patched Cua AX tree walk for bounded background snapshots");
-  return true;
+  const clickToolPath = path.join(scratchPath, CUA_CLICK_TOOL_RELATIVE_PATH);
+  if (!fs.existsSync(clickToolPath)) {
+    throw new Error(`[computer-use-helper] Cua ClickTool.swift not found at ${clickToolPath}`);
+  }
+
+  let patchedAny = false;
+  const appStateSource = fs.readFileSync(appStatePath, "utf8");
+  const patchedAppState = patchCuaDriverAppStateSource(appStateSource);
+  if (patchedAppState !== appStateSource) {
+    fs.chmodSync(appStatePath, 0o644);
+    fs.writeFileSync(appStatePath, patchedAppState);
+    console.log("[computer-use-helper] patched Cua AX tree walk for bounded background snapshots");
+    patchedAny = true;
+  }
+
+  const clickToolSource = fs.readFileSync(clickToolPath, "utf8");
+  const patchedClickTool = patchCuaDriverClickToolSource(clickToolSource);
+  if (patchedClickTool !== clickToolSource) {
+    fs.chmodSync(clickToolPath, 0o644);
+    fs.writeFileSync(clickToolPath, patchedClickTool);
+    console.log("[computer-use-helper] patched Cua ClickTool for AXShowDefaultUI row actions");
+    patchedAny = true;
+  }
+
+  return patchedAny;
 }
 
 function run(command, args, options = {}) {

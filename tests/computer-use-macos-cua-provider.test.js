@@ -570,7 +570,7 @@ describe("macos Cua provider", () => {
     ]);
   });
 
-  it("uses Cua's element double-click fallback for AXShowDefaultUI rows that do not support AXPress", async () => {
+  it("uses AXShowDefaultUI instead of double-click fallback for rows that do not support AXPress", async () => {
     const { runner, calls } = makeRunner((_command, args) => {
       if (args[0] === "get_window_state") {
         return rawResult(
@@ -608,14 +608,15 @@ describe("macos Cua provider", () => {
     expect(snapshot.elements.find((element) => element.elementId === "15")).toMatchObject({
       actions: ["AXShowDefaultUI", "AXShowAlternateUI"],
     });
-    expect(calls.map((c) => c.args[0])).toContain("double_click");
-    const actionCall = calls.find((c) => c.args[0] === "double_click");
+    expect(calls.map((c) => c.args[0])).toContain("click");
+    const actionCall = calls.find((c) => c.args[0] === "click");
     expect(JSON.parse(actionCall.args[1])).toEqual({
       pid: 844,
       window_id: 10725,
       element_index: 15,
+      action: "show_default_ui",
     });
-    expect(calls.map((c) => c.args[0])).not.toContain("click");
+    expect(calls.map((c) => c.args[0])).not.toContain("double_click");
   });
 
   it("converts Cua CLI failures into typed errors", async () => {

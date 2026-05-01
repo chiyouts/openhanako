@@ -448,10 +448,12 @@ function advertisedActions(snapshotElement = {}) {
     : [];
 }
 
-function shouldUseElementDoubleClickFallback(snapshotElement = {}) {
+function semanticClickActionForElement(snapshotElement = {}) {
   const actions = advertisedActions(snapshotElement);
-  if (!actions.length || actions.includes("AXPress")) return false;
-  return snapshotElement?.role === "AXRow" && actions.includes("AXShowDefaultUI");
+  if (!actions.length || actions.includes("AXPress")) return null;
+  if (actions.includes("AXShowDefaultUI")) return "show_default_ui";
+  if (actions.includes("AXOpen")) return "open";
+  return null;
 }
 
 function normalizeCursorStyle({ cursorStyle, cursorImagePath, cursorBloomColor }) {
@@ -772,11 +774,13 @@ export function createMacosCuaProvider({
       }
 
       if (action.type === "click_element") {
-        if (shouldUseElementDoubleClickFallback(action.snapshotElement)) {
-          return getStructured(await runTool("double_click", {
+        const semanticAction = semanticClickActionForElement(action.snapshotElement);
+        if (semanticAction) {
+          return getStructured(await runTool("click", {
             pid,
             window_id: windowId,
             element_index: requireElementIndex(action),
+            action: semanticAction,
           })) || { ok: true };
         }
         return getStructured(await runTool("click", { pid, window_id: windowId, element_index: requireElementIndex(action) })) || { ok: true };
