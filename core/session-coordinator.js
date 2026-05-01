@@ -21,6 +21,7 @@ import { computeToolSnapshot, DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool
 import { buildUiContextReminder, injectReminderIntoLastUserMessage } from "./ui-context-reminder.js";
 import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
+import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 
 const log = createModuleLogger("session");
 
@@ -109,6 +110,13 @@ export class SessionCoordinator {
     if (!restore && !effectiveModel) {
       throw new Error(t("error.noAvailableModel"));
     }
+    const resolvedThinkingLevel = models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel());
+    const providerPromptPatches = !restore
+      ? getProviderPromptPatches(effectiveModel, {
+        reasoningLevel: resolvedThinkingLevel,
+        locale: agent.config?.locale || getLocale(),
+      })
+      : [];
 
     if (!sessionMgr) {
       sessionMgr = SessionManager.create(effectiveCwd, agent.sessionDir);
@@ -224,7 +232,7 @@ export class SessionCoordinator {
       getAppendSystemPrompt: {
         value: () => {
           const base = baseResourceLoader.getAppendSystemPrompt();
-          const parts = [...base];
+          const parts = [...base, ...providerPromptPatches];
 
           // Plan mode prompt (existing logic, preserved verbatim)
           if (sessionEntry.planMode) {
@@ -291,7 +299,7 @@ After dispatching subagent or other background tasks:
       settingsManager: this._createSettings(effectiveModel),
       authStorage: models.authStorage,
       modelRegistry: models.modelRegistry,
-      thinkingLevel: models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel()),
+      thinkingLevel: resolvedThinkingLevel,
       resourceLoader,
       tools: sessionTools,
       customTools: sessionCustomTools,
