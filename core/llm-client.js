@@ -1,6 +1,7 @@
 import { AppError } from '../shared/errors.js';
 import { errorBus } from '../shared/error-bus.js';
 import { normalizeProviderPayload } from './provider-compat.js';
+import { logLlmUsage, normalizeLlmUsage } from '../lib/llm/usage-observer.js';
 
 /**
  * core/llm-client.js — 统一的非流式 LLM 调用入口
@@ -88,7 +89,8 @@ function convertContentForApi(content, api) {
  * @param {number} [opts.maxTokens]    最大输出 token (default 512)
  * @param {number} [opts.timeoutMs]    超时毫秒 (default 60000)
  * @param {AbortSignal} [opts.signal]  外部取消信号
- * @returns {Promise<string>} 生成的文本
+ * @param {boolean} [opts.returnUsage] 返回 { text, usage }，默认保持旧接口返回纯文本
+ * @returns {Promise<string|{text: string, usage: object|null}>} 生成的文本
  */
 export async function callText({
   api,
@@ -102,6 +104,7 @@ export async function callText({
   maxTokens = 512,
   timeoutMs = 60_000,
   signal,
+  returnUsage = false,
 }) {
   // 同时接受完整 model 对象和裸 id。modelObj 用于 provider-compat 决策；modelId 入 payload。
   const modelObj = typeof model === "object" && model !== null ? model : null;
@@ -175,8 +178,16 @@ export async function callText({
   // 把 callText opts 传入的 quirks 合入 model 对象，让 qwen.js 等子模块的
   // matches 能基于数据声明字段识别。modelObj 自身已有 quirks 时不覆盖。
   const modelForCompat = modelObj
-    ? (Array.isArray(modelObj.quirks) ? modelObj : { ...modelObj, quirks })
-    : (quirks.length > 0 ? { id: modelId, provider, quirks } : null);
+    ? (
+      Array.isArray(modelObj.quirks)
+        ? { ...modelObj, api: modelObj.api ?? api }
+        : { ...modelObj, api: modelObj.api ?? api, quirks }
+    )
+    : (
+      quirks.length > 0 || api === "anthropic-messages"
+        ? { id: modelId, provider, api, quirks }
+        : null
+    );
   body = normalizeProviderPayload(body, modelForCompat, { mode: "utility" });
 
   // ── 4. 发送请求 ──
@@ -252,5 +263,15 @@ export async function callText({
     throw new AppError('LLM_EMPTY_RESPONSE', { context: { model: modelId } });
   }
 
-  return text;
+  const usage = normalizeLlmUsage(data?.usage, { costRates: modelObj?.cost });
+  logLlmUsage({
+    source: "utility",
+    api,
+    provider,
+    modelId,
+    usage: data?.usage,
+    costRates: modelObj?.cost,
+  });
+
+  return returnUsage ? { text, usage } : text;
 }

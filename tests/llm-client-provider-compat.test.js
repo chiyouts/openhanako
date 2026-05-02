@@ -94,7 +94,97 @@ describe("callText provider-compat routing", () => {
           media_type: "image/jpeg",
           data: "BASE64",
         },
+        cache_control: { type: "ephemeral" },
       },
     ]);
+  });
+
+  it("adds cache_control to anthropic utility system prompts", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        content: [{ type: "text", text: "ok" }],
+      }),
+    });
+
+    await callText({
+      api: "anthropic-messages",
+      baseUrl: "https://example.test",
+      model: { id: "claude-opus-4-5", provider: "anthropic" },
+      systemPrompt: "Stable writing system prompt",
+      messages: [{ role: "user", content: "write" }],
+      timeoutMs: 5_000,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.system).toEqual([
+      {
+        type: "text",
+        text: "Stable writing system prompt",
+        cache_control: { type: "ephemeral" },
+      },
+    ]);
+  });
+
+  it("keeps callText string-compatible by default and returns usage only when requested", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_input_tokens: 80,
+            cache_creation_input_tokens: 40,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          content: [{ type: "text", text: "ok" }],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_input_tokens: 80,
+            cache_creation_input_tokens: 40,
+          },
+        }),
+      });
+
+    const defaultResult = await callText({
+      api: "anthropic-messages",
+      baseUrl: "https://example.test",
+      model: { id: "claude-opus-4-5", provider: "anthropic" },
+      messages: [{ role: "user", content: "hi" }],
+      timeoutMs: 5_000,
+    });
+
+    const detailedResult = await callText({
+      api: "anthropic-messages",
+      baseUrl: "https://example.test",
+      model: { id: "claude-opus-4-5", provider: "anthropic" },
+      messages: [{ role: "user", content: "hi" }],
+      timeoutMs: 5_000,
+      returnUsage: true,
+    });
+
+    expect(defaultResult).toBe("ok");
+    expect(detailedResult).toEqual({
+      text: "ok",
+      usage: expect.objectContaining({
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 80,
+        cacheWriteTokens: 40,
+        cacheHit: true,
+        cacheCreated: true,
+      }),
+    });
   });
 });

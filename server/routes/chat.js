@@ -12,6 +12,7 @@ import { wsSend, wsParse } from "../ws-protocol.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { t } from "../i18n.js";
 import { getLastAssistantUsage } from "../../lib/pi-sdk/index.js";
+import { logLlmUsage } from "../../lib/llm/usage-observer.js";
 import { BrowserManager } from "../../lib/browser/browser-manager.js";
 import {
   createSessionStreamState,
@@ -515,6 +516,14 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           const usage = getLastAssistantUsage(sess.entries ?? []);
           if (usage) {
             const model = sess.model;
+            logLlmUsage({
+              source: "chat",
+              api: model?.api ?? null,
+              modelId: model?.id ?? null,
+              provider: model?.provider ?? null,
+              usage,
+              costRates: model?.cost,
+            });
             hub.eventBus.emit({
               type: "token_usage",
               usage,
