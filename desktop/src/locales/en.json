@@ -564,6 +564,27 @@
       "leavesOverlay": "Sunny Mode",
       "leavesOverlayHint": "Go touch some grass (and sunlight)"
     },
+    "editor": {
+      "title": "Editor",
+      "markdownBodyFontSize": "Body Size",
+      "markdownBodyFontSizeHint": "Markdown body text defaults to a Notion-like 16px.",
+      "markdownHeading1FontSize": "Heading 1 Size",
+      "markdownHeading1FontSizeHint": "Used for # headings.",
+      "markdownHeading2FontSize": "Heading 2 Size",
+      "markdownHeading2FontSizeHint": "Used for ## headings.",
+      "markdownHeading3FontSize": "Heading 3 Size",
+      "markdownHeading3FontSizeHint": "Used for ### headings.",
+      "markdownHeading4FontSize": "Heading 4 Size",
+      "markdownHeading4FontSizeHint": "Used for #### headings.",
+      "markdownHeading5FontSize": "Heading 5 Size",
+      "markdownHeading5FontSizeHint": "Used for ##### headings.",
+      "markdownHeading6FontSize": "Heading 6 Size",
+      "markdownHeading6FontSizeHint": "Used for ###### headings.",
+      "markdownLineHeight": "Line Height",
+      "markdownLineHeightHint": "Controls vertical rhythm inside the editor.",
+      "markdownContentPadding": "Content Padding",
+      "markdownContentPaddingHint": "Controls left and right padding for editor content."
+    },
     "locale": {
       "title": "Language & Region",
       "language": "Language",

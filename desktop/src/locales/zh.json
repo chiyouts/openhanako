@@ -569,6 +569,27 @@
       "leavesOverlay": "晴天模式",
       "leavesOverlayHint": "没事儿晒晒太阳"
     },
+    "editor": {
+      "title": "编辑器",
+      "markdownBodyFontSize": "正文字号",
+      "markdownBodyFontSizeHint": "Markdown 编辑器正文默认使用接近 Notion 的 16px。",
+      "markdownHeading1FontSize": "一级标题字号",
+      "markdownHeading1FontSizeHint": "用于 # 标题。",
+      "markdownHeading2FontSize": "二级标题字号",
+      "markdownHeading2FontSizeHint": "用于 ## 标题。",
+      "markdownHeading3FontSize": "三级标题字号",
+      "markdownHeading3FontSizeHint": "用于 ### 标题。",
+      "markdownHeading4FontSize": "四级标题字号",
+      "markdownHeading4FontSizeHint": "用于 #### 标题。",
+      "markdownHeading5FontSize": "五级标题字号",
+      "markdownHeading5FontSizeHint": "用于 ##### 标题。",
+      "markdownHeading6FontSize": "六级标题字号",
+      "markdownHeading6FontSizeHint": "用于 ###### 标题。",
+      "markdownLineHeight": "行高",
+      "markdownLineHeightHint": "控制编辑区每一行文字的垂直距离。",
+      "markdownContentPadding": "内容边距",
+      "markdownContentPaddingHint": "控制编辑区正文左右留白。"
+    },
     "locale": {
       "title": "语言和地区",
       "language": "语言",

@@ -1,10 +1,17 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useSettingsStore } from '../store';
 import { t, VALID_THEMES, autoSaveConfig } from '../helpers';
 import { SelectWidget } from '../widgets/SelectWidget';
 import { Toggle } from '../widgets/Toggle';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
+import { NumberInput } from '../components/NumberInput';
+import {
+  applyEditorTypography,
+  mergeEditorTypography,
+  normalizeEditorTypography,
+  type EditorMarkdownTypography,
+} from '../../editor/typography';
 import styles from '../Settings.module.css';
 import registry from '../../../shared/theme-registry.cjs';
 
@@ -21,12 +28,54 @@ const THEME_MODE_KEYS: Record<string, string> = Object.fromEntries([
   [registry.AUTO_OPTION.id, registry.AUTO_OPTION.i18nMode],
 ]);
 
+type MarkdownTypographyKey = keyof EditorMarkdownTypography;
+
+const EDITOR_FONT_SIZE_ROWS: Array<{
+  key: MarkdownTypographyKey;
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+}> = [
+  { key: 'bodyFontSize', label: 'settings.editor.markdownBodyFontSize', hint: 'settings.editor.markdownBodyFontSizeHint', min: 12, max: 24 },
+  { key: 'heading1FontSize', label: 'settings.editor.markdownHeading1FontSize', hint: 'settings.editor.markdownHeading1FontSizeHint', min: 16, max: 40 },
+  { key: 'heading2FontSize', label: 'settings.editor.markdownHeading2FontSize', hint: 'settings.editor.markdownHeading2FontSizeHint', min: 15, max: 34 },
+  { key: 'heading3FontSize', label: 'settings.editor.markdownHeading3FontSize', hint: 'settings.editor.markdownHeading3FontSizeHint', min: 14, max: 30 },
+  { key: 'heading4FontSize', label: 'settings.editor.markdownHeading4FontSize', hint: 'settings.editor.markdownHeading4FontSizeHint', min: 13, max: 28 },
+  { key: 'heading5FontSize', label: 'settings.editor.markdownHeading5FontSize', hint: 'settings.editor.markdownHeading5FontSizeHint', min: 12, max: 26 },
+  { key: 'heading6FontSize', label: 'settings.editor.markdownHeading6FontSize', hint: 'settings.editor.markdownHeading6FontSizeHint', min: 12, max: 24 },
+];
+
 export function InterfaceTab() {
   const { settingsConfig } = useSettingsStore();
   const currentTheme = registry.migrateSavedTheme(localStorage.getItem(registry.STORAGE_KEY));
   const serifEnabled = localStorage.getItem('hana-font-serif') !== '0';
   const paperTextureEnabled = localStorage.getItem('hana-paper-texture') === '1';
   const leavesOverlayEnabled = localStorage.getItem('hana-leaves-overlay') === '1';
+  const editorTypography = useMemo(
+    () => normalizeEditorTypography(settingsConfig?.editor),
+    [settingsConfig?.editor],
+  );
+
+  const saveEditorTypography = async (patch: Partial<EditorMarkdownTypography>) => {
+    const previousConfig = useSettingsStore.getState().settingsConfig || {};
+    const previousEditor = previousConfig.editor;
+    const next = mergeEditorTypography(previousEditor, { markdown: patch });
+    useSettingsStore.setState({ settingsConfig: { ...previousConfig, editor: next } });
+    applyEditorTypography(next);
+    platform?.settingsChanged?.('editor-typography-changed', { editor: next });
+
+    const saved = await autoSaveConfig({ editor: next }, { silent: true });
+    if (saved) {
+      useSettingsStore.getState().showToast(t('settings.autoSaved'), 'success');
+      return;
+    }
+
+    const restored = normalizeEditorTypography(previousEditor);
+    useSettingsStore.setState({ settingsConfig: previousConfig });
+    applyEditorTypography(restored);
+    platform?.settingsChanged?.('editor-typography-changed', { editor: restored });
+  };
 
   const locale = settingsConfig?.locale || 'zh-CN';
   const localeVal = ['zh-CN', 'zh-TW', 'ja', 'ko', 'en'].includes(locale) ? locale
@@ -122,6 +171,52 @@ export function InterfaceTab() {
                 platform?.settingsChanged?.('leaves-overlay-changed', { enabled: next });
                 useSettingsStore.setState({});
               }}
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.editor.title')}>
+        {EDITOR_FONT_SIZE_ROWS.map(row => (
+          <SettingsRow
+            key={row.key}
+            label={t(row.label)}
+            hint={t(row.hint)}
+            control={
+              <NumberInput
+                value={editorTypography.markdown[row.key]}
+                onChange={(value) => saveEditorTypography({ [row.key]: value })}
+                unit="px"
+                min={row.min}
+                max={row.max}
+              />
+            }
+          />
+        ))}
+        <SettingsRow
+          label={t('settings.editor.markdownLineHeight')}
+          hint={t('settings.editor.markdownLineHeightHint')}
+          control={
+            <NumberInput
+              value={editorTypography.markdown.lineHeight}
+              onChange={(value) => saveEditorTypography({ lineHeight: value })}
+              min={1.2}
+              max={2.2}
+              step={0.05}
+              precision="float"
+            />
+          }
+        />
+        <SettingsRow
+          label={t('settings.editor.markdownContentPadding')}
+          hint={t('settings.editor.markdownContentPaddingHint')}
+          control={
+            <NumberInput
+              value={editorTypography.markdown.contentPadding}
+              onChange={(value) => saveEditorTypography({ contentPadding: value })}
+              unit="px"
+              min={0}
+              max={64}
             />
           }
         />

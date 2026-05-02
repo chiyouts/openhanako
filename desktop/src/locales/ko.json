@@ -584,6 +584,27 @@
       "leavesOverlay": "맑은 날 모드",
       "leavesOverlayHint": "가끔은 햇볕도 쬐어요"
     },
+    "editor": {
+      "title": "편집기",
+      "markdownBodyFontSize": "본문 크기",
+      "markdownBodyFontSizeHint": "Markdown 편집기 본문은 Notion에 가까운 16px를 기본값으로 사용해요.",
+      "markdownHeading1FontSize": "제목 1 크기",
+      "markdownHeading1FontSizeHint": "# 제목에 사용돼요.",
+      "markdownHeading2FontSize": "제목 2 크기",
+      "markdownHeading2FontSizeHint": "## 제목에 사용돼요.",
+      "markdownHeading3FontSize": "제목 3 크기",
+      "markdownHeading3FontSizeHint": "### 제목에 사용돼요.",
+      "markdownHeading4FontSize": "제목 4 크기",
+      "markdownHeading4FontSizeHint": "#### 제목에 사용돼요.",
+      "markdownHeading5FontSize": "제목 5 크기",
+      "markdownHeading5FontSizeHint": "##### 제목에 사용돼요.",
+      "markdownHeading6FontSize": "제목 6 크기",
+      "markdownHeading6FontSizeHint": "###### 제목에 사용돼요.",
+      "markdownLineHeight": "줄 높이",
+      "markdownLineHeightHint": "편집기 안의 줄 간격을 조정해요.",
+      "markdownContentPadding": "내용 여백",
+      "markdownContentPaddingHint": "편집기 본문의 좌우 여백을 조정해요."
+    },
     "locale": {
       "title": "언어 및 지역",
       "language": "언어",

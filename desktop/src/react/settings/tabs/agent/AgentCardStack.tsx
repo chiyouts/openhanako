@@ -11,6 +11,35 @@ interface ContextMenu {
   agentId: string;
 }
 
+interface AgentCardGeometry {
+  total: number;
+  cardSize: number;
+  spreadStep: number;
+  groupWidth: number;
+  spreadWidth: number;
+  positions: number[];
+}
+
+export function calculateAgentCardGeometry(totalCards: number): AgentCardGeometry {
+  const total = Math.max(1, totalCards);
+  const compactWidth = 260;
+  const cardSize = 62;
+  const spreadStep = 72;
+  const groupWidth = (total - 1) * spreadStep + cardSize;
+  const spreadWidth = Math.max(compactWidth, groupWidth);
+  const spreadOffset = (spreadWidth - groupWidth) / 2;
+  const positions = Array.from({ length: total }, (_unused, index) => spreadOffset + index * spreadStep);
+
+  return {
+    total,
+    cardSize,
+    spreadStep,
+    groupWidth,
+    spreadWidth,
+    positions,
+  };
+}
+
 export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, onAvatarClick, onSetActive, onDelete, onAdd }: {
   agents: Agent[];
   selectedId: string | null;
@@ -60,10 +89,9 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
   const total = agents.length + 1;
   const n = total;
   const stepTight = n > 1 ? Math.min(2.5, 10 / (n - 1)) : 0;
-  const spreadStep = 72;
-  const PAD = 10;
-  const spreadOffset = PAD;
-  const spreadWidth = Math.max(260, (n - 1) * spreadStep + 82 + PAD);
+  const cardGeometry = calculateAgentCardGeometry(total);
+  const spreadStep = cardGeometry.spreadStep;
+  const spreadWidth = cardGeometry.spreadWidth;
   const ts = Date.now();
 
   // 关闭右键菜单
@@ -200,7 +228,7 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
         <div data-spacer="1" style={{ width: spreadWidth, height: 1, pointerEvents: 'none', flexShrink: 0 }} />
         {agents.map((agent, i) => {
           const rotTight = i * stepTight;
-          const txSpread = spreadOffset + i * spreadStep;
+          const txSpread = cardGeometry.positions[i];
           const z = n - i;
           const isSelected = agent.id === selectedId;
 
@@ -254,7 +282,7 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
           className={styles['agent-card']}
           style={{
             '--rot-tight': `${agents.length * stepTight}deg`,
-            '--tx-spread': `${spreadOffset + agents.length * spreadStep}px`,
+            '--tx-spread': `${cardGeometry.positions[agents.length]}px`,
             '--z': 0,
             zIndex: 0,
           } as React.CSSProperties}

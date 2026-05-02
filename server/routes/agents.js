@@ -93,6 +93,13 @@ function emitAgentConfigAppEvents(engine, agentId, { globalFields, agentPartial,
     emitAppEvent(engine, "locale-changed", { locale });
   }
 
+  const editor = getGlobalValue(globalFields, "editor");
+  if (editor !== undefined) {
+    emitAppEvent(engine, "editor-typography-changed", {
+      editor: typeof engine.getEditor === "function" ? engine.getEditor() : editor,
+    });
+  }
+
   if (hasOwn(agentPartial, "skills")) {
     emitAppEvent(engine, "skills-changed", { agentId });
   }

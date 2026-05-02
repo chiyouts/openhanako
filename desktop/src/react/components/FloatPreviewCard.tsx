@@ -11,6 +11,7 @@ import { hanaUrl } from '../hooks/use-hana-fetch';
 import { createNewSession, switchSession } from '../stores/session-actions';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import { saveJianContent } from '../stores/desk-actions';
+import { openSettingsModal } from '../stores/settings-modal-actions';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
@@ -129,7 +130,7 @@ function SessionListCard({ onAction }: { onAction: () => void }) {
         <div
           className="float-card-bar-btn float-card-bar-icon"
           title={t('settings.title')}
-          onClick={() => { onAction(); window.platform?.openSettings(); }}
+          onClick={() => { onAction(); openSettingsModal(); }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3"></circle>

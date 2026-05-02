@@ -74,6 +74,7 @@
     // 设置通信 → Web 环境暂不支持跨窗口
     settingsChanged: () => {},
     onSettingsChanged: () => {},
+    onOpenSettingsModal: () => {},
 
     // 浏览器查看器 → Web 环境暂不支持
     openBrowserViewer: () => {},

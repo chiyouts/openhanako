@@ -12,6 +12,7 @@ import { hanaUrl, hanaFetch } from '../hooks/use-hana-fetch';
 import { useI18n } from '../hooks/use-i18n';
 import { loadModels } from '../utils/ui-helpers';
 import { addWorkspaceFolder, applyFolder, removeWorkspaceFolder } from '../stores/desk-actions';
+import { openSettingsModal } from '../stores/settings-modal-actions';
 import type { Agent } from '../types';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import styles from './Welcome.module.css';
@@ -143,7 +144,7 @@ function WelcomeAvatar({ agentId, hasAvatar, agentAvatarUrl, yuan, name }: {
   }, [yuan]);
 
   const handleClick = useCallback(() => {
-    window.platform?.openSettings?.('agent');
+    openSettingsModal('agent');
   }, []);
 
   return (

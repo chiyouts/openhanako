@@ -1037,6 +1037,14 @@ function createMainWindow() {
 
 // ── 创建设置窗口 ──
 function createSettingsWindow(tab, theme) {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isCrashed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("open-settings-modal", tab || "agent");
+    return;
+  }
+
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     // renderer 已崩溃：销毁旧窗口，走下方重建流程
     if (settingsWindow.webContents.isCrashed()) {

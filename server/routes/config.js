@@ -50,6 +50,13 @@ function emitConfigAppEvents(engine, { globalFields, agentPartial, providersChan
   if (locale !== undefined) {
     emitAppEvent(engine, "locale-changed", { locale });
   }
+
+  const editor = getGlobalValue(globalFields, "editor");
+  if (editor !== undefined) {
+    emitAppEvent(engine, "editor-typography-changed", {
+      editor: typeof engine.getEditor === "function" ? engine.getEditor() : editor,
+    });
+  }
 }
 
 export function createConfigRoute(engine) {

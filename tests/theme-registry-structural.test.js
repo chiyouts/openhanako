@@ -57,6 +57,18 @@ function relPath(p) {
 }
 
 describe('theme-registry structural constraint', () => {
+  it('全局 styles.css 持有默认字体 token，主题可按需覆盖', () => {
+    const stylesPath = path.join(ROOT, 'desktop/src/styles.css');
+    const content = fs.readFileSync(stylesPath, 'utf8');
+
+    expect(content).toContain("--font-ui: 'Inter'");
+    expect(content).toContain("--font-serif: 'EB Garamond', 'Noto Serif SC'");
+    expect(content).toContain("--font-mono: 'JetBrains Mono'");
+    const fontImportIndex = content.indexOf("claude-design-fonts.css");
+    expect(fontImportIndex).toBeGreaterThanOrEqual(0);
+    expect(fontImportIndex).toBeLessThan(content.indexOf(':root'));
+  });
+
   it('除 registry 和白名单外，不允许任何文件出现主题 id 字符串字面量', () => {
     const SCAN_ROOTS = [
       path.join(ROOT, 'desktop/src'),

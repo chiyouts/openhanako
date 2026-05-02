@@ -12,6 +12,10 @@ import {
   revokeComputerUseApp,
 } from "./computer-use/settings.js";
 import { normalizeSessionPermissionMode } from "./session-permission-mode.js";
+import {
+  mergeEditorTypography,
+  normalizeEditorTypography,
+} from "../shared/editor-typography.js";
 
 export class PreferencesManager {
   /**
@@ -202,6 +206,19 @@ export class PreferencesManager {
     const prefs = this._mutableCopy();
     prefs.locale = locale || "";
     this.savePreferences(prefs);
+  }
+
+  /** 读取编辑器排版偏好 */
+  getEditor() {
+    return normalizeEditorTypography(this._cache.editor);
+  }
+
+  /** 合并写入编辑器排版偏好 */
+  setEditor(partial) {
+    const prefs = this._mutableCopy();
+    prefs.editor = mergeEditorTypography(prefs.editor, partial);
+    this.savePreferences(prefs);
+    return prefs.editor;
   }
 
   /** 读取时区偏好（全局） */

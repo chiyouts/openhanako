@@ -25,7 +25,11 @@ const TAB_ITEMS = [
   { id: 'about', key: 'settings.tabs.about', d: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>' },
 ];
 
-export function SettingsNav() {
+interface SettingsNavProps {
+  onTabChange?: (tab: string) => void;
+}
+
+export function SettingsNav({ onTabChange }: SettingsNavProps) {
   const { activeTab, set } = useSettingsStore();
 
   return (
@@ -35,7 +39,10 @@ export function SettingsNav() {
           key={item.id}
           className={`${styles['settings-nav-item']}${activeTab === item.id ? ' ' + styles['active'] : ''}`}
           data-tab={item.id}
-          onClick={() => set({ activeTab: item.id })}
+          onClick={() => {
+            set({ activeTab: item.id });
+            onTabChange?.(item.id);
+          }}
         >
           <TabIcon d={item.d} />
           <span>{t(item.key)}</span>

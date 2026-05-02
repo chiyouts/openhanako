@@ -584,6 +584,27 @@
       "leavesOverlay": "晴れモード",
       "leavesOverlayHint": "たまには日向ぼっこしよう"
     },
+    "editor": {
+      "title": "エディター",
+      "markdownBodyFontSize": "本文サイズ",
+      "markdownBodyFontSizeHint": "Markdown エディターの本文は、Notion に近い 16px を既定にします。",
+      "markdownHeading1FontSize": "見出し 1 サイズ",
+      "markdownHeading1FontSizeHint": "# 見出しに使用します。",
+      "markdownHeading2FontSize": "見出し 2 サイズ",
+      "markdownHeading2FontSizeHint": "## 見出しに使用します。",
+      "markdownHeading3FontSize": "見出し 3 サイズ",
+      "markdownHeading3FontSizeHint": "### 見出しに使用します。",
+      "markdownHeading4FontSize": "見出し 4 サイズ",
+      "markdownHeading4FontSizeHint": "#### 見出しに使用します。",
+      "markdownHeading5FontSize": "見出し 5 サイズ",
+      "markdownHeading5FontSizeHint": "##### 見出しに使用します。",
+      "markdownHeading6FontSize": "見出し 6 サイズ",
+      "markdownHeading6FontSizeHint": "###### 見出しに使用します。",
+      "markdownLineHeight": "行の高さ",
+      "markdownLineHeightHint": "エディター内の行間を調整します。",
+      "markdownContentPadding": "本文余白",
+      "markdownContentPaddingHint": "エディター本文の左右余白を調整します。"
+    },
     "locale": {
       "title": "言語と地域",
       "language": "言語",

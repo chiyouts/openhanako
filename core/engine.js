@@ -556,6 +556,8 @@ export class HanaEngine {
   setLearnSkills(p) { this._prefs.setLearnSkills(p); }
   getLocale() { return this._prefs.getLocale(); }
   setLocale(l) { this._prefs.setLocale(l); }
+  getEditor() { return this._prefs.getEditor(); }
+  setEditor(p) { return this._prefs.setEditor(p); }
   getTimezone() { return this._prefs.getTimezone(); }
   setTimezone(tz) { this._prefs.setTimezone(tz); }
   getUpdateChannel() { return this._prefs.getUpdateChannel(); }

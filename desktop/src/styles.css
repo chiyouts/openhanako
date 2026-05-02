@@ -1,3 +1,5 @@
+@import url('./themes/claude-design-fonts.css');
+
 /* ========================================
    设计系统 · 结构 Token（主题无关）
    ======================================== */
@@ -23,10 +25,21 @@
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --duration: 0.3s;
 
-    /* 字体 */
-    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-serif: 'Songti SC', 'Georgia', serif;
-    --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    /* 字体默认值：主题 CSS 可 override */
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-serif: 'EB Garamond', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* 编辑器默认排版：用户设置写入同名变量，主题仍可覆盖初始值 */
+    --editor-markdown-font-size: 16px;
+    --editor-markdown-h1-font-size: 24px;
+    --editor-markdown-h2-font-size: 20px;
+    --editor-markdown-h3-font-size: 18px;
+    --editor-markdown-h4-font-size: 16px;
+    --editor-markdown-h5-font-size: 15px;
+    --editor-markdown-h6-font-size: 14px;
+    --editor-markdown-line-height: 1.72;
+    --editor-markdown-content-padding-x: 24px;
 
     /* sidebar 宽度 */
     --sidebar-width: 240px;
@@ -85,9 +98,9 @@ html:not([data-theme="midnight"]) body:not(.no-paper-texture)::before {
     background: rgba(255, 253, 247, 0.35);
 }
 
-/* 无衬线模式：覆盖 --font-serif 为系统无衬线体 */
+/* 无衬线模式：覆盖 --font-serif 为当前 UI 字体 */
 body.font-sans {
-    --font-serif: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    --font-serif: var(--font-ui);
 }
 
 /* ========================================

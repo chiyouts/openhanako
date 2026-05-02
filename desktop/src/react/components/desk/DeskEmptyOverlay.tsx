@@ -3,6 +3,7 @@
  */
 
 import { useStore } from '../../stores';
+import { openSettingsModal } from '../../stores/settings-modal-actions';
 import { ICONS } from './desk-types';
 import s from './Desk.module.css';
 
@@ -17,7 +18,7 @@ export function DeskEmptyOverlay() {
       <p className={s.emptyHint}>
         {(window.t ?? ((p: string) => p))('desk.emptyHint')}
       </p>
-      <button className={s.emptyBtn} onClick={() => window.platform?.openSettings('work')}>
+      <button className={s.emptyBtn} onClick={() => openSettingsModal('work')}>
         <span dangerouslySetInnerHTML={{ __html: ICONS.settings }} />
         {(window.t ?? ((p: string) => p))('desk.goToSettings')}
       </button>
