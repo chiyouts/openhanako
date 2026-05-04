@@ -158,12 +158,6 @@ CRCCheck off
   ${EndIf}
 !macroend
 
-Function hanakoSkipFinishPageForUpdate
-  ${If} ${isUpdated}
-    Abort
-  ${EndIf}
-FunctionEnd
-
 !macro customInstall
   ${If} ${isUpdated}
   ${AndIf} ${isForceRun}
@@ -188,7 +182,7 @@ FunctionEnd
     !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
   !endif
 
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE hanakoSkipFinishPageForUpdate
+  !insertmacro skipPageIfUpdated
   !insertmacro MUI_PAGE_FINISH
 !macroend
 
