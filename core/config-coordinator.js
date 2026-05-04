@@ -26,6 +26,7 @@ export const READ_ONLY_TOOL_NAMES = [
   "search_memory",
   "web_search",
   "web_fetch",
+  "current_status",
   "recall_experience",
   "browser",
 ];

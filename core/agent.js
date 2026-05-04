@@ -34,6 +34,7 @@ import { writeSubagentSessionMeta } from "../lib/subagent-executor-metadata.js";
 import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.js";
 import { createWaitTool } from "../lib/tools/wait-tool.js";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.js";
+import { createCurrentStatusTool } from "../lib/tools/current-status-tool.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
 
@@ -112,6 +113,7 @@ export class Agent {
     this._computerUseTool = null;
     this._notifyTool = null;
     this._stopTaskTool = null;
+    this._currentStatusTool = null;
 
     /**
      * 外部回调注入（由 AgentManager._createAgentInstance 填充）。
@@ -358,6 +360,12 @@ export class Agent {
     this._checkDeferredTool = createCheckDeferredTool({
       getDeferredStore: () => this._cb?.getDeferredResults?.(),
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+    });
+    this._currentStatusTool = createCurrentStatusTool({
+      getTimezone: () => this._cb?.getTimezone?.() || "",
+      getAgent: () => this,
+      getSessionModel: (sessionPath) => this._cb?.getEngine?.()?.getSessionByPath?.(sessionPath)?.model || null,
+      getCurrentModel: () => this._cb?.getEngine?.()?.currentModel || null,
     });
 
     // 10. 设置修改工具
@@ -622,6 +630,7 @@ export class Agent {
       this._updateSettingsTool,
       this._subagentTool,
       this._checkDeferredTool,
+      this._currentStatusTool,
       createWaitTool(),
     ].filter(Boolean);
   }

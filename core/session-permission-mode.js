@@ -13,6 +13,7 @@ const INFORMATION_TOOLS = new Set([
   "ls",
   "web_search",
   "web_fetch",
+  "current_status",
   "search_memory",
   "recall_experience",
 ]);
