@@ -1188,8 +1188,24 @@
       "title": "选择对话模型",
       "subtitle": "这是我主要使用的模型。推荐选择一个聪明的大模型。",
       "loading": "正在获取模型列表...",
-      "searchPlaceholder": "搜索模型...",
       "empty": "未找到模型",
+      "addedModels": "已添加模型",
+      "noAddedModels": "还没有添加模型",
+      "addModel": "添加模型",
+      "addModelSearchPlaceholder": "搜索可添加的模型...",
+      "mainModel": "主模型",
+      "setMainModel": "设为主模型",
+      "editModel": "编辑模型",
+      "removeModel": "移除模型",
+      "editTitle": "编辑模型",
+      "displayName": "显示名称",
+      "contextLength": "上下文长度",
+      "maxOutput": "最大输出",
+      "imageInput": "支持图片",
+      "reasoning": "推理模型",
+      "cancelEdit": "取消",
+      "saveEdit": "保存",
+      "invalidNumber": "请输入有效的正整数",
       "utility": "小工具模型",
       "utilityHint": "对话摘要、事实提取等轻量任务，推荐便宜快速的小模型",
       "utilityLarge": "大工具模型",
@@ -1220,6 +1236,10 @@
       "jian": {
         "title": "笺",
         "desc": "在任意文件夹放一个 jian.md，写上你的指令。\n我会在巡检时看到它并自动执行。"
+      },
+      "agents": {
+        "title": "多 Agent 协作",
+        "desc": "不同 Agent 可以各自承担任务、互相接力。\n适合把复杂工作拆开处理。"
       },
       "finish": "开始使用"
     }

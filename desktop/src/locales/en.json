@@ -1183,8 +1183,24 @@
       "title": "Choose a Chat Model",
       "subtitle": "This is the main model I'll use. Pick a smart, capable one.",
       "loading": "Fetching models...",
-      "searchPlaceholder": "Search models...",
       "empty": "No models found",
+      "addedModels": "Added Models",
+      "noAddedModels": "No models added yet",
+      "addModel": "Add Model",
+      "addModelSearchPlaceholder": "Search models to add...",
+      "mainModel": "Main model",
+      "setMainModel": "Set as main",
+      "editModel": "Edit model",
+      "removeModel": "Remove model",
+      "editTitle": "Edit model",
+      "displayName": "Display name",
+      "contextLength": "Context length",
+      "maxOutput": "Max output",
+      "imageInput": "Image input",
+      "reasoning": "Reasoning",
+      "cancelEdit": "Cancel",
+      "saveEdit": "Save",
+      "invalidNumber": "Enter a valid positive integer",
       "utility": "Utility Model",
       "utilityHint": "Summaries, fact extraction — pick a fast, cheap model",
       "utilityLarge": "Utility Large",
@@ -1215,6 +1231,10 @@
       "jian": {
         "title": "Jian",
         "desc": "Drop a jian.md in any folder with your instructions.\nI'll pick it up during patrol and execute automatically."
+      },
+      "agents": {
+        "title": "Multi-Agent Collaboration",
+        "desc": "Different agents can take on separate tasks and hand work off.\nUseful for breaking down complex work."
       },
       "finish": "Let's Go"
     }

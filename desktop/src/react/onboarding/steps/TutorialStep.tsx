@@ -35,6 +35,16 @@ const JianIcon = () => (
   </svg>
 );
 
+const AgentsIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8" cy="8" r="3" />
+    <circle cx="17" cy="7" r="2.5" />
+    <path d="M3.5 19a4.5 4.5 0 019 0" />
+    <path d="M13.5 18.5a3.5 3.5 0 017 0" />
+    <path d="M11 8h3" />
+  </svg>
+);
+
 // ── Tutorial card sub-component ──
 
 function TutorialCard({ icon, title, desc }: {
@@ -99,6 +109,11 @@ export function TutorialStep({ preview, showError }: TutorialStepProps) {
           icon={<JianIcon />}
           title={t('onboarding.tutorial.jian.title')}
           desc={t('onboarding.tutorial.jian.desc')}
+        />
+        <TutorialCard
+          icon={<AgentsIcon />}
+          title={t('onboarding.tutorial.agents.title')}
+          desc={t('onboarding.tutorial.agents.desc')}
         />
       </div>
 

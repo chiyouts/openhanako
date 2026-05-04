@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { SelectWidget } from '../../settings/widgets/SelectWidget';
 import type { SelectOption } from '../../settings/widgets/SelectWidget';
 import { loadModels as loadModelsAction, saveModel as saveModelAction } from '../onboarding-actions';
-import type { HanaFetch } from '../onboarding-actions';
+import type { AddedModelEntry, AddedModelObject, DiscoveredModel, HanaFetch } from '../onboarding-actions';
 import { StepContainer } from '../onboarding-ui';
 
 interface ModelStepProps {
@@ -20,16 +20,51 @@ interface ModelStepProps {
   showError: (msg: string) => void;
 }
 
+type AddedModelDraft = AddedModelObject;
+
+function toSavedModelEntry(model: AddedModelDraft): AddedModelEntry {
+  const hasMeta = !!model.name?.trim()
+    || typeof model.context === 'number'
+    || typeof model.maxOutput === 'number'
+    || typeof model.image === 'boolean'
+    || typeof model.reasoning === 'boolean';
+  if (!hasMeta) return model.id;
+  return {
+    id: model.id,
+    ...(model.name?.trim() ? { name: model.name.trim() } : {}),
+    ...(typeof model.context === 'number' ? { context: model.context } : {}),
+    ...(typeof model.maxOutput === 'number' ? { maxOutput: model.maxOutput } : {}),
+    ...(typeof model.image === 'boolean' ? { image: model.image } : {}),
+    ...(typeof model.reasoning === 'boolean' ? { reasoning: model.reasoning } : {}),
+  };
+}
+
+function parsePositiveInteger(raw: string): number | undefined | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 export function ModelStep({
   preview, hanaFetch, providerName, providerUrl, providerApi, apiKey,
   goToStep, showError,
 }: ModelStepProps) {
-  const [fetchedModels, setFetchedModels] = useState<{ id: string }[]>([]);
+  const [fetchedModels, setFetchedModels] = useState<DiscoveredModel[]>([]);
+  const [addedModels, setAddedModels] = useState<AddedModelDraft[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [modelSearch, setModelSearch] = useState('');
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [modelLoading, setModelLoading] = useState('');
   const [selectedUtility, setSelectedUtility] = useState('');
   const [selectedUtilityLarge, setSelectedUtilityLarge] = useState('');
+  const [editingModelId, setEditingModelId] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editContext, setEditContext] = useState('');
+  const [editMaxOutput, setEditMaxOutput] = useState('');
+  const [editImage, setEditImage] = useState<boolean | undefined>(undefined);
+  const [editReasoning, setEditReasoning] = useState<boolean | undefined>(undefined);
 
   const modelsLoadedFor = useRef('');
 
@@ -51,9 +86,10 @@ export function ModelStep({
           return;
         }
         setFetchedModels(result.models);
-        setSelectedModel('');
         setSelectedUtility('');
         setSelectedUtilityLarge('');
+        setAddedModels([]);
+        setSelectedModel('');
         modelsLoadedFor.current = providerName;
         setModelLoading('');
       } catch (err: unknown) {
@@ -64,21 +100,98 @@ export function ModelStep({
     doLoad();
   }, [preview, hanaFetch, providerName, providerUrl, providerApi, apiKey]);
 
-  // ── Filtered models ──
-  const filteredModels = modelSearch
-    ? fetchedModels.filter(m => m.id.toLowerCase().includes(modelSearch.toLowerCase()))
-    : fetchedModels;
+  const addedModelIds = new Set(addedModels.map(model => model.id));
+  const availableModels = fetchedModels.filter(model => !addedModelIds.has(model.id));
+  const filteredModels = modelSearch.trim()
+    ? availableModels.filter(m => m.id.toLowerCase().includes(modelSearch.trim().toLowerCase()))
+    : availableModels;
 
-  // ── SelectWidget options ──
-  const modelSelectOptions: SelectOption[] = fetchedModels.map(m => ({ value: m.id, label: m.id }));
+  const labelForModel = useCallback((modelId: string) => {
+    const added = addedModels.find(model => model.id === modelId);
+    if (added?.name?.trim()) return added.name.trim();
+    const fetched = fetchedModels.find(model => model.id === modelId);
+    return fetched?.name || modelId;
+  }, [addedModels, fetchedModels]);
+
+  const modelSelectOptions: SelectOption[] = addedModels.map(model => ({
+    value: model.id,
+    label: labelForModel(model.id),
+  }));
+
+  const addModel = useCallback((modelId: string) => {
+    if (!modelId || addedModelIds.has(modelId)) return;
+    const next = [...addedModels, { id: modelId }];
+    setAddedModels(next);
+    if (!selectedModel) setSelectedModel(modelId);
+    setAddMenuOpen(false);
+    setModelSearch('');
+  }, [addedModelIds, addedModels, selectedModel]);
+
+  const removeModel = useCallback((modelId: string) => {
+    const next = addedModels.filter(model => model.id !== modelId);
+    setAddedModels(next);
+    if (selectedModel === modelId) setSelectedModel(next[0]?.id || '');
+    if (selectedUtility === modelId) setSelectedUtility('');
+    if (selectedUtilityLarge === modelId) setSelectedUtilityLarge('');
+    if (editingModelId === modelId) setEditingModelId('');
+  }, [addedModels, selectedModel, selectedUtility, selectedUtilityLarge, editingModelId]);
+
+  const startEditing = useCallback((model: AddedModelDraft) => {
+    setEditingModelId(model.id);
+    setEditName(model.name || '');
+    setEditContext(model.context ? String(model.context) : '');
+    setEditMaxOutput(model.maxOutput ? String(model.maxOutput) : '');
+    setEditImage(typeof model.image === 'boolean' ? model.image : undefined);
+    setEditReasoning(typeof model.reasoning === 'boolean' ? model.reasoning : undefined);
+  }, []);
+
+  const saveEditing = useCallback(() => {
+    const context = parsePositiveInteger(editContext);
+    const maxOutput = parsePositiveInteger(editMaxOutput);
+    if (context === null || maxOutput === null) {
+      showError(t('onboarding.model.invalidNumber'));
+      return;
+    }
+
+    setAddedModels(prev => prev.map(model => {
+      if (model.id !== editingModelId) return model;
+      return {
+        id: model.id,
+        ...(editName.trim() ? { name: editName.trim() } : {}),
+        ...(context ? { context } : {}),
+        ...(maxOutput ? { maxOutput } : {}),
+        ...(typeof editImage === 'boolean' ? { image: editImage } : {}),
+        ...(typeof editReasoning === 'boolean' ? { reasoning: editReasoning } : {}),
+      };
+    }));
+    setEditingModelId('');
+  }, [editContext, editImage, editMaxOutput, editName, editReasoning, editingModelId, showError]);
+
+  const currentEditingModel = editingModelId
+    ? addedModels.find(model => model.id === editingModelId)
+    : undefined;
+
+  const canContinue = preview || (
+    addedModels.length > 0
+    && !!selectedModel
+    && !!selectedUtility
+    && !!selectedUtilityLarge
+  );
+
+  const candidateList = modelLoading
+    ? [{ id: '__loading__', label: modelLoading, disabled: true }]
+    : filteredModels.length > 0
+      ? filteredModels.map(model => ({ id: model.id, label: model.id, disabled: false }))
+      : [{ id: '__empty__', label: t('onboarding.model.empty'), disabled: true }];
 
   // ── Next ──
   const onNext = useCallback(async () => {
     if (preview) { goToStep(4); return; }
-    if (!selectedModel || !selectedUtility || !selectedUtilityLarge) return;
+    if (!canContinue) return;
     try {
       await saveModelAction({
-        hanaFetch, selectedModel, fetchedModels, providerName,
+        hanaFetch, selectedModel, providerName,
+        addedModels: addedModels.map(toSavedModelEntry),
         selectedUtility, selectedUtilityLarge,
       });
       goToStep(4);
@@ -86,41 +199,125 @@ export function ModelStep({
       console.error('[onboarding] save model failed:', err);
       showError(t('onboarding.error'));
     }
-  }, [preview, selectedModel, hanaFetch, fetchedModels, providerName, selectedUtility, selectedUtilityLarge, goToStep, showError]);
+  }, [preview, canContinue, hanaFetch, selectedModel, providerName, addedModels, selectedUtility, selectedUtilityLarge, goToStep, showError]);
 
   return (
     <StepContainer>
       <h1 className="onboarding-title">{t('onboarding.model.title')}</h1>
       <p className="onboarding-subtitle">{t('onboarding.model.subtitle')}</p>
 
-      <input
-        className="ob-input ob-model-search"
-        type="text"
-        placeholder={t('onboarding.model.searchPlaceholder')}
-        value={modelSearch}
-        onChange={e => setModelSearch(e.target.value)}
-        autoComplete="off"
-      />
+      <div className="ob-added-models">
+        <div className="ob-added-models-title">
+          <span>{t('onboarding.model.addedModels')}</span>
+          <span className="ob-added-models-count">{addedModels.length}</span>
+        </div>
 
-      <div className="model-list">
-        {modelLoading ? (
-          <div className="model-empty">{modelLoading}</div>
-        ) : filteredModels.length === 0 ? (
-          <div className="model-empty">{t('onboarding.model.empty')}</div>
+        {addedModels.length === 0 ? (
+          <div className="ob-added-models-empty">{t('onboarding.model.noAddedModels')}</div>
         ) : (
-          filteredModels.map(model => (
-            <div
-              key={model.id}
-              className={`model-item${selectedModel === model.id ? ' selected' : ''}`}
-              onClick={() => setSelectedModel(model.id)}
-            >
-              {model.id}
+          <div className="ob-added-models-list">
+            {addedModels.map(model => (
+              <div key={model.id} className={`ob-added-model-row${selectedModel === model.id ? ' main' : ''}`}>
+                <div className="ob-added-model-info">
+                  <span className="ob-added-model-name" title={model.id}>{labelForModel(model.id)}</span>
+                  {model.name?.trim() && <span className="ob-added-model-id">{model.id}</span>}
+                </div>
+                <div className="ob-added-model-actions">
+                  {selectedModel === model.id ? (
+                    <span className="ob-main-model-badge">{t('onboarding.model.mainModel')}</span>
+                  ) : (
+                    <button type="button" className="ob-main-model-btn" onClick={() => setSelectedModel(model.id)}>
+                      {t('onboarding.model.setMainModel')}
+                    </button>
+                  )}
+                  <button type="button" className="ob-model-icon-btn" title={t('onboarding.model.editModel')} onClick={() => startEditing(model)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                  <button type="button" className="ob-model-icon-btn" title={t('onboarding.model.removeModel')} onClick={() => removeModel(model.id)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {currentEditingModel && (
+          <div className="ob-model-edit-panel">
+            <div className="ob-model-edit-title">{t('onboarding.model.editTitle')}</div>
+            <div className="ob-model-edit-grid">
+              <label className="ob-model-edit-field">
+                <span>{t('onboarding.model.displayName')}</span>
+                <input className="ob-input" value={editName} placeholder={currentEditingModel.id} onChange={e => setEditName(e.target.value)} />
+              </label>
+              <label className="ob-model-edit-field">
+                <span>{t('onboarding.model.contextLength')}</span>
+                <input className="ob-input" value={editContext} inputMode="numeric" placeholder="131072" onChange={e => setEditContext(e.target.value)} />
+              </label>
+              <label className="ob-model-edit-field">
+                <span>{t('onboarding.model.maxOutput')}</span>
+                <input className="ob-input" value={editMaxOutput} inputMode="numeric" placeholder="16384" onChange={e => setEditMaxOutput(e.target.value)} />
+              </label>
             </div>
-          ))
+            <div className="ob-model-edit-checks">
+              <label className="ob-model-edit-check">
+                <input type="checkbox" checked={editImage === true} onChange={e => setEditImage(e.target.checked)} />
+                <span>{t('onboarding.model.imageInput')}</span>
+              </label>
+              <label className="ob-model-edit-check">
+                <input type="checkbox" checked={editReasoning === true} onChange={e => setEditReasoning(e.target.checked)} />
+                <span>{t('onboarding.model.reasoning')}</span>
+              </label>
+            </div>
+            <div className="ob-model-edit-actions">
+              <button type="button" className="ob-btn ob-btn-secondary" onClick={() => setEditingModelId('')}>{t('onboarding.model.cancelEdit')}</button>
+              <button type="button" className="ob-btn ob-btn-primary" onClick={saveEditing}>{t('onboarding.model.saveEdit')}</button>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Utility model selectors */}
+      <div className="ob-add-model">
+        <button type="button" className="ob-add-model-trigger" onClick={() => setAddMenuOpen(open => !open)}>
+          <span>{t('onboarding.model.addModel')}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+        {addMenuOpen && (
+          <div className="ob-add-model-menu">
+            <input
+              className="ob-input ob-add-model-search"
+              type="text"
+              placeholder={t('onboarding.model.addModelSearchPlaceholder')}
+              value={modelSearch}
+              onChange={e => setModelSearch(e.target.value)}
+              autoComplete="off"
+              autoFocus
+            />
+            <div className="ob-add-model-options">
+              {candidateList.map(candidate => (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  className="ob-add-model-option"
+                  disabled={candidate.disabled}
+                  onClick={() => addModel(candidate.id)}
+                >
+                  {candidate.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="ob-utility-section">
         <div className="ob-utility-block">
           <div className="ob-utility-header">
@@ -132,6 +329,7 @@ export function ModelStep({
             value={selectedUtility}
             onChange={setSelectedUtility}
             placeholder={'\u2014'}
+            disabled={addedModels.length === 0}
           />
         </div>
         <div className="ob-utility-block">
@@ -144,6 +342,7 @@ export function ModelStep({
             value={selectedUtilityLarge}
             onChange={setSelectedUtilityLarge}
             placeholder={'\u2014'}
+            disabled={addedModels.length === 0}
           />
         </div>
       </div>
@@ -154,7 +353,7 @@ export function ModelStep({
         </button>
         <button
           className="ob-btn ob-btn-primary"
-          disabled={!preview && (!selectedModel || !selectedUtility || !selectedUtilityLarge)}
+          disabled={!canContinue}
           onClick={onNext}
         >
           {t('onboarding.model.next')}

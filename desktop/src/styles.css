@@ -2950,6 +2950,260 @@ html[data-platform="linux"] .onboarding {
     color: var(--text-muted);
 }
 
+/* ── Added model workflow ── */
+.ob-added-models {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+.ob-added-models-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    align-self: flex-start;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text);
+}
+.ob-added-models-count {
+    min-width: 1rem;
+    padding: 0 0.35rem;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--overlay-light);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 400;
+    text-align: center;
+}
+.ob-added-models-empty {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: center;
+}
+.ob-added-models-list {
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+}
+.ob-added-model-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 0.55rem 0.7rem;
+    border-top: 1px solid var(--overlay-subtle, rgba(0,0,0,0.04));
+}
+.ob-added-model-row:first-child {
+    border-top: none;
+}
+.ob-added-model-row.main {
+    background: var(--accent-bg, rgba(139,115,85,0.06));
+}
+.ob-added-model-info {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.ob-added-model-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+.ob-added-model-id {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+.ob-added-model-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+}
+.ob-main-model-badge,
+.ob-main-model-btn {
+    white-space: nowrap;
+    font-family: inherit;
+    font-size: 0.7rem;
+}
+.ob-main-model-badge {
+    color: var(--accent);
+}
+.ob-main-model-btn {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.2rem 0.45rem;
+}
+.ob-main-model-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.ob-model-icon-btn {
+    width: 1.45rem;
+    height: 1.45rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.ob-model-icon-btn:hover {
+    color: var(--accent);
+    background: var(--overlay-light);
+}
+.ob-model-icon-btn svg {
+    width: 0.85rem;
+    height: 0.85rem;
+}
+.ob-add-model {
+    position: relative;
+    width: 100%;
+}
+.ob-add-model-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-xs);
+    padding: 0.5rem var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+.ob-add-model-trigger:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.ob-add-model-trigger svg {
+    width: 0.85rem;
+    height: 0.85rem;
+}
+.ob-add-model-menu {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+    box-shadow: 0 4px 16px var(--shadow, rgba(0,0,0,0.08));
+}
+.ob-add-model-search {
+    border: none;
+    border-bottom: 1px solid var(--overlay-light);
+    border-radius: 0;
+    background: transparent;
+}
+.ob-add-model-options {
+    max-height: 190px;
+    overflow-y: auto;
+    padding: var(--space-xs) 0;
+}
+.ob-add-model-option {
+    width: 100%;
+    padding: 0.45rem 0.7rem;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8rem;
+    text-align: left;
+    cursor: pointer;
+}
+.ob-add-model-option:hover {
+    background: var(--accent-bg, rgba(139,115,85,0.06));
+}
+.ob-add-model-option:disabled {
+    color: var(--text-muted);
+    cursor: default;
+}
+.ob-add-model-option:disabled:hover {
+    background: transparent;
+}
+.ob-model-edit-panel {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+}
+.ob-model-edit-title {
+    margin-bottom: var(--space-sm);
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+.ob-model-edit-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm);
+}
+.ob-model-edit-field:first-child {
+    grid-column: 1 / -1;
+}
+.ob-model-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+.ob-model-edit-field span,
+.ob-model-edit-check span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+.ob-model-edit-checks {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-sm);
+}
+.ob-model-edit-check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+.ob-model-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+.ob-model-edit-actions .ob-btn {
+    padding: 0.4rem 1rem;
+    font-size: 0.78rem;
+}
+
 /* ── Utility model selectors ── */
 .ob-utility-section {
     width: 100%;

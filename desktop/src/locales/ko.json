@@ -1138,8 +1138,24 @@
       "title": "대화 모델을 선택해 주세요",
       "subtitle": "주로 사용할 모델이에요. 똑똑하고 유능한 걸 골라주세요.",
       "loading": "모델을 가져오는 중...",
-      "searchPlaceholder": "모델 검색...",
       "empty": "모델을 찾지 못했어요",
+      "addedModels": "추가된 모델",
+      "noAddedModels": "아직 추가된 모델이 없습니다",
+      "addModel": "모델 추가",
+      "addModelSearchPlaceholder": "추가할 모델 검색...",
+      "mainModel": "주 모델",
+      "setMainModel": "주 모델로 설정",
+      "editModel": "모델 편집",
+      "removeModel": "모델 제거",
+      "editTitle": "모델 편집",
+      "displayName": "표시 이름",
+      "contextLength": "컨텍스트 길이",
+      "maxOutput": "최대 출력",
+      "imageInput": "이미지 입력",
+      "reasoning": "추론 모델",
+      "cancelEdit": "취소",
+      "saveEdit": "저장",
+      "invalidNumber": "유효한 양의 정수를 입력하세요",
       "utility": "유틸리티 모델",
       "utilityHint": "요약, 핵심 추출 등. 빠르고 저렴한 모델을 추천해요",
       "utilityLarge": "유틸리티 대형",
@@ -1170,6 +1186,10 @@
       "jian": {
         "title": "Jian",
         "desc": "아무 폴더에 jian.md를 넣어두면\n순찰할 때 확인하고 자동으로 실행해요."
+      },
+      "agents": {
+        "title": "다중 Agent 협업",
+        "desc": "여러 Agent가 각자 작업을 맡고 이어받을 수 있습니다.\n복잡한 일을 나누어 처리할 때 좋습니다."
       },
       "finish": "시작할게요"
     }

@@ -1138,8 +1138,24 @@
       "title": "チャットモデルを選択",
       "subtitle": "メインで使用するモデルです。賢くて高性能なものを選んでください。",
       "loading": "モデルを取得中...",
-      "searchPlaceholder": "モデルを検索...",
       "empty": "モデルが見つかりません",
+      "addedModels": "追加済みモデル",
+      "noAddedModels": "まだモデルが追加されていません",
+      "addModel": "モデルを追加",
+      "addModelSearchPlaceholder": "追加するモデルを検索...",
+      "mainModel": "メインモデル",
+      "setMainModel": "メインにする",
+      "editModel": "モデルを編集",
+      "removeModel": "モデルを削除",
+      "editTitle": "モデルを編集",
+      "displayName": "表示名",
+      "contextLength": "コンテキスト長",
+      "maxOutput": "最大出力",
+      "imageInput": "画像入力",
+      "reasoning": "推論モデル",
+      "cancelEdit": "キャンセル",
+      "saveEdit": "保存",
+      "invalidNumber": "有効な正の整数を入力してください",
       "utility": "ユーティリティモデル",
       "utilityHint": "要約、事実抽出など。高速で安価なモデルを選んでください",
       "utilityLarge": "ユーティリティ（大）",
@@ -1170,6 +1186,10 @@
       "jian": {
         "title": "Jian",
         "desc": "任意のフォルダに jian.md を置いて指示を書いてください。\n巡回時に見つけて自動的に実行します。"
+      },
+      "agents": {
+        "title": "複数 Agent の協作",
+        "desc": "異なる Agent がそれぞれのタスクを担当し、作業を引き継げます。\n複雑な作業を分解するのに向いています。"
       },
       "finish": "さあ、始めましょう"
     }
