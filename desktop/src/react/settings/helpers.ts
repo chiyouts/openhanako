@@ -3,8 +3,8 @@
  */
 import { useSettingsStore } from './store';
 import { hanaFetch } from './api';
-import knownModels from '../../../../lib/known-models.json';
 import registry from '../../shared/theme-registry.cjs';
+import { lookupReferenceModelMeta } from '../utils/model-metadata';
 
 export function t(key: string, params?: Record<string, any>): any {
   return window.t?.(key, params) ?? key;
@@ -26,27 +26,6 @@ export function formatContext(n: number): string {
   const k = n / 1024;
   if (Number.isInteger(k)) return k + 'K';
   return Math.round(n / 1000) + 'K';
-}
-
-/**
- * 从 known-models 词典查模型参考元数据（contextWindow / image 等）。
- * provider 提供时严格在该 provider 下查；缺省时回退到遍历（仅用于展示降级，
- * 多 provider 同 id 时结果不确定）。
- */
-function lookupReferenceModelMeta(modelId: string, provider?: string): any {
-  if (!modelId) return null;
-  const dict = knownModels as Record<string, any>;
-
-  if (provider && dict[provider]?.[modelId]) {
-    return { ...dict[provider][modelId], _source: 'reference' };
-  }
-
-  // provider 缺省时的展示降级：扫描所有 provider，返第一个命中
-  for (const [key, val] of Object.entries(dict)) {
-    if (key === '_comment' || typeof val !== 'object' || val === null) continue;
-    if (val[modelId]) return { ...val[modelId], _source: 'reference' };
-  }
-  return null;
 }
 
 /**

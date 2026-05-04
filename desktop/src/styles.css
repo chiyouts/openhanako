@@ -3179,7 +3179,7 @@ html[data-platform="linux"] .onboarding {
     gap: var(--space-xs);
 }
 .ob-model-edit-field span,
-.ob-model-edit-check span {
+.ob-model-edit-toggle-row .hana-toggle-label {
     color: var(--text-muted);
     font-size: 0.72rem;
 }
@@ -3188,10 +3188,8 @@ html[data-platform="linux"] .onboarding {
     gap: var(--space-md);
     margin-top: var(--space-sm);
 }
-.ob-model-edit-check {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
+.ob-model-edit-toggle-row {
+    min-width: 0;
 }
 .ob-model-edit-actions {
     display: flex;

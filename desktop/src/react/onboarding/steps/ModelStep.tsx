@@ -5,6 +5,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SelectWidget } from '../../settings/widgets/SelectWidget';
 import type { SelectOption } from '../../settings/widgets/SelectWidget';
+import { Toggle } from '../../settings/widgets/Toggle';
+import { lookupReferenceModelMeta } from '../../utils/model-metadata';
 import { loadModels as loadModelsAction, saveModel as saveModelAction } from '../onboarding-actions';
 import type { AddedModelEntry, AddedModelObject, DiscoveredModel, HanaFetch } from '../onboarding-actions';
 import { StepContainer } from '../onboarding-ui';
@@ -45,6 +47,14 @@ function parsePositiveInteger(raw: string): number | undefined | null {
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed) || parsed <= 0) return null;
   return parsed;
+}
+
+function numberFromMeta(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function boolFromMeta(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 export function ModelStep({
@@ -106,12 +116,37 @@ export function ModelStep({
     ? availableModels.filter(m => m.id.toLowerCase().includes(modelSearch.trim().toLowerCase()))
     : availableModels;
 
+  const baselineForModel = useCallback((modelId: string) => {
+    const reference = lookupReferenceModelMeta(modelId, providerName);
+    const fetched = fetchedModels.find(model => model.id === modelId);
+    return {
+      name: reference?.name || fetched?.name || '',
+      context: numberFromMeta(reference?.context) ?? numberFromMeta(fetched?.context),
+      maxOutput: numberFromMeta(reference?.maxOutput) ?? numberFromMeta(fetched?.maxOutput),
+      image: boolFromMeta(reference?.image ?? reference?.vision),
+      reasoning: boolFromMeta(reference?.reasoning),
+    };
+  }, [fetchedModels, providerName]);
+
+  const effectiveModelMeta = useCallback((model: AddedModelDraft) => {
+    const baseline = baselineForModel(model.id);
+    return {
+      name: model.name ?? baseline.name,
+      context: model.context ?? baseline.context,
+      maxOutput: model.maxOutput ?? baseline.maxOutput,
+      image: model.image ?? baseline.image,
+      reasoning: model.reasoning ?? baseline.reasoning,
+    };
+  }, [baselineForModel]);
+
   const labelForModel = useCallback((modelId: string) => {
     const added = addedModels.find(model => model.id === modelId);
-    if (added?.name?.trim()) return added.name.trim();
-    const fetched = fetchedModels.find(model => model.id === modelId);
-    return fetched?.name || modelId;
-  }, [addedModels, fetchedModels]);
+    if (added) {
+      const meta = effectiveModelMeta(added);
+      if (meta.name?.trim()) return meta.name.trim();
+    }
+    return modelId;
+  }, [addedModels, effectiveModelMeta]);
 
   const modelSelectOptions: SelectOption[] = addedModels.map(model => ({
     value: model.id,
@@ -137,13 +172,14 @@ export function ModelStep({
   }, [addedModels, selectedModel, selectedUtility, selectedUtilityLarge, editingModelId]);
 
   const startEditing = useCallback((model: AddedModelDraft) => {
+    const meta = effectiveModelMeta(model);
     setEditingModelId(model.id);
-    setEditName(model.name || '');
-    setEditContext(model.context ? String(model.context) : '');
-    setEditMaxOutput(model.maxOutput ? String(model.maxOutput) : '');
-    setEditImage(typeof model.image === 'boolean' ? model.image : undefined);
-    setEditReasoning(typeof model.reasoning === 'boolean' ? model.reasoning : undefined);
-  }, []);
+    setEditName(meta.name || '');
+    setEditContext(meta.context ? String(meta.context) : '');
+    setEditMaxOutput(meta.maxOutput ? String(meta.maxOutput) : '');
+    setEditImage(typeof meta.image === 'boolean' ? meta.image : undefined);
+    setEditReasoning(typeof meta.reasoning === 'boolean' ? meta.reasoning : undefined);
+  }, [effectiveModelMeta]);
 
   const saveEditing = useCallback(() => {
     const context = parsePositiveInteger(editContext);
@@ -155,17 +191,19 @@ export function ModelStep({
 
     setAddedModels(prev => prev.map(model => {
       if (model.id !== editingModelId) return model;
+      const baseline = baselineForModel(model.id);
+      const name = editName.trim();
       return {
         id: model.id,
-        ...(editName.trim() ? { name: editName.trim() } : {}),
-        ...(context ? { context } : {}),
-        ...(maxOutput ? { maxOutput } : {}),
-        ...(typeof editImage === 'boolean' ? { image: editImage } : {}),
-        ...(typeof editReasoning === 'boolean' ? { reasoning: editReasoning } : {}),
+        ...(name && name !== baseline.name ? { name } : {}),
+        ...(context && context !== baseline.context ? { context } : {}),
+        ...(maxOutput && maxOutput !== baseline.maxOutput ? { maxOutput } : {}),
+        ...(typeof editImage === 'boolean' && editImage !== baseline.image ? { image: editImage } : {}),
+        ...(typeof editReasoning === 'boolean' && editReasoning !== baseline.reasoning ? { reasoning: editReasoning } : {}),
       };
     }));
     setEditingModelId('');
-  }, [editContext, editImage, editMaxOutput, editName, editReasoning, editingModelId, showError]);
+  }, [baselineForModel, editContext, editImage, editMaxOutput, editName, editReasoning, editingModelId, showError]);
 
   const currentEditingModel = editingModelId
     ? addedModels.find(model => model.id === editingModelId)
@@ -220,7 +258,7 @@ export function ModelStep({
               <div key={model.id} className={`ob-added-model-row${selectedModel === model.id ? ' main' : ''}`}>
                 <div className="ob-added-model-info">
                   <span className="ob-added-model-name" title={model.id}>{labelForModel(model.id)}</span>
-                  {model.name?.trim() && <span className="ob-added-model-id">{model.id}</span>}
+                  {labelForModel(model.id) !== model.id && <span className="ob-added-model-id">{model.id}</span>}
                 </div>
                 <div className="ob-added-model-actions">
                   {selectedModel === model.id ? (
@@ -254,26 +292,24 @@ export function ModelStep({
             <div className="ob-model-edit-grid">
               <label className="ob-model-edit-field">
                 <span>{t('onboarding.model.displayName')}</span>
-                <input className="ob-input" value={editName} placeholder={currentEditingModel.id} onChange={e => setEditName(e.target.value)} />
+                <input aria-label={t('onboarding.model.displayName')} className="ob-input" value={editName} placeholder={currentEditingModel.id} onChange={e => setEditName(e.target.value)} />
               </label>
               <label className="ob-model-edit-field">
                 <span>{t('onboarding.model.contextLength')}</span>
-                <input className="ob-input" value={editContext} inputMode="numeric" placeholder="131072" onChange={e => setEditContext(e.target.value)} />
+                <input aria-label={t('onboarding.model.contextLength')} className="ob-input" value={editContext} inputMode="numeric" placeholder="131072" onChange={e => setEditContext(e.target.value)} />
               </label>
               <label className="ob-model-edit-field">
                 <span>{t('onboarding.model.maxOutput')}</span>
-                <input className="ob-input" value={editMaxOutput} inputMode="numeric" placeholder="16384" onChange={e => setEditMaxOutput(e.target.value)} />
+                <input aria-label={t('onboarding.model.maxOutput')} className="ob-input" value={editMaxOutput} inputMode="numeric" placeholder="16384" onChange={e => setEditMaxOutput(e.target.value)} />
               </label>
             </div>
             <div className="ob-model-edit-checks">
-              <label className="ob-model-edit-check">
-                <input type="checkbox" checked={editImage === true} onChange={e => setEditImage(e.target.checked)} />
-                <span>{t('onboarding.model.imageInput')}</span>
-              </label>
-              <label className="ob-model-edit-check">
-                <input type="checkbox" checked={editReasoning === true} onChange={e => setEditReasoning(e.target.checked)} />
-                <span>{t('onboarding.model.reasoning')}</span>
-              </label>
+              <div className="ob-model-edit-toggle-row">
+                <Toggle on={editImage === true} onChange={setEditImage} label={t('onboarding.model.imageInput')} />
+              </div>
+              <div className="ob-model-edit-toggle-row">
+                <Toggle on={editReasoning === true} onChange={setEditReasoning} label={t('onboarding.model.reasoning')} />
+              </div>
             </div>
             <div className="ob-model-edit-actions">
               <button type="button" className="ob-btn ob-btn-secondary" onClick={() => setEditingModelId('')}>{t('onboarding.model.cancelEdit')}</button>

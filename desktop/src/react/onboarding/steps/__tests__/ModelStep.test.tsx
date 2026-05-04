@@ -62,4 +62,31 @@ describe('ModelStep', () => {
     expect(screen.getByText('deepseek-v4-flash')).toBeInTheDocument();
     expect(screen.getByText('onboarding.model.mainModel')).toBeInTheDocument();
   });
+
+  it('prefills the edit panel with known-model metadata for added models', async () => {
+    render(
+      <ModelStep
+        preview={false}
+        hanaFetch={vi.fn()}
+        providerName="deepseek"
+        providerUrl="https://api.deepseek.com/v1"
+        providerApi="openai-completions"
+        apiKey="sk-test"
+        goToStep={vi.fn()}
+        showError={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.loadModels).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'onboarding.model.addModel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'deepseek-v4-flash' }));
+    fireEvent.click(screen.getByTitle('onboarding.model.editModel'));
+
+    expect(screen.getByLabelText('onboarding.model.displayName')).toHaveValue('DeepSeek V4 Flash');
+    expect(screen.getByLabelText('onboarding.model.contextLength')).toHaveValue('1000000');
+    expect(screen.getByLabelText('onboarding.model.maxOutput')).toHaveValue('384000');
+    expect(screen.getByLabelText('onboarding.model.imageInput')).not.toBeChecked();
+    expect(screen.getByLabelText('onboarding.model.reasoning')).toBeChecked();
+  });
 });
