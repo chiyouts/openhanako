@@ -102,6 +102,7 @@ describe('ws-message-handler session-scoped desktop events', () => {
       }],
       chatSessions: {},
       streamingSessions: [],
+      computerOverlayBySession: {},
     } as never);
     useStore.getState().clearSession('/session/a.jsonl');
     useStore.getState().initSession('/session/a.jsonl', [], false);
@@ -127,6 +128,65 @@ describe('ws-message-handler session-scoped desktop events', () => {
     expect(first.data.text).toBe('hello from bridge');
     expect(first.data.quotedText).toBe('quote');
     expect(first.data.attachments).toEqual([{ path: '/tmp/a.png', name: 'a.png', isDir: false }]);
+  });
+
+  it('stream replay 中的 session_user_message 若已由历史加载存在，不重复追加', () => {
+    useStore.getState().appendItem('/session/a.jsonl', {
+      type: 'message',
+      data: {
+        id: 'hist-0',
+        role: 'user',
+        text: 'hello from bridge',
+        textHtml: 'hello from bridge',
+        attachments: [{ path: '/tmp/a.png', name: 'a.png', isDir: false }],
+        quotedText: 'quote',
+      },
+    });
+
+    handleServerMessage({
+      type: 'session_user_message',
+      sessionPath: '/session/a.jsonl',
+      __fromReplay: true,
+      message: {
+        text: 'hello from bridge',
+        quotedText: 'quote',
+        attachments: [{ path: '/tmp/a.png', name: 'a.png', isDir: false }],
+      },
+    });
+
+    const items = useStore.getState().chatSessions['/session/a.jsonl']?.items || [];
+    expect(items).toHaveLength(1);
+  });
+
+  it('computer_overlay 写入当前 session 的 overlay keyed 状态并支持 clear', () => {
+    handleServerMessage({
+      type: 'computer_overlay',
+      sessionPath: '/session/a.jsonl',
+      phase: 'running',
+      action: 'click_element',
+      leaseId: 'lease-1',
+      snapshotId: 'snapshot-1',
+      visualSurface: 'provider',
+      target: { coordinateSpace: 'element', elementId: 'mock-button' },
+      ts: 100,
+    });
+
+    expect(useStore.getState().computerOverlayBySession['/session/a.jsonl']).toMatchObject({
+      phase: 'running',
+      action: 'click_element',
+      leaseId: 'lease-1',
+      visualSurface: 'provider',
+    });
+
+    handleServerMessage({
+      type: 'computer_overlay',
+      sessionPath: '/session/a.jsonl',
+      phase: 'clear',
+      action: 'stop',
+      ts: 101,
+    });
+
+    expect(useStore.getState().computerOverlayBySession['/session/a.jsonl']).toBeUndefined();
   });
 
   it('bridge_rc_attached / detached 直接补丁 sessions 列表上的接管态', () => {

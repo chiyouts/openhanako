@@ -9,7 +9,6 @@ import { YuanSelector } from './agent/YuanSelector';
 import { MemorySection } from './agent/AgentMemory';
 import { AgentToolsSection } from './agent/AgentToolsSection';
 import { SettingsSection } from '../components/SettingsSection';
-import { SettingsRow } from '../components/SettingsRow';
 import styles from '../Settings.module.css';
 import {
   type ExpCategory, parseExperience,
@@ -79,6 +78,8 @@ export function AgentTab() {
   }, [availableModels, currentModel]);
 
   const memoryEnabled = settingsConfig?.memory?.enabled !== false;
+  const hasAvailableToolsField = !!settingsConfig && Object.prototype.hasOwnProperty.call(settingsConfig, 'availableTools');
+  const availableTools = hasAvailableToolsField ? settingsConfig?.availableTools : undefined;
 
   const saveAgent = async () => {
     try {
@@ -141,7 +142,7 @@ export function AgentTab() {
 
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="agent">
-      {/* Agent 卡片堆叠（保持原样，不改） */}
+      {/* Agent 卡片堆叠 */}
       <section className={styles['settings-section']}>
         <h2 className={styles['settings-section-title']}>{t('settings.agent.title')}</h2>
         <AgentCardStack
@@ -164,7 +165,9 @@ export function AgentTab() {
             input.click();
           }}
           onSetActive={(id) => switchToAgent(id)}
-          onDelete={() => window.dispatchEvent(new Event('hana-show-agent-delete'))}
+          onDelete={(id) => window.dispatchEvent(new CustomEvent('hana-show-agent-delete', {
+            detail: { agentId: id },
+          }))}
           onAdd={() => window.dispatchEvent(new Event('hana-show-agent-create'))}
         />
 
@@ -303,7 +306,7 @@ export function AgentTab() {
 
       {/* 默认关闭 update_settings 和 dm，与后端 DEFAULT_DISABLED_TOOL_NAMES 保持同步 */}
       <AgentToolsSection
-        availableTools={settingsConfig?.availableTools || []}
+        availableTools={availableTools}
         disabled={settingsConfig?.tools?.disabled ?? ["update_settings", "dm"]}
       />
 

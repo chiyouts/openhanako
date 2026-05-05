@@ -9,6 +9,14 @@
     background-color: var(--bg);
 }
 
+.settings-panel-modal {
+    --settings-nav-width: 160px;
+    --settings-main-x-padding: var(--space-xl);
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+}
+
 /* ── 纸质纹理：Surface 层 ── */
 :global(body:not(.no-paper-texture)) :global(.settings-panel) {
     background-image: url(../../assets/textures/rice-paper.png);
@@ -19,7 +27,6 @@
 
 /* ── 纸质纹理：Card 层（所有 bg-card 元素，lighten 混合） ── */
 :global(body:not(.no-paper-texture)) .agent-card-inner,
-:global(body:not(.no-paper-texture)) .agent-context-menu,
 :global(body:not(.no-paper-texture)) .agent-create-card,
 :global(body:not(.no-paper-texture)) .agent-delete-card,
 :global(body:not(.no-paper-texture)) .agent-name-input,
@@ -56,6 +63,50 @@
     -webkit-app-region: drag;
 }
 
+.settings-header-modal {
+    display: grid;
+    grid-template-columns: calc(var(--settings-nav-width, 160px) + var(--settings-main-x-padding, var(--space-xl))) minmax(0, 640px);
+    align-items: center;
+    padding: var(--space-lg) 0 var(--space-md);
+    gap: 0;
+    -webkit-app-region: no-drag;
+}
+
+.settings-return-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-input, 4px);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
+    -webkit-app-region: no-drag;
+}
+
+.settings-return-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--overlay-light);
+}
+
+.settings-return-btn:active {
+    background: var(--overlay-light);
+}
+
+.settings-title-group {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+    padding-left: var(--space-md);
+    -webkit-app-region: no-drag;
+}
+
 
 /* Body: left nav + right content */
 .settings-body {
@@ -65,7 +116,7 @@
 }
 
 .settings-nav {
-    width: 160px;
+    width: var(--settings-nav-width, 160px);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -114,7 +165,7 @@
 .settings-main {
     flex: 1;
     overflow-y: auto;
-    padding: 0 var(--space-xl) var(--space-xl);
+    padding: 0 var(--settings-main-x-padding, var(--space-xl)) var(--space-xl);
     max-width: 640px;
 }
 
@@ -144,7 +195,34 @@
     font-weight: 600;
     color: var(--text);
     letter-spacing: 0.03em;
+    line-height: 1;
+    margin: 0;
     -webkit-app-region: no-drag;
+}
+
+:global(.settings-loading-mask) {
+    position: fixed;
+    inset: 0;
+    z-index: 1990;
+    background-color: var(--bg);
+    transition: opacity 0.25s var(--ease-out);
+}
+
+:global(body:not(.no-paper-texture)) :global(.settings-loading-mask) {
+    background-image: url(../../assets/textures/rice-paper.png);
+    background-repeat: repeat;
+    background-size: 160px;
+}
+
+.settings-loading-text {
+    position: absolute;
+    bottom: var(--space-lg);
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    opacity: 0.6;
 }
 
 /* Tab 顶部大标题（每个 tab 右侧面板第一行：工作空间、界面、助手…）
@@ -156,6 +234,25 @@
     color: var(--text);
     margin: 0 0 var(--space-xl) 0;
     letter-spacing: 0.05em;
+}
+
+.settings-header-tab-title {
+    font-family: "Songti SC", "STSong", serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+    margin: 0;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    -webkit-app-region: no-drag;
+}
+
+.computer-use-warning {
+    margin: calc(var(--space-xl) * -0.5) 0 var(--space-lg);
+    color: var(--danger, #c85143);
+    font-size: 0.82rem;
+    line-height: 1.7;
 }
 
 /* Section */
@@ -439,48 +536,45 @@
     box-shadow: 0 2px 8px var(--shadow);
 }
 
-/* Agent 右键菜单 */
-.agent-context-menu {
-    background-color: var(--bg-card);
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06);
-    padding: 4px 0;
-    min-width: 120px;
+.agent-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    min-height: 1.4rem;
+    margin-top: calc(var(--space-xs) * -0.5);
 }
 
-.agent-context-header {
-    padding: 6px 14px 4px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    border-bottom: 1px solid var(--overlay-light, rgba(0,0,0,0.06));
-    margin-bottom: 2px;
-}
-
-.agent-context-item {
-    display: block;
-    width: 100%;
-    padding: 7px 14px;
+.agent-card-action {
     border: none;
+    border-radius: var(--radius-input, 4px);
     background: transparent;
-    color: var(--text);
-    font-size: 0.82rem;
-    font-family: inherit;
-    text-align: left;
+    color: var(--text-muted);
     cursor: pointer;
-    transition: background 0.1s;
+    font-family: inherit;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    opacity: 0.68;
+    padding: calc(var(--space-xs) * 0.5) var(--space-sm);
+    transition: background 0.15s var(--ease-out),
+                color 0.15s var(--ease-out),
+                opacity 0.15s var(--ease-out);
 }
 
-.agent-context-item:hover {
+.agent-card-action:hover {
     background: var(--overlay-light, rgba(0,0,0,0.04));
+    color: var(--text);
+    opacity: 1;
 }
 
-.agent-context-danger {
-    color: var(--text-error, #c44);
+.agent-card-action-danger {
+    color: var(--danger, #c85143);
+    opacity: 0.58;
 }
 
-.agent-context-danger:hover {
-    background: rgba(204, 68, 68, 0.08);
+.agent-card-action-danger:hover {
+    background: rgba(var(--danger-rgb, 200, 81, 67), 0.08);
+    color: var(--danger, #c85143);
 }
 
 /* 新建助手浮层 */
@@ -1671,15 +1765,15 @@
 
 /* 青夜：用青夜主题的真实配色 */
 .theme-card[data-theme="midnight"] {
-    background: #2D4356;
+    background: #3B4A54;
 }
 
 .theme-card[data-theme="midnight"] .theme-card-name {
-    color: #C8D1D8;
+    color: #E1EAF0;
 }
 
 .theme-card[data-theme="midnight"] .theme-card-mode {
-    color: #A76F6F;
+    color: #C99AAF;
 }
 
 /* 素白（高对比）：用高对比主题的真实配色 */
@@ -1721,7 +1815,7 @@
     color: #7E99A8;
 }
 
-/* Absolutely：Claude 赤陶配色 */
+/* Absolutely：暖奶油底 + 哑光赤陶 */
 .theme-card[data-theme="absolutely"] {
     background: #F4F3EE;
 }
@@ -1760,17 +1854,30 @@
     color: #636AE8;
 }
 
-/* Claude Design：手账宣纸 + 印章青蓝 */
-.theme-card[data-theme="claude-design"] {
+/* 新暖纸：手账宣纸 + 印章青蓝 */
+.theme-card[data-theme="new-warm-paper"] {
     background: #F5EFE4;
 }
 
-.theme-card[data-theme="claude-design"] .theme-card-name {
+.theme-card[data-theme="new-warm-paper"] .theme-card-name {
     color: #2A2622;
 }
 
-.theme-card[data-theme="claude-design"] .theme-card-mode {
+.theme-card[data-theme="new-warm-paper"] .theme-card-mode {
     color: #537D96;
+}
+
+/* 青夜高对比：更深青蓝 + 亮玫瑰 */
+.theme-card[data-theme="midnight-contrast"] {
+    background: #26343D;
+}
+
+.theme-card[data-theme="midnight-contrast"] .theme-card-name {
+    color: #F0F6FA;
+}
+
+.theme-card[data-theme="midnight-contrast"] .theme-card-mode {
+    color: #E6B1C4;
 }
 
 /* 自动：左暖纸右蓝调，硬拼色 */

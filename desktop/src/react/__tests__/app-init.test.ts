@@ -458,4 +458,53 @@ describe('initApp bridge indicator', () => {
       sessionPath: '/session/a.jsonl',
     }));
   });
+
+  it('opens the in-window settings modal when main process requests settings', async () => {
+    let openSettingsHandler: ((tab?: string) => void) | null = null;
+    (globalThis as Record<string, unknown>).window = {
+      addEventListener: vi.fn(),
+      platform: {
+        getServerPort: vi.fn(async () => 62950),
+        getServerToken: vi.fn(async () => 'token'),
+        appReady: vi.fn(),
+        onSettingsChanged: vi.fn(),
+        onOpenSettingsModal: vi.fn((cb: (tab?: string) => void) => {
+          openSettingsHandler = cb;
+        }),
+        openSettings: vi.fn(),
+      },
+      dispatchEvent: vi.fn(),
+    };
+    (globalThis as Record<string, unknown>).document = {
+      addEventListener: vi.fn(),
+    };
+    (globalThis as Record<string, unknown>).i18n = {
+      locale: 'zh-CN',
+      defaultName: 'Hanako',
+      load: vi.fn(async () => {}),
+    };
+    (globalThis as Record<string, unknown>).t = vi.fn((key: string) => key);
+
+    mockHanaFetch
+      .mockResolvedValueOnce(jsonResponse({ agent: 'Hanako', user: 'User', avatars: {} }))
+      .mockResolvedValueOnce(jsonResponse({ locale: 'zh-CN', desk: { home_folder: null }, cwd_history: [] }))
+      .mockResolvedValueOnce(jsonResponse({ jobs: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        telegram: { status: 'disconnected' },
+        feishu: { status: 'disconnected' },
+        qq: { status: 'disconnected' },
+        wechat: { status: 'disconnected' },
+      }));
+
+    const { initApp } = await import('../app-init');
+    await initApp();
+
+    expect(openSettingsHandler).toBeTypeOf('function');
+    (openSettingsHandler as unknown as (tab?: string) => void)('bridge');
+
+    expect(mockState.settingsModal).toEqual({
+      open: true,
+      activeTab: 'bridge',
+    });
+  });
 });

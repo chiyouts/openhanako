@@ -95,7 +95,7 @@ export function lookupModelMeta(modelId: string, provider?: string): any {
 export async function autoSaveConfig(
   partial: Record<string, any>,
   opts: { silent?: boolean } = {},
-) {
+): Promise<boolean> {
   const store = useSettingsStore.getState();
   try {
     const agentId = store.getSettingsAgentId();
@@ -115,8 +115,10 @@ export async function autoSaveConfig(
       if (k in prev && !(k in newConfig)) newConfig[k] = (prev as any)[k];
     }
     useSettingsStore.setState({ settingsConfig: newConfig });
+    return true;
   } catch (err: any) {
     store.showToast(t('settings.saveFailed') + ': ' + err.message, 'error');
+    return false;
   }
 }
 
@@ -208,5 +210,5 @@ export const VALID_THEMES = [
   _ids[0],                    // warm-paper
   _ids[1],                    // midnight
   registry.AUTO_OPTION.id,    // auto (第 3 位，保持原顺序)
-  ..._ids.slice(2),           // high-contrast, grass-aroma, contemplation, absolutely, delve, deep-think, claude-design
+  ..._ids.slice(2),           // high-contrast, grass-aroma, contemplation, absolutely, delve, deep-think, new-warm-paper
 ];

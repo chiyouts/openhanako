@@ -23,6 +23,7 @@ import { createArtifactTool } from "../lib/tools/artifact-tool.js";
 import { createChannelTool } from "../lib/tools/channel-tool.js";
 import { createDmTool } from "../lib/tools/dm-tool.js";
 import { createBrowserTool } from "../lib/tools/browser-tool.js";
+import { createComputerUseTool } from "../lib/tools/computer-use-tool.js";
 import { createPinnedMemoryTools } from "../lib/tools/pinned-memory.js";
 import { createExperienceTools } from "../lib/tools/experience.js";
 import { createInstallSkillTool } from "../lib/tools/install-skill.js";
@@ -33,7 +34,6 @@ import { writeSubagentSessionMeta } from "../lib/subagent-executor-metadata.js";
 import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.js";
 import { createWaitTool } from "../lib/tools/wait-tool.js";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.js";
-import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
 
@@ -101,6 +101,7 @@ export class Agent {
     this._artifactTool = null;
     this._channelTool = null;
     this._browserTool = null;
+    this._computerUseTool = null;
     this._notifyTool = null;
     this._stopTaskTool = null;
 
@@ -296,7 +297,25 @@ export class Agent {
     });
     this._stageFilesTool = createStageFilesTool();
     this._artifactTool = createArtifactTool();
-    this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.());
+    this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.(), {
+      getSessionModel: (sessionPath) => {
+        const engine = this._cb?.getEngine?.();
+        return engine?.getSessionByPath?.(sessionPath)?.model || null;
+      },
+      getVisionBridge: () => this._cb?.getEngine?.()?.getVisionBridge?.() || null,
+      isVisionAuxiliaryEnabled: () => this._cb?.getEngine?.()?.isVisionAuxiliaryEnabled?.() === true,
+    });
+    this._computerUseTool = createComputerUseTool({
+      getComputerHost: () => this._cb?.getEngine?.()?.getComputerHost?.() || null,
+      getSessionModel: (sessionPath) => {
+        const engine = this._cb?.getEngine?.();
+        return engine?.getSessionByPath?.(sessionPath)?.model || null;
+      },
+      getAgentId: () => this.id,
+      getConfirmStore: () => this._cb?.getConfirmStore?.(),
+      approveComputerUseApp: (approval) => this._cb?.getEngine?.()?.approveComputerUseApp?.(approval),
+      emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
+    });
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
     });
@@ -534,6 +553,9 @@ export class Agent {
       ...this._pinnedMemoryTools,
       ...this._experienceTools,
     ] : [];
+    const computerUseTools = this._isComputerUseAvailableForThisAgent()
+      ? [this._computerUseTool]
+      : [];
     return [
       ...memTools,
       this._webSearchTool,
@@ -545,6 +567,7 @@ export class Agent {
       this._channelTool,
       this._dmTool,
       this._browserTool,
+      ...computerUseTools,
       this._installSkillTool,
       this._notifyTool,
       this._stopTaskTool,
@@ -556,6 +579,14 @@ export class Agent {
   }
   get tools() {
     return this.getToolsSnapshot();
+  }
+
+  _isComputerUseAvailableForThisAgent() {
+    const engine = this._cb?.getEngine?.();
+    const settings = engine?.getComputerUseSettings?.();
+    if (settings?.enabled !== true) return false;
+    const primaryAgentId = engine?.getPrimaryAgentId?.() || null;
+    return !primaryAgentId || primaryAgentId === this.id;
   }
 
   // Desk 系统访问
@@ -732,17 +763,18 @@ export class Agent {
     // 构建 section 分隔格式的 prompt
     const section = (title, content) => ["", "---", "", title, "", content];
 
+    // Prompt 拼接遵循「静态前缀在前、动态尾部在后」原则，最大化跨 session 的 prefix
+    // cache 命中率（KV cache / Anthropic prompt cache 都按严格前缀匹配）。
+    // 顺序：平台 → 环境 → 行为指南（任务/经验/工具/安全/网页/设置/技能/团队）
+    //      ── cache 分界线 ──
+    //      用户档案 → ishiki（依赖 userName）→ 工作空间 → 记忆规则/置顶/记忆 → 当前时间
+    //
+    // ishiki 放在用户档案之后：模板里有「你和{userName}是认识很久的人」这类引用，
+    // 叙事顺序上先告诉模型"用户是谁"，再告诉它"你是谁、你和用户什么关系"。
     const parts = [
       isZh
         ? "你运行在 OpenHanako 平台上，由 liliMozi 开发。项目主页：https://github.com/liliMozi/openhanako"
         : "You are running on the OpenHanako platform, developed by liliMozi. Project page: https://github.com/liliMozi/openhanako",
-      ishiki,
-      ...section(
-        isZh ? "# 用户档案" : "# User Profile",
-        isZh
-          ? "以下是用户的自我描述，由用户手动维护。\n\n" + userMd
-          : "The following is the user's self-description, manually maintained by the user.\n\n" + userMd
-      ),
     ];
     const platformPrompt = getPlatformPromptNote({ platform: process.platform });
     if (platformPrompt) {
@@ -753,6 +785,8 @@ export class Agent {
     }
     // 记忆整体开关：master && session 都开启才注入记忆相关 prompt
     // Subagent 场景下整块跳过（无记忆工具 = 规则和 pinned 也是孤儿噪音）
+    // 注意：记忆块本身已下移到 prompt 末尾（见下方），这里只是预先准备好规则文本
+    let memoryBlock = null;
     if (memoryEnabled && !forSubagent) {
       const memoryRule = isZh ? [
         "",
@@ -780,23 +814,24 @@ export class Agent {
       const hasMemory = trimmedMemory && trimmedMemory !== "（暂无记忆）" && trimmedMemory !== "(No memory yet)";
 
       if (hasPinned || hasMemory) {
-        parts.push(memoryRule);
-      }
-      if (hasPinned) {
-        parts.push(...section(
-          isZh ? "# 置顶记忆" : "# Pinned Memories",
-          isZh
-            ? "用户主动要求你记住的内容，始终保留。你可以读写这些记忆。\n\n" + pinnedMd
-            : "Content the user explicitly asked you to remember. Always retained. You can read and write these memories.\n\n" + pinnedMd
-        ));
-      }
-      if (hasMemory) {
-        parts.push(...section(
-          isZh ? "# 记忆" : "# Memory",
-          isZh
-            ? "以下这些是从过往对话积累的记忆。\n\n" + memory
-            : "The following are memories accumulated from past conversations.\n\n" + memory
-        ));
+        const memParts = [memoryRule];
+        if (hasPinned) {
+          memParts.push(...section(
+            isZh ? "# 置顶记忆" : "# Pinned Memories",
+            isZh
+              ? "用户主动要求你记住的内容，始终保留。你可以读写这些记忆。\n\n" + pinnedMd
+              : "Content the user explicitly asked you to remember. Always retained. You can read and write these memories.\n\n" + pinnedMd
+          ));
+        }
+        if (hasMemory) {
+          memParts.push(...section(
+            isZh ? "# 记忆" : "# Memory",
+            isZh
+              ? "以下这些是从过往对话积累的记忆。\n\n" + memory
+              : "The following are memories accumulated from past conversations.\n\n" + memory
+          ));
+        }
+        memoryBlock = memParts;
       }
     }
 
@@ -853,6 +888,19 @@ export class Agent {
         "When multiple tools can accomplish the same task, prefer the one with the lowest cost and least disruption. " +
         "Do not reach for heavy tools when simpler ones can do the job."
     );
+
+    if (this._isComputerUseAvailableForThisAgent()) {
+      parts.push(isZh
+        ? "\n## 本机应用控制\n\n" +
+          "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先使用 computer 工具。" +
+          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过 Hana 的应用审批列表，也更容易撞到系统隐私权限。" +
+          "如果需要控制一个新应用，先用 computer 的 start/list_apps 流程触发应用级确认，让用户在输入框上方同意。"
+        : "\n## Desktop App Control\n\n" +
+          "When the user asks to open, inspect, click, type in, or control a local GUI application, prefer the computer tool. " +
+          "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's app approval list and are more likely to hit OS privacy permissions. " +
+          "For a new app, use the computer start/list_apps flow so the input-area app approval prompt can ask the user to approve it."
+      );
+    }
 
     // 失败处理（诊断优先于换方案）
     parts.push(isZh
@@ -967,6 +1015,22 @@ export class Agent {
       }
     }
 
+    // ── cache 分界线 ──
+    // 以下内容会在不同 session 之间变化（用户档案编辑、cwd 切换、记忆更新、时间戳推进），
+    // 统一放在 prompt 末尾以保护前面静态前缀的 cache 命中率。
+
+    // 用户档案（user.md，用户偶尔手动编辑）
+    parts.push(...section(
+      isZh ? "# 用户档案" : "# User Profile",
+      isZh
+        ? "以下是用户的自我描述，由用户手动维护。\n\n" + userMd
+        : "The following is the user's self-description, manually maintained by the user.\n\n" + userMd
+    ));
+
+    // ishiki（identity + yuan + ishiki 模板，含 {{userName}} 等替换）
+    // 放在用户档案之后：先建立"用户是谁"的语境，再讲"你是谁、你和用户什么关系"。
+    parts.push(ishiki);
+
     // 工作空间 = 当前工作目录（注入实际路径）
     const cwdPath = cwdOverride !== null ? cwdOverride : (this._cb?.getCwd?.() || "");
     parts.push(isZh
@@ -979,6 +1043,11 @@ export class Agent {
         (cwdPath ? `\nCurrent working directory: ${cwdPath}` : "") +
         `\nFiles and directories mentioned by the user should be searched in the current working directory first.`
     );
+
+    // 记忆规则 + 置顶记忆 + 记忆（动态，后台 compile 会更新；按 session 快照）
+    if (memoryBlock) {
+      parts.push(...memoryBlock);
+    }
 
     // 日期时间（尊重用户时区偏好，fallback 到系统时区）
     const tz = this._cb?.getTimezone?.() || Intl.DateTimeFormat().resolvedOptions().timeZone;

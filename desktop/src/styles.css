@@ -1,3 +1,5 @@
+@import url('./themes/new-warm-paper-fonts.css');
+
 /* ========================================
    设计系统 · 结构 Token（主题无关）
    ======================================== */
@@ -23,10 +25,21 @@
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --duration: 0.3s;
 
-    /* 字体 */
-    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-serif: 'Songti SC', 'Georgia', serif;
-    --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    /* 字体默认值：主题 CSS 可 override */
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-serif: 'EB Garamond', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* 编辑器默认排版：用户设置写入同名变量，主题仍可覆盖初始值 */
+    --editor-markdown-font-size: 16px;
+    --editor-markdown-h1-font-size: 24px;
+    --editor-markdown-h2-font-size: 20px;
+    --editor-markdown-h3-font-size: 18px;
+    --editor-markdown-h4-font-size: 16px;
+    --editor-markdown-h5-font-size: 15px;
+    --editor-markdown-h6-font-size: 14px;
+    --editor-markdown-line-height: 1.72;
+    --editor-markdown-content-padding-x: 24px;
 
     /* sidebar 宽度 */
     --sidebar-width: 240px;
@@ -76,7 +89,7 @@ body:not(.no-paper-texture) .yuan-chip {
 }
 
 /* ③ 亮度补偿：暖白叠层抵消纹理变暗（暗色主题跳过） */
-html:not([data-theme="midnight"]) body:not(.no-paper-texture)::before {
+html:not([data-theme="midnight"]):not([data-theme="midnight-contrast"]) body:not(.no-paper-texture)::before {
     content: '';
     position: fixed;
     inset: 0;
@@ -85,9 +98,9 @@ html:not([data-theme="midnight"]) body:not(.no-paper-texture)::before {
     background: rgba(255, 253, 247, 0.35);
 }
 
-/* 无衬线模式：覆盖 --font-serif 为系统无衬线体 */
+/* 无衬线模式：覆盖 --font-serif 为当前 UI 字体 */
 body.font-sans {
-    --font-serif: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    --font-serif: var(--font-ui);
 }
 
 /* ========================================
@@ -586,6 +599,7 @@ html[data-platform="linux"] .tb-toggle-right {
     background: rgba(255,255,255,0.5);
     border: 1px solid rgba(0,0,0,0.05);
     box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    color: var(--sidebar-bridge-card-text, var(--text-muted));
     width: calc(100% - var(--space-md) * 2);
     margin: 4px auto 6px;
     padding: 7px 12px;
@@ -866,6 +880,16 @@ html[data-platform="linux"] .tb-toggle-right {
 
 .md-content p:last-child {
     margin-bottom: 0;
+}
+
+/* 普通 Markdown 图片必须收进正文列，避免大图撑宽聊天区。 */
+.md-content img {
+    display: block;
+    max-width: 100%;
+    max-height: min(520px, 70vh);
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
 }
 
 /* 行内代码 */
@@ -1915,12 +1939,14 @@ html[data-platform="linux"] .tb-toggle-right {
     padding: 0 var(--space-lg) var(--space-lg);
     background: transparent;
     z-index: 5;
+    pointer-events: none;
 }
 
 .input-area > * {
     max-width: 646px;
     margin-left: auto;
     margin-right: auto;
+    pointer-events: auto;
 }
 
 /* (输入区子组件样式已迁移到 InputArea.module.css) */

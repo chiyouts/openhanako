@@ -11,6 +11,7 @@ const mockLoadSessions = vi.fn(async () => {});
 const mockLoadModels = vi.fn(async () => {});
 const mockActivateWorkspaceDesk = vi.fn(async () => {});
 const mockLoadChannels = vi.fn(async () => {});
+const mockApplyEditorTypography = vi.fn();
 
 vi.mock('../../stores', () => ({
   useStore: {
@@ -47,6 +48,10 @@ vi.mock('../../stores/channel-actions', () => ({
   loadChannels: mockLoadChannels,
 }));
 
+vi.mock('../../editor/typography', () => ({
+  applyEditorTypography: mockApplyEditorTypography,
+}));
+
 function jsonResponse(body: unknown): Response {
   return { json: async () => body } as unknown as Response;
 }
@@ -66,6 +71,7 @@ describe('handleAppEvent', () => {
     mockLoadModels.mockReset();
     mockActivateWorkspaceDesk.mockReset();
     mockLoadChannels.mockReset();
+    mockApplyEditorTypography.mockReset();
     vi.resetModules();
 
     (globalThis as Record<string, unknown>).window = {
@@ -180,6 +186,18 @@ describe('handleAppEvent', () => {
     handleAppEvent('theme-changed', { theme: 'moon' });
 
     expect((globalThis as any).window.setTheme).toHaveBeenCalledWith('moon');
+  });
+
+  it('editor-typography-changed applies editor typography settings', async () => {
+    const { handleAppEvent } = await import('../../services/app-event-actions');
+
+    handleAppEvent('editor-typography-changed', {
+      editor: { markdown: { bodyFontSize: 17 } },
+    });
+
+    expect(mockApplyEditorTypography).toHaveBeenCalledWith({
+      markdown: { bodyFontSize: 17 },
+    });
   });
 
   it('agent-workspace-changed updates only the current agent workspace and activates the desk', async () => {

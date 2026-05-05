@@ -163,6 +163,43 @@ describe("model sync related routes", () => {
     expectAppEvent(engine.emitEvent, "models-changed", { agentId: "hana" });
   });
 
+  it("auxiliary vision toggle updates shared prefs without refreshing the model registry", async () => {
+    const { createPreferencesRoute } = await import("../server/routes/preferences.js");
+    const app = new Hono();
+    const engine = {
+      getSharedModels: vi.fn(() => ({ vision_enabled: false })),
+      getSearchConfig: vi.fn(() => ({ provider: null, api_key: null })),
+      getUtilityApi: vi.fn(() => ({ provider: null, base_url: null, api_key: null })),
+      resolveModelWithCredentials: vi.fn(),
+      setSharedModels: vi.fn(),
+      setSearchConfig: vi.fn(),
+      setUtilityApi: vi.fn(),
+      syncModelsAndRefresh: vi.fn().mockResolvedValue(true),
+      currentAgentId: "hana",
+      emitEvent: vi.fn(),
+    };
+
+    app.route("/api", createPreferencesRoute(engine));
+
+    const res = await app.request("/api/preferences/models", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        models: {
+          vision_enabled: true,
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(engine.setSharedModels).toHaveBeenCalledWith({
+      vision_enabled: true,
+    });
+    expect(engine.resolveModelWithCredentials).not.toHaveBeenCalled();
+    expect(engine.syncModelsAndRefresh).not.toHaveBeenCalled();
+    expectAppEvent(engine.emitEvent, "models-changed", { agentId: "hana" });
+  });
+
   it("shared model preference updates return an error and emit no event when model refresh fails", async () => {
     const { createPreferencesRoute } = await import("../server/routes/preferences.js");
     const app = new Hono();
@@ -539,6 +576,56 @@ describe("model sync related routes", () => {
     const data = await res.json();
     expect(data.source).toBe("registry");
     expect(data.models[0].id).toBe("gpt-5.4");
+  });
+
+  it("providers summary treats no-auth providers as credential-ready without api_key", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const allowsMissingApiKey = vi.fn(() => true);
+    const engine = {
+      providerRegistry: {
+        getAllProvidersRaw: vi.fn(() => ({
+          ollama: {
+            base_url: "http://192.168.1.20:11434/v1",
+            api: "openai-completions",
+            models: ["llama3"],
+          },
+        })),
+        get: vi.fn(() => ({
+          authType: "none",
+          baseUrl: "http://localhost:11434/v1",
+          api: "openai-completions",
+          displayName: "Ollama",
+        })),
+        isOAuth: vi.fn(() => false),
+        getAuthType: vi.fn(() => "none"),
+        allowsMissingApiKey,
+        getAuthJsonKey: (id) => id,
+        getOAuthProviderIds: () => [],
+        getAll: () => new Map(),
+      },
+      preferences: {
+        getOAuthCustomModels: () => ({}),
+      },
+      hanakoHome: "/tmp",
+    };
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/summary");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.providers.ollama).toMatchObject({
+      auth_type: "none",
+      has_credentials: true,
+      api_key: "",
+      models: ["llama3"],
+    });
+    expect(allowsMissingApiKey).toHaveBeenCalledWith(
+      "ollama",
+      "http://192.168.1.20:11434/v1",
+    );
   });
 
   it("oauth provider with empty registry falls back to defaults", async () => {

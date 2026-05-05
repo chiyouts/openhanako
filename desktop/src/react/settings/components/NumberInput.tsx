@@ -7,6 +7,8 @@ interface NumberInputProps {
   unit?: string;
   min?: number;
   max?: number;
+  step?: number;
+  precision?: 'int' | 'float';
   disabled?: boolean;
 }
 
@@ -16,8 +18,17 @@ export function NumberInput({
   unit,
   min,
   max,
+  step,
+  precision = 'int',
   disabled,
 }: NumberInputProps) {
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = event.target.value;
+    const next = precision === 'float' ? parseFloat(raw) : parseInt(raw, 10);
+    if (!Number.isFinite(next)) return;
+    onChange(next);
+  };
+
   return (
     <div className={styles.numberInput}>
       <input
@@ -26,8 +37,9 @@ export function NumberInput({
         value={value}
         min={min}
         max={max}
+        step={step}
         disabled={disabled}
-        onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)}
+        onChange={handleChange}
       />
       {unit && <span className={styles.numberInputUnit}>{unit}</span>}
     </div>

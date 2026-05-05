@@ -6,9 +6,10 @@
  */
 
 import fs from "fs";
-import { isLocalBaseUrl } from "../shared/net-utils.js";
 import { lookupKnown } from "../shared/known-models.js";
-import { withThinkingFormatCompat } from "../shared/model-capabilities.js";
+import { normalizeVisionCapabilities, withThinkingFormatCompat } from "../shared/model-capabilities.js";
+import { providerCredentialAllowsMissingApiKey } from "../shared/provider-auth.js";
+import { isLocalBaseUrl } from "../shared/net-utils.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const KNOWN_OPENAI_COMPAT_PROVIDER_IDS = new Set([
@@ -112,6 +113,12 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
 
   if (known?.quirks?.length) entry.quirks = known.quirks;
 
+  const rawVisionCapabilities = isObj && modelEntry.visionCapabilities !== undefined
+    ? modelEntry.visionCapabilities
+    : known?.visionCapabilities;
+  const visionCapabilities = image ? normalizeVisionCapabilities(rawVisionCapabilities) : null;
+  if (visionCapabilities) entry.visionCapabilities = visionCapabilities;
+
   // Pi SDK compat 覆盖：
   // 1. 非 OpenAI provider 不发 developer role（dashscope 等不支持）— 与 reasoning 无关
   // 2. thinkingFormat 由 shared/model-capabilities.js 统一派生，避免请求层按 provider 猜
@@ -181,9 +188,11 @@ export function syncModels(providers, opts = {}) {
       apiKey = extractApiKey(getAuthJson()[authKey]);
     }
 
-    // 无凭证且非 localhost，跳过
-    const isLocal = isLocalBaseUrl(p.base_url);
-    if (!apiKey && !isLocal) continue;
+    // 无凭证时只允许 provider 契约声明无需 key，或旧本地 loopback 配置。
+    if (!apiKey && !providerCredentialAllowsMissingApiKey({
+      authType: p.auth_type,
+      baseUrl: p.base_url,
+    })) continue;
 
     const effectiveApiKey = apiKey || "local";
 

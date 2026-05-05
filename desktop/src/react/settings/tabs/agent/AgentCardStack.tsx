@@ -1,14 +1,41 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { useSettingsStore, type Agent } from '../../store';
 import { hanaFetch, hanaUrl, yuanFallbackAvatar } from '../../api';
 import { t } from '../../helpers';
 import { loadAgents } from '../../actions';
 import styles from '../../Settings.module.css';
 
-interface ContextMenu {
-  x: number;
-  y: number;
-  agentId: string;
+interface AgentCardGeometry {
+  total: number;
+  cardSize: number;
+  spreadStep: number;
+  edgeBleed: number;
+  groupWidth: number;
+  spreadWidth: number;
+  positions: number[];
+}
+
+export function calculateAgentCardGeometry(totalCards: number): AgentCardGeometry {
+  const total = Math.max(1, totalCards);
+  const compactWidth = 260;
+  const cardSize = 62;
+  const spreadStep = 72;
+  const edgeBleed = 18;
+  const groupWidth = (total - 1) * spreadStep + cardSize;
+  const visualWidth = groupWidth + edgeBleed * 2;
+  const spreadWidth = Math.max(compactWidth, visualWidth);
+  const spreadOffset = (spreadWidth - visualWidth) / 2;
+  const positions = Array.from({ length: total }, (_unused, index) => spreadOffset + edgeBleed + index * spreadStep);
+
+  return {
+    total,
+    cardSize,
+    spreadStep,
+    edgeBleed,
+    groupWidth,
+    spreadWidth,
+    positions,
+  };
 }
 
 export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, onAvatarClick, onSetActive, onDelete, onAdd }: {
@@ -24,7 +51,6 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
   const cardsRef = useRef<HTMLDivElement>(null);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
-  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
 
   // Wheel 在本区域内只用于左右翻卡，永远不传穿透到外层触发页面纵向滚动
   useEffect(() => {
@@ -60,20 +86,10 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
   const total = agents.length + 1;
   const n = total;
   const stepTight = n > 1 ? Math.min(2.5, 10 / (n - 1)) : 0;
-  const spreadStep = 72;
-  const PAD = 10;
-  const spreadOffset = PAD;
-  const spreadWidth = Math.max(260, (n - 1) * spreadStep + 82 + PAD);
+  const cardGeometry = calculateAgentCardGeometry(total);
+  const spreadStep = cardGeometry.spreadStep;
+  const spreadWidth = cardGeometry.spreadWidth;
   const ts = Date.now();
-
-  // 关闭右键菜单
-  const closeMenu = useCallback(() => setContextMenu(null), []);
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handler = () => closeMenu();
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [contextMenu, closeMenu]);
 
   // 拖拽排序（只对 agent 卡片，排除最后的 add 按钮）
   useEffect(() => {
@@ -181,14 +197,14 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
     };
   }, [agents, spreadStep]);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent, agentId: string) => {
+  const suppressContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, agentId });
   }, []);
 
-  const menuAgent = contextMenu ? agents.find(a => a.id === contextMenu.agentId) : null;
-  const isMenuAgentCurrent = menuAgent?.id === currentAgentId;
-  const canDelete = agents.length >= 2 && !isMenuAgentCurrent;
+  const selectedAgent = selectedId ? agents.find(a => a.id === selectedId) : null;
+  const isSelectedCurrent = selectedAgent?.id === currentAgentId;
+  const canSetPrimary = !!selectedAgent && !selectedAgent.isPrimary;
+  const canDeleteSelected = !!selectedAgent && agents.length >= 2 && !selectedAgent.isPrimary && !isSelectedCurrent;
 
   return (
     <div
@@ -200,7 +216,7 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
         <div data-spacer="1" style={{ width: spreadWidth, height: 1, pointerEvents: 'none', flexShrink: 0 }} />
         {agents.map((agent, i) => {
           const rotTight = i * stepTight;
-          const txSpread = spreadOffset + i * spreadStep;
+          const txSpread = cardGeometry.positions[i];
           const z = n - i;
           const isSelected = agent.id === selectedId;
 
@@ -222,7 +238,7 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
                 if (isSelected) onAvatarClick();
                 else onSelect(agent.id);
               }}
-              onContextMenu={(e) => handleContextMenu(e, agent.id)}
+              onContextMenu={suppressContextMenu}
             >
               <div className={styles['agent-card-inner']}>
                 <img
@@ -254,7 +270,7 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
           className={styles['agent-card']}
           style={{
             '--rot-tight': `${agents.length * stepTight}deg`,
-            '--tx-spread': `${spreadOffset + agents.length * spreadStep}px`,
+            '--tx-spread': `${cardGeometry.positions[agents.length]}px`,
             '--z': 0,
             zIndex: 0,
           } as React.CSSProperties}
@@ -268,21 +284,23 @@ export function AgentCardStack({ agents, selectedId, currentAgentId, onSelect, o
         </div>
       </div>
 
-      {/* 右键菜单 */}
-      {contextMenu && menuAgent && (
-        <div
-          className={styles['agent-context-menu']}
-          style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 9999 }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className={styles['agent-context-header']}>{menuAgent.name}</div>
-          {!isMenuAgentCurrent && (
-            <button className={styles['agent-context-item']} onClick={() => { onSetActive(contextMenu.agentId); closeMenu(); }}>
+      {selectedAgent && (
+        <div className={styles['agent-card-actions']}>
+          {canSetPrimary && (
+            <button
+              type="button"
+              className={styles['agent-card-action']}
+              onClick={() => onSetActive(selectedAgent.id)}
+            >
               {t('settings.agent.setActive')}
             </button>
           )}
-          {canDelete && (
-            <button className={`${styles['agent-context-item']} ${styles['agent-context-danger']}`} onClick={() => { closeMenu(); onSelect(contextMenu.agentId); onDelete(contextMenu.agentId); }}>
+          {canDeleteSelected && (
+            <button
+              type="button"
+              className={`${styles['agent-card-action']} ${styles['agent-card-action-danger']}`}
+              onClick={() => onDelete(selectedAgent.id)}
+            >
               {t('settings.agent.deleteBtn')}
             </button>
           )}

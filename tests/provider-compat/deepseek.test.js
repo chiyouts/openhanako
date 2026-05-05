@@ -123,15 +123,23 @@ describe("provider-compat/deepseek — ensureReasoningContentForToolCalls", () =
     expect(result[1].reasoning_content).toBe("我应该调用 date 工具");
   });
 
-  it("reasoning_content 已存在但为空字符串/null 时不再视为合规", () => {
+  it("reasoning_content 已存在且为空字符串时原样保留（DeepSeek V4 合法空思考）", () => {
+    const compliantAssistant = {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "不应覆盖合法空字符串", thinkingSignature: "reasoning_content" }],
+      reasoning_content: "",
+      tool_calls: [{ id: "call_1" }],
+    };
+    const messages = [{ role: "user", content: "x" }, compliantAssistant];
+    const result = deepseek.ensureReasoningContentForToolCalls(messages);
+    expect(result).toBe(messages);
+    expect(result[1]).toBe(compliantAssistant);
+    expect(result[1].reasoning_content).toBe("");
+  });
+
+  it("reasoning_content 已存在但为 null 时不再视为合规", () => {
     const messages = [
       { role: "user", content: "x" },
-      {
-        role: "assistant",
-        content: [{ type: "thinking", thinking: "从 thinking 恢复", thinkingSignature: "reasoning_content" }],
-        reasoning_content: "",
-        tool_calls: [{ id: "call_1" }],
-      },
       {
         role: "assistant",
         content: [{ type: "thinking", thinking: "也从 thinking 恢复", thinkingSignature: "reasoning_content" }],
@@ -140,8 +148,7 @@ describe("provider-compat/deepseek — ensureReasoningContentForToolCalls", () =
       },
     ];
     const result = deepseek.ensureReasoningContentForToolCalls(messages);
-    expect(result[1].reasoning_content).toBe("从 thinking 恢复");
-    expect(result[2].reasoning_content).toBe("也从 thinking 恢复");
+    expect(result[1].reasoning_content).toBe("也从 thinking 恢复");
     expect(result).not.toBe(messages);
   });
 

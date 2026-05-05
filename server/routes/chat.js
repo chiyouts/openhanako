@@ -12,6 +12,7 @@ import { wsSend, wsParse } from "../ws-protocol.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { t } from "../i18n.js";
 import { getLastAssistantUsage } from "../../lib/pi-sdk/index.js";
+import { logLlmUsage } from "../../lib/llm/usage-observer.js";
 import { BrowserManager } from "../../lib/browser/browser-manager.js";
 import {
   createSessionStreamState,
@@ -341,6 +342,15 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       broadcast({ type: "devlog", text: event.text, level: event.level });
     } else if (event.type === "browser_bg_status") {
       broadcast({ type: "browser_bg_status", running: event.running, url: event.url, sessionPath });
+    } else if (event.type === "computer_overlay") {
+      if (!ss) return;
+      emitStreamEvent(sessionPath, ss, event);
+    } else if (event.type === "session_confirmation" && event.request) {
+      if (!ss) return;
+      emitStreamEvent(sessionPath, ss, {
+        type: "content_block",
+        block: event.request,
+      });
     } else if (event.type === "cron_confirmation" && event.confirmId) {
       // 新的阻塞式 cron 确认（通过 emitEvent 触发）
       if (!ss) return;
@@ -388,7 +398,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     } else if (event.type === "bridge_status") {
       broadcast({ type: "bridge_status", platform: event.platform, status: event.status, error: event.error, agentId: event.agentId || null });
     } else if (event.type === "session_user_message") {
-      broadcast({ type: "session_user_message", sessionPath, message: event.message });
+      if (!ss) return;
+      emitStreamEvent(sessionPath, ss, { type: "session_user_message", message: event.message });
     } else if (event.type === "session_status") {
       if (ss) {
         if (event.isStreaming) {
@@ -505,6 +516,14 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           const usage = getLastAssistantUsage(sess.entries ?? []);
           if (usage) {
             const model = sess.model;
+            logLlmUsage({
+              source: "chat",
+              api: model?.api ?? null,
+              modelId: model?.id ?? null,
+              provider: model?.provider ?? null,
+              usage,
+              costRates: model?.cost,
+            });
             hub.eventBus.emit({
               type: "token_usage",
               usage,

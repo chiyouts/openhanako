@@ -14,11 +14,21 @@ const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
-const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, getState: getUpdateState, installDownloadedUpdate } = require("./auto-updater.cjs");
+const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, installDownloadedUpdate } = require("./auto-updater.cjs");
 const { createFileWatchRegistry } = require("./file-watch-registry.cjs");
 const { readTextFileSnapshot, writeTextFileIfUnchanged } = require("./file-text-io.cjs");
 const { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 const themeRegistry = require('./src/shared/theme-registry.cjs');
+const {
+  configureClientSingleInstance,
+  focusExistingWindow,
+} = require("./src/shared/single-instance-lock.cjs");
+const {
+  configureProcessPiSdkEnv,
+  ensureHanaPiSdkDirs,
+  resolveHanakoHome,
+  withHanaPiSdkEnv,
+} = require("../shared/hana-runtime-paths.cjs");
 const {
   buildBrowserSearchExtractionScript,
   buildBrowserSearchUrl,
@@ -70,19 +80,20 @@ function safeReadJSON(filePath, fallback = null) {
   }
 }
 
-const hanakoHome = process.env.HANA_HOME
-  ? path.resolve(process.env.HANA_HOME.replace(/^~/, os.homedir()))
-  : path.join(os.homedir(), ".hanako");
+const hanakoHome = resolveHanakoHome(process.env.HANA_HOME);
+process.env.HANA_HOME = hanakoHome;
+ensureHanaPiSdkDirs(hanakoHome);
+configureProcessPiSdkEnv(hanakoHome);
 
 // 按 HANA_HOME 隔离 Electron userData（localStorage / cache / session）
 // 生产: ~/Library/Application Support/Hanako
 // 开发: ~/Library/Application Support/Hanako-dev
 const defaultHome = path.join(os.homedir(), ".hanako");
-if (hanakoHome !== defaultHome) {
-  const suffix = path.basename(hanakoHome).replace(/^\./, ""); // "hanako-dev"
-  const appName = suffix.charAt(0).toUpperCase() + suffix.slice(1); // "Hanako-dev"
-  app.setPath("userData", path.join(app.getPath("appData"), appName));
-}
+configureClientSingleInstance(app, {
+  hanakoHome,
+  defaultHome,
+  onSecondInstance: () => showPrimaryWindow(),
+});
 
 if (process.platform === "win32") {
   app.setAppUserModelId(APP_USER_MODEL_ID);
@@ -140,6 +151,9 @@ let isExitingServer = false; // 只有托盘"退出"时才 kill server，其余�
 let _isUpdating = false;  // auto-updater 正在执行 quitAndInstall，before-quit 跳过 server 清理
 let _autoUpdaterInitialized = false;
 let forceQuitApp = false;   // 启动失败等场景需要真正退出，绕过"隐藏保持运行"拦截
+const SERVER_SHUTDOWN_GRACE_MS = 17000; // server gracefulShutdown 内部 15s force timer + 余量
+const SERVER_FORCE_KILL_WAIT_MS = 5000;
+const SERVER_SHUTDOWN_POLL_MS = 200;
 
 // ── 主进程 i18n ──
 // 从 agent config.yaml 读取 locale，加载对应语言包的 "main" 部分
@@ -325,6 +339,46 @@ function migrateSetupComplete() {
 // ── 启动 Server ──
 // 收集 server 的 stdout/stderr 用于崩溃诊断
 let _serverLogs = [];
+let _lastServerSpawn = null;
+
+function isPidAliveForDiagnostics(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function hasChildExitObserved(proc) {
+  if (!proc) return true;
+  return proc.exitCode !== null || proc.signalCode !== null;
+}
+
+async function waitForProcessExit(proc, pid, timeoutMs) {
+  if (!proc && !pid) return true;
+  if (hasChildExitObserved(proc)) return true;
+
+  let exitObserved = false;
+  let onExit = null;
+  if (proc && typeof proc.once === "function") {
+    onExit = () => { exitObserved = true; };
+    proc.once("exit", onExit);
+  }
+
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (exitObserved || hasChildExitObserved(proc)) return true;
+      if (pid && !isPidAliveForDiagnostics(pid)) return true;
+      const waitMs = Math.min(SERVER_SHUTDOWN_POLL_MS, Math.max(0, deadline - Date.now()));
+      if (waitMs <= 0) break;
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+    if (exitObserved || hasChildExitObserved(proc)) return true;
+    return !!pid && !isPidAliveForDiagnostics(pid);
+  } finally {
+    if (proc && onExit && typeof proc.removeListener === "function") {
+      proc.removeListener("exit", onExit);
+    }
+  }
+}
 
 // Server 启动前的就绪性校验：处理自动更新文件落地竞态
 const {
@@ -489,7 +543,7 @@ async function startServer() {
 async function _spawnServerOnce(serverInfoPath) {
   _serverLogs = [];
 
-  const serverEnv = { ...process.env, HANA_HOME: hanakoHome };
+  const serverEnv = { ...withHanaPiSdkEnv(process.env, hanakoHome), HANA_HOME: hanakoHome };
 
   // Windows: 注入 MinGit 路径
   if (process.platform === "win32") {
@@ -513,34 +567,61 @@ async function _spawnServerOnce(serverInfoPath) {
 
   // 选择 server 启动方式
   let serverBin, serverArgs;
-  const bundledServer = path.join(process.resourcesPath || "", "server", "hana-server");
+  const bundledServerRoot = path.join(process.resourcesPath || "", "server");
+  const bundledServer = path.join(bundledServerRoot, "hana-server");
   if (fs.existsSync(bundledServer) || fs.existsSync(bundledServer + ".exe")) {
     // 打包模式：使用 extraResources 里的独立 server
-    // macOS/Linux：hana-server 是 shell wrapper，内部调用 node bundle/index.js，无需额外参数
-    // Windows：hana-server.exe 是裸 Node 二进制（改名），需要显式传入 bundle/index.js
+    // macOS/Linux：hana-server 是 shell wrapper，内部调用 bootstrap.js，无需额外参数
+    // Windows：hana-server.exe 是裸 Node 二进制（改名），需要显式传入 bootstrap.js
     const bin = process.platform === "win32" ? bundledServer + ".exe" : bundledServer;
+    const entry = path.join(bundledServerRoot, "bundle", "index.js");
     serverBin = bin;
     serverArgs = process.platform === "win32"
-      ? [path.join(path.dirname(bin), "bundle", "index.js")]
+      ? [path.join(bundledServerRoot, "bootstrap.js")]
       : [];
-    serverEnv.HANA_ROOT = path.join(process.resourcesPath, "server");
+    serverEnv.HANA_ROOT = bundledServerRoot;
+    serverEnv.HANA_SERVER_ENTRY = entry;
   } else {
     // 开发模式：沿用 launch.js 传下来的独立 Node runtime 跑 source server，
     // 让源码模式和 BUILD 文档保持同一 ABI 合同，避免本地 npm install 的
     // native addon 被 Electron 自带 Node 误加载。
+    const devRoot = path.join(__dirname, "..");
     serverBin = process.env.HANA_DEV_NODE_BIN || process.env.npm_node_execpath || "node";
-    serverArgs = [path.join(__dirname, "..", "server", "index.js")];
+    serverArgs = [path.join(devRoot, "server", "bootstrap.js")];
+    serverEnv.HANA_ROOT = devRoot;
+    serverEnv.HANA_SERVER_ENTRY = path.join(devRoot, "server", "index.js");
     delete serverEnv.ELECTRON_RUN_AS_NODE;
   }
 
   // 删除旧 server-info.json
   try { fs.unlinkSync(serverInfoPath); } catch {}
 
+  _lastServerSpawn = {
+    command: serverBin,
+    args: serverArgs,
+    pid: null,
+    startedAt: new Date().toISOString(),
+  };
   serverProcess = spawn(serverBin, serverArgs, {
     detached: true,
     windowsHide: true,
     env: serverEnv,
     stdio: ["pipe", "pipe", "pipe"],
+  });
+  const spawnedProcess = serverProcess;
+  _lastServerSpawn.pid = spawnedProcess.pid || null;
+
+  spawnedProcess.on("exit", (code, signal) => {
+    if (_lastServerSpawn?.pid === spawnedProcess.pid) {
+      _lastServerSpawn.exitCode = code;
+      _lastServerSpawn.exitSignal = signal;
+      _lastServerSpawn.exitedAt = new Date().toISOString();
+    }
+  });
+  spawnedProcess.on("error", (err) => {
+    if (_lastServerSpawn?.pid === spawnedProcess.pid) {
+      _lastServerSpawn.error = err?.message || String(err);
+    }
   });
 
   // 捕获 stdout/stderr 到 buffer（打包后 console 不可见，崩溃时需要这些信息）
@@ -621,7 +702,7 @@ function monitorServer() {
 function showPrimaryWindow() {
   if (process.platform === "darwin") app.dock.show();
   const win = mainWindow || onboardingWindow;
-  if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  focusExistingWindow(win);
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.show();
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.show();
@@ -672,49 +753,60 @@ function createTray() {
 /**
  * 将崩溃日志写入 HANA_HOME/crash.log（默认 ~/.hanako/crash.log）并返回日志内容
  */
+function buildServerCrashDiagnostics() {
+  // production 时 server 在 resources/server/，dev 时在 __dirname/../server/
+  const isPackaged = process.resourcesPath &&
+    fs.existsSync(path.join(process.resourcesPath, "server"));
+  const serverDir = isPackaged
+    ? path.join(process.resourcesPath, "server")
+    : path.join(__dirname, "..", "server");
+  const sqlitePath = path.join(serverDir, "node_modules", "better-sqlite3",
+    "build", "Release", "better_sqlite3.node");
+  const bundlePath = path.join(serverDir, "bundle", "index.js");
+
+  const items = [
+    ``,
+    `--- Diagnostics ---`,
+    `HANA_HOME: ${hanakoHome}`,
+    `Server dir: ${serverDir}`,
+    `Packaged: ${!!isPackaged}`,
+    `bundle/index.js exists: ${fs.existsSync(bundlePath)}`,
+    `better_sqlite3.node exists: ${fs.existsSync(sqlitePath)}`,
+    `ELECTRON_RUN_AS_NODE: ${process.env.ELECTRON_RUN_AS_NODE || "unset"}`,
+    `Node ABI: ${process.versions.modules || "unknown"}`,
+  ];
+
+  if (_lastServerSpawn) {
+    const childAlive = isPidAliveForDiagnostics(_lastServerSpawn.pid);
+    const exitObserved = _lastServerSpawn.exitCode !== undefined || _lastServerSpawn.exitSignal !== undefined;
+    items.push(`Server PID: ${_lastServerSpawn.pid || "unknown"}`);
+    items.push(`Server command: ${_lastServerSpawn.command || "unknown"}`);
+    items.push(`Server args: ${JSON.stringify(_lastServerSpawn.args || [])}`);
+    items.push(`Server started at: ${_lastServerSpawn.startedAt || "unknown"}`);
+    items.push(`Server child alive: ${childAlive}`);
+    items.push(`Server exit: ${exitObserved ? `code=${_lastServerSpawn.exitCode ?? "null"} signal=${_lastServerSpawn.exitSignal ?? "null"}` : "not observed"}`);
+    if (_lastServerSpawn.error) items.push(`Server spawn error: ${_lastServerSpawn.error}`);
+  }
+
+  // Windows: 检查 server 二进制、手动调试 wrapper 和 MinGit
+  if (process.platform === "win32" && isPackaged) {
+    const exePath = path.join(serverDir, "hana-server.exe");
+    const cmdPath = path.join(serverDir, "hana-server.cmd");
+    const gitRoot = path.join(process.resourcesPath, "git");
+    items.push(`hana-server.exe exists: ${fs.existsSync(exePath)}`);
+    items.push(`hana-server.cmd exists (manual debug): ${fs.existsSync(cmdPath)}`);
+    items.push(`MinGit dir exists: ${fs.existsSync(gitRoot)}`);
+    items.push(``);
+    items.push(`Manual debug: open cmd.exe, cd to "${serverDir}", run hana-server.cmd`);
+  }
+
+  return items.join("\n");
+}
+
 function writeCrashLog(errorMessage) {
   const logs = _serverLogs.join("");
   const timestamp = new Date().toISOString();
-
-  // 没有任何输出时，附加诊断信息帮助定位问题
-  let diagnostics = "";
-  if (!logs) {
-    // production 时 server 在 resources/server/，dev 时在 __dirname/../server/
-    const isPackaged = process.resourcesPath &&
-      fs.existsSync(path.join(process.resourcesPath, "server"));
-    const serverDir = isPackaged
-      ? path.join(process.resourcesPath, "server")
-      : path.join(__dirname, "..", "server");
-    const sqlitePath = path.join(serverDir, "node_modules", "better-sqlite3",
-      "build", "Release", "better_sqlite3.node");
-    const bundlePath = path.join(serverDir, "bundle", "index.js");
-
-    const items = [
-      ``,
-      `--- Diagnostics ---`,
-      `HANA_HOME: ${hanakoHome}`,
-      `Server dir: ${serverDir}`,
-      `Packaged: ${!!isPackaged}`,
-      `bundle/index.js exists: ${fs.existsSync(bundlePath)}`,
-      `better_sqlite3.node exists: ${fs.existsSync(sqlitePath)}`,
-      `ELECTRON_RUN_AS_NODE: ${process.env.ELECTRON_RUN_AS_NODE || "unset"}`,
-      `Node ABI: ${process.versions.modules || "unknown"}`,
-    ];
-
-    // Windows: 检查 server 二进制、手动调试 wrapper 和 MinGit
-    if (process.platform === "win32" && isPackaged) {
-      const exePath = path.join(serverDir, "hana-server.exe");
-      const cmdPath = path.join(serverDir, "hana-server.cmd");
-      const gitRoot = path.join(process.resourcesPath, "git");
-      items.push(`hana-server.exe exists: ${fs.existsSync(exePath)}`);
-      items.push(`hana-server.cmd exists (manual debug): ${fs.existsSync(cmdPath)}`);
-      items.push(`MinGit dir exists: ${fs.existsSync(gitRoot)}`);
-      items.push(``);
-      items.push(`Manual debug: open cmd.exe, cd to "${serverDir}", run hana-server.cmd`);
-    }
-
-    diagnostics = items.join("\n");
-  }
+  const diagnostics = buildServerCrashDiagnostics();
 
   const content = [
     `=== Hanako Crash Log ===`,
@@ -833,7 +925,6 @@ function createMainWindow() {
   // auto-updater 是进程级服务：初始化只做一次，窗口重建时只更新目标 window 引用。
   if (!_autoUpdaterInitialized) {
     initAutoUpdater(mainWindow, {
-      shutdownServer,
       setIsUpdating: (v) => { _isUpdating = v; },
       hanakoHome,
     });
@@ -945,6 +1036,14 @@ function createMainWindow() {
 
 // ── 创建设置窗口 ──
 function createSettingsWindow(tab, theme) {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isCrashed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("open-settings-modal", tab || "agent");
+    return;
+  }
+
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     // renderer 已崩溃：销毁旧窗口，走下方重建流程
     if (settingsWindow.webContents.isCrashed()) {
@@ -2853,7 +2952,10 @@ app.on("will-quit", () => {
 });
 
 async function shutdownServer() {
-  if (serverProcess && !serverProcess.killed) {
+  let removeServerInfo = true;
+  if (serverProcess && !hasChildExitObserved(serverProcess)) {
+    const proc = serverProcess;
+    const pid = proc.pid;
     console.log("[desktop] shutdownServer: 正在关闭 owned server...");
     if (process.platform === "win32") {
       try {
@@ -2864,23 +2966,24 @@ async function shutdownServer() {
         });
       } catch {}
     } else {
-      try { serverProcess.kill("SIGTERM"); } catch {}
+      try { proc.kill("SIGTERM"); } catch {}
     }
-    await new Promise((resolve) => {
-      let resolved = false;
-      const done = () => { if (!resolved) { resolved = true; resolve(); } };
-      const timeout = setTimeout(() => {
-        if (serverProcess && !serverProcess.killed) {
-          try { serverProcess.kill(); } catch {}
-        }
-        // 强杀后仍等 exit 事件（最多再等 3s），让 OS 释放文件句柄
-        setTimeout(done, 3000);
-      }, 5000);
-      serverProcess.on("exit", () => { clearTimeout(timeout); done(); });
-    });
-    serverProcess = null;
+
+    let exited = await waitForProcessExit(proc, pid, SERVER_SHUTDOWN_GRACE_MS);
+    if (!exited && pid) {
+      console.warn(`[desktop] shutdownServer: server PID ${pid} 未在 ${SERVER_SHUTDOWN_GRACE_MS}ms 内退出，强制终止`);
+      killPid(pid, true);
+      exited = await waitForProcessExit(proc, pid, SERVER_FORCE_KILL_WAIT_MS);
+      if (!exited) {
+        console.warn(`[desktop] shutdownServer: server PID ${pid} 强制终止后仍未确认退出`);
+        removeServerInfo = false;
+      }
+    }
+
+    if (serverProcess === proc) serverProcess = null;
   } else if (reusedServerPid) {
     console.log("[desktop] shutdownServer: 正在关闭 reused server...");
+    const pid = reusedServerPid;
     try {
       await fetch(`http://127.0.0.1:${serverPort}/api/shutdown`, {
         method: "POST",
@@ -2888,18 +2991,26 @@ async function shutdownServer() {
         signal: AbortSignal.timeout(2000),
       });
     } catch {
-      killPid(reusedServerPid);
+      killPid(pid);
     }
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      try { process.kill(reusedServerPid, 0); } catch { break; }
-      await new Promise(r => setTimeout(r, 200));
+
+    let exited = await waitForProcessExit(null, pid, SERVER_SHUTDOWN_GRACE_MS);
+    if (!exited) {
+      killPid(pid, true);
+      exited = await waitForProcessExit(null, pid, SERVER_FORCE_KILL_WAIT_MS);
+      if (!exited) {
+        console.warn(`[desktop] shutdownServer: reused server PID ${pid} 强制终止后仍未确认退出`);
+        removeServerInfo = false;
+      }
     }
-    killPid(reusedServerPid, true);
-    reusedServerPid = null;
+    if (reusedServerPid === pid) reusedServerPid = null;
   }
   // 清理 server-info.json，防止更新后新版 Electron 误连旧 server
-  try { fs.unlinkSync(path.join(hanakoHome, "server-info.json")); } catch {}
+  if (removeServerInfo) {
+    try { fs.unlinkSync(path.join(hanakoHome, "server-info.json")); } catch {}
+  } else {
+    console.warn("[desktop] shutdownServer: 保留 server-info.json，供下次启动识别残留 server");
+  }
 }
 
 app.on("before-quit", async (event) => {
@@ -2907,19 +3018,6 @@ app.on("before-quit", async (event) => {
 
   // auto-updater 已完成 server 清理，直接放行
   if (_isUpdating) return;
-
-  if (getUpdateState().status === "downloaded") {
-    event.preventDefault();
-    const started = await installDownloadedUpdate("app-quit");
-    if (!started) {
-      isExitingServer = true;
-      if ((serverProcess && !serverProcess.killed) || reusedServerPid) {
-        await shutdownServer();
-      }
-      app.quit();
-    }
-    return;
-  }
 
   isExitingServer = true;
 
@@ -2937,7 +3035,7 @@ app.on("before-quit", async (event) => {
   _currentBrowserSession = null;
 
   // server 清理
-  if ((serverProcess && !serverProcess.killed) || reusedServerPid) {
+  if ((serverProcess && !hasChildExitObserved(serverProcess)) || reusedServerPid) {
     event.preventDefault();
     await shutdownServer();
     app.quit();

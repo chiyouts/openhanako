@@ -6,6 +6,7 @@ const mockAutoUpdater = {
   autoDownload: true,
   autoInstallOnAppQuit: true,
   allowPrerelease: false,
+  installDirectory: undefined,
   checkForUpdates: vi.fn().mockResolvedValue({}),
   downloadUpdate: vi.fn().mockResolvedValue(null),
   quitAndInstall: vi.fn(),
@@ -14,6 +15,7 @@ const mockAutoUpdater = {
 };
 
 const mockWindows = [];
+let mockExePath = "/Applications/Hanako.app/Contents/MacOS/Hanako";
 
 vi.mock("electron", () => ({
   ipcMain: { handle: vi.fn() },
@@ -22,7 +24,7 @@ vi.mock("electron", () => ({
     isPackaged: true,
     getVersion: () => "1.0.0",
     getPath: (name) => {
-      if (name === "exe") return "/Applications/Hanako.app/Contents/MacOS/Hanako";
+      if (name === "exe") return mockExePath;
       if (name === "userData") return "/tmp/test-userdata";
       return "/tmp";
     },
@@ -52,6 +54,8 @@ describe("auto-updater", () => {
     mockAutoUpdater.autoDownload = true;
     mockAutoUpdater.autoInstallOnAppQuit = true;
     mockAutoUpdater.allowPrerelease = false;
+    mockAutoUpdater.installDirectory = undefined;
+    mockExePath = "/Applications/Hanako.app/Contents/MacOS/Hanako";
 
     ({ ipcMain } = await import("electron"));
     ipcMain.handle.mockImplementation((name, handler) => {
@@ -87,6 +91,22 @@ describe("auto-updater", () => {
     initWithMockWindow();
     expect(mockAutoUpdater.autoDownload).toBe(false);
     expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(false);
+  });
+
+  it("pins the NSIS install directory to the running exe directory on Windows", async () => {
+    const originalPlatform = process.platform;
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      vi.resetModules();
+      mockExePath = "/tmp/Hanako/Hanako.exe";
+      mod = await import("../desktop/auto-updater.cjs");
+
+      initWithMockWindow();
+
+      expect(mockAutoUpdater.installDirectory).toBe("/tmp/Hanako");
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
   });
 
   it("should map update-available to available state", async () => {
@@ -168,8 +188,8 @@ describe("auto-updater", () => {
     expect(win2.webContents.send).toHaveBeenCalledWith("auto-update-state", expect.objectContaining({ status: "latest" }));
   });
 
-  it("installDownloadedUpdate enters installing state and delegates to quitAndInstall", async () => {
-    const shutdownServer = vi.fn().mockResolvedValue(undefined);
+  it("installDownloadedUpdate enters installing state and schedules quitAndInstall on the next tick", async () => {
+    const shutdownServer = vi.fn(() => new Promise(() => {}));
     const setIsUpdating = vi.fn();
     const win = initWithMockWindow({ shutdownServer, setIsUpdating });
 
@@ -177,28 +197,34 @@ describe("auto-updater", () => {
       handlers["update-downloaded"]({ version: "2.0.0" });
     }
 
-    const ok = await mod.installDownloadedUpdate("manual");
+    const installPromise = mod.installDownloadedUpdate("manual");
+    await Promise.resolve();
 
-    expect(ok).toBe(true);
     expect(setIsUpdating).toHaveBeenCalledWith(true);
-    expect(shutdownServer).toHaveBeenCalledTimes(1);
+    expect(shutdownServer).not.toHaveBeenCalled();
+    expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    await new Promise(resolve => setImmediate(resolve));
     expect(mockAutoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true);
     expect(mod.getState()).toEqual(expect.objectContaining({ status: "installing", version: "2.0.0" }));
     expect(win.webContents.send).toHaveBeenCalledWith("auto-update-state", expect.objectContaining({ status: "installing" }));
+    await expect(installPromise).resolves.toBe(true);
   });
 
-  it("manual install IPC uses the same install path as app quit", async () => {
-    const shutdownServer = vi.fn().mockResolvedValue(undefined);
+  it("manual install IPC uses the same immediate install path", async () => {
+    const shutdownServer = vi.fn(() => new Promise(() => {}));
     initWithMockWindow({ shutdownServer });
 
     if (handlers["update-downloaded"]) {
       handlers["update-downloaded"]({ version: "2.0.0" });
     }
 
-    const ok = await ipcHandlers["auto-update-install"]();
+    const installPromise = ipcHandlers["auto-update-install"]();
+    await Promise.resolve();
 
-    expect(ok).toBe(true);
-    expect(shutdownServer).toHaveBeenCalledTimes(1);
+    expect(shutdownServer).not.toHaveBeenCalled();
+    expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    await new Promise(resolve => setImmediate(resolve));
     expect(mockAutoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true);
+    await expect(installPromise).resolves.toBe(true);
   });
 });

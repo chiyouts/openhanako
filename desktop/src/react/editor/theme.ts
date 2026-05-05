@@ -10,14 +10,14 @@ export const codeTheme = EditorView.theme({
 });
 
 export const markdownTheme = EditorView.theme({
-  '&': { fontSize: '0.92rem' },
+  '&': { fontSize: 'var(--editor-markdown-font-size)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {
     fontFamily: 'var(--font-serif)',
-    lineHeight: '1.75',
+    lineHeight: 'var(--editor-markdown-line-height)',
     padding: 'var(--space-md) 0',
   },
-  '.cm-content': { padding: '0 var(--space-lg)' },
+  '.cm-content': { padding: '0 var(--editor-markdown-content-padding-x)' },
   '.cm-activeLine': { backgroundColor: 'transparent' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
   '.cm-cursor': { borderLeftColor: 'var(--text)' },

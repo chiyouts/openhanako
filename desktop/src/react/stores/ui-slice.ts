@@ -7,6 +7,11 @@ export interface MediaViewerState {
   origin: 'desk' | 'session';
 }
 
+export interface SettingsModalState {
+  open: boolean;
+  activeTab: string;
+}
+
 export interface UiSlice {
   sidebarOpen: boolean;
   sidebarAutoCollapsed: boolean;
@@ -21,6 +26,8 @@ export interface UiSlice {
   skillViewerData: { name: string; baseDir: string; filePath?: string; installed?: boolean } | null;
   /** 媒体预览 overlay 状态（null = 关闭） */
   mediaViewer: MediaViewerState | null;
+  /** 主窗口内嵌设置浮层状态 */
+  settingsModal: SettingsModalState;
   /** 频道创建弹窗是否可见 */
   channelCreateOverlayVisible: boolean;
   setSidebarOpen: (open: boolean) => void;
@@ -33,6 +40,7 @@ export interface UiSlice {
   setActivePanel: (panel: ActivePanel) => void;
   setChannelCreateOverlayVisible: (visible: boolean) => void;
   setMediaViewer: (state: MediaViewerState | null) => void;
+  setSettingsModal: (state: SettingsModalState) => void;
   setMediaViewerCurrent: (id: string) => void;
   closeMediaViewer: () => void;
   toggleSidebar: () => void;
@@ -55,6 +63,7 @@ export const createUiSlice = (
   locale: '',
   skillViewerData: null,
   mediaViewer: null,
+  settingsModal: { open: false, activeTab: 'agent' },
   channelCreateOverlayVisible: false,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSidebarAutoCollapsed: (collapsed) => set({ sidebarAutoCollapsed: collapsed }),
@@ -66,6 +75,7 @@ export const createUiSlice = (
   setActivePanel: (panel) => set({ activePanel: panel }),
   setChannelCreateOverlayVisible: (visible) => set({ channelCreateOverlayVisible: visible }),
   setMediaViewer: (state) => set({ mediaViewer: state }),
+  setSettingsModal: (state) => set({ settingsModal: state }),
   setMediaViewerCurrent: (id) => set((s) => ({
     mediaViewer: s.mediaViewer ? { ...s.mediaViewer, currentId: id } : null,
   })),

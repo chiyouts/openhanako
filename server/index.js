@@ -10,7 +10,6 @@
 import crypto from "crypto";
 import fs from "fs";
 import { setMaxListeners } from "events";
-import os from "os";
 import path from "path";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
@@ -50,6 +49,7 @@ import { createConfirmRoute } from "./routes/confirm.js";
 import { createPluginsRoute } from "./routes/plugins.js";
 import { createCheckpointsRoute } from "./routes/checkpoints.js";
 import { createCommandsRoute } from "./routes/commands.js";
+import { configureProcessPiSdkEnv, ensureHanaPiSdkDirs, resolveHanakoHome } from "../shared/hana-runtime-paths.js";
 // internal-browser WS is handled directly via raw ws.WebSocketServer in the
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
 import { ConfirmStore } from "../lib/confirm-store.js";
@@ -65,10 +65,10 @@ const productDir = fromRoot("lib");
 
 // 用户数据存放在 ~/.hanako/（打包后与产品代码分离）
 // 开发时可通过 HANA_HOME 环境变量隔离数据目录，如：HANA_HOME=~/.hanako-dev node server/index.js
-const hanakoHome = process.env.HANA_HOME
-  ? path.resolve(process.env.HANA_HOME.replace(/^~/, os.homedir()))
-  : path.join(os.homedir(), ".hanako");
+const hanakoHome = resolveHanakoHome(process.env.HANA_HOME);
 process.env.HANA_HOME = hanakoHome;
+ensureHanaPiSdkDirs(hanakoHome);
+configureProcessPiSdkEnv(hanakoHome);
 // ── 首次运行播种 ──
 console.log("[server] ① ensureFirstRun...");
 ensureFirstRun(hanakoHome, productDir);
@@ -325,12 +325,46 @@ app.post("/api/log", async (c) => {
 
 // Plan Mode（只读探索模式）
 app.get("/api/plan-mode", async (c) => {
-  return c.json({ enabled: engine.planMode });
+  return c.json({
+    enabled: engine.planMode,
+    mode: engine.permissionMode,
+    accessMode: engine.accessMode,
+    locked: false,
+  });
 });
 app.post("/api/plan-mode", async (c) => {
-  const { enabled } = await safeJson(c);
-  engine.setPlanMode(!!enabled);
-  return c.json({ ok: true, enabled: engine.planMode });
+  const { enabled, mode } = await safeJson(c);
+  const result = mode ? engine.setSessionPermissionMode(mode) : engine.setPlanMode(!!enabled);
+  return c.json({
+    ok: result?.ok !== false,
+    locked: false,
+    enabled: engine.planMode,
+    mode: engine.permissionMode,
+    accessMode: engine.accessMode,
+  });
+});
+
+app.get("/api/session-permission-mode", async (c) => {
+  return c.json({
+    mode: engine.permissionMode,
+    accessMode: engine.accessMode,
+    defaultMode: engine.getSessionPermissionModeDefault(),
+  });
+});
+
+app.post("/api/session-permission-mode", async (c) => {
+  const { mode, pendingNewSession } = await safeJson(c);
+  const result = pendingNewSession === true
+    ? engine.setPendingSessionPermissionMode(mode)
+    : engine.setSessionPermissionMode(mode);
+  return c.json({
+    ok: result?.ok !== false,
+    mode: pendingNewSession === true ? result?.mode : engine.permissionMode,
+    accessMode: pendingNewSession === true
+      ? (result?.mode === "read_only" ? "read_only" : "operate")
+      : engine.accessMode,
+    defaultMode: engine.getSessionPermissionModeDefault(),
+  });
 });
 
 // 远程关闭（供 desktop 端复用 server 退出时调用，跨平台可靠的 graceful shutdown）

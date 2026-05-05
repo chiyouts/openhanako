@@ -23,10 +23,17 @@ import { SlashCommandMenu } from './input/SlashCommandMenu';
 import { InputStatusBars } from './input/InputStatusBars';
 import { InputContextRow } from './input/InputContextRow';
 import { InputControlBar } from './input/InputControlBar';
+import type { PermissionMode } from './input/PlanModeButton';
+import { SessionConfirmationPrompt } from './input/SessionConfirmationPrompt';
 import { SkillBadge } from './input/extensions/skill-badge';
 import { serializeEditor } from '../utils/editor-serializer';
 import { useSkillSlashItems } from '../hooks/use-slash-items';
 import { notifyPasteUploadFailure } from '../utils/paste-upload-feedback';
+import {
+  evaluateChatImageSendPreflight,
+  notifyTextModelImageBlocked,
+} from '../utils/chat-image-send-preflight';
+import { openProviderModelSettings } from '../utils/model-settings-navigation';
 import {
   XING_PROMPT, executeDiary, executeCompact, buildSlashCommands, getSlashMatches,
   resolveSlashSubmitSelection,
@@ -36,8 +43,25 @@ import { attachFilesFromPaths } from '../MainContent';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import styles from './input/InputArea.module.css';
 import type { TodoItem } from '../types';
+import type { ChatListItem, SessionConfirmationBlock } from '../stores/chat-types';
 
 const EMPTY_TODOS: TodoItem[] = [];
+
+function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string): SessionConfirmationBlock | null {
+  if (!items) return null;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type !== 'message' || item.data.role !== 'assistant') continue;
+    const blocks = item.data.blocks || [];
+    for (let j = blocks.length - 1; j >= 0; j--) {
+      const block = blocks[j];
+      if (block.type !== 'session_confirmation' || block.surface !== 'input') continue;
+      if (confirmId && block.confirmId !== confirmId) continue;
+      return block;
+    }
+  }
+  return null;
+}
 
 export type { SlashItem };
 
@@ -84,20 +108,49 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const supportsVision = !Array.isArray(currentModelInfo?.input) || currentModelInfo.input.includes("image");
   const modelSwitching = useStore(s => s.modelSwitching);
   const sessionHasMessages = useStore(s => !!(s.currentSessionPath && s.chatSessions[s.currentSessionPath]?.items?.length));
+  const currentSessionItems = useStore(s => s.currentSessionPath ? s.chatSessions[s.currentSessionPath]?.items : undefined);
+  const pendingSessionConfirmation = useMemo(() => {
+    const latest = findLatestInputSessionConfirmation(currentSessionItems);
+    return latest?.status === 'pending' ? latest : null;
+  }, [currentSessionItems]);
 
   // Local state
-  const [planMode, setPlanMode] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('ask');
   const [sending, setSending] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashSelected, setSlashSelected] = useState(0);
   const [slashBusy, setSlashBusy] = useState<string | null>(null);
   const [slashResult, setSlashResult] = useState<{ text: string; type: 'success' | 'error'; deskDir?: string } | null>(null);
+  const [visibleSessionConfirmation, setVisibleSessionConfirmation] = useState<SessionConfirmationBlock | null>(null);
+  const [sessionConfirmationExiting, setSessionConfirmationExiting] = useState(false);
 
   const isComposing = useRef(false);
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const slashBtnRef = useRef<HTMLButtonElement>(null);
   const slashDismissedTextRef = useRef<string | null>(null);
   const [inputText, setInputText] = useState('');
+
+  useEffect(() => {
+    if (pendingSessionConfirmation) {
+      setVisibleSessionConfirmation(pendingSessionConfirmation);
+      setSessionConfirmationExiting(false);
+      return;
+    }
+    if (!visibleSessionConfirmation || sessionConfirmationExiting) return;
+
+    const resolved = findLatestInputSessionConfirmation(currentSessionItems, visibleSessionConfirmation.confirmId);
+    setVisibleSessionConfirmation(resolved || visibleSessionConfirmation);
+    setSessionConfirmationExiting(true);
+  }, [currentSessionItems, pendingSessionConfirmation, sessionConfirmationExiting, visibleSessionConfirmation]);
+
+  useEffect(() => {
+    if (!sessionConfirmationExiting) return;
+    const timer = window.setTimeout(() => {
+      setVisibleSessionConfirmation(null);
+      setSessionConfirmationExiting(false);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [sessionConfirmationExiting]);
 
   // ── 全局 inline notice（截图等非斜杠命令的轻提示）──
   useEffect(() => {
@@ -315,6 +368,15 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     || (editor?.getJSON().content?.some(n => n.type === 'skillBadge') ?? false);
   const canSend = hasContent && connected && !isStreaming && !modelSwitching;
 
+  const loadVisionAuxiliaryConfig = useCallback(async () => {
+    const res = await hanaFetch('/api/preferences/models');
+    const data = await res.json();
+    return {
+      enabled: data?.models?.vision_enabled === true,
+      model: data?.models?.vision || null,
+    };
+  }, []);
+
   // ── Paste image ──
   // 与拖拽对齐：剪贴板图片同样落盘到 uploads 目录，入 store 的形态和拖拽完全一致
   // （只有 path/name/isDirectory，没有 base64Data）。是否走 vision 桥由发送阶段的
@@ -369,7 +431,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     }
 
     const handler = (e: Event) => {
-      setPlanMode((e as CustomEvent).detail?.enabled ?? false);
+      const detail = (e as CustomEvent).detail || {};
+      setPermissionMode((detail.mode || (detail.enabled ? 'read_only' : 'operate')) as PermissionMode);
     };
     window.addEventListener('hana-plan-mode', handler);
     return () => window.removeEventListener('hana-plan-mode', handler);
@@ -428,6 +491,20 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       // 分离图片和非图片附件；后端决定原生图片、视觉桥或显式报错。
       const imageFiles = hasFiles ? attachedFiles.filter(f => !f.isDirectory && isImageFile(f.name)) : [];
       const otherFiles = hasFiles ? attachedFiles.filter(f => f.isDirectory || !isImageFile(f.name)) : [];
+
+      const imagePreflight = await evaluateChatImageSendPreflight({
+        attachments: attachedFiles,
+        model: currentModelInfo,
+        loadVisionAuxiliaryConfig,
+      });
+      if (!imagePreflight.ok) {
+        notifyTextModelImageBlocked({
+          t,
+          addToast: useStore.getState().addToast,
+          openSettings: () => openProviderModelSettings(currentModelInfo?.provider),
+        });
+        return;
+      }
 
       let finalText = text;
       if (otherFiles.length > 0) {
@@ -517,7 +594,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setSending(false);
     }
-  }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision]);
+  }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, t]);
 
   // ── Steer ──
   const handleSteer = useCallback(async () => {
@@ -595,38 +672,47 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             onSelect={handleSlashSelect} onHover={(i) => setSlashSelected(i)} />
         )}
       </div>
-      <div className={styles['input-wrapper']} ref={cardRef}>
-        <div
-          onKeyDown={handleEditorKeyDown}
-          onPaste={handlePaste}
-          onCompositionStart={() => { isComposing.current = true; }}
-          onCompositionEnd={() => { isComposing.current = false; }}
-        >
-          <EditorContent editor={editor} />
+      <div className={styles['input-stack']}>
+        {visibleSessionConfirmation && (
+          <SessionConfirmationPrompt
+            block={visibleSessionConfirmation}
+            exiting={sessionConfirmationExiting}
+          />
+        )}
+        <div className={styles['input-wrapper']} ref={cardRef}>
+          <div
+            onKeyDown={handleEditorKeyDown}
+            onPaste={handlePaste}
+            onCompositionStart={() => { isComposing.current = true; }}
+            onCompositionEnd={() => { isComposing.current = false; }}
+          >
+            <EditorContent editor={editor} />
+          </div>
+          <InputControlBar
+            t={t}
+            onAttach={handleAttach}
+            slashBtnRef={slashBtnRef}
+            onSlashToggle={handleSlashToggle}
+            permissionMode={permissionMode}
+            onPermissionModeChange={setPermissionMode}
+            planModeLocked={false}
+            hasDoc={hasDoc}
+            docContextAttached={docContextAttached}
+            onToggleDocContext={toggleDocContext}
+            showThinking={currentModelInfo?.reasoning !== false}
+            thinkingLevel={thinkingLevel}
+            onThinkingChange={setThinkingLevel}
+            modelXhigh={(sessionModel ? models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider)?.xhigh : globalModelInfo?.xhigh) ?? false}
+            models={models}
+            sessionModel={sessionModel}
+            isStreaming={isStreaming}
+            hasInput={!!inputText.trim()}
+            canSend={canSend}
+            onSend={handleSend}
+            onSteer={handleSteer}
+            onStop={handleStop}
+          />
         </div>
-        <InputControlBar
-          t={t}
-          onAttach={handleAttach}
-          slashBtnRef={slashBtnRef}
-          onSlashToggle={handleSlashToggle}
-          planMode={planMode}
-          onTogglePlanMode={setPlanMode}
-          hasDoc={hasDoc}
-          docContextAttached={docContextAttached}
-          onToggleDocContext={toggleDocContext}
-          showThinking={currentModelInfo?.reasoning !== false}
-          thinkingLevel={thinkingLevel}
-          onThinkingChange={setThinkingLevel}
-          modelXhigh={(sessionModel ? models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider)?.xhigh : globalModelInfo?.xhigh) ?? false}
-          models={models}
-          sessionModel={sessionModel}
-          isStreaming={isStreaming}
-          hasInput={!!inputText.trim()}
-          canSend={canSend}
-          onSend={handleSend}
-          onSteer={handleSteer}
-          onStop={handleStop}
-        />
       </div>
     </>
   );

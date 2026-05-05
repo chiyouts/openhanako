@@ -1,7 +1,9 @@
 /**
  * auto-updater.cjs — electron-updater 集成
  *
- * 行为：启动时静默检查 → 静默下载 → renderer 展示状态 → 页内触发或 app quit 安装。
+ * 行为：启动时静默检查 → 静默下载 → renderer 展示状态 → 页内触发安装。
+ * Windows 安装时由 NSIS installer 负责关闭旧进程和覆盖安装；这里不等待 server
+ * graceful shutdown，避免“重启更新”点击后长时间无反馈。
  * 频道：Stable（allowPrerelease=false）/ Preview（allowPrerelease=true）。
  */
 const { ipcMain, app, BrowserWindow } = require("electron");
@@ -12,7 +14,6 @@ const fs = require("fs");
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 小时
 
 let _mainWindow = null;
-let _shutdownServer = null; // 由 main.cjs 注入
 let _setIsUpdating = null;  // 由 main.cjs 注入
 let _hanakoHome = null;     // 由 main.cjs 注入
 let _checkTimer = null;
@@ -93,6 +94,24 @@ function resetState() {
   };
 }
 
+function invokeQuitAndInstallSoon() {
+  return new Promise((resolve) => {
+    setImmediate(() => {
+      try {
+        logUpdate("quitAndInstall invoked: silent=true, forceRunAfter=true");
+        autoUpdater.quitAndInstall(true, true);
+        resolve(true);
+      } catch (err) {
+        const msg = err?.message || String(err);
+        logUpdate(`install failed before quitAndInstall: ${msg}`);
+        if (_setIsUpdating) _setIsUpdating(false);
+        setState({ status: "error", error: msg });
+        resolve(false);
+      }
+    });
+  });
+}
+
 async function installDownloadedUpdate(source = "manual") {
   if (_updateState.status === "installing") return true;
   if (_updateState.status !== "downloaded") {
@@ -108,15 +127,9 @@ async function installDownloadedUpdate(source = "manual") {
     setState({ status: "installing", version, progress: null, error: null });
 
     try {
-      if (_shutdownServer) await _shutdownServer();
-      autoUpdater.quitAndInstall(true, true);
-      return true;
-    } catch (err) {
-      const msg = err?.message || String(err);
-      logUpdate(`install failed before quitAndInstall: ${msg}`);
-      if (_setIsUpdating) _setIsUpdating(false);
-      setState({ status: "error", error: msg });
-      return false;
+      // Defer one tick so the IPC/state handoff finishes before electron-updater
+      // closes windows and starts the NSIS installer.
+      return await invokeQuitAndInstallSoon();
     } finally {
       _installPromise = null;
     }
@@ -233,9 +246,12 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.autoDownload = false;          // 由我们控制（磁盘空间检查后手动触发）
-  autoUpdater.autoInstallOnAppQuit = false;  // 统一走 installDownloadedUpdate，包含手动退出
+  autoUpdater.autoInstallOnAppQuit = false;  // 只在用户明确点击"重启更新"时安装
   autoUpdater.allowPrerelease = false;       // 由频道控制
   autoUpdater.disableDifferentialDownload = true;
+  if (process.platform === "win32") {
+    autoUpdater.installDirectory = path.dirname(app.getPath("exe"));
+  }
 
   // ── 事件 → 状态映射 ──
 
@@ -352,10 +368,9 @@ function startPolling() {
 // ── 公共 API ──
 
 function initAutoUpdater(mainWindow, {
-  shutdownServer, setIsUpdating, hanakoHome,
+  setIsUpdating, hanakoHome,
 } = {}) {
   _mainWindow = mainWindow;
-  _shutdownServer = shutdownServer;
   _setIsUpdating = setIsUpdating;
   _hanakoHome = hanakoHome;
 

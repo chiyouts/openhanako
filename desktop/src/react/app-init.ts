@@ -18,8 +18,10 @@ import { initViewerEvents } from './stores/artifact-actions';
 import { updateLayout } from './components/SidebarLayout';
 import { initErrorBusBridge } from './errors/error-bus-bridge';
 import { refreshPluginUI } from './stores/plugin-ui-actions';
+import { openSettingsModal } from './stores/settings-modal-actions';
 import { configureAppEventActions, handleAppEvent, readConfigCwdHistory, readConfigHomeFolder } from './services/app-event-actions';
 import { configureWsMessageHandler } from './services/ws-message-handler';
+import { applyEditorTypography } from './editor/typography';
 // @ts-expect-error — shared JS module
 import { errorBus as _errorBus } from '../../../shared/error-bus.js';
 // @ts-expect-error — shared JS module
@@ -88,6 +90,7 @@ export async function initApp(): Promise<void> {
     ]);
     const healthData = await healthRes.json();
     const configData = await configRes.json();
+    applyEditorTypography(configData.editor);
 
     // 3. 加载 i18n
     await i18n.load(configData.locale || 'zh-CN');
@@ -159,7 +162,7 @@ export async function initApp(): Promise<void> {
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === ',') {
       e.preventDefault();
-      platform.openSettings();
+      openSettingsModal();
     }
   });
 
@@ -168,11 +171,16 @@ export async function initApp(): Promise<void> {
     handleAppEvent(type, data);
   });
 
-  // 20. Skill Viewer overlay（主进程 / 设置窗口 → 渲染进程）
+  // 20. 主进程请求打开设置：托盘 / 外部 IPC 统一落到主窗口 modal
+  platform.onOpenSettingsModal?.((tab?: string) => {
+    openSettingsModal(tab);
+  });
+
+  // 21. Skill Viewer overlay（主进程 / 设置窗口 → 渲染进程）
   window.hana?.onShowSkillViewer?.((data: any) => {
     useStore.setState({ skillViewerData: data });
   });
 
-  // 21. 通知 app ready
+  // 22. 通知 app ready
   platform.appReady();
 }

@@ -12,18 +12,65 @@ import path from "path";
 // mock known-models 词典查询：provider + model 二级结构，未命中时再查通用 fallback
 const KNOWN_MODELS = {
   dashscope: {
-    "qwen3.5-flash": { name: "Qwen3.5 Flash", context: 131072, maxOutput: 8192, image: true, reasoning: true, quirks: ["enable_thinking"] },
+    "qwen3.5-flash": {
+      name: "Qwen3.5 Flash",
+      context: 131072,
+      maxOutput: 8192,
+      image: true,
+      reasoning: true,
+      quirks: ["enable_thinking"],
+      visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "qwen", groundingMode: "native" },
+    },
+    "qwen3.6-plus": {
+      name: "Qwen3.6 Plus",
+      context: 1000000,
+      maxOutput: 65536,
+      image: true,
+      reasoning: true,
+      visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "qwen", groundingMode: "native" },
+    },
+    "qwen3-vl-plus": {
+      name: "Qwen3 VL Plus",
+      context: 262144,
+      maxOutput: 32768,
+      image: true,
+      reasoning: true,
+      visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "qwen", groundingMode: "native" },
+    },
   },
   deepseek: {
     "deepseek-chat": { name: "DeepSeek Chat", context: 128000, maxOutput: 8192 },
     "deepseek-v4-pro": { name: "DeepSeek V4 Pro", context: 1000000, maxOutput: 384000, reasoning: true, xhigh: true },
   },
   openai: {
-    "gpt-4o": { name: "GPT-4o", context: 128000, maxOutput: 16384, image: true },
+    "gpt-4o": {
+      name: "GPT-4o",
+      context: 128000,
+      maxOutput: 16384,
+      image: true,
+      visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "anchor", groundingMode: "prompted" },
+    },
     "gpt-image-1": { name: "GPT Image 1", type: "image" },
   },
+  gemini: {
+    "gemini-3-flash-preview": {
+      name: "Gemini 3 Flash Preview",
+      context: 1048576,
+      maxOutput: 65535,
+      image: true,
+      reasoning: true,
+      visionCapabilities: { grounding: true, boxes: true, points: false, coordinateSpace: "norm-1000", boxOrder: "yxyx", outputFormat: "gemini", groundingMode: "native" },
+    },
+  },
   "kimi-coding": {
-    "kimi-k2.6": { name: "Kimi K2.6", context: 262144, maxOutput: 98304, image: true, reasoning: true },
+    "kimi-k2.6": {
+      name: "Kimi K2.6",
+      context: 262144,
+      maxOutput: 98304,
+      image: true,
+      reasoning: true,
+      visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "anchor", groundingMode: "prompted" },
+    },
   },
   minimax: {
     "MiniMax-M2.7": { name: "MiniMax M2.7", context: 204800, maxOutput: 131072, reasoning: true },
@@ -35,7 +82,14 @@ const KNOWN_MODELS = {
 };
 
 const GENERIC_MODEL_FALLBACKS = {
-  "kimi-k2.6": { name: "Kimi K2.6", context: 262144, maxOutput: 98304, image: true, reasoning: true },
+  "kimi-k2.6": {
+    name: "Kimi K2.6",
+    context: 262144,
+    maxOutput: 98304,
+    image: true,
+    reasoning: true,
+    visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "anchor", groundingMode: "prompted" },
+  },
 };
 
 vi.mock("../shared/known-models.js", () => ({
@@ -176,6 +230,88 @@ describe("syncModels", () => {
     expect(model.reasoning).toBe(true);
     expect(model.quirks).toEqual(["enable_thinking"]);
     expect(model.compat.thinkingFormat).toBe("qwen");
+  });
+
+  it("projects native and prompted visual grounding family formats", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      dashscope: {
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["qwen3-vl-plus", "qwen3.5-flash", "qwen3.6-plus"],
+      },
+      openai: {
+        base_url: "https://api.openai.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gpt-4o"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.dashscope.models[0].visionCapabilities).toEqual({
+      grounding: true,
+      boxes: true,
+      points: true,
+      coordinateSpace: "norm-1000",
+      boxOrder: "xyxy",
+      outputFormat: "qwen",
+      groundingMode: "native",
+    });
+    expect(result.providers.dashscope.models[1].visionCapabilities).toMatchObject({
+      outputFormat: "qwen",
+      groundingMode: "native",
+    });
+    expect(result.providers.dashscope.models[2].visionCapabilities).toMatchObject({
+      outputFormat: "qwen",
+      groundingMode: "native",
+    });
+    expect(result.providers.openai.models[0].visionCapabilities).toMatchObject({
+      outputFormat: "anchor",
+      groundingMode: "prompted",
+    });
+  });
+
+  it("accepts explicit user visual grounding capabilities for custom image models", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      custom: {
+        base_url: "https://custom.api.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: [{
+          id: "custom-grounded-vl",
+          image: true,
+          visionCapabilities: {
+            grounding: true,
+            boxes: true,
+            points: false,
+            coordinateSpace: "norm-1000",
+            boxOrder: "yxyx",
+            outputFormat: "gemini",
+            groundingMode: "native",
+          },
+        }],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.custom.models[0].visionCapabilities).toEqual({
+      grounding: true,
+      boxes: true,
+      points: false,
+      coordinateSpace: "norm-1000",
+      boxOrder: "yxyx",
+      outputFormat: "gemini",
+      groundingMode: "native",
+    });
   });
 
   it("enriches provider models from generic fallbacks when provider-specific metadata is missing", async () => {
@@ -438,6 +574,55 @@ describe("syncModels", () => {
     expect(result.providers.ollama).toBeDefined();
     expect(result.providers.ollama.apiKey).toBe("local");
     expect(result.providers.ollama.models[0].id).toBe("llama3");
+  });
+
+  it("allows no-auth providers without api_key on remote base URLs", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      ollama: {
+        base_url: "http://192.168.1.20:11434/v1",
+        api: "openai-completions",
+        auth_type: "none",
+        models: ["llama3"],
+      },
+    };
+
+    const changed = syncModels(providers, { modelsJsonPath });
+
+    expect(changed).toBe(true);
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.ollama).toBeDefined();
+    expect(result.providers.ollama.apiKey).toBe("local");
+    expect(result.providers.ollama.models[0].id).toBe("llama3");
+  });
+
+  it("derives no-auth policy from ProviderRegistry for existing Ollama configs", async () => {
+    const { ModelManager } = await import("../core/model-manager.js");
+    fs.writeFileSync(path.join(tmpDir, "added-models.yaml"), [
+      "providers:",
+      "  ollama:",
+      "    base_url: http://192.168.1.20:11434/v1",
+      "    api: openai-completions",
+      "    models:",
+      "      - llama3",
+      "",
+    ].join("\n"), "utf-8");
+
+    const mm = new ModelManager({ hanakoHome: tmpDir });
+    mm._modelRegistry = {
+      refresh: vi.fn(),
+      getAvailable: vi.fn().mockResolvedValue([{ id: "llama3", provider: "ollama" }]),
+    };
+
+    const changed = await mm.syncAndRefresh();
+
+    expect(changed).toBe(true);
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.ollama).toBeDefined();
+    expect(result.providers.ollama.apiKey).toBe("local");
+    expect(mm._modelRegistry.refresh).toHaveBeenCalledTimes(1);
+    expect(mm.availableModels).toEqual([{ id: "llama3", provider: "ollama" }]);
   });
 
   it("handles multiple providers in one call", async () => {

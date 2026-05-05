@@ -9,11 +9,22 @@ function read(relPath: string) {
 }
 
 describe('chat bottom overlay layout', () => {
-  it('session panel cuts off at input card midline while preserving the input area bottom inset', () => {
+  it('keeps the transcript panel visually tucked under the input card', () => {
     const styleSource = read('components/chat/Chat.module.css');
 
     expect(styleSource).toMatch(
       /\.sessionPanel\s*\{[\s\S]*bottom:\s*calc\(var\(--input-card-h,\s*0px\)\s*\/\s*2\s*\+\s*var\(--space-lg\)\);/,
+    );
+  });
+
+  it('shortens only the visible scrollbar track above the tucked transcript area', () => {
+    const styleSource = read('components/chat/Chat.module.css');
+
+    expect(styleSource).toMatch(
+      /--chat-scrollbar-bottom-inset:\s*calc\(var\(--input-card-h,\s*0px\)\s*\/\s*2\);/,
+    );
+    expect(styleSource).toMatch(
+      /\.sessionPanel::\-webkit\-scrollbar\-track\s*\{[\s\S]*margin-bottom:\s*var\(--chat-scrollbar-bottom-inset\);/,
     );
   });
 
@@ -32,5 +43,12 @@ describe('chat bottom overlay layout', () => {
     expect(appSource).toContain("parent.style.setProperty('--input-card-h'");
     expect(appSource).toContain('<InputArea key={currentSessionPath || \'__new\'} cardRef={inputCardRef} />');
     expect(inputSource).toContain("<div className={styles['input-wrapper']} ref={cardRef}>");
+  });
+
+  it('lets the transparent input-area shell pass through pointer events while children stay interactive', () => {
+    const styleSource = read('../styles.css');
+
+    expect(styleSource).toMatch(/\.input-area\s*\{[^}]*pointer-events:\s*none;/);
+    expect(styleSource).toMatch(/\.input-area\s*>\s*\*\s*\{[^}]*pointer-events:\s*auto;/);
   });
 });

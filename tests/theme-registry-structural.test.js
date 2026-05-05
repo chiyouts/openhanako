@@ -25,7 +25,7 @@ const SKIP_DIRS = [
 // - theme-registry.cjs / .d.cts: the single source of truth itself
 // - Tests that reference ids directly for white-box validation
 // - onboarding/constants.ts: onboarding UI layer owns its own theme-list UX decision
-//   (auto at position 3 + claude-design excluded is a product/UX choice,
+//   (auto at position 3 + new-warm-paper excluded is a product/UX choice,
 //   not a data-mirroring bug; see Task 8 of theme-registry refactor plan)
 const ALLOWED_FILES = new Set([
   'desktop/src/shared/theme-registry.cjs',
@@ -57,6 +57,18 @@ function relPath(p) {
 }
 
 describe('theme-registry structural constraint', () => {
+  it('全局 styles.css 持有默认字体 token，主题可按需覆盖', () => {
+    const stylesPath = path.join(ROOT, 'desktop/src/styles.css');
+    const content = fs.readFileSync(stylesPath, 'utf8');
+
+    expect(content).toContain("--font-ui: 'Inter'");
+    expect(content).toContain("--font-serif: 'EB Garamond', 'Noto Serif SC'");
+    expect(content).toContain("--font-mono: 'JetBrains Mono'");
+    const fontImportIndex = content.indexOf("new-warm-paper-fonts.css");
+    expect(fontImportIndex).toBeGreaterThanOrEqual(0);
+    expect(fontImportIndex).toBeLessThan(content.indexOf(':root'));
+  });
+
   it('除 registry 和白名单外，不允许任何文件出现主题 id 字符串字面量', () => {
     const SCAN_ROOTS = [
       path.join(ROOT, 'desktop/src'),

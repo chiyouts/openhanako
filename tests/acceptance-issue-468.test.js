@@ -38,7 +38,8 @@ const v4FlashModel = {
 
 /**
  * 协议铁律断言：扫 payload.messages，每条带 tool_calls 的 assistant message 必须有
- * reasoning_content 字段且值必须是非空字符串。
+ * reasoning_content 字段且值必须是字符串。DeepSeek V4 可能返回合法空字符串，
+ * 这里校验字段存在，不把空字符串误判为缺字段。
  */
 function assertDeepSeekProtocolCompliant(payload) {
   expect(Array.isArray(payload.messages)).toBe(true);
@@ -49,8 +50,8 @@ function assertDeepSeekProtocolCompliant(payload) {
         `messages[${idx}] 是 assistant + tool_calls 但缺 reasoning_content 字段（DeepSeek 会 400）`
       ).toBe(true);
       expect(
-        typeof msg.reasoning_content === "string" && msg.reasoning_content.trim().length > 0,
-        `messages[${idx}] 是 assistant + tool_calls 但 reasoning_content 不是非空字符串（DeepSeek 会 400）`
+        typeof msg.reasoning_content === "string",
+        `messages[${idx}] 是 assistant + tool_calls 但 reasoning_content 不是字符串（DeepSeek 会 400）`
       ).toBe(true);
     }
   }
@@ -85,6 +86,37 @@ describe("issue #468 验收 — DeepSeek 思考模式协议铁律", () => {
         reasoningLevel: "high",
       });
       assertDeepSeekProtocolCompliant(result);
+      expect(result.thinking).toEqual({ type: "enabled" });
+    });
+
+    it("第 2 轮请求：assistant 历史带 tool_calls + 空 reasoning_content → 原样通过协议校验", () => {
+      // DeepSeek V4 在显而易见的 tool call 场景里可能返回 reasoning_content: ""。
+      // 这不是坏历史，后续请求必须保留这个字段和值。
+      const payload = {
+        model: "deepseek-v4-pro",
+        messages: [
+          { role: "user", content: "查询当前时间" },
+          {
+            role: "assistant",
+            content: null,
+            reasoning_content: "",
+            tool_calls: [{
+              id: "call_1",
+              type: "function",
+              function: { name: "date", arguments: "{}" },
+            }],
+          },
+          { role: "tool", tool_call_id: "call_1", content: "2026-04-26 12:00:00" },
+          { role: "user", content: "继续" },
+        ],
+        tools: [{ type: "function", function: { name: "date" } }],
+      };
+      const result = normalizeProviderPayload(payload, v4ProModel, {
+        mode: "chat",
+        reasoningLevel: "high",
+      });
+      assertDeepSeekProtocolCompliant(result);
+      expect(result.messages[1].reasoning_content).toBe("");
       expect(result.thinking).toEqual({ type: "enabled" });
     });
 

@@ -54,6 +54,10 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function hasStringReasoningContent(message) {
+  return hasOwn(message, "reasoning_content") && typeof message.reasoning_content === "string";
+}
+
 export function matches(model) {
   if (!model || typeof model !== "object") return false;
   const provider = lower(model.provider);
@@ -233,13 +237,13 @@ export function extractReasoningFromContent(message) {
  * 恢复/校验：保证所有「带 tool_calls 的 assistant message」都有真实 reasoning_content 字段。
  *
  * 三档策略：
- *   档 1：已有非空 reasoning_content → 不动
+ *   档 1：已有 string reasoning_content（包括合法空字符串）→ 不动
  *   档 2：无 reasoning_content 但能从 message.content 恢复原文 → 注入恢复值
- *   档 3：原文也找不到 → 抛错，阻止远端 400（禁止空字符串伪造）
+ *   档 3：原文也找不到 → 抛错，阻止远端 400（禁止把缺字段伪造成空字符串）
  *
  * 这条恢复/校验覆盖以下漏字段路径：
  *   - 跨 V4 子版本切换：pi-ai transform-messages 把 thinking block 降级 text
- *   - 空思考被过滤：openai-completions:492 nonEmptyThinkingBlocks filter 掉空内容
+ *   - 空思考被过滤：openai-completions nonEmptyThinkingBlocks filter 掉空内容后补了空字符串
  *   - compaction / 跨 session 续接边界：原文确实丢失（此时本函数 fail closed）
  *
  * 不可变契约：未修改时返回原数组；修改时返回新数组（仅修改的 message 浅拷贝）。
@@ -258,7 +262,7 @@ export function ensureReasoningContentForToolCalls(messages) {
     if (!hasToolCalls(message)) {
       return message;
     }
-    if (isNonEmptyString(message.reasoning_content)) {
+    if (hasStringReasoningContent(message)) {
       return message;
     }
     const recovered = extractReasoningFromContent(message);

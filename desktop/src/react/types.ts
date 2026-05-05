@@ -203,9 +203,10 @@ export interface PlatformApi {
   browserEmergencyStop?(): void;
   openSkillViewer?(opts: { skillPath?: string; name?: string; baseDir?: string; filePath?: string; installed?: boolean }): void;
   settingsChanged(event: string, payload?: unknown): void;
-  onSettingsChanged(callback: (event: string, payload: unknown) => void): void;
-  onSwitchTab?(callback: (tab: string) => void): void;
-  onServerRestarted?(callback: (data: { port: number }) => void): void;
+  onSettingsChanged(callback: (event: string, payload: unknown) => void): void | (() => void);
+  onOpenSettingsModal?(callback: (tab?: string) => void): void | (() => void);
+  onSwitchTab?(callback: (tab: string) => void): void | (() => void);
+  onServerRestarted?(callback: (data: { port: number }) => void): void | (() => void);
   getFilePath?(file: File): string | null;
   startDrag?(filePaths: string | string[]): void;
   appReady(): void;

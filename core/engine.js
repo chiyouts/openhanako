@@ -20,19 +20,18 @@ import { migrateToProvidersYaml } from "./migrate-providers.js";
 import { runMigrations } from "./migrations.js";
 import { findModel } from "../shared/model-ref.js";
 import { resolveWorkspaceSkillPaths } from "../shared/workspace-skill-paths.js";
+import { resolveHanaPiAgentDir, resolveHanaPiProjectDir } from "../shared/hana-runtime-paths.js";
 import { PluginManager } from "./plugin-manager.js";
-import { DefaultResourceLoader, PI_BUILTIN_TOOL_NAMES, SettingsManager } from "../lib/pi-sdk/index.js";
+import { DefaultResourceLoader, SettingsManager } from "../lib/pi-sdk/index.js";
 
 /** 已知的外部 AI 工具技能目录（相对 $HOME） */
-const WELL_KNOWN_SKILL_PATHS = [
+export const WELL_KNOWN_SKILL_PATHS = [
   { suffix: ".claude/skills",     label: "Claude Code" },
   { suffix: ".codex/skills",      label: "Codex" },
   { suffix: ".openclaw/skills",   label: "OpenClaw" },
   { suffix: ".pi/agent/skills",   label: "Pi" },
   { suffix: ".agents/skills",     label: "Agents" },
 ];
-
-const allBuiltInToolNames = PI_BUILTIN_TOOL_NAMES;
 
 function findUniqueModelById(models, id) {
   if (!id || !Array.isArray(models)) return null;
@@ -81,7 +80,13 @@ import { t } from "../server/i18n.js";
 import { CheckpointStore } from "../lib/checkpoint-store.js";
 import { assertAllToolsCategorized } from "../shared/tool-categories.js";
 import { wrapWithCheckpoint } from "../lib/checkpoint-wrapper.js";
+import { wrapWithSessionPermission } from "../lib/tools/session-permission-wrapper.js";
 import { TaskRegistry } from "../lib/task-registry.js";
+import { ComputerHost } from "./computer-use/computer-host.js";
+import { ComputerProviderRegistry } from "./computer-use/provider-registry.js";
+import { createMockComputerProvider } from "./computer-use/providers/mock-provider.js";
+import { createMacosCuaProvider } from "./computer-use/providers/macos-cua-provider.js";
+import { createWindowsUiaProvider } from "./computer-use/providers/windows-uia-provider.js";
 
 export class HanaEngine {
   /**
@@ -196,6 +201,7 @@ export class HanaEngine {
       buildTools: (cwd, customTools, opts) => this.buildTools(cwd, customTools, opts),
       getHomeCwd: (agentId) => this.getHomeCwd(agentId),
       getVisionBridge: () => this._visionBridge,
+      isVisionAuxiliaryEnabled: () => this.isVisionAuxiliaryEnabled(),
     });
 
     // ── Slash Command System ──
@@ -218,6 +224,18 @@ export class HanaEngine {
     this._checkpointStore = new CheckpointStore(
       path.join(this.hanakoHome, "checkpoints")
     );
+
+    this._computerProviders = new ComputerProviderRegistry();
+    this._computerProviders.register(createMockComputerProvider({ providerId: "mock" }));
+    this._computerProviders.register(createMacosCuaProvider());
+    this._computerProviders.register(createWindowsUiaProvider());
+    this._computerHost = new ComputerHost({
+      providers: this._computerProviders,
+      defaultProviderId: "mock",
+      getSettings: () => this.getComputerUseSettings(),
+      getAccessMode: (sessionPath) => this._sessionCoord.getAccessMode(sessionPath),
+      getPrimaryAgentId: () => this._prefs.getPrimaryAgent(),
+    });
 
     // ── Plugin Manager ──
     this._pluginManager = null;  // initialized async in initPlugins()
@@ -425,14 +443,15 @@ export class HanaEngine {
   get memoryEnabled() { return this.agent.memoryEnabled; }
   get memoryModelUnavailableReason() { return this.agent.memoryModelUnavailableReason; }
   get planMode() { return this._sessionCoord.getPlanMode(); }
+  getPrimaryAgentId() { return this._prefs.getPrimaryAgent(); }
   get homeCwd() { return this._configCoord.getHomeFolder(this._readPrimaryAgent()) || null; }
 
   getHomeCwd(agentId) {
     return this._configCoord.getHomeFolder(agentId) || null;
   }
   _createResourceLoaderOptions(skillsDir) {
-    const cwd = this.getHomeCwd(this.currentAgentId) || this.hanakoHome;
-    const agentDir = this.agent?.agentDir || this.agentDir;
+    const cwd = resolveHanaPiProjectDir(this.hanakoHome);
+    const agentDir = resolveHanaPiAgentDir(this.hanakoHome);
     if (!cwd || typeof cwd !== "string") {
       throw new Error("ResourceLoader init: cwd is required");
     }
@@ -444,6 +463,7 @@ export class HanaEngine {
       agentDir,
       settingsManager: SettingsManager.inMemory(),
       systemPromptOverride: () => this.agent.systemPrompt,
+      appendSystemPromptOverride: () => [],
       agentsFilesOverride: () => ({ agentsFiles: [] }),
       noContextFiles: true,
       noExtensions: true,
@@ -474,8 +494,16 @@ export class HanaEngine {
   setBridgeReceiptEnabled(v) { this._prefs.setBridgeReceiptEnabled(v); }
   getSharedModels() { return this._configCoord.getSharedModels(); }
   setSharedModels(p) { return this._configCoord.setSharedModels(p); }
+  isVisionAuxiliaryEnabled() { return this.getSharedModels()?.vision_enabled === true; }
   getVisionBridge() { return this._visionBridge; }
+  getComputerHost() { return this._computerHost; }
+  getComputerProviders() { return this._computerProviders; }
+  getComputerUseSettings() { return this._prefs.getComputerUseSettings(); }
+  setComputerUseSettings(partial) { return this._prefs.setComputerUseSettings(partial); }
+  approveComputerUseApp(approval) { return this._prefs.approveComputerUseApp(approval); }
+  revokeComputerUseApp(approval) { return this._prefs.revokeComputerUseApp(approval); }
   resolveVisionConfig() {
+    if (!this.isVisionAuxiliaryEnabled()) return null;
     const ref = this.getSharedModels()?.vision || null;
     if (!ref) return null;
     return this.resolveModelWithCredentials(ref);
@@ -528,6 +556,8 @@ export class HanaEngine {
   setLearnSkills(p) { this._prefs.setLearnSkills(p); }
   getLocale() { return this._prefs.getLocale(); }
   setLocale(l) { this._prefs.setLocale(l); }
+  getEditor() { return this._prefs.getEditor(); }
+  setEditor(p) { return this._prefs.setEditor(p); }
   getTimezone() { return this._prefs.getTimezone(); }
   setTimezone(tz) { this._prefs.setTimezone(tz); }
   getUpdateChannel() { return this._prefs.getUpdateChannel(); }
@@ -537,7 +567,14 @@ export class HanaEngine {
   setMemoryEnabled(v) { return this._configCoord.setMemoryEnabled(v); }
   setMemoryMasterEnabled(id, v) { return this._configCoord.setMemoryMasterEnabled(id, v); }
   persistSessionMeta() { return this._configCoord.persistSessionMeta(); }
-  setPlanMode(enabled) { return this._sessionCoord.setPlanMode(enabled, allBuiltInToolNames); }
+  get permissionMode() { return this._sessionCoord.getPermissionMode(); }
+  getSessionPermissionMode(sessionPath) { return this._sessionCoord.getPermissionMode(sessionPath); }
+  setSessionPermissionMode(mode) { return this._sessionCoord.setPermissionMode(mode); }
+  setPendingSessionPermissionMode(mode) { return this._sessionCoord.setPendingPermissionMode(mode); }
+  getSessionPermissionModeDefault() { return this._sessionCoord.getPermissionModeDefault(); }
+  get accessMode() { return this._sessionCoord.getAccessMode(); }
+  setAccessMode(mode) { return this._sessionCoord.setAccessMode(mode); }
+  setPlanMode(enabled) { return this._sessionCoord.setPlanMode(enabled); }
   async updateConfig(p, opts) { return this._configCoord.updateConfig(p, opts); }
 
   getPreferences() { return this._readPreferences(); }
@@ -1087,6 +1124,23 @@ export class HanaEngine {
         }),
       };
     }
+
+    const getSessionPath = opts.getSessionPath || (() => null);
+    result = {
+      ...result,
+      tools: wrapWithSessionPermission(result.tools, {
+        getSessionPath,
+        getPermissionMode: (sessionPath) => this.getSessionPermissionMode(sessionPath),
+        getConfirmStore: () => this._confirmStore,
+        emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
+      }),
+      customTools: wrapWithSessionPermission(result.customTools, {
+        getSessionPath,
+        getPermissionMode: (sessionPath) => this.getSessionPermissionMode(sessionPath),
+        getConfirmStore: () => this._confirmStore,
+        emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
+      }),
+    };
 
     // Startup assertion: every built-in tool must be categorized in
     // shared/tool-categories.js. All session-creation paths route through

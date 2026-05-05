@@ -73,9 +73,26 @@ contextBridge.exposeInMainWorld("hana", {
   // 设置窗口
   openSettings: (tab) => ipcRenderer.invoke("open-settings", tab, resolveTheme()),
   settingsChanged: (type, data) => ipcRenderer.send("settings-changed", type, data),
-  onSettingsChanged: (cb) => ipcRenderer.on("settings-changed", (_, type, data) => cb(type, data)),
-  onSwitchTab: (cb) => ipcRenderer.on("settings-switch-tab", (_, tab) => cb(tab)),
-  onServerRestarted: (cb) => ipcRenderer.on("server-restarted", (_, data) => cb(data)),
+  onSettingsChanged: (cb) => {
+    const handler = (_, type, data) => cb(type, data);
+    ipcRenderer.on("settings-changed", handler);
+    return () => ipcRenderer.removeListener("settings-changed", handler);
+  },
+  onOpenSettingsModal: (cb) => {
+    const handler = (_, tab) => cb(tab);
+    ipcRenderer.on("open-settings-modal", handler);
+    return () => ipcRenderer.removeListener("open-settings-modal", handler);
+  },
+  onSwitchTab: (cb) => {
+    const handler = (_, tab) => cb(tab);
+    ipcRenderer.on("settings-switch-tab", handler);
+    return () => ipcRenderer.removeListener("settings-switch-tab", handler);
+  },
+  onServerRestarted: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on("server-restarted", handler);
+    return () => ipcRenderer.removeListener("server-restarted", handler);
+  },
   // 浏览器查看器窗口
   openBrowserViewer: () => ipcRenderer.invoke("open-browser-viewer", resolveTheme()),
   onBrowserUpdate: (cb) => ipcRenderer.on("browser-update", (_, data) => cb(data)),

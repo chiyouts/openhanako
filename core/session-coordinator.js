@@ -15,12 +15,20 @@ import { teardownSessionResources } from "./session-teardown.js";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { BrowserManager } from "../lib/browser/browser-manager.js";
 import { t, getLocale } from "../server/i18n.js";
-import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
+import {
+  DEFAULT_SESSION_PERMISSION_MODE,
+  SESSION_PERMISSION_MODES,
+  isReadOnlyPermissionMode,
+  legacyAccessModeFromPermissionMode,
+  normalizeSessionPermissionMode,
+} from "./session-permission-mode.js";
 import { findModel } from "../shared/model-ref.js";
 import { computeToolSnapshot, DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.js";
 import { buildUiContextReminder, injectReminderIntoLastUserMessage } from "./ui-context-reminder.js";
 import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
+import { getProviderPromptPatches } from "./provider-prompt-patches.js";
+import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
 
 const log = createModuleLogger("session");
 
@@ -63,7 +71,8 @@ export class SessionCoordinator {
     this._headlessOps = new Set();
     this._titlesCache = new Map(); // sessionDir → { titles, ts }
     this._metaCache = new Map();   // metaPath → { data, ts }
-    this._pendingPlanMode = false;
+    this._pendingPermissionMode = null;
+    this._runtimePermissionModeDefault = DEFAULT_SESSION_PERMISSION_MODE;
     this._metaWriteQueue = Promise.resolve();
   }
 
@@ -109,6 +118,13 @@ export class SessionCoordinator {
     if (!restore && !effectiveModel) {
       throw new Error(t("error.noAvailableModel"));
     }
+    const resolvedThinkingLevel = models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel());
+    const providerPromptPatches = !restore
+      ? getProviderPromptPatches(effectiveModel, {
+        reasoningLevel: resolvedThinkingLevel,
+        locale: agent.config?.locale || getLocale(),
+      })
+      : [];
 
     if (!sessionMgr) {
       sessionMgr = SessionManager.create(effectiveCwd, agent.sessionDir);
@@ -146,9 +162,32 @@ export class SessionCoordinator {
     creatingAgent.setMemoryEnabled(frozenMemoryEnabled);
 
     const baseResourceLoader = this._d.getResourceLoader();
-    const initialPlanMode = this._pendingPlanMode;
-    this._pendingPlanMode = false;
-    const sessionEntry = { planMode: initialPlanMode }; // pre-populated for resourceLoader proxy
+    let restoredPermissionMode = null;
+    if (restore && sessionPathForMeta) {
+      try {
+        const metaPath = path.join(agent.sessionDir, "session-meta.json");
+        const meta = await this._readMetaCached(metaPath);
+        const metaEntry = meta[path.basename(sessionPathForMeta)];
+        if (metaEntry) {
+          restoredPermissionMode = normalizeSessionPermissionMode(metaEntry);
+        }
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          log.warn(`session permission mode restore failed: ${err.message}`);
+        }
+      }
+    }
+    let initialPermissionMode = restore
+      ? normalizeSessionPermissionMode(restoredPermissionMode)
+      : normalizeSessionPermissionMode(this._pendingPermissionMode || this._getDefaultPermissionMode());
+    this._pendingPermissionMode = null;
+    let initialAccessMode = legacyAccessModeFromPermissionMode(initialPermissionMode);
+    let initialPlanMode = isReadOnlyPermissionMode(initialPermissionMode);
+    const sessionEntry = {
+      permissionMode: initialPermissionMode,
+      accessMode: initialAccessMode,
+      planMode: initialPlanMode,
+    }; // pre-populated for resourceLoader proxy
 
     // 快照当前 system prompt，per-session 隔离。
     // 后续记忆编译、技能变更只影响新对话，已有对话的 prompt 不变（保护 prefix cache）。
@@ -187,6 +226,7 @@ export class SessionCoordinator {
             async (event, ctx) => {
               try {
                 const engine = getEngine?.();
+                if (!engine?.isVisionAuxiliaryEnabled?.()) return undefined;
                 const bridge = engine?.getVisionBridge?.();
                 if (!bridge) return undefined;
                 const sp = ctx.sessionManager?.getSessionFile?.();
@@ -224,16 +264,7 @@ export class SessionCoordinator {
       getAppendSystemPrompt: {
         value: () => {
           const base = baseResourceLoader.getAppendSystemPrompt();
-          const parts = [...base];
-
-          // Plan mode prompt (existing logic, preserved verbatim)
-          if (sessionEntry.planMode) {
-              const isZh = String(agent.config?.locale || "").startsWith("zh");
-              const planModePrompt = isZh
-                ? "【系统通知】当前处于「只读模式」，用户在设置中关闭了「操作电脑」权限。你只能使用只读工具（read、grep、find、ls）和自定义工具。不能执行写入、编辑、删除等操作。如果用户要求你做这些操作，请告知当前处于只读模式，需要先在输入框旁的按钮开启「操作电脑」权限。"
-                : "[System Notice] Currently in READ-ONLY MODE. The user has disabled 'Computer Access' in settings. You can only use read-only tools (read, grep, find, ls) and custom tools. You cannot write, edit, or delete. If the user asks for these operations, inform them that read-only mode is active and they need to enable 'Computer Access' via the button next to the input area.";
-            parts.push(planModePrompt);
-          }
+          const parts = [...base, ...providerPromptPatches];
 
           // 后台任务行为引导
           if (this._d.getDeferredResultStore?.()) {
@@ -291,7 +322,7 @@ After dispatching subagent or other background tasks:
       settingsManager: this._createSettings(effectiveModel),
       authStorage: models.authStorage,
       modelRegistry: models.modelRegistry,
-      thinkingLevel: models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel()),
+      thinkingLevel: resolvedThinkingLevel,
       resourceLoader,
       tools: sessionTools,
       customTools: sessionCustomTools,
@@ -310,6 +341,25 @@ After dispatching subagent or other background tasks:
 
     // 事件转发（附带 agentId，供订阅者按 agent 过滤）
     const sessionPath = session.sessionManager?.getSessionFile?.();
+    if (restore && sessionPath && restoredPermissionMode === null) {
+      try {
+        const metaPath = path.join(agent.sessionDir, "session-meta.json");
+        const meta = await this._readMetaCached(metaPath);
+        const metaEntry = meta[path.basename(sessionPath)];
+        if (metaEntry) {
+          initialPermissionMode = normalizeSessionPermissionMode(metaEntry);
+          initialAccessMode = legacyAccessModeFromPermissionMode(initialPermissionMode);
+          initialPlanMode = isReadOnlyPermissionMode(initialPermissionMode);
+          sessionEntry.permissionMode = initialPermissionMode;
+          sessionEntry.accessMode = initialAccessMode;
+          sessionEntry.planMode = initialPlanMode;
+        }
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          log.warn(`session permission mode restore failed: ${err.message}`);
+        }
+      }
+    }
     const creatingAgentId = ownerAgentId;
     const unsub = session.subscribe((event) => {
       this._d.emitEvent(
@@ -384,29 +434,18 @@ After dispatching subagent or other background tasks:
       modelId: resolvedModel?.id || effectiveModel?.id || null,
       modelProvider: resolvedModel?.provider || effectiveModel?.provider || null,
       workspaceFolders: workspaceScope.workspaceFolders,
+      permissionMode: initialPermissionMode,
+      accessMode: initialAccessMode,
+      planMode: initialPlanMode,
       toolNames: snapshotToolNames,  // null for legacy sessions (Case B), array otherwise
       lastTouchedAt: Date.now(),
       unsub,
     });
     this._sessions.set(mapKey, sessionEntry);
 
-    // Plan mode restricts to read-only SDK tools + custom tools. When a session
-    // has a tool snapshot (Case A/C), intersect with it so user-disabled optional
-    // tools stay disabled in plan mode too. Legacy sessions (Case B) fall back to
-    // the full custom tool list since they have no snapshot to honor.
-    if (initialPlanMode) {
-      const customBase = snapshotToolNames !== null
-        ? snapshotToolNames.filter((n) => !READ_ONLY_BUILTIN_TOOLS.includes(n))
-        : (agent.tools || []).map((t) => t.name).filter(Boolean);
-      session.setActiveToolsByName([...READ_ONLY_BUILTIN_TOOLS, ...customBase]);
-    }
-
-    // Apply tool snapshot (Case A / Case C). Plan mode already ran above and
-    // intersected with the snapshot, so this branch is skipped in plan mode to
-    // avoid clobbering plan mode's restricted list. Case B leaves
-    // snapshotToolNames === null so this branch is a no-op and the session
-    // keeps all tools.
-    if (!initialPlanMode && snapshotToolNames !== null) {
+    // Apply tool snapshot (Case A / Case C). Permission mode is a runtime
+    // policy and does not change the stable tool schema.
+    if (snapshotToolNames !== null) {
       session.setActiveToolsByName(snapshotToolNames);
     }
 
@@ -419,6 +458,9 @@ After dispatching subagent or other background tasks:
       const metaPatch = {
         memoryEnabled: frozenMemoryEnabled,
         workspaceFolders: workspaceScope.workspaceFolders,
+        permissionMode: initialPermissionMode,
+        accessMode: initialAccessMode,
+        planMode: initialPlanMode,
       };
       if (snapshotToolNames !== null) metaPatch.toolNames = snapshotToolNames;
       await this.writeSessionMeta(sessionPath, metaPatch);
@@ -541,7 +583,9 @@ After dispatching subagent or other background tasks:
     // model.input 缺失/非数组时视为未知，放行让 API 决定。
     const inputMods = this._session.model?.input;
     if (opts?.images?.length && Array.isArray(inputMods) && !inputMods.includes("image")) {
-      const bridge = this._d.getEngine?.()?.getVisionBridge?.();
+      const engine = this._d.getEngine?.();
+      requireVisionAuxiliaryEnabled(engine);
+      const bridge = engine?.getVisionBridge?.();
       if (!bridge) {
         throw new Error("vision auxiliary model is required for image input with the current text-only model");
       }
@@ -602,7 +646,9 @@ After dispatching subagent or other background tasks:
     // 非 image 模型：剥离新贴的图片（历史净化见 core/message-sanitizer.js）
     const inputMods2 = entry.session.model?.input;
     if (opts?.images?.length && Array.isArray(inputMods2) && !inputMods2.includes("image")) {
-      const bridge = this._d.getEngine?.()?.getVisionBridge?.();
+      const engine = this._d.getEngine?.();
+      requireVisionAuxiliaryEnabled(engine);
+      const bridge = engine?.getVisionBridge?.();
       if (!bridge) {
         throw new Error("vision auxiliary model is required for image input with the current text-only model");
       }
@@ -836,46 +882,85 @@ After dispatching subagent or other background tasks:
 
   /** Get plan mode for the current (focused) session */
   getPlanMode() {
-    const sp = this.currentSessionPath;
-    if (!sp) return this._pendingPlanMode;
-    return this._sessions.get(sp)?.planMode ?? false;
+    return isReadOnlyPermissionMode(this.getPermissionMode());
   }
 
-  /** Set plan mode for the current (focused) session */
-  setPlanMode(enabled, allBuiltInToolNames) {
+  _getDefaultPermissionMode() {
+    return normalizeSessionPermissionMode(this._runtimePermissionModeDefault);
+  }
+
+  _setDefaultPermissionMode(mode) {
+    this._runtimePermissionModeDefault = normalizeSessionPermissionMode(mode);
+  }
+
+  getPermissionModeDefault() {
+    return this._getDefaultPermissionMode();
+  }
+
+  getPermissionMode(sessionPath = this.currentSessionPath) {
+    if (!sessionPath) return this._pendingPermissionMode || this._getDefaultPermissionMode();
+    const entry = this._sessions.get(sessionPath);
+    return normalizeSessionPermissionMode(entry || { permissionMode: this._getDefaultPermissionMode() });
+  }
+
+  getAccessMode(sessionPath = this.currentSessionPath) {
+    return legacyAccessModeFromPermissionMode(this.getPermissionMode(sessionPath));
+  }
+
+  setPendingAccessMode(mode) {
+    return this.setPendingPermissionMode(mode);
+  }
+
+  setPendingPermissionMode(mode) {
+    const nextMode = normalizeSessionPermissionMode(mode);
+    this._setDefaultPermissionMode(nextMode);
+    this._pendingPermissionMode = nextMode;
+    this._emitPermissionModeChanged(nextMode, null);
+    return { ok: true, mode: nextMode, enabled: isReadOnlyPermissionMode(nextMode) };
+  }
+
+  setPermissionMode(mode) {
+    const nextMode = normalizeSessionPermissionMode(mode);
     const sp = this.currentSessionPath;
-
-    // No session yet (welcome page) — store for when session is created
-    if (!sp) {
-      this._pendingPlanMode = !!enabled;
-      this._d.emitEvent({ type: "plan_mode", enabled: this._pendingPlanMode }, null);
-      this._d.emitDevLog(`Plan Mode: ${this._pendingPlanMode ? "ON (只读)" : "OFF (正常)"}`, "info");
-      return;
+    this._setDefaultPermissionMode(nextMode);
+    if (sp) {
+      const entry = this._sessions.get(sp);
+      if (!entry) return { ok: false, mode: this.getPermissionMode(sp) };
+      entry.permissionMode = nextMode;
+      entry.accessMode = legacyAccessModeFromPermissionMode(nextMode);
+      entry.planMode = isReadOnlyPermissionMode(nextMode);
+      this.writeSessionMeta(sp, {
+        permissionMode: entry.permissionMode,
+        accessMode: entry.accessMode,
+        planMode: entry.planMode,
+      });
+      this._emitPermissionModeChanged(nextMode, sp);
+      return { ok: true, mode: nextMode, enabled: entry.planMode };
     }
 
-    const entry = this._sessions.get(sp);
-    if (!entry) return;
+    return this.setPendingPermissionMode(nextMode);
+  }
 
-    entry.planMode = !!enabled;
-    const agent = this._d.getAgent();
+  setAccessMode(mode) {
+    return this.setPermissionMode(mode);
+  }
 
-    // Respect the session's tool snapshot so toggling plan mode preserves the
-    // user's disabled-tool choice. Strip SDK built-in names from the snapshot
-    // because we re-prepend either READ_ONLY_BUILTIN_TOOLS (plan ON) or the
-    // full built-in list (plan OFF). Legacy sessions (Case B) have
-    // toolNames = null and fall back to the unfiltered agent.tools list.
-    const customBase = entry.toolNames != null
-      ? entry.toolNames.filter((n) => !allBuiltInToolNames.includes(n))
-      : (agent.tools || []).map((t) => t.name).filter(Boolean);
+  /** Backward-compatible route for the old Plan Mode API. */
+  setPlanMode(enabled) {
+    return this.setPermissionMode(enabled ? SESSION_PERMISSION_MODES.READ_ONLY : SESSION_PERMISSION_MODES.OPERATE);
+  }
 
-    if (entry.planMode) {
-      entry.session.setActiveToolsByName([...READ_ONLY_BUILTIN_TOOLS, ...customBase]);
-    } else {
-      entry.session.setActiveToolsByName([...allBuiltInToolNames, ...customBase]);
-    }
-
-    this._d.emitEvent({ type: "plan_mode", enabled: entry.planMode }, sp);
-    this._d.emitDevLog(`Plan Mode: ${entry.planMode ? "ON (只读)" : "OFF (正常)"}`, "info");
+  _emitPermissionModeChanged(mode, sessionPath) {
+    const normalized = normalizeSessionPermissionMode(mode);
+    const readOnly = isReadOnlyPermissionMode(normalized);
+    const accessMode = legacyAccessModeFromPermissionMode(normalized);
+    this._d.emitEvent({ type: "permission_mode", mode: normalized, readOnly }, sessionPath);
+    this._d.emitEvent({ type: "access_mode", mode: accessMode, permissionMode: normalized, readOnly }, sessionPath);
+    this._d.emitEvent({ type: "plan_mode", enabled: readOnly }, sessionPath);
+    const label = normalized === SESSION_PERMISSION_MODES.READ_ONLY
+      ? "只读"
+      : (normalized === SESSION_PERMISSION_MODES.ASK ? "先问" : "操作");
+    this._d.emitDevLog(`Permission Mode: ${label}`, "info");
   }
 
   /**

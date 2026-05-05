@@ -5,6 +5,7 @@ import { loadSessions } from '../stores/session-actions';
 import { loadModels } from '../utils/ui-helpers';
 import { activateWorkspaceDesk } from '../stores/desk-actions';
 import { loadChannels } from '../stores/channel-actions';
+import { applyEditorTypography } from '../editor/typography';
 // @ts-expect-error — shared JS module
 import { mergeWorkspaceHistory } from '../../../../shared/workspace-history.js';
 
@@ -165,6 +166,9 @@ export function handleAppEvent(type: string, data: any = {}): void {
       break;
     case 'font-changed':
       window.setSerifFont(data.serif);
+      break;
+    case 'editor-typography-changed':
+      applyEditorTypography(data.editor ?? data);
       break;
     case 'paper-texture-changed':
       window.setPaperTexture(data.enabled);
