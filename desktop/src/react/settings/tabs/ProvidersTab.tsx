@@ -121,6 +121,7 @@ export function ProvidersTab() {
               };
               return (
                 <ProviderDetail
+                  key={selected}
                   providerId={selected}
                   summary={summary}
                   providerConfig={providers[selected]}
