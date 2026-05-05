@@ -6,47 +6,10 @@
  * answers in final assistant content across official and third-party providers.
  */
 
-import { getReasoningProfile, getThinkingFormat } from "../shared/model-capabilities.js";
-
-function lower(value) {
-  return typeof value === "string" ? value.toLowerCase() : "";
-}
+import { isDeepSeekFamilyModel, isDeepSeekReasoningModel } from "../shared/model-capabilities.js";
 
 function isThinkingOff(level) {
   return level === "off" || level === "none" || level === "disabled";
-}
-
-function modelText(model) {
-  return [
-    model?.id,
-    model?.name,
-    model?.model,
-    model?.modelId,
-  ].map(lower).filter(Boolean).join(" ");
-}
-
-function isDeepSeekFamilyModel(model) {
-  if (!model || typeof model !== "object") return false;
-  const provider = lower(model.provider);
-  const baseUrl = lower(model.baseUrl || model.base_url);
-  const text = modelText(model);
-  return provider === "deepseek"
-    || provider.includes("deepseek")
-    || baseUrl.includes("api.deepseek.com")
-    || text.includes("deepseek-ai/")
-    || text.includes("deepseek/")
-    || text.includes("deepseek-");
-}
-
-function isDeepSeekReasoningModel(model) {
-  if (!isDeepSeekFamilyModel(model)) return false;
-  if (model.reasoning === true) return true;
-  if (getThinkingFormat(model) || getReasoningProfile(model)) return true;
-
-  const text = modelText(model);
-  return text.includes("deepseek-reasoner")
-    || text.includes("deepseek-r1")
-    || text.includes("deepseek-v4");
 }
 
 function deepseekOutputContractPrompt(locale) {

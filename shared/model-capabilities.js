@@ -22,6 +22,19 @@ function getModelId(model, context = {}) {
   return lower(model?.id || context.id || context.modelId || context.model);
 }
 
+function getModelText(model, context = {}) {
+  return [
+    model?.id,
+    model?.name,
+    model?.model,
+    model?.modelId,
+    context.id,
+    context.name,
+    context.model,
+    context.modelId,
+  ].map(lower).filter(Boolean).join(" ");
+}
+
 function normalizeBoolean(value) {
   return value === true;
 }
@@ -37,6 +50,30 @@ function isDeepSeekV4ModelId(id) {
 
 function isDeepSeekThinkingModelId(id) {
   return id === "deepseek-reasoner" || isDeepSeekV4ModelId(id);
+}
+
+export function isDeepSeekFamilyModel(model, context = {}) {
+  if (!isPlainObject(model)) return false;
+  const provider = getProvider(model, context);
+  const baseUrl = getBaseUrl(model, context);
+  const text = getModelText(model, context);
+  return provider === "deepseek"
+    || provider.includes("deepseek")
+    || baseUrl.includes("api.deepseek.com")
+    || text.includes("deepseek-ai/")
+    || text.includes("deepseek/")
+    || text.includes("deepseek-");
+}
+
+export function isDeepSeekReasoningModel(model, context = {}) {
+  if (!isDeepSeekFamilyModel(model, context)) return false;
+  if (model.reasoning === true) return true;
+  if (getThinkingFormat(model, context) || getReasoningProfile(model, context)) return true;
+
+  const text = getModelText(model, context);
+  return text.includes("deepseek-reasoner")
+    || text.includes("deepseek-r1")
+    || text.includes("deepseek-v4");
 }
 
 /**
