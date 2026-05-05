@@ -72,6 +72,14 @@ vi.mock("../lib/debug-log.js", () => ({
 
 import { createFeishuAdapter } from "../lib/bridge/feishu-adapter.js";
 
+function markdownPostContent(text) {
+  return JSON.stringify({
+    zh_cn: {
+      content: [[{ tag: "md", text }]],
+    },
+  });
+}
+
 describe("createFeishuAdapter", () => {
   beforeEach(() => {
     registeredHandlers = {};
@@ -221,7 +229,36 @@ describe("createFeishuAdapter", () => {
     });
   });
 
-  it("declares Feishu edit-message streaming and updates the same text message", async () => {
+  it("sends plain and block replies as Feishu post markdown messages", async () => {
+    const adapter = createFeishuAdapter({
+      appId: "app-id",
+      appSecret: "app-secret",
+      agentId: "hana",
+      onMessage: vi.fn(),
+    });
+
+    await adapter.sendReply("oc_chat", "**bold**");
+    await adapter.sendBlockReply("oc_chat", "- item");
+
+    expect(mockMessageCreate).toHaveBeenNthCalledWith(1, {
+      params: { receive_id_type: "chat_id" },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "post",
+        content: markdownPostContent("**bold**"),
+      },
+    });
+    expect(mockMessageCreate).toHaveBeenNthCalledWith(2, {
+      params: { receive_id_type: "chat_id" },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "post",
+        content: markdownPostContent("- item"),
+      },
+    });
+  });
+
+  it("declares Feishu edit-message streaming and updates the same post markdown message", async () => {
     mockMessageCreate.mockResolvedValue({ data: { message_id: "om_stream_001" } });
     const adapter = createFeishuAdapter({
       appId: "app-id",
@@ -245,22 +282,22 @@ describe("createFeishuAdapter", () => {
       params: { receive_id_type: "chat_id" },
       data: {
         receive_id: "oc_chat",
-        msg_type: "text",
-        content: JSON.stringify({ text: "first" }),
+        msg_type: "post",
+        content: markdownPostContent("first"),
       },
     });
     expect(mockMessageUpdate).toHaveBeenNthCalledWith(1, {
       path: { message_id: "om_stream_001" },
       data: {
-        msg_type: "text",
-        content: JSON.stringify({ text: "second" }),
+        msg_type: "post",
+        content: markdownPostContent("second"),
       },
     });
     expect(mockMessageUpdate).toHaveBeenNthCalledWith(2, {
       path: { message_id: "om_stream_001" },
       data: {
-        msg_type: "text",
-        content: JSON.stringify({ text: "final" }),
+        msg_type: "post",
+        content: markdownPostContent("final"),
       },
     });
   });
