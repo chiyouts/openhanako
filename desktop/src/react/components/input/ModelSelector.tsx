@@ -67,6 +67,9 @@ export function ModelSelector({ models, sessionModel, isStreaming = false }: {
         if (data.model) {
           useStore.getState().updateSessionModel(currentSessionPath, data.model);
         }
+        if (data.thinkingLevel) {
+          useStore.getState().setThinkingLevel(data.thinkingLevel);
+        }
 
         if (data.adaptations?.length) {
           const msgs: Record<string, string> = {

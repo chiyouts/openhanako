@@ -249,11 +249,15 @@ engine.registerExtensionFactory(createCompactionGuardExtension());
 // 时序要求：所有 framework extension + plugin extension 都注册完之后再 create，
 // 否则 pi SDK ExtensionRunner 构造时拿不到这些 factory，extension 不会挂到
 // startup session 上（Codex 评审发现的 issue#437 部分失效场景）。
-if (engine.currentModel) {
+const shouldCreateStartupSession = process.env.HANA_CREATE_STARTUP_SESSION !== "0";
+if (shouldCreateStartupSession && engine.currentModel) {
   console.log("[server] ③ 创建 session...");
   await engine.createSession();
   console.log("[server] ③ Session created");
   dlog.log("server", `session created, model=${engine.currentModel.name}`);
+} else if (!shouldCreateStartupSession) {
+  console.log("[server] ③ 跳过启动期 session 创建");
+  dlog.log("server", "startup session creation skipped");
 } else {
   // 诊断信息：区分三种 currentModel=null 的情况，方便用户排查 (#414)
   const availableCount = engine.availableModels?.length ?? 0;
@@ -357,6 +361,23 @@ app.get("/api/session-permission-mode", async (c) => {
     mode: engine.permissionMode,
     accessMode: engine.accessMode,
     defaultMode: engine.getSessionPermissionModeDefault(),
+  });
+});
+
+app.post("/api/session-thinking-level", async (c) => {
+  const { sessionPath, level } = await safeJson(c);
+  if (!sessionPath) return c.json({ error: "sessionPath required" }, 400);
+  const result = engine.setSessionThinkingLevel(sessionPath, level);
+  if (result?.ok === false) {
+    return c.json({
+      ok: false,
+      error: result.error || "failed to set session thinking level",
+      thinkingLevel: result.thinkingLevel || engine.getSessionThinkingLevel(sessionPath),
+    }, 409);
+  }
+  return c.json({
+    ok: true,
+    thinkingLevel: result.thinkingLevel,
   });
 });
 

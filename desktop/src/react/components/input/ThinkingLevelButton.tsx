@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { invalidateConfigCache } from '../../hooks/use-config';
 import { useI18n } from '../../hooks/use-i18n';
+import { useStore } from '../../stores';
 import type { ThinkingLevel } from '../../stores/model-slice';
 import styles from './InputArea.module.css';
 
@@ -15,6 +16,8 @@ export function ThinkingLevelButton({ level, onChange, modelXhigh }: {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const currentSessionPath = useStore(s => s.currentSessionPath);
+  const pendingNewSession = useStore(s => s.pendingNewSession);
 
   const availableLevels = useMemo(() => {
     return ALL_THINKING_LEVELS.filter(lv => lv !== 'xhigh' || modelXhigh);
@@ -30,19 +33,26 @@ export function ThinkingLevelButton({ level, onChange, modelXhigh }: {
   }, [open]);
 
   const selectLevel = useCallback(async (next: ThinkingLevel) => {
-    onChange(next);
     setOpen(false);
     try {
-      await hanaFetch('/api/config', {
-        method: 'PUT',
+      const useSessionThinking = !!currentSessionPath && !pendingNewSession;
+      const res = await hanaFetch(useSessionThinking ? '/api/session-thinking-level' : '/api/config', {
+        method: useSessionThinking ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thinking_level: next }),
+        body: useSessionThinking
+          ? JSON.stringify({ sessionPath: currentSessionPath, level: next })
+          : JSON.stringify({ thinking_level: next }),
       });
-      invalidateConfigCache();
+      const data = await res.json();
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'failed to save thinking level');
+      }
+      onChange((data?.thinkingLevel || next) as ThinkingLevel);
+      if (!useSessionThinking) invalidateConfigCache();
     } catch (err) {
       console.error('[thinking-level] save failed:', err);
     }
-  }, [onChange]);
+  }, [currentSessionPath, onChange, pendingNewSession]);
 
   const tLevel = (key: string, fallback: string) => {
     const v = t(key);

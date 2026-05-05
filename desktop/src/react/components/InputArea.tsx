@@ -703,7 +703,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
             showThinking={currentModelInfo?.reasoning !== false}
             thinkingLevel={thinkingLevel}
             onThinkingChange={setThinkingLevel}
-            modelXhigh={(sessionModel ? models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider)?.xhigh : globalModelInfo?.xhigh) ?? false}
+            modelXhigh={(sessionModel ? (sessionModel.xhigh ?? models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider)?.xhigh) : globalModelInfo?.xhigh) ?? false}
             models={models}
             sessionModel={sessionModel}
             isStreaming={isStreaming}

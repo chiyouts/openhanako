@@ -28,6 +28,7 @@ import {
 } from "../../lib/session-files/session-file-registry.js";
 import { deleteSessionSkillSnapshotSync } from "../../lib/skills/session-skill-snapshot.js";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.js";
+import { modelSupportsXhigh } from "../../core/session-thinking-level.js";
 
 function rcPlatformFromSessionKey(sessionKey) {
   const match = /^([a-z]+)_/i.exec(sessionKey || "");
@@ -389,6 +390,7 @@ export function createSessionsRoute(engine) {
         planMode: engine.planMode,
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
+        thinkingLevel: engine.getSessionThinkingLevel?.(newSessionPath) || engine.getThinkingLevel?.() || "auto",
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
       });
     } catch (err) {
@@ -444,6 +446,7 @@ export function createSessionsRoute(engine) {
         planMode: engine.planMode,
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
+        thinkingLevel: engine.getSessionThinkingLevel?.(sessionPath) || engine.getThinkingLevel?.() || "auto",
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
         cwd: engine.cwd,
         workspaceFolders: engine.getSessionWorkspaceFolders?.(sessionPath) || [],
@@ -457,6 +460,7 @@ export function createSessionsRoute(engine) {
         currentModelName: activeModel?.name || null,
         currentModelInput: Array.isArray(activeModel?.input) ? activeModel.input : null,
         currentModelReasoning: activeModel?.reasoning ?? null,
+        currentModelXhigh: modelSupportsXhigh(activeModel),
         currentModelContextWindow: activeModel?.contextWindow ?? null,
       });
     } catch (err) {

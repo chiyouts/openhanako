@@ -69,7 +69,7 @@ function allNames() {
 }
 
 describe("session-coordinator tool snapshot (createSession)", () => {
-  let tmpDir, agentDir, sessionDir, coord, fakeSessionPath, activeToolsSpy, currentAgentConfig, defaultModeSaveSpy, storedDefaultMode, lastSessionOptions;
+  let tmpDir, agentDir, sessionDir, coord, fakeSessionPath, activeToolsSpy, currentAgentConfig, defaultModeSaveSpy, storedDefaultMode, storedThinkingLevel, lastSessionOptions;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -84,6 +84,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
     activeToolsSpy = vi.fn();
     defaultModeSaveSpy = vi.fn();
     storedDefaultMode = "ask";
+    storedThinkingLevel = "auto";
     lastSessionOptions = null;
 
     sessionManagerCreateMock.mockReturnValue({ getCwd: () => tmpDir });
@@ -119,7 +120,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
         currentModel: { id: "test-model", name: "test-model" },
         authStorage: {},
         modelRegistry: {},
-        resolveThinkingLevel: () => "medium",
+        resolveThinkingLevel: (level) => level === "auto" ? "medium" : level,
       }),
       getResourceLoader: () => ({
         getSystemPrompt: () => "mock-prompt",
@@ -134,7 +135,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
       switchAgentOnly: async () => {},
       getConfig: () => ({}),
       getPrefs: () => ({
-        getThinkingLevel: () => "medium",
+        getThinkingLevel: () => storedThinkingLevel,
         getSessionPermissionModeDefault: () => storedDefaultMode,
         setSessionPermissionModeDefault: defaultModeSaveSpy,
       }),
@@ -235,6 +236,21 @@ describe("session-coordinator tool snapshot (createSession)", () => {
 
     expect(coord.getPermissionMode(nextPath)).toBe("read_only");
     expect(defaultModeSaveSpy).not.toHaveBeenCalled();
+  });
+
+  it("persists the resolved thinking level as session-owned state when creating a session", async () => {
+    storedThinkingLevel = "high";
+    currentAgentConfig = { tools: { disabled: [] } };
+
+    const { sessionPath } = await coord.createSession(null, tmpDir, true);
+
+    expect(lastSessionOptions.thinkingLevel).toBe("high");
+    expect(coord.getSessionThinkingLevel(sessionPath)).toBe("high");
+
+    const meta = JSON.parse(await fsp.readFile(path.join(sessionDir, "session-meta.json"), "utf-8"));
+    expect(meta[path.basename(sessionPath)]).toMatchObject({
+      thinkingLevel: "high",
+    });
   });
 
   it("can switch only the current session permission mode without mutating the runtime default", async () => {

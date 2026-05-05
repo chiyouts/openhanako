@@ -360,12 +360,8 @@ export class ConfigCoordinator {
   }
 
   setThinkingLevel(level) {
-    // 持久化到全局 preference（跨 session 常驻）
+    // 全局 preference 只作为新 session 默认值；已有 session 的实际值归 SessionCoordinator。
     this._d.getPrefs().setThinkingLevel(level);
-    const session = this._d.getSession();
-    if (session) {
-      session.setThinkingLevel(this._d.getModels().resolveThinkingLevel(level));
-    }
   }
 
   /** 从 preference 读取用户设定的 thinking level */

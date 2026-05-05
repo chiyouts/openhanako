@@ -29,6 +29,11 @@ import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
+import {
+  normalizeSessionThinkingLevel,
+  normalizeThinkingLevelForModel,
+  resolveThinkingLevelForModel,
+} from "./session-thinking-level.js";
 import { snapshotSkillsForSession } from "../lib/skills/session-skill-snapshot.js";
 
 const log = createModuleLogger("session");
@@ -227,7 +232,21 @@ export class SessionCoordinator {
       sessionMgr = SessionManager.create(effectiveCwd, agent.sessionDir);
     }
     const sessionPathForMeta = sessionMgr.getSessionFile?.() || null;
-    const resolvedThinkingLevel = models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel());
+    let restoredThinkingLevel = null;
+    if (restore && sessionPathForMeta) {
+      try {
+        const metaPath = path.join(agent.sessionDir, "session-meta.json");
+        const meta = await this._readMetaCached(metaPath);
+        const metaEntry = meta[path.basename(sessionPathForMeta)];
+        if (typeof metaEntry?.thinkingLevel === "string") {
+          restoredThinkingLevel = metaEntry.thinkingLevel;
+        }
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          log.warn(`session thinking level restore failed: ${err.message}`);
+        }
+      }
+    }
     const restoredPromptSnapshot = restore && sessionPathForMeta
       ? await this._readSessionPromptSnapshot(agent, sessionPathForMeta)
       : null;
@@ -235,6 +254,11 @@ export class SessionCoordinator {
       ? this._resolvePromptModelFromSessionManager(sessionMgr, models)
       : null;
     const promptPatchModel = restoredPromptSnapshot ? null : (effectiveModel || restoredPromptModel);
+    const requestedThinkingLevel = normalizeSessionThinkingLevel(
+      restore ? (restoredThinkingLevel || this._d.getPrefs().getThinkingLevel()) : this._d.getPrefs().getThinkingLevel(),
+    );
+    let initialThinkingLevel = normalizeThinkingLevelForModel(requestedThinkingLevel, promptPatchModel);
+    let resolvedThinkingLevel = models.resolveThinkingLevel(initialThinkingLevel);
     const providerPromptPatches = promptPatchModel
       ? getProviderPromptPatches(promptPatchModel, {
         reasoningLevel: resolvedThinkingLevel,
@@ -317,6 +341,7 @@ export class SessionCoordinator {
       permissionMode: initialPermissionMode,
       accessMode: initialAccessMode,
       planMode: initialPlanMode,
+      thinkingLevel: initialThinkingLevel,
     }; // pre-populated for resourceLoader proxy
 
     // 快照当前 system prompt，per-session 隔离。
@@ -469,6 +494,12 @@ export class SessionCoordinator {
       log.warn(`session model fallback: ${modelFallbackMessage}`);
     }
     const resolvedModel = session.model;
+    const actualThinkingLevel = normalizeThinkingLevelForModel(initialThinkingLevel, resolvedModel);
+    if (actualThinkingLevel !== initialThinkingLevel) {
+      initialThinkingLevel = actualThinkingLevel;
+      resolvedThinkingLevel = models.resolveThinkingLevel(initialThinkingLevel);
+      session.setThinkingLevel?.(resolvedThinkingLevel);
+    }
     const elapsed = Date.now() - t0;
     log.log(`session created (${elapsed}ms), model=${resolvedModel?.name || effectiveModel?.name || "?"}`);
     this._session = session;
@@ -573,6 +604,7 @@ export class SessionCoordinator {
       permissionMode: initialPermissionMode,
       accessMode: initialAccessMode,
       planMode: initialPlanMode,
+      thinkingLevel: initialThinkingLevel,
       toolNames: snapshotToolNames,  // null for legacy sessions (Case B), array otherwise
       lastTouchedAt: Date.now(),
       unsub,
@@ -606,6 +638,7 @@ export class SessionCoordinator {
         permissionMode: initialPermissionMode,
         accessMode: initialAccessMode,
         planMode: initialPlanMode,
+        thinkingLevel: initialThinkingLevel,
         promptSnapshot: promptSnapshotToWrite,
       };
       if (snapshotToolNames !== null) metaPatch.toolNames = snapshotToolNames;
@@ -913,8 +946,14 @@ export class SessionCoordinator {
       await session.setModel(newModel);
       entry.modelId = newModel.id;
       entry.modelProvider = newModel.provider;
+      const models = this._d.getModels();
+      const currentThinkingLevel = this.getSessionThinkingLevel(sessionPath);
+      const nextThinkingLevel = normalizeThinkingLevelForModel(currentThinkingLevel, newModel);
+      entry.thinkingLevel = nextThinkingLevel;
+      session.setThinkingLevel?.(models?.resolveThinkingLevel?.(nextThinkingLevel) || nextThinkingLevel);
+      this.writeSessionMeta(sessionPath, { thinkingLevel: nextThinkingLevel });
 
-      return { adaptations };
+      return { adaptations, thinkingLevel: nextThinkingLevel };
     } finally {
       entry._switching = false;
     }
@@ -1053,6 +1092,29 @@ export class SessionCoordinator {
     if (!sessionPath) return this._pendingPermissionMode || this._getDefaultPermissionMode();
     const entry = this._sessions.get(sessionPath);
     return normalizeSessionPermissionMode(entry || { permissionMode: this._getDefaultPermissionMode() });
+  }
+
+  getSessionThinkingLevel(sessionPath = this.currentSessionPath) {
+    const fallback = normalizeSessionThinkingLevel(this._d.getPrefs().getThinkingLevel());
+    if (!sessionPath) return fallback;
+    const entry = this._sessions.get(sessionPath);
+    return normalizeSessionThinkingLevel(entry?.thinkingLevel || fallback);
+  }
+
+  setSessionThinkingLevel(sessionPath, level) {
+    if (!sessionPath) {
+      return { ok: false, error: "session thinking level requires sessionPath" };
+    }
+    const entry = this._sessions.get(sessionPath);
+    if (!entry?.session) {
+      return { ok: false, error: "session not found", thinkingLevel: this.getSessionThinkingLevel(sessionPath) };
+    }
+    const models = this._d.getModels();
+    const nextLevel = normalizeThinkingLevelForModel(level, entry.session.model);
+    entry.thinkingLevel = nextLevel;
+    entry.session.setThinkingLevel?.(models.resolveThinkingLevel(nextLevel));
+    this.writeSessionMeta(sessionPath, { thinkingLevel: nextLevel });
+    return { ok: true, thinkingLevel: nextLevel };
   }
 
   getAccessMode(sessionPath = this.currentSessionPath) {
@@ -1941,7 +2003,11 @@ export class SessionCoordinator {
         authStorage: models.authStorage,
         modelRegistry: models.modelRegistry,
         model: execModel,
-        thinkingLevel: models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel()),
+        thinkingLevel: resolveThinkingLevelForModel(
+          this._d.getPrefs().getThinkingLevel(),
+          execModel,
+          (level) => models.resolveThinkingLevel(level),
+        ),
         resourceLoader: execResourceLoader,
         tools: actTools,
         customTools: actCustomTools,

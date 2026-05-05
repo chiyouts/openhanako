@@ -548,6 +548,8 @@ export class HanaEngine {
   async setDefaultModel(id, provider, opts) { return this._configCoord.setDefaultModel(id, provider, opts); }
   getThinkingLevel() { return this._configCoord.getThinkingLevel(); }
   setThinkingLevel(l) { return this._configCoord.setThinkingLevel(l); }
+  getSessionThinkingLevel(sessionPath) { return this._sessionCoord.getSessionThinkingLevel(sessionPath); }
+  setSessionThinkingLevel(sessionPath, level) { return this._sessionCoord.setSessionThinkingLevel(sessionPath, level); }
   getSandbox() { return this._prefs.getSandbox(); }
   setSandbox(v) { this._prefs.setSandbox(v); }
   getFileBackup() { return this._prefs.getFileBackup(); }

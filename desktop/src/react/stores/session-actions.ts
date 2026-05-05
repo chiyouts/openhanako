@@ -286,6 +286,9 @@ export async function switchSession(path: string): Promise<void> {
         mode: data.permissionMode || data.accessMode,
       },
     }));
+    if (data.thinkingLevel) {
+      useStore.getState().setThinkingLevel(data.thinkingLevel);
+    }
 
     // 刷新模型列表（当前 session 的模型可能不同）
     loadModels();
@@ -300,6 +303,7 @@ export async function switchSession(path: string): Promise<void> {
         provider: data.currentModelProvider,
         input: Array.isArray(data.currentModelInput) ? data.currentModelInput : undefined,
         reasoning: data.currentModelReasoning ?? undefined,
+        xhigh: data.currentModelXhigh ?? undefined,
         contextWindow: data.currentModelContextWindow ?? undefined,
       });
     }
@@ -443,6 +447,9 @@ export async function ensureSession(): Promise<boolean> {
     }
 
     useStore.setState(patch);
+    if (data.thinkingLevel) {
+      useStore.getState().setThinkingLevel(data.thinkingLevel);
+    }
 
     await resetDeskForSessionCwd(data.cwd || null);
 
