@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFsRoute } from "../server/routes/fs.js";
 
 describe("fs route", () => {
@@ -18,10 +18,13 @@ describe("fs route", () => {
     const engine = {
       hanakoHome,
       currentAgentId: "hana",
+      getHomeCwd: vi.fn((agentId) => agentId === "hana" ? workspace : null),
       getAgent(id) {
         if (id !== "hana") return null;
         return {
-          deskManager: { homePath: workspace },
+          id: "hana",
+          config: { desk: { home_folder: workspace } },
+          deskManager: {},
         };
       },
     };

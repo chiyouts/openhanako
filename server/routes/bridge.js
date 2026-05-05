@@ -12,6 +12,7 @@ import { getWechatQrcode, pollWechatQrcodeStatus } from "../../lib/bridge/wechat
 import { debugLog } from "../../lib/debug-log.js";
 import { parseSessionKey, collectKnownUsers, KNOWN_PLATFORMS } from "../../lib/bridge/session-key.js";
 import { isBridgeOwner, resolveBridgeOwnerUserId } from "../../lib/bridge/owner-policy.js";
+import { collectBridgeMediaAllowedRoots, isInsideBridgeMediaRoot } from "../../lib/bridge/media-roots.js";
 import { t } from "../i18n.js";
 import { resolveAgent, resolveAgentStrict } from "../utils/resolve-agent.js";
 
@@ -312,13 +313,8 @@ export function createBridgeRoute(engine, bridgeManager) {
 
     const agent = resolveAgentStrict(engine, c);
 
-    // 路径安全检查（对齐 fs.js 的 getAllowedRoots 逻辑）
-    const allowedRoots = [realpathAllowedRoot(engine.hanakoHome)].filter(Boolean);
-    const deskHome = agent.deskManager?.homePath;
-    if (deskHome) {
-      const root = realpathAllowedRoot(deskHome);
-      if (root) allowedRoots.push(root);
-    }
+    // 路径安全检查：对齐 Bridge runtime 的媒体发送白名单。
+    const allowedRoots = collectBridgeMediaAllowedRoots(engine, { agentId: agent.id, agent });
 
     // 先检查文件是否存在
     const resolved = path.resolve(filePath);
@@ -331,9 +327,7 @@ export function createBridgeRoute(engine, bridgeManager) {
     try { realPath = fs.realpathSync(resolved); }
     catch { return c.json({ error: "file not found" }, 404); }
 
-    const isSafe = allowedRoots.some(root =>
-      realPath === root || realPath.startsWith(root + path.sep)
-    );
+    const isSafe = isInsideBridgeMediaRoot(realPath, allowedRoots);
     if (!isSafe) {
       return c.json({ error: "path outside allowed roots" }, 403);
     }
@@ -470,13 +464,6 @@ export function createBridgeRoute(engine, bridgeManager) {
   });
 
   return route;
-}
-
-function realpathAllowedRoot(root) {
-  if (!root) return null;
-  const resolved = path.resolve(root);
-  try { return fs.realpathSync(resolved); }
-  catch { return resolved; }
 }
 
 function buildBridgeManualSendSessionPath(agentId, platform, chatId) {

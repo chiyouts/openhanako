@@ -14,7 +14,7 @@ describe("bridge send-media route", () => {
     tmpDir = null;
   });
 
-  function makeApp({ bridgeManagerOverrides = {} } = {}) {
+  function makeApp({ agentOverrides = {}, engineOverrides = {}, bridgeManagerOverrides = {} } = {}) {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-bridge-route-"));
     const hanakoHome = path.join(tmpDir, "hana-home");
     const sessionDir = path.join(tmpDir, "sessions");
@@ -25,12 +25,14 @@ describe("bridge send-media route", () => {
       id: "hana",
       sessionDir,
       config: { bridge: {} },
-      deskManager: { homePath: hanakoHome },
+      deskManager: {},
+      ...agentOverrides,
     };
     const engine = {
       hanakoHome,
       currentAgentId: "hana",
       getAgent: vi.fn((id) => id === "hana" ? agent : null),
+      getHomeCwd: vi.fn((agentId) => agentId === "hana" ? agent.config?.desk?.home_folder || null : null),
       registerSessionFile: vi.fn(({ sessionPath, filePath, label, origin }) => ({
         id: "sf_route",
         sessionPath,
@@ -46,6 +48,7 @@ describe("bridge send-media route", () => {
       getBridgeReadOnly: vi.fn(() => false),
       getBridgeReceiptEnabled: vi.fn(() => true),
       getBridgeIndex: vi.fn(() => ({})),
+      ...engineOverrides,
     };
     const bridgeManager = {
       getStatus: vi.fn(() => ({})),
@@ -57,7 +60,7 @@ describe("bridge send-media route", () => {
     };
     const app = new Hono();
     app.route("/api", createBridgeRoute(engine, bridgeManager));
-    return { app, engine, bridgeManager, hanakoHome };
+    return { app, engine, bridgeManager, hanakoHome, agent };
   }
 
   it("treats a unique known WeChat DM user as owner even without configured owner", async () => {
@@ -115,6 +118,46 @@ describe("bridge send-media route", () => {
       "telegram",
       "chat-1",
       { type: "session_file", fileId: "sf_route", sessionPath: "bridge:hana:telegram:chat-1" },
+      "hana",
+    );
+  });
+
+  it("allows manual bridge sends from the target agent workspace", async () => {
+    const { app, engine, bridgeManager, agent } = makeApp({
+      agentOverrides: {
+        config: { bridge: {}, desk: {} },
+        deskManager: {},
+      },
+    });
+    const workspace = path.join(tmpDir, "workspace");
+    fs.mkdirSync(workspace, { recursive: true });
+    agent.config.desk.home_folder = workspace;
+    const filePath = path.join(workspace, "out.txt");
+    fs.writeFileSync(filePath, "ok");
+
+    const res = await app.request("/api/bridge/send-media?agentId=hana", {
+      method: "POST",
+      body: JSON.stringify({
+        platform: "wechat",
+        chatId: "wx-user",
+        filePath,
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ ok: true, fileId: "sf_route" });
+    expect(engine.registerSessionFile).toHaveBeenCalledWith({
+      sessionPath: "bridge:hana:wechat:wx-user",
+      filePath: fs.realpathSync(filePath),
+      label: "out.txt",
+      origin: "bridge_manual_send",
+    });
+    expect(bridgeManager.sendMediaItem).toHaveBeenCalledWith(
+      "wechat",
+      "wx-user",
+      { type: "session_file", fileId: "sf_route", sessionPath: "bridge:hana:wechat:wx-user" },
       "hana",
     );
   });
