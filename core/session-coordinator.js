@@ -29,6 +29,7 @@ import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
+import { snapshotSkillsForSession } from "../lib/skills/session-skill-snapshot.js";
 
 const log = createModuleLogger("session");
 
@@ -339,12 +340,15 @@ export class SessionCoordinator {
         locale: localeSnapshot,
         workspaceScope,
       });
-    const skillsResultSnapshot = restoredPromptSnapshot?.skillsResult
+    const rawSkillsResultSnapshot = restoredPromptSnapshot?.skillsResult
       ?? (
         skills?.getSkillsForAgent
           ? freezeSkillsResult(skills.getSkillsForAgent(agent))
           : freezeSkillsResult(baseResourceLoader.getSkills?.())
       );
+    const skillsResultSnapshot = restoredPromptSnapshot?.skillsResult
+      ? freezeSkillsResult(restoredPromptSnapshot.skillsResult)
+      : freezeSkillsResult(await snapshotSkillsForSession(rawSkillsResultSnapshot, sessionPathForMeta));
     const agentsFilesResultSnapshot = restoredPromptSnapshot?.agentsFilesResult
       ?? freezeAgentsFilesResult(baseResourceLoader.getAgentsFiles?.());
     const promptSnapshotForPersist = restoredPromptSnapshot || {

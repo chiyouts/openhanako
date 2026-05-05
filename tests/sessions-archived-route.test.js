@@ -255,6 +255,21 @@ describe("POST /api/sessions/archived/delete", () => {
     expect(engine.clearSessionTitle).toHaveBeenCalledWith(activeKey);
   });
 
+  it("removes the session skill snapshot directory for the deleted archived session", async () => {
+    const snapshotRoot = path.join(path.dirname(activeKey), ".skill-snapshots", "d1");
+    fs.mkdirSync(path.join(snapshotRoot, "001-test-skill"), { recursive: true });
+    fs.writeFileSync(path.join(snapshotRoot, "001-test-skill", "SKILL.md"), "# Test skill\n");
+
+    const res = await app.request("/api/sessions/archived/delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: archPath }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fs.existsSync(snapshotRoot)).toBe(false);
+  });
+
   it("also invalidates stale rc state keyed by the original active session path", async () => {
     engine.rcState.attach("tg_dm_owner@a", activeKey);
     engine.rcState.setPending("tg_dm_other@a", {
@@ -330,6 +345,23 @@ describe("POST /api/sessions/cleanup (titles orphan cleanup)", () => {
     expect(fs.existsSync(`${oldFile}.files.json`)).toBe(false);
     const activeKey = path.join(tmpDir, "agents", "a", "sessions", "old.jsonl");
     expect(engine.clearSessionTitle).toHaveBeenCalledWith(activeKey);
+  });
+
+  it("removes skill snapshots for deleted archived sessions", async () => {
+    const oldFile = path.join(tmpDir, "agents", "a", "sessions", "archived", "old.jsonl");
+    const snapshotRoot = path.join(tmpDir, "agents", "a", "sessions", ".skill-snapshots", "old");
+    fs.mkdirSync(path.join(snapshotRoot, "001-test-skill"), { recursive: true });
+    fs.writeFileSync(path.join(snapshotRoot, "001-test-skill", "SKILL.md"), "# Test skill\n");
+
+    const res = await app.request("/api/sessions/cleanup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxAgeDays: 90 }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fs.existsSync(oldFile)).toBe(false);
+    expect(fs.existsSync(snapshotRoot)).toBe(false);
   });
 
   it("also invalidates stale rc state that still points at the deleted active path", async () => {

@@ -26,6 +26,7 @@ import {
   moveSessionFileSidecarSync,
   sessionFileSidecarPath,
 } from "../../lib/session-files/session-file-registry.js";
+import { deleteSessionSkillSnapshotSync } from "../../lib/skills/session-skill-snapshot.js";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.js";
 
 function rcPlatformFromSessionKey(sessionKey) {
@@ -526,6 +527,7 @@ export function createSessionsRoute(engine) {
             if (stat.mtime.getTime() < cutoff) {
               await fs.unlink(fp);
               deleteSessionFileSidecarSync(fp);
+              deleteSessionSkillSnapshotSync(fp);
               deleted++;
               // 清理 titles.json 孤儿（key = 对应的活跃路径）
               const activeKey = path.join(agentsDir, agentId, "sessions", f);
@@ -661,6 +663,7 @@ export function createSessionsRoute(engine) {
       try {
         await fs.unlink(sessionPath);
         deleteSessionFileSidecarSync(sessionPath);
+        deleteSessionSkillSnapshotSync(sessionPath);
       } catch (err) {
         if (err.code === "ENOENT") {
           return c.json({ error: t("error.sessionNotFound") }, 404);
