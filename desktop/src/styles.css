@@ -979,8 +979,9 @@ html[data-platform="linux"] .tb-toggle-right {
 
 /* 列表 */
 .md-content ul, .md-content ol {
-    padding-left: 1.5em;
+    padding-inline-start: 2em;
     margin: var(--space-xs) 0;
+    list-style-position: outside;
 }
 
 .md-content li {
