@@ -11,6 +11,7 @@ import { safeJson } from "../hono-helpers.js";
 import { getWechatQrcode, pollWechatQrcodeStatus } from "../../lib/bridge/wechat-login.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { parseSessionKey, collectKnownUsers, KNOWN_PLATFORMS } from "../../lib/bridge/session-key.js";
+import { isBridgeOwner, resolveBridgeOwnerUserId } from "../../lib/bridge/owner-policy.js";
 import { t } from "../i18n.js";
 import { resolveAgent, resolveAgentStrict } from "../utils/resolve-agent.js";
 
@@ -24,6 +25,7 @@ export function createBridgeRoute(engine, bridgeManager) {
     const agent = resolveAgent(engine, c);
     const live = bridgeManager.getStatus(agent.id);
     const bridge = agent.config?.bridge || {};
+    const index = engine.getBridgeIndex(agent.id);
 
     const platformStatus = (plat, cfg, extraFields) => {
       return {
@@ -39,10 +41,10 @@ export function createBridgeRoute(engine, bridgeManager) {
     const fsAppId = bridge.feishu?.appId || "";
     const fsAppSecret = bridge.feishu?.appSecret || "";
 
-    // Build per-platform owner dict from agent config
+    // Build per-platform owner dict from the shared owner policy.
     const ownerDict = {};
     for (const plat of KNOWN_PLATFORMS) {
-      const o = bridge[plat]?.owner;
+      const o = resolveBridgeOwnerUserId({ platform: plat, agent, index });
       if (o) ownerDict[plat] = o;
     }
 
@@ -64,7 +66,7 @@ export function createBridgeRoute(engine, bridgeManager) {
       }),
       readOnly: engine.getBridgeReadOnly(),
       receiptEnabled: engine.getBridgeReceiptEnabled(),
-      knownUsers: collectKnownUsers(engine.getBridgeIndex(agent.id)),
+      knownUsers: collectKnownUsers(index),
       owner: ownerDict,
     });
   });
@@ -158,12 +160,6 @@ export function createBridgeRoute(engine, bridgeManager) {
     const agent = resolveAgent(engine, c);
     const index = engine.getBridgeIndex(agent.id);
     const bridgeDir = path.join(agent.sessionDir, "bridge");
-    const agentBridge = agent.config?.bridge || {};
-    const owner = {};
-    for (const plat of KNOWN_PLATFORMS) {
-      const o = agentBridge[plat]?.owner;
-      if (o) owner[plat] = o;
-    }
     const sessions = [];
 
     for (const [sessionKey, raw] of Object.entries(index)) {
@@ -186,9 +182,8 @@ export function createBridgeRoute(engine, bridgeManager) {
         lastActive = stat.mtimeMs;
       } catch {}
 
-      // isOwner 运行时计算：per-agent owner dict
-      const ownerUserId = owner[plat] || null;
-      const isOwner = !!(entry.userId && ownerUserId && entry.userId === ownerUserId);
+      const userId = entry.userId || (plat === "wechat" && chatType === "dm" ? chatId : null);
+      const isOwner = isBridgeOwner({ platform: plat, chatType, userId, agent });
 
       sessions.push({
         sessionKey, platform: plat, chatType, chatId, file, lastActive,

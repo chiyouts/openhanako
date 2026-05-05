@@ -60,6 +60,33 @@ describe("bridge send-media route", () => {
     return { app, engine, bridgeManager, hanakoHome };
   }
 
+  it("treats a unique known WeChat DM user as owner even without configured owner", async () => {
+    const { app, engine } = makeApp();
+    const sessionFile = path.join(tmpDir, "sessions", "bridge", "owner", "wx.jsonl");
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+    fs.writeFileSync(sessionFile, "", "utf-8");
+    engine.getBridgeIndex.mockReturnValue({
+      "wx_dm_wx-user@hana": {
+        file: "owner/wx.jsonl",
+        userId: "wx-user",
+        name: "微信用户",
+      },
+    });
+
+    const statusRes = await app.request("/api/bridge/status?agentId=hana");
+    const statusBody = await statusRes.json();
+    expect(statusBody.owner.wechat).toBe("wx-user");
+
+    const sessionsRes = await app.request("/api/bridge/sessions?platform=wechat&agentId=hana");
+    const sessionsBody = await sessionsRes.json();
+    expect(sessionsBody.sessions).toEqual([
+      expect.objectContaining({
+        sessionKey: "wx_dm_wx-user@hana",
+        isOwner: true,
+      }),
+    ]);
+  });
+
   it("registers the local file as a session_file before bridge delivery", async () => {
     const { app, engine, bridgeManager, hanakoHome } = makeApp();
     const filePath = path.join(hanakoHome, "out.txt");
