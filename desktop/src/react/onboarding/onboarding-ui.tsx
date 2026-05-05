@@ -6,7 +6,7 @@ export interface StepContainerProps { children: React.ReactNode }
 export interface MultilineProps { className?: string; text: string }
 
 export function StepContainer({ children }: StepContainerProps) {
-  return <div className="onboarding-step active" style={{ animation: 'obFadeIn 0.3s ease-out' }}>{children}</div>;
+  return <div className="onboarding-step active">{children}</div>;
 }
 
 export function Multiline({ className, text }: MultilineProps) {

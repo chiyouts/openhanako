@@ -21,6 +21,7 @@ export default class ImageGenPlugin {
       bus,
       generatedDir: () => resolveGeneratedDir(this.ctx),
       log,
+      registerSessionFile: this.ctx.registerSessionFile,
     });
 
     registry.register(volcengineImageAdapter);

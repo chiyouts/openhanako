@@ -87,6 +87,7 @@ import { ComputerProviderRegistry } from "./computer-use/provider-registry.js";
 import { createMockComputerProvider } from "./computer-use/providers/mock-provider.js";
 import { createMacosCuaProvider } from "./computer-use/providers/macos-cua-provider.js";
 import { createWindowsUiaProvider } from "./computer-use/providers/windows-uia-provider.js";
+import { SessionFileRegistry } from "../lib/session-files/session-file-registry.js";
 
 export class HanaEngine {
   /**
@@ -102,6 +103,9 @@ export class HanaEngine {
     this.userDir = path.join(hanakoHome, "user");
     this.channelsDir = path.join(hanakoHome, "channels");
     fs.mkdirSync(this.channelsDir, { recursive: true });
+    this._sessionFiles = new SessionFileRegistry({
+      managedCacheRoot: path.join(hanakoHome, "session-files"),
+    });
 
     // ── Core managers ──
     this._prefs = new PreferencesManager({ userDir: this.userDir, agentsDir: this.agentsDir });
@@ -202,6 +206,8 @@ export class HanaEngine {
       getHomeCwd: (agentId) => this.getHomeCwd(agentId),
       getVisionBridge: () => this._visionBridge,
       isVisionAuxiliaryEnabled: () => this.isVisionAuxiliaryEnabled(),
+      getHanakoHome: () => this.hanakoHome,
+      registerSessionFile: (entry) => this.registerSessionFile(entry),
     });
 
     // ── Slash Command System ──
@@ -255,7 +261,7 @@ export class HanaEngine {
     this._imageStripNotified = new Set();
 
     // UI context 注入（用户当前视野）：sessionPath → { currentViewed, activeFile,
-    // activeArtifact, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.js
+    // activePreview, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.js
     // 写入；session-coordinator 注册的 `context` extension hook 每轮读取并拼 reminder
     // 到 last user message 开头（不写进 session.entries，不累积）。
     // 详见 core/ui-context-reminder.js 和 docs/superpowers/specs/2026-04-22-viewer-spawn-and-context-injection-design.md
@@ -304,6 +310,17 @@ export class HanaEngine {
 
   get taskRegistry() {
     return this._taskRegistry;
+  }
+
+  registerSessionFile(entry) { return this._sessionFiles.registerFile(entry); }
+  getSessionFile(fileId, options) { return this._sessionFiles.get(fileId, options); }
+  getSessionFileByPath(filePath, options) { return this._sessionFiles.getByFilePath(filePath, options); }
+  listSessionFiles(sessionPath) { return this._sessionFiles.list(sessionPath); }
+  async cleanupColdSessionFiles(options) {
+    return this._sessionFiles.cleanupColdSessions({
+      agentsDir: this.agentsDir,
+      ...(options || {}),
+    });
   }
 
   setSubagentController(taskId, controller) { this._subagentControllers.set(taskId, controller); }
@@ -492,6 +509,8 @@ export class HanaEngine {
   setBridgeReadOnly(v) { this._prefs.setBridgeReadOnly(v); }
   getBridgeReceiptEnabled() { return this._prefs.getBridgeReceiptEnabled(); }
   setBridgeReceiptEnabled(v) { this._prefs.setBridgeReceiptEnabled(v); }
+  getBridgeMediaPublicBaseUrl() { return this._prefs.getBridgeMediaPublicBaseUrl(); }
+  setBridgeMediaPublicBaseUrl(v) { return this._prefs.setBridgeMediaPublicBaseUrl(v); }
   getSharedModels() { return this._configCoord.getSharedModels(); }
   setSharedModels(p) { return this._configCoord.setSharedModels(p); }
   isVisionAuxiliaryEnabled() { return this.getSharedModels()?.vision_enabled === true; }
@@ -1021,6 +1040,7 @@ export class HanaEngine {
       preferencesManager: this._prefs,
       appVersion,
       getSessionPath: () => this.currentSessionPath,
+      registerSessionFile: (entry) => this.registerSessionFile(entry),
       slashRegistry: this._slashSystem?.registry ?? null,
     });
     this._pluginManager.scan();

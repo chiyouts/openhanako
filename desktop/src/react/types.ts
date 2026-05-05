@@ -90,14 +90,20 @@ export interface Activity {
   [key: string]: unknown;
 }
 
-export interface Artifact {
+export interface PreviewItem {
   id: string;
   type: string;
   title: string;
   content: string;
   language?: string | null;
+  fileId?: string;
   filePath?: string;
   ext?: string;
+  mime?: string;
+  kind?: string;
+  storageKind?: string;
+  status?: 'available' | 'expired' | string;
+  missingAt?: number | null;
   fileVersion?: FileVersion | null;
 }
 

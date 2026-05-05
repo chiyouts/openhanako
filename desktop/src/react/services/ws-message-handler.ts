@@ -11,7 +11,7 @@ import { dispatchStreamKey } from './stream-key-dispatcher';
 import { useStore } from '../stores';
 import { updateKeyed } from '../stores/create-keyed-slice';
 import { loadSessions as loadSessionsAction } from '../stores/session-actions';
-import { handleArtifact } from '../stores/artifact-actions';
+import { handleLegacyArtifactBlock } from '../stores/preview-actions';
 import { loadDeskFiles } from '../stores/desk-actions';
 import { loadChannels as loadChannelsAction, openChannel as openChannelAction } from '../stores/channel-actions';
 import { showError } from '../utils/ui-helpers';
@@ -81,6 +81,26 @@ function isKnownChatSession(sessionPath: string, state = useStore.getState()): b
   return !!state.chatSessions?.[sessionPath] || state.sessions.some((s: any) => s.path === sessionPath);
 }
 
+function applyCompactionLifecycle(msg: any): void {
+  const sp = msg.sessionPath;
+  if (!sp) return;
+
+  if (msg.type === 'compaction_start') {
+    useStore.getState().addCompactingSession(sp);
+    return;
+  }
+
+  if (msg.type !== 'compaction_end') return;
+
+  useStore.getState().removeCompactingSession(sp);
+  const existingWindow = useStore.getState().contextBySession[sp]?.window ?? null;
+  const window = msg.contextWindow ?? existingWindow;
+  updateKeyed('contextBySession', sp,
+    { tokens: msg.tokens ?? null, window, percent: msg.percent ?? null },
+    (_s, d) => ({ contextTokens: d.tokens, contextWindow: d.window, contextPercent: d.percent }),
+  );
+}
+
 export function applyStreamingStatus(isStreaming: boolean, sessionPath: string | null): void {
   // 元数据层：把 isStreaming 视为 sessionPath 维度的权威信号，统一写回 streamingSessions。
   // 这一层不分焦点，任何来源（普通 status、stream_resume 恢复）都必须到达这里，
@@ -122,6 +142,8 @@ function attachmentsEqual(a: any, b: any): boolean {
     if (!!la.isDir !== !!rb.isDir) return false;
     if ((la.mimeType || '') !== (rb.mimeType || '')) return false;
     if ((la.base64Data || '') !== (rb.base64Data || '')) return false;
+    if ((la.status || '') !== (rb.status || '')) return false;
+    if ((la.missingAt ?? null) !== (rb.missingAt ?? null)) return false;
     if (!!la.visionAuxiliary !== !!rb.visionAuxiliary) return false;
   }
   return true;
@@ -167,6 +189,10 @@ export function handleServerMessage(msg: any): void {
     updateSessionStreamMeta(msg);
   }
 
+  if (msg.type === 'compaction_start' || msg.type === 'compaction_end') {
+    applyCompactionLifecycle(msg);
+  }
+
   // 活跃 block 事件路由：非当前 session 的聊天事件也要写入正常聊天缓存。
   // stream-key-dispatcher 只负责卡片/预览订阅，不能吞掉主 transcript 的后台流。
   if (REACT_CHAT_EVENTS.has(msg.type) && msg.sessionPath && msg.sessionPath !== state.currentSessionPath) {
@@ -203,34 +229,10 @@ export function handleServerMessage(msg: any): void {
         useStore.getState().bumpTodosLiveVersion(sp);
       }
     }
-    // compaction_end 后更新 token
-    if (msg.type === 'compaction_end') {
-      const sp = msg.sessionPath;
-      if (sp) useStore.getState().removeCompactingSession(sp);
-      // 写入 keyed store（含 compat 同步）
-      if (sp) {
-        if (msg.tokens != null && msg.contextWindow != null) {
-          updateKeyed('contextBySession', sp,
-            { tokens: msg.tokens ?? null, window: msg.contextWindow ?? null, percent: msg.percent ?? null },
-            (_s, d) => ({ contextTokens: d.tokens, contextWindow: d.window, contextPercent: d.percent }),
-          );
-        } else {
-          // SDK returns null right after compaction (no post-compaction response yet)
-          // Reset to null so the ring shows empty/estimating instead of stale pre-compaction values
-          updateKeyed('contextBySession', sp,
-            { tokens: null, window: useStore.getState().contextBySession[sp]?.window ?? null, percent: null },
-            (_s, _d) => ({ contextTokens: null, contextPercent: null }),
-          );
-        }
-      }
-    }
-    if (msg.type === 'compaction_start') {
-      const sp = msg.sessionPath;
-      if (sp) useStore.getState().addCompactingSession(sp);
-    }
-    // content_block 中的 artifact 需要通知预览系统更新
+    // COMPAT(create_artifact, remove no earlier than v0.133):
+    // 旧 artifact block 进入当前 Preview 面板。
     if (msg.type === 'content_block' && msg.block?.type === 'artifact' && state.currentTab === 'chat') {
-      handleArtifact({ ...msg.block, sessionPath: msg.sessionPath });
+      handleLegacyArtifactBlock({ ...msg.block, sessionPath: msg.sessionPath });
     }
     return;
   }

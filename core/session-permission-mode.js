@@ -13,6 +13,7 @@ const INFORMATION_TOOLS = new Set([
   "ls",
   "web_search",
   "web_fetch",
+  "current_status",
   "search_memory",
   "recall_experience",
 ]);
@@ -28,6 +29,8 @@ const SIDE_EFFECT_TOOLS = new Set([
   "install_skill",
   "update_settings",
   "todo_write",
+  // Legacy compatibility tools stay classified as side effects so restored
+  // sessions keep the same permission boundary until the v0.133 cleanup window.
   "create_artifact",
   "stage_files",
   "present_files",

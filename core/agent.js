@@ -34,8 +34,13 @@ import { writeSubagentSessionMeta } from "../lib/subagent-executor-metadata.js";
 import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.js";
 import { createWaitTool } from "../lib/tools/wait-tool.js";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.js";
+import { createCurrentStatusTool } from "../lib/tools/current-status-tool.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
+
+function isExplicitTextOnlyModel(model) {
+  return Array.isArray(model?.input) && !model.input.includes("image");
+}
 
 export class Agent {
   /**
@@ -89,6 +94,7 @@ export class Agent {
     this._experienceTools = [];
     this._memoryMasterEnabled = true;   // agent 级别总开关（config.yaml memory.enabled）
     this._memorySessionEnabled = true;  // per-session 开关（WelcomeScreen toggle）
+    this._experienceEnabled = false;    // agent 级别经验能力开关（config.yaml experience.enabled，默认关闭）
     this._enabledSkills = [];
     this._systemPrompt = "";
     this._descriptionRefreshHandler = null;
@@ -98,12 +104,16 @@ export class Agent {
     this._cronStore = null;
     this._cronTool = null;
     this._stageFilesTool = null;
+    // Legacy compatibility only. Fresh sessions should write files and stage
+    // them via stage_files; restored old sessions may still need this schema.
     this._artifactTool = null;
     this._channelTool = null;
     this._browserTool = null;
+    this._browserToolNoScreenshot = null;
     this._computerUseTool = null;
     this._notifyTool = null;
     this._stopTaskTool = null;
+    this._currentStatusTool = null;
 
     /**
      * 外部回调注入（由 AgentManager._createAgentInstance 填充）。
@@ -134,6 +144,7 @@ export class Agent {
     this.userName = this._config.user?.name || (isZh ? "用户" : "User");
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
+    this._experienceEnabled = this._config.experience?.enabled === true;
   }
 
   async init(log = () => {}, sharedModels = {}, resolveModel = null) {
@@ -154,6 +165,7 @@ export class Agent {
     this.userName = this._config.user?.name || (isZh ? "用户" : "User");
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
+    this._experienceEnabled = this._config.experience?.enabled === true;
 
     // 3. 初始化各模块
     log(`  [agent] 3. 模块初始化完成`);
@@ -279,7 +291,9 @@ export class Agent {
     this._webFetchTool = createWebFetchTool();
     this._todoTool = createTodoTool();
     this._pinnedMemoryTools = createPinnedMemoryTools(this.agentDir);
-    this._experienceTools = createExperienceTools(this.agentDir);
+    this._experienceTools = createExperienceTools(this.agentDir, {
+      isEnabled: () => this._experienceEnabled === true,
+    });
 
     // 8. Desk 系统（与 memory 完全独立）
     log(`  [agent] 8. Desk 系统...`);
@@ -295,8 +309,15 @@ export class Agent {
       emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
-    this._stageFilesTool = createStageFilesTool();
-    this._artifactTool = createArtifactTool();
+    this._stageFilesTool = createStageFilesTool({
+      registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+    });
+    this._artifactTool = createArtifactTool({
+      getHanakoHome: () => this._cb?.getEngine?.()?.hanakoHome,
+      registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+    });
     this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.(), {
       getSessionModel: (sessionPath) => {
         const engine = this._cb?.getEngine?.();
@@ -304,6 +325,19 @@ export class Agent {
       },
       getVisionBridge: () => this._cb?.getEngine?.()?.getVisionBridge?.() || null,
       isVisionAuxiliaryEnabled: () => this._cb?.getEngine?.()?.isVisionAuxiliaryEnabled?.() === true,
+      getHanakoHome: () => this._cb?.getEngine?.()?.hanakoHome,
+      registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
+    });
+    this._browserToolNoScreenshot = createBrowserTool(() => this._cb?.getCurrentSessionPath?.(), {
+      getSessionModel: (sessionPath) => {
+        const engine = this._cb?.getEngine?.();
+        return engine?.getSessionByPath?.(sessionPath)?.model || null;
+      },
+      getVisionBridge: () => this._cb?.getEngine?.()?.getVisionBridge?.() || null,
+      isVisionAuxiliaryEnabled: () => this._cb?.getEngine?.()?.isVisionAuxiliaryEnabled?.() === true,
+      getHanakoHome: () => this._cb?.getEngine?.()?.hanakoHome,
+      registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
+      screenshotEnabled: false,
     });
     this._computerUseTool = createComputerUseTool({
       getComputerHost: () => this._cb?.getEngine?.()?.getComputerHost?.() || null,
@@ -326,6 +360,12 @@ export class Agent {
     this._checkDeferredTool = createCheckDeferredTool({
       getDeferredStore: () => this._cb?.getDeferredResults?.(),
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+    });
+    this._currentStatusTool = createCurrentStatusTool({
+      getTimezone: () => this._cb?.getTimezone?.() || "",
+      getAgent: () => this,
+      getSessionModel: (sessionPath) => this._cb?.getEngine?.()?.getSessionByPath?.(sessionPath)?.model || null,
+      getCurrentModel: () => this._cb?.getEngine?.()?.currentModel || null,
     });
 
     // 10. 设置修改工具
@@ -416,6 +456,7 @@ export class Agent {
       onInstalled: async (skillName) => {
         await this._onInstallCallback?.(skillName);
       },
+      registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
     });
 
     // 11. subagent 工具
@@ -510,6 +551,8 @@ export class Agent {
   get memoryEnabled() { return this._memoryMasterEnabled && this._memorySessionEnabled; }
   /** agent 级别总开关 */
   get memoryMasterEnabled() { return this._memoryMasterEnabled; }
+  /** agent 级别经验能力开关，缺省关闭 */
+  get experienceEnabled() { return this._experienceEnabled === true; }
   /** per-session 级别（持久化、API 返回用，不受 master 影响） */
   get sessionMemoryEnabled() { return this._memorySessionEnabled; }
   get yuanPrompt() { return this._readYuan(); }
@@ -545,28 +588,41 @@ export class Agent {
     const forceMemoryEnabled = Object.prototype.hasOwnProperty.call(options, "forceMemoryEnabled")
       ? options.forceMemoryEnabled
       : null;
+    const forceExperienceEnabled = Object.prototype.hasOwnProperty.call(options, "forceExperienceEnabled")
+      ? options.forceExperienceEnabled
+      : null;
     const memoryEnabled = typeof forceMemoryEnabled === "boolean"
       ? forceMemoryEnabled
       : this.memoryEnabled;
+    const experienceEnabled = typeof forceExperienceEnabled === "boolean"
+      ? forceExperienceEnabled
+      : this.experienceEnabled;
     const memTools = memoryEnabled ? [
       this._memorySearchTool,
       ...this._pinnedMemoryTools,
-      ...this._experienceTools,
     ] : [];
+    const experienceTools = experienceEnabled ? this._experienceTools : [];
     const computerUseTools = this._isComputerUseAvailableForThisAgent()
       ? [this._computerUseTool]
       : [];
+    const browserTool = isExplicitTextOnlyModel(options.model)
+      ? this._browserToolNoScreenshot
+      : this._browserTool;
+    const legacyArtifactTools = options.includeLegacyArtifactTool === true
+      ? [this._artifactTool]
+      : [];
     return [
       ...memTools,
+      ...experienceTools,
       this._webSearchTool,
       this._webFetchTool,
       this._todoTool,
       this._cronTool,
       this._stageFilesTool,
-      this._artifactTool,
+      ...legacyArtifactTools,
       this._channelTool,
       this._dmTool,
-      this._browserTool,
+      browserTool,
       ...computerUseTools,
       this._installSkillTool,
       this._notifyTool,
@@ -574,6 +630,7 @@ export class Agent {
       this._updateSettingsTool,
       this._subagentTool,
       this._checkDeferredTool,
+      this._currentStatusTool,
       createWaitTool(),
     ].filter(Boolean);
   }
@@ -655,6 +712,9 @@ export class Agent {
     // 记忆总开关
     if (partial.memory && "enabled" in partial.memory) {
       this._memoryMasterEnabled = this._config.memory?.enabled !== false;
+    }
+    if (partial.experience && "enabled" in partial.experience) {
+      this._experienceEnabled = this._config.experience?.enabled === true;
     }
 
     // 刷新受影响的模块
@@ -740,12 +800,18 @@ export class Agent {
     const forceMemoryEnabled = Object.prototype.hasOwnProperty.call(options, "forceMemoryEnabled")
       ? options.forceMemoryEnabled
       : null;
+    const forceExperienceEnabled = Object.prototype.hasOwnProperty.call(options, "forceExperienceEnabled")
+      ? options.forceExperienceEnabled
+      : null;
     const cwdOverride = Object.prototype.hasOwnProperty.call(options, "cwdOverride")
       ? (typeof options.cwdOverride === "string" ? options.cwdOverride : "")
       : null;
     const memoryEnabled = typeof forceMemoryEnabled === "boolean"
       ? forceMemoryEnabled
       : this.memoryEnabled;
+    const experienceEnabled = typeof forceExperienceEnabled === "boolean"
+      ? forceExperienceEnabled
+      : this.experienceEnabled;
     const isZh = String(this._config.locale || "").startsWith("zh");
 
     const readFile = (filePath) => safeReadFile(filePath, "");
@@ -859,25 +925,27 @@ export class Agent {
         "This helps the user track your progress. Simple single-step tasks (answering questions, single lookups, simple edits) do not need todo_write."
     );
 
-    // 经验库引导
-    parts.push(isZh
-      ? "\n## 经验库\n\n" +
-        "你有一个经验库，记录着过往工作中踩过的坑和学到的教训。\n\n" +
-        "**查**：接到工作任务时，先调用 recall_experience 扫一眼索引，看有没有相关经验。\n\n" +
-        "**记**：工作中遇到以下情况时，用 record_experience 记录一条简洁的教训：\n" +
-        "- 用户纠正了你的错误\n" +
-        "- 用户表现出不满或反复强调某件事\n" +
-        "- 你自己试错后找到了正确做法\n" +
-        "- 巡检或自主工作时踩了坑"
-      : "\n## Experience Library\n\n" +
-        "You have an experience library that stores lessons from past work — mistakes, corrections, and discoveries.\n\n" +
-        "**Recall**: When you receive a work task, call recall_experience to scan the index for relevant experience first.\n\n" +
-        "**Record**: During work, use record_experience to log a concise lesson when:\n" +
-        "- The user corrects a mistake you made\n" +
-        "- The user shows frustration or repeatedly emphasizes something\n" +
-        "- You discover the right approach after trial and error\n" +
-        "- You hit a pitfall during patrol or autonomous work"
-    );
+    // 经验库引导。经验是独立能力：缺省关闭，开启后才把规则写入新 session 的 prompt。
+    if (experienceEnabled) {
+      parts.push(isZh
+        ? "\n## 经验库\n\n" +
+          "你有一个经验库，记录着过往工作中踩过的坑和学到的教训。\n\n" +
+          "**查**：接到工作任务时，先调用 recall_experience 扫一眼索引，看有没有相关经验。\n\n" +
+          "**记**：工作中遇到以下情况时，用 record_experience 记录一条简洁的教训：\n" +
+          "- 用户纠正了你的错误\n" +
+          "- 用户表现出不满或反复强调某件事\n" +
+          "- 你自己试错后找到了正确做法\n" +
+          "- 巡检或自主工作时踩了坑"
+        : "\n## Experience Library\n\n" +
+          "You have an experience library that stores lessons from past work — mistakes, corrections, and discoveries.\n\n" +
+          "**Recall**: When you receive a work task, call recall_experience to scan the index for relevant experience first.\n\n" +
+          "**Record**: During work, use record_experience to log a concise lesson when:\n" +
+          "- The user corrects a mistake you made\n" +
+          "- The user shows frustration or repeatedly emphasizes something\n" +
+          "- You discover the right approach after trial and error\n" +
+          "- You hit a pitfall during patrol or autonomous work"
+      );
+    }
 
     // 工具使用纪律（轻量优先）
     parts.push(isZh
@@ -887,6 +955,21 @@ export class Agent {
       : "\n## Tool Usage Discipline\n\n" +
         "When multiple tools can accomplish the same task, prefer the one with the lowest cost and least disruption. " +
         "Do not reach for heavy tools when simpler ones can do the job."
+    );
+
+    parts.push(isZh
+      ? "\n## 文件交付\n\n" +
+        "当用户要求你把文件发给他、呈现给他、交付给他，或者你创建、找到、收到一个需要交给用户的本地文件时，使用 stage_files 登记文件。stage 表示把文件归属到当前 session；桌面端可以显示卡片，Bridge 可以按平台能力发送，未来移动端也消费同一份 SessionFile。\n\n" +
+        "- 只传真实存在的本机绝对路径\n" +
+        "- 插件贡献的文件、浏览器截图、安装包、子 Agent 产物也遵守同一规则\n" +
+        "- 不要只在文本里写文件路径\n" +
+        "- 不要在 Agent 层判断具体平台怎么展示或发送，消费端会处理"
+      : "\n## File Delivery\n\n" +
+        "When the user asks you to send, present, or hand over a file, or when you create, find, or receive a local file that should reach the user, use stage_files to register it. Staging means assigning the file to the current session; desktop can render a card, Bridge can send according to platform capabilities, and future mobile clients can consume the same SessionFile.\n\n" +
+        "- Pass only real local absolute paths\n" +
+        "- Files contributed by plugins, browser screenshots, installers, and sub-agents follow the same rule\n" +
+        "- Do not merely write file paths in text\n" +
+        "- Do not decide platform-specific display or sending behavior in the Agent layer; consumers handle it"
     );
 
     if (this._isComputerUseAvailableForThisAgent()) {

@@ -52,6 +52,7 @@ export class TaskStore {
       status: "pending",
       failReason: null,
       files: [],
+      sessionFiles: [],
       favorited: false,
       imageWidth: null,
       imageHeight: null,

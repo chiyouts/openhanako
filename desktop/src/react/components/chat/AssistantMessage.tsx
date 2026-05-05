@@ -19,7 +19,7 @@ import { hanaFetch, hanaUrl } from '../../hooks/use-hana-fetch';
 import { openFilePreview, openSkillPreview } from '../../utils/file-preview';
 import { openMediaViewerForRef } from '../../utils/open-media-viewer';
 import { buildFileRefId, isImageOrSvgExt } from '../../utils/file-kind';
-import { openPreview } from '../../stores/artifact-actions';
+import { openPreview } from '../../stores/preview-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import styles from './Chat.module.css';
 
@@ -237,11 +237,12 @@ interface FileBlockCtx {
   blockIdx: number;
 }
 
-const ImageOutputCard = memo(function ImageOutputCard({ filePath, label, ext, ctx }: { filePath: string; label: string; ext: string; ctx: FileBlockCtx }) {
+const ImageOutputCard = memo(function ImageOutputCard({ filePath, label, ext, status, ctx }: { filePath: string; label: string; ext: string; status?: string; ctx: FileBlockCtx }) {
   const [failed, setFailed] = useState(false);
   const displayName = label || filePath.split('/').pop() || filePath;
 
-  if (failed) return <FileOutputCard filePath={filePath} label={label} ext={ext} ctx={ctx} />;
+  if (status === 'expired') return <FileOutputCard filePath={filePath} label={label} ext={ext} status={status} ctx={ctx} />;
+  if (failed) return <FileOutputCard filePath={filePath} label={label} ext={ext} status={status} ctx={ctx} />;
 
   return (
     <div
@@ -265,26 +266,34 @@ const ImageOutputCard = memo(function ImageOutputCard({ filePath, label, ext, ct
   );
 });
 
-const FileOutputCard = memo(function FileOutputCard({ filePath, label, ext, ctx }: { filePath: string; label: string; ext: string; ctx: FileBlockCtx }) {
+const FileOutputCard = memo(function FileOutputCard({ filePath, label, ext, status, ctx }: { filePath: string; label: string; ext: string; status?: string; ctx: FileBlockCtx }) {
+  const expired = status === 'expired';
+  const expiredLabel = window.t('chat.fileExpired');
   const handleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (expired) return;
     const p = window.platform;
     if (p?.openFile) p.openFile(filePath);
   };
+  const handlePreview = () => {
+    if (expired) return;
+    openFilePreview(filePath, label, ext, {
+      origin: 'session',
+      sessionPath: ctx.sessionPath,
+      messageId: ctx.messageId,
+      blockIdx: ctx.blockIdx,
+    });
+  };
 
   const displayName = label || filePath.split('/').pop() || filePath;
-  const typeLabel = EXT_LABELS[ext] || ext.toUpperCase();
+  const typeLabel = expired ? expiredLabel : (EXT_LABELS[ext] || ext.toUpperCase());
 
   return (
     <div
-      className={`${styles.fileOutputCard} ${styles.fileOutputPreviewable}`}
-      onClick={() => openFilePreview(filePath, label, ext, {
-        origin: 'session',
-        sessionPath: ctx.sessionPath,
-        messageId: ctx.messageId,
-        blockIdx: ctx.blockIdx,
-      })}
-      style={{ cursor: 'pointer' }}
+      className={`${styles.fileOutputCard}${expired ? ` ${styles.fileOutputExpired}` : ` ${styles.fileOutputPreviewable}`}`}
+      onClick={handlePreview}
+      style={{ cursor: expired ? 'default' : 'pointer' }}
+      aria-disabled={expired}
     >
       <div className={styles.fileOutputIcon}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -294,15 +303,19 @@ const FileOutputCard = memo(function FileOutputCard({ filePath, label, ext, ctx 
       </div>
       <div className={styles.fileOutputInfo}>
         <div className={styles.fileOutputName}>{displayName}</div>
-        <div className={styles.fileOutputType}>{typeLabel}{ext ? ` \u00b7 ${ext.toUpperCase()}` : ''}</div>
+        <div className={styles.fileOutputType}>
+          {typeLabel}{!expired && ext ? ` \u00b7 ${ext.toUpperCase()}` : ''}
+        </div>
       </div>
-      <button className={styles.fileOutputOpen} onClick={handleOpen} title={window.t('desk.openWithDefault')}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
-      </button>
+      {!expired && (
+        <button className={styles.fileOutputOpen} onClick={handleOpen} title={window.t('desk.openWithDefault')}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 });
@@ -316,25 +329,43 @@ const FileBlock = memo(function FileBlock({ block, sessionPath, messageId, block
   const ctx: FileBlockCtx = { sessionPath, messageId, blockIdx };
   // 扩展名识别统一走中心表（inferKindByExt via isImageOrSvgExt）
   return isImageOrSvgExt(block.ext)
-    ? <ImageOutputCard filePath={block.filePath} label={block.label} ext={block.ext} ctx={ctx} />
-    : <FileOutputCard filePath={block.filePath} label={block.label} ext={block.ext} ctx={ctx} />;
+    ? <ImageOutputCard filePath={block.filePath} label={block.label} ext={block.ext} status={block.status} ctx={ctx} />
+    : <FileOutputCard filePath={block.filePath} label={block.label} ext={block.ext} status={block.status} ctx={ctx} />;
 });
 
-// artifact block
+// COMPAT(create_artifact, remove no earlier than v0.133):
+// Old sessions may still contain `artifact` content blocks. New preview
+// surface consumes them as PreviewItem records.
 
-const ArtifactBlock = memo(function ArtifactBlock({ block }: { block: any }) {
+const LegacyArtifactBlock = memo(function LegacyArtifactBlock({ block }: { block: any }) {
   const handleClick = () => {
-    const artifact = { id: block.artifactId, type: block.artifactType, title: block.title, content: block.content, language: block.language };
-    openPreview(artifact);
+    const previewItem = {
+      id: block.artifactId,
+      type: block.artifactType,
+      title: block.title,
+      content: block.content,
+      language: block.language,
+      fileId: block.fileId,
+      filePath: block.filePath,
+      ext: block.ext,
+      mime: block.mime,
+      kind: block.kind,
+      storageKind: block.storageKind,
+      status: block.status,
+      missingAt: block.missingAt,
+    };
+    openPreview(previewItem);
   };
+  const expired = block.status === 'expired';
 
   return (
-    <div className={styles.artifactCard} onClick={handleClick} style={{ cursor: 'pointer' }}>
+    <div className={styles.legacyArtifactCard} onClick={handleClick} style={{ cursor: 'pointer' }}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
         <line x1="3" y1="9" x2="21" y2="9" />
       </svg>
       <span>{block.title || block.artifactType}</span>
+      {expired && <span className={styles.legacyArtifactExpiredBadge}>{window.t('chat.fileExpired')}</span>}
     </div>
   );
 });
@@ -466,7 +497,7 @@ const SettingsConfirmBlock = memo(function SettingsConfirmBlock({ block }: { blo
 // 注：`file` 与 `screenshot` 需 session 上下文（sessionPath/messageId/blockIdx），
 // 统一走 ContentBlockView 的 switch 内联分发，不注册到全局表中。
 BLOCK_RENDERERS['subagent'] = SubagentCard;
-BLOCK_RENDERERS['artifact'] = ArtifactBlock;
+BLOCK_RENDERERS['artifact'] = LegacyArtifactBlock;
 BLOCK_RENDERERS['plugin_card'] = PluginCardWrapper;
 BLOCK_RENDERERS['skill'] = SkillBlock;
 BLOCK_RENDERERS['cron_confirm'] = CronConfirmBlock;

@@ -154,6 +154,163 @@ describe("SessionCoordinator", () => {
     );
   });
 
+  it("passes the frozen experience state into the agent tool snapshot", async () => {
+    const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "experience.jsonl");
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      memoryEnabled: true,
+      experienceEnabled: false,
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      getToolsSnapshot: vi.fn(() => []),
+    };
+    fs.mkdirSync(agent.sessionDir, { recursive: true });
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        sessionManager: { getSessionFile: () => sessionFile },
+        subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
+      },
+    });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { name: "test-model" },
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => [],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+      }),
+      getSkills: () => null,
+      buildTools: vi.fn(() => ({ tools: [], customTools: [] })),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+
+    expect(agent.getToolsSnapshot).toHaveBeenCalledWith({
+      forceMemoryEnabled: true,
+      forceExperienceEnabled: false,
+      model: { name: "test-model" },
+    });
+  });
+
+  it("keeps legacy create_artifact out of fresh sessions but restores it for old sessions", async () => {
+    const freshSessionFile = path.join(tempDir, "agents", "hana", "sessions", "fresh.jsonl");
+    const restoredSessionFile = path.join(tempDir, "agents", "hana", "sessions", "restored.jsonl");
+    const restoredNewSessionFile = path.join(tempDir, "agents", "hana", "sessions", "restored-new.jsonl");
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      memoryEnabled: true,
+      experienceEnabled: false,
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      getToolsSnapshot: vi.fn((options = {}) => [
+        { name: "stage_files" },
+        ...(options.includeLegacyArtifactTool ? [{ name: "create_artifact" }] : []),
+      ]),
+    };
+    fs.mkdirSync(agent.sessionDir, { recursive: true });
+    const buildTools = vi.fn((_cwd, customTools) => ({ tools: [], customTools }));
+    createAgentSessionMock
+      .mockResolvedValueOnce({
+        session: {
+          sessionManager: { getSessionFile: () => freshSessionFile },
+          subscribe: vi.fn(() => vi.fn()),
+          setActiveToolsByName: vi.fn(),
+        },
+      })
+      .mockResolvedValueOnce({
+        session: {
+          sessionManager: { getSessionFile: () => restoredSessionFile },
+          subscribe: vi.fn(() => vi.fn()),
+          setActiveToolsByName: vi.fn(),
+        },
+      })
+      .mockResolvedValueOnce({
+        session: {
+          sessionManager: { getSessionFile: () => restoredNewSessionFile },
+          subscribe: vi.fn(() => vi.fn()),
+          setActiveToolsByName: vi.fn(),
+        },
+      });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { name: "test-model" },
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => [],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+      }),
+      getSkills: () => null,
+      buildTools,
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+    await coordinator.createSession(null, tempDir, true, null, { restore: true });
+    fs.writeFileSync(
+      path.join(agent.sessionDir, "session-meta.json"),
+      JSON.stringify({ [path.basename(restoredNewSessionFile)]: { toolNames: ["stage_files"] } }, null, 2),
+    );
+    await coordinator.createSession(
+      { getCwd: () => tempDir, getSessionFile: () => restoredNewSessionFile },
+      tempDir,
+      true,
+      null,
+      { restore: true },
+    );
+
+    expect(buildTools.mock.calls[0][1].map((tool) => tool.name)).toEqual(["stage_files"]);
+    expect(buildTools.mock.calls[1][1].map((tool) => tool.name)).toEqual([
+      "stage_files",
+      "create_artifact",
+    ]);
+    expect(buildTools.mock.calls[2][1].map((tool) => tool.name)).toEqual(["stage_files"]);
+    expect(agent.getToolsSnapshot.mock.calls[0][0]).not.toHaveProperty("includeLegacyArtifactTool", true);
+    expect(agent.getToolsSnapshot.mock.calls[1][0]).toMatchObject({
+      includeLegacyArtifactTool: true,
+    });
+    expect(agent.getToolsSnapshot.mock.calls[2][0]).not.toHaveProperty("includeLegacyArtifactTool", true);
+  });
+
   it("threads extra workspace folders into tools, prompt context, and session meta", async () => {
     const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "scope.jsonl");
     const agent = {
@@ -292,6 +449,195 @@ describe("SessionCoordinator", () => {
     const appendPrompt = createAgentSessionMock.mock.calls[0][0].resourceLoader.getAppendSystemPrompt();
     expect(appendPrompt.join("\n")).toContain("如果你使用的是 DeepSeek 模型");
     expect(appendPrompt.join("\n")).toContain("DeepSeek 输出契约");
+  });
+
+  it("restores the original prompt snapshot instead of rebuilding from current agent state", async () => {
+    const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "frozen-prompt.jsonl");
+    let currentAgentPrompt = "SYSTEM PROMPT V1";
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      config: { locale: "zh-CN" },
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: vi.fn(() => currentAgentPrompt),
+      tools: [],
+    };
+    fs.mkdirSync(agent.sessionDir, { recursive: true });
+    const freshSession = {
+      sessionManager: { getSessionFile: () => sessionFile },
+      subscribe: vi.fn(() => vi.fn()),
+      setActiveToolsByName: vi.fn(),
+      _baseSystemPrompt: "FINAL PROMPT V1",
+      agent: { state: { systemPrompt: "FINAL PROMPT V1" } },
+    };
+    const restoredSession = {
+      sessionManager: { getSessionFile: () => sessionFile },
+      subscribe: vi.fn(() => vi.fn()),
+      setActiveToolsByName: vi.fn(function () {
+        this._baseSystemPrompt = "FINAL PROMPT CURRENT";
+        this.agent.state.systemPrompt = "FINAL PROMPT CURRENT";
+      }),
+      _baseSystemPrompt: "FINAL PROMPT CURRENT",
+      agent: { state: { systemPrompt: "FINAL PROMPT CURRENT" } },
+    };
+    createAgentSessionMock
+      .mockResolvedValueOnce({ session: freshSession })
+      .mockResolvedValueOnce({ session: restoredSession });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { id: "claude-opus-4-5", provider: "anthropic", name: "Claude" },
+        availableModels: [{ id: "claude-opus-4-5", provider: "anthropic", name: "Claude" }],
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => ["BASE APPEND V1"],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+        getSkills: () => ({ skills: [{ name: "skill-v1" }], diagnostics: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [{ path: "/AGENTS.md", content: "rules v1" }] }),
+      }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+    currentAgentPrompt = "SYSTEM PROMPT V2";
+    await coordinator.createSession(
+      {
+        getCwd: () => tempDir,
+        getSessionFile: () => sessionFile,
+        buildSessionContext: () => ({ model: { provider: "anthropic", modelId: "claude-opus-4-5" } }),
+      },
+      tempDir,
+      true,
+      null,
+      { restore: true },
+    );
+
+    const restoreOptions = createAgentSessionMock.mock.calls[1][0];
+    expect(restoreOptions.resourceLoader.getSystemPrompt()).toBe("SYSTEM PROMPT V1");
+    const restoredAppend = restoreOptions.resourceLoader.getAppendSystemPrompt().join("\n");
+    expect(restoredAppend).toContain("BASE APPEND V1");
+    expect(restoredAppend).not.toContain("BASE APPEND V2");
+    expect(restoreOptions.resourceLoader.getSkills()).toEqual({ skills: [{ name: "skill-v1" }], diagnostics: [] });
+    expect(restoreOptions.resourceLoader.getAgentsFiles()).toEqual({ agentsFiles: [{ path: "/AGENTS.md", content: "rules v1" }] });
+    expect(restoredSession._baseSystemPrompt).toBe("FINAL PROMPT V1");
+    expect(restoredSession.agent.state.systemPrompt).toBe("FINAL PROMPT V1");
+    expect(agent.buildSystemPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores frozen append prompts so provider prompt patches survive cold restore", async () => {
+    const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "deepseek-restore.jsonl");
+    const deepseekModel = {
+      id: "deepseek/deepseek-v4-pro",
+      provider: "openrouter",
+      reasoning: true,
+      name: "DeepSeek V4 Pro",
+    };
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      config: { locale: "zh-CN" },
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      tools: [],
+    };
+    fs.mkdirSync(agent.sessionDir, { recursive: true });
+    createAgentSessionMock
+      .mockResolvedValueOnce({
+        session: {
+          sessionManager: { getSessionFile: () => sessionFile },
+          subscribe: vi.fn(() => vi.fn()),
+          setActiveToolsByName: vi.fn(),
+          _baseSystemPrompt: "FINAL DEEPSEEK",
+          agent: { state: { systemPrompt: "FINAL DEEPSEEK" } },
+          model: deepseekModel,
+        },
+      })
+      .mockResolvedValueOnce({
+        session: {
+          sessionManager: { getSessionFile: () => sessionFile },
+          subscribe: vi.fn(() => vi.fn()),
+          setActiveToolsByName: vi.fn(),
+          _baseSystemPrompt: "FINAL CURRENT",
+          agent: { state: { systemPrompt: "FINAL CURRENT" } },
+          model: deepseekModel,
+        },
+      });
+    let baseAppend = ["BASE APPEND V1"];
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: deepseekModel,
+        availableModels: [deepseekModel],
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "high",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => baseAppend,
+        getExtensions: () => ({ extensions: [], errors: [] }),
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [] }),
+      }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "high" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(null, tempDir, true);
+    baseAppend = ["BASE APPEND V2"];
+    await coordinator.createSession(
+      {
+        getCwd: () => tempDir,
+        getSessionFile: () => sessionFile,
+        buildSessionContext: () => ({ model: { provider: "openrouter", modelId: "deepseek/deepseek-v4-pro" } }),
+      },
+      tempDir,
+      true,
+      null,
+      { restore: true },
+    );
+
+    const appendPrompt = createAgentSessionMock.mock.calls[1][0].resourceLoader.getAppendSystemPrompt().join("\n");
+    expect(appendPrompt).toContain("BASE APPEND V1");
+    expect(appendPrompt).toContain("DeepSeek 输出契约");
+    expect(appendPrompt).not.toContain("BASE APPEND V2");
   });
 
   it("does not add the DeepSeek prompt patch when a non-DeepSeek session later switches models", async () => {
@@ -694,7 +1040,10 @@ describe("SessionCoordinator", () => {
 
     await coordinator.executeIsolated("background check");
 
-    expect(getToolsSnapshot).toHaveBeenCalledWith({ forceMemoryEnabled: true });
+    expect(getToolsSnapshot).toHaveBeenCalledWith({
+      forceMemoryEnabled: true,
+      model: { id: "default-model", provider: "test" },
+    });
     expect(buildTools.mock.calls[0][1].map((tool) => tool.name)).toEqual([
       "plain_custom",
       "search_memory",

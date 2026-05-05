@@ -74,8 +74,15 @@ interface LoadModelsParams {
   apiKey: string;
 }
 
+export interface DiscoveredModel {
+  id: string;
+  name?: string;
+  context?: number | null;
+  maxOutput?: number | null;
+}
+
 export interface LoadModelsResult {
-  models: { id: string }[];
+  models: DiscoveredModel[];
   error?: string;
 }
 
@@ -99,16 +106,39 @@ export async function loadModels({ hanaFetch, providerName, providerUrl, provide
 
 // ── Save model + utility models ──
 
+export interface AddedModelObject {
+  id: string;
+  name?: string;
+  context?: number;
+  maxOutput?: number;
+  image?: boolean;
+  reasoning?: boolean;
+}
+
+export type AddedModelEntry = string | AddedModelObject;
+
 interface SaveModelParams {
   hanaFetch: HanaFetch;
   selectedModel: string;
-  fetchedModels: { id: string }[];
   providerName: string;
+  addedModels: AddedModelEntry[];
   selectedUtility: string;
   selectedUtilityLarge: string;
 }
 
-export async function saveModel({ hanaFetch, selectedModel, fetchedModels, providerName, selectedUtility, selectedUtilityLarge }: SaveModelParams): Promise<void> {
+function compactModelEntry(entry: AddedModelEntry): AddedModelEntry {
+  if (typeof entry === 'string') return entry;
+  const next: AddedModelObject = { id: entry.id };
+  const name = entry.name?.trim();
+  if (name) next.name = name;
+  if (typeof entry.context === 'number' && Number.isFinite(entry.context)) next.context = entry.context;
+  if (typeof entry.maxOutput === 'number' && Number.isFinite(entry.maxOutput)) next.maxOutput = entry.maxOutput;
+  if (typeof entry.image === 'boolean') next.image = entry.image;
+  if (typeof entry.reasoning === 'boolean') next.reasoning = entry.reasoning;
+  return Object.keys(next).length === 1 ? next.id : next;
+}
+
+export async function saveModel({ hanaFetch, selectedModel, providerName, addedModels, selectedUtility, selectedUtilityLarge }: SaveModelParams): Promise<void> {
   // Save chat model
   await hanaFetch(`/api/agents/${AGENT_ID}/config`, {
     method: 'PUT',
@@ -116,13 +146,13 @@ export async function saveModel({ hanaFetch, selectedModel, fetchedModels, provi
     body: JSON.stringify({ models: { chat: { id: selectedModel, provider: providerName } } }),
   });
 
-  // Save model list to provider
-  const modelIds = fetchedModels.map(m => m.id);
+  // Save only the user's explicit Added Models selection to provider.
+  const modelEntries = addedModels.map(compactModelEntry);
   await hanaFetch(`/api/agents/${AGENT_ID}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      providers: { [providerName]: { models: modelIds } },
+      providers: { [providerName]: { models: modelEntries } },
     }),
   });
 

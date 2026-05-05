@@ -119,7 +119,8 @@
     "stop": "停止",
     "browserScreenshot": "ブラウザスクリーンショット",
     "compacting": "コンテキスト圧縮中",
-    "visionAuxiliary": "補助ビジョン"
+    "visionAuxiliary": "補助ビジョン",
+    "fileExpired": "ファイル期限切れ"
   },
   "time": {
     "justNow": "たった今",
@@ -491,8 +492,12 @@
   },
   "model": {
     "unknown": "不明なモデル",
+    "notSelected": "モデルを選択",
+    "noneConfigured": "モデル未設定",
+    "unavailable": "モデルは利用できません",
     "offline": "オフライン",
-    "switchFailed": "モデルの切り替えに失敗しました"
+    "switchFailed": "モデルの切り替えに失敗しました",
+    "switchWhileStreaming": "返信中はモデルを切り替えられません"
   },
   "splash": {
     "lines": [
@@ -913,6 +918,9 @@
     "experience": {
       "title": "経験",
       "hint": "エージェントが学んだ教訓をカテゴリ別に整理しています。作業前に関連する経験を確認します",
+      "toggleLabel": "経験を有効化",
+      "toggleHint": "デフォルトではオフです。オンにすると、アシスタントは作業経験を自動で要約して成長しますが、コンテキストを汚染するリスクがあります。",
+      "paused": "経験は一時停止中です。既存の内容は保持されますが、アシスタントは読み取りも記録もできません。",
       "empty": "経験はまだありません",
       "edit": "編集",
       "deleteCategory": "カテゴリを削除"
@@ -1130,8 +1138,24 @@
       "title": "チャットモデルを選択",
       "subtitle": "メインで使用するモデルです。賢くて高性能なものを選んでください。",
       "loading": "モデルを取得中...",
-      "searchPlaceholder": "モデルを検索...",
       "empty": "モデルが見つかりません",
+      "addedModels": "追加済みモデル",
+      "noAddedModels": "まだモデルが追加されていません",
+      "addModel": "モデルを追加",
+      "addModelSearchPlaceholder": "追加するモデルを検索...",
+      "mainModel": "メインモデル",
+      "setMainModel": "メインにする",
+      "editModel": "モデルを編集",
+      "removeModel": "モデルを削除",
+      "editTitle": "モデルを編集",
+      "displayName": "表示名",
+      "contextLength": "コンテキスト長",
+      "maxOutput": "最大出力",
+      "imageInput": "画像入力",
+      "reasoning": "推論モデル",
+      "cancelEdit": "キャンセル",
+      "saveEdit": "保存",
+      "invalidNumber": "有効な正の整数を入力してください",
       "utility": "ユーティリティモデル",
       "utilityHint": "要約、事実抽出など。高速で安価なモデルを選んでください",
       "utilityLarge": "ユーティリティ（大）",
@@ -1162,6 +1186,10 @@
       "jian": {
         "title": "Jian",
         "desc": "任意のフォルダに jian.md を置いて指示を書いてください。\n巡回時に見つけて自動的に実行します。"
+      },
+      "agents": {
+        "title": "複数 Agent の協作",
+        "desc": "異なる Agent がそれぞれのタスクを担当し、作業を引き継げます。\n複雑な作業を分解するのに向いています。"
       },
       "finish": "さあ、始めましょう"
     }
@@ -1390,6 +1418,7 @@
     "expEmptyInput": "カテゴリ名と経験内容は空にできません。",
     "expDuplicate": "この経験は既に記録されています。",
     "expRecorded": "経験を記録しました [{category}]：{content}",
+    "expPaused": "経験は一時停止中です。",
     "outputFileNeedPaths": "filepaths 配列または filePath が必要です。",
     "outputFileNotAbsolute": "パスは絶対パスである必要があります: {path}",
     "outputFileNotFound": "ファイルが見つかりません: {path}",
@@ -1669,10 +1698,10 @@
     },
     "outputFile": {
       "label": "ファイルを届ける",
-      "description": "誰か（ユーザー、agents）のためにファイルを正常に作成した後、またはファイルの提供を求められたときに、このツールを呼び出して会話内にファイルを提示します。ファイルが存在するときのみ呼び出し、ファイルが見つからないか作成に失敗した場合は呼び出さないでください。テキストでファイルパスに言及するだけでなく、必ずこのツールを呼び出してください。",
-      "filepathsDesc": "ファイルの絶対パス配列",
-      "filePathDesc": "（互換）単一ファイルの絶対パス",
-      "labelDesc": "（互換）ユーザーに表示するファイル名"
+      "description": "ローカルファイルをユーザーへ渡す、デスクトップで提示する、または Bridge/リモートプラットフォーム経由で送る必要があるときに、このツールでファイルを登録します。ファイルを作成した後、要求されたローカルファイルを見つけた後、ブラウザのスクリーンショット、インストーラー/パッケージ元、プラグインやサブエージェントが交付対象のファイルを出した後に使います。実在するローカル絶対パスの場合だけ呼び出してください。返信文にパスだけを書かず、具体的なプラットフォームでの表示や送信方法を Agent 側で判断しないでください。消費側が能力に応じて処理します。",
+      "filepathsDesc": "交付するローカルファイルの絶対パス配列。見つけたファイルはここに渡し、StageFile がデスクトップ、Bridge、将来のモバイル消費側向けに登録します。",
+      "filePathDesc": "（互換）単一ローカルファイルの絶対パス。新しい呼び出しでは filepaths を優先してください。",
+      "labelDesc": "（互換）ユーザーに表示するファイル名。通常は省略でき、既定でファイル名が使われます。"
     },
     "subagent": {
       "label": "サブエージェントを起動",
@@ -1707,9 +1736,13 @@
       "locale": "言語",
       "timezone": "タイムゾーン",
       "timezoneDesc": "IANA タイムゾーン（例: Asia/Shanghai）",
+      "bridgeMediaPublicBaseUrl": "Bridge ファイル公開 URL",
+      "bridgeMediaPublicBaseUrlDesc": "外部プラットフォームがローカル staged ファイルを取得するための公開 HTTP/HTTPS base URL。通常はリバースプロキシまたは tunnel で提供します。空にすると HANA_BRIDGE_PUBLIC_BASE_URL にフォールバックします。",
       "thinkingBudget": "思考の深さ",
       "memory": "メモリシステム",
       "memoryDesc": "現在の Agent のメモリ機能を有効/無効にする",
+      "experience": "経験",
+      "experienceDesc": "現在の Agent の経験ライブラリを有効/無効にする",
       "agentName": "Agent 名",
       "userName": "ユーザー名",
       "workingDir": "作業ディレクトリ",

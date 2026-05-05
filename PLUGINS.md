@@ -142,7 +142,7 @@ export const description = "...";       // 必须
 export const parameters = { ... };      // JSON Schema，可选
 export async function execute(input, toolCtx) {  // 必须
   // input: 用户传入的参数
-  // toolCtx: { pluginId, pluginDir, dataDir, bus, config, log }
+  // toolCtx: { pluginId, pluginDir, dataDir, sessionPath, bus, config, log, registerSessionFile, stageFile }
   return "result";
 }
 ```
@@ -152,18 +152,36 @@ export async function execute(input, toolCtx) {  // 必须
 
 #### 媒体交付
 
-工具需要交付文件时，在返回值的 `details` 中声明 `media`：
+工具需要交付文件时，使用 `toolCtx.stageFile()` 把本地文件登记成当前 session 的 `SessionFile`，并直接复用它返回的 `mediaItem`：
 
 ```js
+const staged = toolCtx.stageFile({
+  sessionPath: toolCtx.sessionPath,
+  filePath: "/path/to/image.png",
+  label: "image.png",
+});
+
 return {
   content: [{ type: "text", text: "已生成图片" }],
   details: {
-    media: { mediaUrls: ["/path/to/image.png"] },
+    media: {
+      items: [staged.mediaItem],
+    },
   },
 };
 ```
 
-框架会自动提取 `details.media.mediaUrls` 并根据上下文投递（桌面渲染文件卡片，bridge 发送给对方）。工具本身不需要感知运行环境。
+框架会自动提取 `details.media` 并根据上下文投递：桌面端渲染文件卡片，Bridge 按平台能力发送给对方，未来移动端也消费同一份 `SessionFile` 身份。新协议优先消费 `details.media.items` 里的结构化 `session_file`；`mediaUrls` 只保留为兼容旧工具和远程 URL 的字段，不建议新插件使用，计划不早于 v0.133 移除。本地文件不得通过 `MEDIA:/path`、`file://` 或 `mediaUrls` 绕过 StageFile，必须先登记成 `session_file`。内置 `stage_files` 会自动登记 SessionFile 并返回结构化媒体项，插件交付用户可见文件时应复用这条语义，不要让插件自己判断运行平台，也不要自己创建私有文件卡片来替代 `SessionFile`。
+
+插件直接产出本地文件时，调用 `toolCtx.stageFile({ sessionPath, filePath, label })` 绑定到当前 session，并得到可直接放入 `details.media.items` 的 `mediaItem`。`registerSessionFile` 仍保留为低层兼容 API，新插件应优先使用 `stageFile`，这样文件归属和媒体交付不会被拆散。`sessionPath` 必须显式传入，`filePath` 必须是绝对路径。框架会把这类文件记为 `storageKind: "plugin_data"`，它们属于插件数据或生成结果，不会被 session 临时缓存清理器删除。插件不应把任意本地路径标成临时缓存，缓存生命周期由框架拥有。
+
+几条边界：
+
+- 插件生成的文件：`origin: "plugin_output"`，走 `storageKind: "plugin_data"`
+- 插件异步生成的文件：后台任务完成时仍要登记 `SessionFile`；如果工具先返回 card，card 只负责展示任务状态和结果引用
+- 用户上传、Bridge 入站、浏览器截图、旧 `create_artifact` 兼容工具输出等临时产物由框架登记为 `managed_cache`
+- 安装来源（`.skill`、plugin 目录或 zip）：由安装 route 登记为 `install_source`
+- Card 负责呈现交互界面，文件仍然是资源；卡片需要引用文件时，应引用 `SessionFile`，不要把文件内容塞进 card payload
 
 #### 可视化卡片
 
@@ -189,6 +207,7 @@ return {
 - `pluginId` 由框架自动注入，工具无需填写
 - 卡片在工具完成时立即渲染，不依赖 LLM 行为
 - 卡片数据随 toolResult 存入 JSONL，会话重载时自动恢复
+- 卡片本身可以随 Bridge 或移动端做不同呈现；卡片关联的文件仍通过 `SessionFile` 生命周期恢复
 
 ### Skills（知识注入）
 
