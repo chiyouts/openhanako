@@ -1169,6 +1169,18 @@
       "back": "上一步",
       "next": "下一步"
     },
+    "workspace": {
+      "title": "建立工作空間",
+      "subtitle": "我會把預設工作區放在桌面上的 OH-WorkSpace。\n你也可以選擇一個已有資料夾。",
+      "defaultLabel": "預設工作空間",
+      "customLabel": "自選工作空間",
+      "defaultHint": "如果不選擇其他資料夾，將自動建立這個目錄。\n巡檢預設關閉，之後可在設定中開啟。",
+      "choose": "選擇資料夾",
+      "useDefault": "使用預設",
+      "back": "上一步",
+      "next": "下一步",
+      "saving": "儲存中..."
+    },
     "tutorial": {
       "title": "準備就緒 ✿",
       "memory": {
@@ -1220,6 +1232,25 @@
     "copy": "複製",
     "paste": "貼上",
     "selectAll": "全選"
+  },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "右側工作區",
+      "sessionFiles": "Session 檔案",
+      "workspace": "工作空間"
+    },
+    "sessionFiles": {
+      "title": "Session 檔案",
+      "empty": "這個 Session 還沒有登記檔案",
+      "status": {
+        "available": "可用",
+        "expired": "已過期"
+      }
+    },
+    "jian": {
+      "collapse": "收起箋",
+      "expand": "展開箋"
+    }
   },
   "desk": {
     "title": "書桌",

@@ -1219,6 +1219,18 @@
       "back": "上一步",
       "next": "下一步"
     },
+    "workspace": {
+      "title": "创建工作空间",
+      "subtitle": "我会把默认工作区放在桌面上的 OH-WorkSpace。\n你也可以选择一个已有文件夹。",
+      "defaultLabel": "默认工作空间",
+      "customLabel": "自选工作空间",
+      "defaultHint": "如果不选择其他文件夹，将自动创建这个目录。\n巡检默认关闭，之后可在设置中开启。",
+      "choose": "选择文件夹",
+      "useDefault": "使用默认",
+      "back": "上一步",
+      "next": "下一步",
+      "saving": "保存中..."
+    },
     "tutorial": {
       "title": "准备就绪 ✿",
       "memory": {
@@ -1270,6 +1282,25 @@
     "copy": "复制",
     "paste": "粘贴",
     "selectAll": "全选"
+  },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "右侧工作区",
+      "sessionFiles": "Session 文件",
+      "workspace": "工作空间"
+    },
+    "sessionFiles": {
+      "title": "Session 文件",
+      "empty": "这个 Session 还没有登记文件",
+      "status": {
+        "available": "可用",
+        "expired": "已过期"
+      }
+    },
+    "jian": {
+      "collapse": "收起笺",
+      "expand": "展开笺"
+    }
   },
   "desk": {
     "title": "书桌",

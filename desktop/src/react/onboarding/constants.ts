@@ -3,7 +3,7 @@
  */
 
 export const AGENT_ID = 'hanako';
-export const TOTAL_STEPS = 6;
+export const TOTAL_STEPS = 7;
 
 export const LOCALES = [
   { value: 'zh-CN', label: '简体中文' },

@@ -1169,6 +1169,18 @@
       "back": "戻る",
       "next": "次へ"
     },
+    "workspace": {
+      "title": "ワークスペースを作成",
+      "subtitle": "既定のワークスペースはデスクトップの OH-WorkSpace です。\n既存のフォルダーを選ぶこともできます。",
+      "defaultLabel": "既定のワークスペース",
+      "customLabel": "選択したワークスペース",
+      "defaultHint": "ほかのフォルダーを選ばない場合、このディレクトリを自動作成します。\n巡回は既定でオフです。あとで設定からオンにできます。",
+      "choose": "フォルダーを選択",
+      "useDefault": "既定を使う",
+      "back": "戻る",
+      "next": "次へ",
+      "saving": "保存中..."
+    },
     "tutorial": {
       "title": "準備完了 ✿",
       "memory": {
@@ -1220,6 +1232,25 @@
     "copy": "コピー",
     "paste": "貼り付け",
     "selectAll": "すべて選択"
+  },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "右側ワークスペース",
+      "sessionFiles": "セッションファイル",
+      "workspace": "ワークスペース"
+    },
+    "sessionFiles": {
+      "title": "セッションファイル",
+      "empty": "この Session にはまだファイルが登録されていません",
+      "status": {
+        "available": "利用可能",
+        "expired": "期限切れ"
+      }
+    },
+    "jian": {
+      "collapse": "Jian をたたむ",
+      "expand": "Jian を開く"
+    }
   },
   "desk": {
     "title": "デスク",

@@ -61,6 +61,11 @@ search:
 skills:
   enabled: ["skill-creator"]         # 启用的 skill 名称，如 ["pdf", "literary-craft"]
 
+# 工作书桌
+desk:
+  heartbeat_enabled: false           # 巡检默认关闭，用户明确开启后才会自动巡检
+  heartbeat_interval: 31             # 巡检间隔（分钟）
+
 # 频道系统（agent 间协作通信）
 channels:
   enabled: false                     # 是否参与频道轮转

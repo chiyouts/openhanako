@@ -16,6 +16,10 @@ import {
   clearCompiledMemoryArtifacts,
   clearCompiledSummarySources,
 } from "../../lib/memory/compiled-memory-state.js";
+import {
+  ensureDefaultWorkspace,
+  resolveDefaultWorkspacePath,
+} from "../../shared/default-workspace.js";
 import { splitByScope, injectGlobalFields } from '../../shared/config-scope.js';
 import { mergeWorkspaceHistory, normalizeWorkspacePath } from "../../shared/workspace-history.js";
 import { resolveAgent, resolveAgentStrict, AgentNotFoundError } from "../utils/resolve-agent.js";
@@ -118,6 +122,18 @@ export function createConfigRoute(engine) {
       const cwdHistory = mergeWorkspaceHistory(engine.config.cwd_history, [folder]);
       await engine.updateConfig({ cwd_history: cwdHistory });
       return c.json({ ok: true, cwd_history: cwdHistory });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  route.get("/config/default-workspace", async (c) => {
+    return c.json({ path: resolveDefaultWorkspacePath() });
+  });
+
+  route.post("/config/default-workspace", async (c) => {
+    try {
+      return c.json({ ok: true, path: ensureDefaultWorkspace() });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

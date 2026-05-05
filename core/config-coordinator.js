@@ -6,11 +6,10 @@
  * 不持有 engine 引用，通过构造器注入依赖。
  */
 import fs from "fs";
-import path from "path";
-import os from "os";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { findModel, parseModelRef, requireModelRef } from "../shared/model-ref.js";
 import { t } from "../server/i18n.js";
+import { ensureDefaultWorkspace } from "../shared/default-workspace.js";
 
 const log = createModuleLogger("config");
 
@@ -142,8 +141,8 @@ export class ConfigCoordinator {
       if (folder && fs.existsSync(folder)) return folder;
     }
 
-    // 3. 硬编码 fallback
-    return path.join(os.homedir(), "Desktop");
+    // 3. 显式默认工作区，避免把整个桌面暴露成工作目录
+    return ensureDefaultWorkspace();
   }
 
   /**

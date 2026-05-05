@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { saveModel } from '../onboarding-actions';
+import { saveModel, saveWorkspace } from '../onboarding-actions';
 import type { HanaFetch } from '../onboarding-actions';
 
 function jsonResponse(body: unknown): Response {
@@ -40,5 +40,32 @@ describe('onboarding saveModel', () => {
       'deepseek-v4-flash',
       { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     ]);
+  });
+});
+
+describe('onboarding saveWorkspace', () => {
+  it('creates the default workspace before saving the agent desk config', async () => {
+    const hanaFetch = vi.fn<HanaFetch>(async () => jsonResponse({ ok: true }));
+
+    await saveWorkspace({
+      hanaFetch,
+      workspacePath: '/Users/test/Desktop/OH-WorkSpace',
+      defaultPath: '/Users/test/Desktop/OH-WorkSpace',
+    });
+
+    expect(hanaFetch).toHaveBeenNthCalledWith(1, '/api/config/default-workspace', {
+      method: 'POST',
+    });
+    expect(hanaFetch).toHaveBeenNthCalledWith(2, '/api/agents/hanako/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        desk: {
+          home_folder: '/Users/test/Desktop/OH-WorkSpace',
+          heartbeat_enabled: false,
+          heartbeat_interval: 31,
+        },
+      }),
+    });
   });
 });

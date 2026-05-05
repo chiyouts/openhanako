@@ -7,11 +7,14 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
 import YAML from "js-yaml";
 import { safeCopyDir } from '../shared/safe-fs.js';
 import { AppError } from '../shared/errors.js';
 import { errorBus } from '../shared/error-bus.js';
+import {
+  DEFAULT_HEARTBEAT_INTERVAL_MINUTES,
+  ensureDefaultWorkspace,
+} from "../shared/default-workspace.js";
 
 /**
  * 确保 ~/.hanako/ 数据目录就绪
@@ -85,11 +88,14 @@ function seedDefaultAgent(agentsDir, productDir) {
     fs.copyFileSync(configSrc, cfgDest);
   }
   // 写入默认工作空间（per-agent，不存全局）
-  try {
-    const raw = fs.existsSync(cfgDest) ? YAML.load(fs.readFileSync(cfgDest, "utf-8")) || {} : {};
-    raw.desk = { ...(raw.desk || {}), home_folder: path.join(os.homedir(), "Desktop") };
-    fs.writeFileSync(cfgDest, YAML.dump(raw, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '"' }), "utf-8");
-  } catch {}
+  const raw = fs.existsSync(cfgDest) ? YAML.load(fs.readFileSync(cfgDest, "utf-8")) || {} : {};
+  raw.desk = {
+    ...(raw.desk || {}),
+    home_folder: ensureDefaultWorkspace(),
+    heartbeat_enabled: false,
+    heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL_MINUTES,
+  };
+  fs.writeFileSync(cfgDest, YAML.dump(raw, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '"' }), "utf-8");
 
 
   // 与 createAgent 同策略：按 yuan（= agentId）+ locale 优先，通用 example 兜底。

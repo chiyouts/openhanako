@@ -1169,6 +1169,18 @@
       "back": "뒤로",
       "next": "다음"
     },
+    "workspace": {
+      "title": "워크스페이스 만들기",
+      "subtitle": "기본 워크스페이스는 데스크톱의 OH-WorkSpace입니다.\n기존 폴더를 직접 선택할 수도 있습니다.",
+      "defaultLabel": "기본 워크스페이스",
+      "customLabel": "선택한 워크스페이스",
+      "defaultHint": "다른 폴더를 선택하지 않으면 이 디렉터리를 자동으로 만듭니다.\n순찰은 기본적으로 꺼져 있으며 나중에 설정에서 켤 수 있습니다.",
+      "choose": "폴더 선택",
+      "useDefault": "기본값 사용",
+      "back": "뒤로",
+      "next": "다음",
+      "saving": "저장 중..."
+    },
     "tutorial": {
       "title": "준비 완료 ✿",
       "memory": {
@@ -1220,6 +1232,25 @@
     "copy": "복사",
     "paste": "붙여넣기",
     "selectAll": "모두 선택"
+  },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "오른쪽 작업공간",
+      "sessionFiles": "세션 파일",
+      "workspace": "작업공간"
+    },
+    "sessionFiles": {
+      "title": "세션 파일",
+      "empty": "이 Session에는 아직 등록된 파일이 없어요",
+      "status": {
+        "available": "사용 가능",
+        "expired": "만료됨"
+      }
+    },
+    "jian": {
+      "collapse": "Jian 접기",
+      "expand": "Jian 펼치기"
+    }
   },
   "desk": {
     "title": "책상",

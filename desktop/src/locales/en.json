@@ -1214,6 +1214,18 @@
       "back": "Back",
       "next": "Next"
     },
+    "workspace": {
+      "title": "Create a Workspace",
+      "subtitle": "The default workspace will be OH-WorkSpace on your Desktop.\nYou can choose another existing folder.",
+      "defaultLabel": "Default workspace",
+      "customLabel": "Chosen workspace",
+      "defaultHint": "If you do not choose another folder, this directory will be created automatically.\nPatrol is off by default and can be enabled later in settings.",
+      "choose": "Choose folder",
+      "useDefault": "Use default",
+      "back": "Back",
+      "next": "Next",
+      "saving": "Saving..."
+    },
     "tutorial": {
       "title": "All Set ✿",
       "memory": {
@@ -1265,6 +1277,25 @@
     "copy": "Copy",
     "paste": "Paste",
     "selectAll": "Select All"
+  },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "Right workspace",
+      "sessionFiles": "Session Registry Files",
+      "workspace": "Workspace"
+    },
+    "sessionFiles": {
+      "title": "Session Registry Files",
+      "empty": "No files have been registered in this session yet.",
+      "status": {
+        "available": "Available",
+        "expired": "Expired"
+      }
+    },
+    "jian": {
+      "collapse": "Collapse Jian",
+      "expand": "Expand Jian"
+    }
   },
   "desk": {
     "title": "Desk",

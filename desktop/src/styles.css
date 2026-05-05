@@ -3233,6 +3233,70 @@ html[data-platform="linux"] .onboarding {
     max-width: 100%;
 }
 
+/* ── Workspace step ── */
+.ob-workspace-card {
+    width: 100%;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+}
+.ob-workspace-icon {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-secondary);
+}
+.ob-workspace-icon svg {
+    width: 24px;
+    height: 24px;
+}
+.ob-workspace-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.ob-workspace-label {
+    color: var(--text);
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+.ob-workspace-path {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding: 7px 9px;
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+.ob-workspace-hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.55;
+}
+.ob-workspace-actions {
+    width: 100%;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
 /* ── Tutorial cards ── */
 .tutorial-cards {
     display: flex;
