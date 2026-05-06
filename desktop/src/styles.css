@@ -146,6 +146,41 @@ body {
     line-height: 1.7;
     font-size: 15px;
     -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* UI 文本默认不可选；真正的文本/编辑内容显式放开。 */
+input,
+textarea,
+select,
+option,
+[contenteditable="true"],
+[contenteditable="true"] *,
+.cm-editor,
+.cm-editor *,
+.md-content,
+.md-content *,
+.preview-markdown,
+.preview-markdown *,
+.preview-code,
+.preview-code *,
+.preview-csv,
+.preview-csv *,
+.preview-docx,
+.preview-docx *,
+[data-selectable="true"],
+[data-selectable="true"] * {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.md-content button,
+.md-content .copy-btn,
+.preview-markdown button,
+.preview-code .copy-btn {
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* 焦点环：屏蔽鼠标点击后的系统 -webkit-focus-ring-color（跟随 macOS 强调色，常出现橙色），
