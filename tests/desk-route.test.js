@@ -45,7 +45,19 @@ describe("desk route", () => {
       });
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, name: "sample-skill" });
+      expect(await res.json()).toEqual({
+        ok: true,
+        name: "sample-skill",
+        installedSkillSource: {
+          kind: "skill_source",
+          owner: "workspace",
+          skillName: "sample-skill",
+          filePath: path.join(cwd, ".agents", "skills", "sample-skill", "SKILL.md"),
+          baseDir: path.join(cwd, ".agents", "skills", "sample-skill"),
+          editable: true,
+          readonly: false,
+        },
+      });
       expect(extractZipMock).toHaveBeenCalledTimes(1);
       expect(extractZipMock).toHaveBeenCalledWith(zipPath, expect.stringMatching(/_tmp_/));
       expect(fs.existsSync(path.join(cwd, ".agents", "skills", "sample-skill", "SKILL.md"))).toBe(true);

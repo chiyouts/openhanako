@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
 import { extractZip } from "../../lib/extract-zip.js";
 import { parseSkillMetadata } from "../../lib/skills/skill-metadata.js";
+import { createSkillSourceIdentity } from "../../lib/skills/skill-file-identity.js";
 import { WORKSPACE_SKILL_DIRS } from "../../shared/workspace-skill-paths.js";
 import { t } from "../i18n.js";
 import { resolveAgent } from "../utils/resolve-agent.js";
@@ -55,6 +56,23 @@ function isApprovedDir(dir, engine) {
 
 function defaultDeskDir(engine) {
   return engine.defaultDeskCwd || engine.homeCwd || engine.deskCwd;
+}
+
+function workspaceSkillSource(skillDir, fallbackName) {
+  const skillFile = path.join(skillDir, "SKILL.md");
+  let skillName = fallbackName;
+  try {
+    if (fs.existsSync(skillFile)) {
+      const content = fs.readFileSync(skillFile, "utf-8");
+      skillName = parseSkillMetadata(content, fallbackName).name || fallbackName;
+    }
+  } catch {}
+  return createSkillSourceIdentity({
+    owner: "workspace",
+    skillName,
+    filePath: skillFile,
+    baseDir: skillDir,
+  });
 }
 
 /** 列出工作空间目录下的文件（异步） */
@@ -440,7 +458,11 @@ export function createDeskRoute(engine, hub) {
         if (realPath(cwd) === realPath(engine.deskCwd)) {
           await engine.syncWorkspaceSkillPaths(cwd, { reload: true, emitEvent: true, force: true });
         }
-        return c.json({ ok: true, name: destName });
+        return c.json({
+          ok: true,
+          name: destName,
+          installedSkillSource: workspaceSkillSource(dest, destName),
+        });
       }
 
       const ext = path.extname(filePath).toLowerCase();
@@ -471,7 +493,11 @@ export function createDeskRoute(engine, hub) {
         if (realPath(cwd) === realPath(engine.deskCwd)) {
           await engine.syncWorkspaceSkillPaths(cwd, { reload: true, emitEvent: true, force: true });
         }
-        return c.json({ ok: true, name: skillName });
+        return c.json({
+          ok: true,
+          name: skillName,
+          installedSkillSource: workspaceSkillSource(path.join(skillsDir, skillName), skillName),
+        });
       }
 
       return c.json({ error: "Unsupported file type. Use folder, .zip or .skill" }, 400);

@@ -76,6 +76,7 @@ export const BLOCK_EXTRACTORS = {
       type: "skill",
       skillName: details.skillName,
       skillFilePath: details.skillFilePath || "",
+      ...(details.installedSkillSource ? { installedSkillSource: details.installedSkillSource } : {}),
       ...(installedFile?.fileId || installedFile?.id ? { fileId: installedFile.fileId || installedFile.id } : {}),
       ...(installedFile ? { installedFile } : {}),
     }];

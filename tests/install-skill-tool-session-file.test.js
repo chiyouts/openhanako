@@ -69,6 +69,15 @@ describe("install_skill session file ownership", () => {
     expect(result.details).toMatchObject({
       skillName: "demo-skill",
       skillFilePath,
+      installedSkillSource: {
+        kind: "skill_source",
+        owner: "learned",
+        skillName: "demo-skill",
+        filePath: skillFilePath,
+        baseDir: path.dirname(skillFilePath),
+        editable: true,
+        readonly: false,
+      },
       installedFile: {
         id: "sf_installed_skill",
         fileId: "sf_installed_skill",

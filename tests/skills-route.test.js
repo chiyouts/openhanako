@@ -249,6 +249,15 @@ describe("skills route", () => {
     expect(data).toMatchObject({
       ok: true,
       skill: { name: "sample-skill" },
+      installedSkillSource: {
+        kind: "skill_source",
+        owner: "user",
+        skillName: "sample-skill",
+        filePath: path.join(userSkillsDir, "sample-skill", "SKILL.md"),
+        baseDir: path.join(userSkillsDir, "sample-skill"),
+        editable: true,
+        readonly: false,
+      },
       sourceFile: {
         id: "sf_skill_source",
         fileId: "sf_skill_source",
