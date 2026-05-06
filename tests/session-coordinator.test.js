@@ -545,7 +545,7 @@ describe("SessionCoordinator", () => {
     expect(agent.buildSystemPrompt).toHaveBeenCalledTimes(1);
   });
 
-  it("snapshots skill files for a session so restored sessions do not read mutated source skills", async () => {
+  it("stores skill pointers for a session and omits restored skills whose source was deleted", async () => {
     const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "skill-snapshot.jsonl");
     const skillDir = path.join(tempDir, "skills", "stable-skill");
     fs.mkdirSync(path.join(skillDir, "assets"), { recursive: true });
@@ -639,18 +639,28 @@ describe("SessionCoordinator", () => {
 
     await coordinator.createSession(sessionMgr, tempDir, true);
     const freshSkill = createAgentSessionMock.mock.calls[0][0].resourceLoader.getSkills().skills[0];
-    expect(freshSkill.filePath).not.toBe(skill.filePath);
+    expect(freshSkill.filePath).toBe(skill.filePath);
+    expect(freshSkill.runtimeIdentity).toMatchObject({
+      kind: "skill_pointer",
+      filePath: skill.filePath,
+      baseDir: skill.baseDir,
+      readonly: true,
+    });
     expect(fs.readFileSync(freshSkill.filePath, "utf-8")).toContain("original body");
     expect(fs.readFileSync(path.join(freshSkill.baseDir, "assets", "note.txt"), "utf-8")).toBe("asset v1\n");
 
-    fs.writeFileSync(path.join(skillDir, "SKILL.md"), "---\nname: stable-skill\ndescription: Stable skill.\n---\n\nmutated body\n", "utf-8");
-    fs.rmSync(path.join(skillDir, "assets"), { recursive: true, force: true });
+    fs.rmSync(skillDir, { recursive: true, force: true });
 
     await coordinator.createSession(sessionMgr, tempDir, true, null, { restore: true });
-    const restoredSkill = createAgentSessionMock.mock.calls[1][0].resourceLoader.getSkills().skills[0];
-    expect(restoredSkill.filePath).toBe(freshSkill.filePath);
-    expect(fs.readFileSync(restoredSkill.filePath, "utf-8")).toContain("original body");
-    expect(fs.readFileSync(path.join(restoredSkill.baseDir, "assets", "note.txt"), "utf-8")).toBe("asset v1\n");
+    const restoredSkills = createAgentSessionMock.mock.calls[1][0].resourceLoader.getSkills();
+    expect(restoredSkills.skills).toEqual([]);
+    expect(restoredSkills.diagnostics).toEqual([
+      expect.objectContaining({
+        type: "warning",
+        message: 'skill "stable-skill" source is no longer available',
+        path: skill.filePath,
+      }),
+    ]);
   });
 
   it("restores frozen append prompts so provider prompt patches survive cold restore", async () => {

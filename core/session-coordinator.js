@@ -33,7 +33,10 @@ import {
   normalizeThinkingLevelForModel,
   resolveThinkingLevelForModel,
 } from "./session-thinking-level.js";
-import { snapshotSkillsForSession } from "../lib/skills/session-skill-snapshot.js";
+import {
+  resolveSessionSkillsForRuntime,
+  snapshotSkillsForSession,
+} from "../lib/skills/session-skill-snapshot.js";
 
 const log = createModuleLogger("session");
 
@@ -451,7 +454,7 @@ export class SessionCoordinator {
         value: () => [...appendSystemPromptSnapshot],
       },
       getSkills: {
-        value: () => freezeSkillsResult(skillsResultSnapshot),
+        value: () => resolveSessionSkillsForRuntime(skillsResultSnapshot),
       },
       getAgentsFiles: {
         value: () => freezeAgentsFilesResult(agentsFilesResultSnapshot),
