@@ -18,10 +18,13 @@ export function getPlatformPromptNote({
     `OS Version: ${osType} ${osRelease}`,
   ];
   if (platform === "win32") {
-    lines.push([
-      "Command syntax: use bash/POSIX syntax for pipes, paths, and redirection.",
-      "Discard output with /dev/null; do not use CMD's nul device unless the command is explicitly run through cmd.exe.",
-    ].join(" "));
+    lines.push(
+      "Host OS is Windows, but the bash tool runs in a bash-compatible layer such as Git Bash, MSYS2, or bundled MinGit.",
+      "Command syntax: use bash/POSIX syntax for pipes, paths, environment variables, and redirection.",
+      "Prefer bash-compatible paths such as /c/Users/name/file when a Windows path is needed.",
+      "Use cmd.exe /c or powershell.exe -NoProfile -Command only when you explicitly need a Windows-native command.",
+      "Discard bash output with /dev/null; do not use CMD's nul device unless the command is explicitly run through cmd.exe.",
+    );
   }
   return lines.join("\n");
 }

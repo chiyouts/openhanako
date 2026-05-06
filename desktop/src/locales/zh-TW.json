@@ -1888,7 +1888,7 @@
     "inputHelp": "輸入 /help 查看命令列表"
   },
   "sandbox": {
-    "blocked": "[安全策略] {reason}\n\n此操作被 Hanako 的沙盒安全策略阻止。這不是程式錯誤，而是安全保護機制在運作。請告知使用者操作被安全策略阻止，並說明具體原因。使用者可以在設定中調整沙盒策略。",
+    "blocked": "[安全策略] {reason}\n\n此操作被 Hanako 的沙盒安全策略阻止，表示命令越過了路徑或權限邊界。先檢查目前工作區、具體路徑寫法，以及目標檔案是否本來就應該放在允許的工作區或 session 路徑內。請向使用者說明被攔截的路徑和原因；只有使用者明確決定時，再討論是否修改沙盒設定。",
     "noSudo": "禁止使用 sudo",
     "noSu": "禁止使用 su 切換使用者",
     "noChmod": "禁止修改檔案權限",
@@ -1906,7 +1906,7 @@
     "noBcdedit": "禁止修改開機設定",
     "noWmic": "禁止 WMI 命令",
     "restrictedPath": "命令存取了受限路徑：{path}",
-    "writeRestricted": "[安全策略] 檔案系統寫入被限制在工作空間內。此操作被沙盒安全策略阻止，請告知使用者。",
+    "writeRestricted": "[安全策略] 檔案系統寫入被限制在允許的工作區和 session 路徑內。先檢查目前工作區和路徑寫法，再詢問使用者是否需要修改沙盒設定。",
     "osRequired": "[sandbox] standard 模式要求 OS 級沙盒，但當前平台不支援（{platform}）。請安裝 sandbox-exec (macOS) 或 bubblewrap (Linux)，或切換到 full-access 模式。",
     "opRead": "讀取",
     "opWrite": "寫入",
