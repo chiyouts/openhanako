@@ -114,6 +114,15 @@ export interface DeskFile {
   mtime?: string;
 }
 
+export interface DeskSearchResult {
+  name: string;
+  relativePath: string;
+  parentSubdir: string;
+  isDir: boolean;
+  size?: number | null;
+  mtime?: string;
+}
+
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface TodoItem {
@@ -125,6 +134,7 @@ export interface TodoItem {
 // ── 浮动面板类型 ──
 export type ActivePanel = 'activity' | 'automation' | 'bridge' | null;
 export type TabType = 'chat' | 'channels' | `plugin:${string}`;
+export type RightWorkspaceTab = 'session-files' | 'workspace' | `plugin-widget:${string}`;
 
 export interface FileVersion {
   mtimeMs: number;
@@ -206,6 +216,7 @@ export interface PlatformApi {
   openFile(path: string): void;
   openExternal(url: string): void;
   showInFinder(path: string): void;
+  trashItem?(path: string): Promise<boolean>;
   browserEmergencyStop?(): void;
   openSkillViewer?(opts: { skillPath?: string; name?: string; baseDir?: string; filePath?: string; installed?: boolean }): void;
   settingsChanged(event: string, payload?: unknown): void;

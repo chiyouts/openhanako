@@ -8,6 +8,7 @@ import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
 import { NumberInput } from '../components/NumberInput';
 import styles from '../Settings.module.css';
+import { DEFAULT_HEARTBEAT_INTERVAL_MINUTES } from '../../../../../shared/default-workspace-constants.js';
 
 type AgentDeskConfig = {
   home_folder: string;
@@ -49,7 +50,7 @@ export function WorkTab() {
         const desk: AgentDeskConfig = {
           home_folder: data.desk?.home_folder || '',
           heartbeat_enabled: data.desk?.heartbeat_enabled !== false,
-          heartbeat_interval: data.desk?.heartbeat_interval ?? 17,
+          heartbeat_interval: data.desk?.heartbeat_interval ?? DEFAULT_HEARTBEAT_INTERVAL_MINUTES,
         };
         setAgentDesk(desk);
         setHbIntervalDraft(desk.heartbeat_interval);

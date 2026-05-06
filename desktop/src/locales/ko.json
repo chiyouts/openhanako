@@ -1055,6 +1055,7 @@
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
       "feishuHint": "Feishu 오픈 플랫폼에서 받으세요",
+      "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
       "qqAppSecret": "App Secret",
@@ -1120,6 +1121,9 @@
     "provider": {
       "title": "AI Provider를 선택해 주세요",
       "subtitle": "작동하려면 AI 모델 Provider가 필요해요.\nProvider를 선택하고 API Key를 입력해 주세요.",
+      "selectPlaceholder": "Provider 선택",
+      "searchPlaceholder": "Provider 검색...",
+      "empty": "Provider를 찾지 못했어요",
       "custom": "직접 입력...",
       "customName": "이름",
       "customNamePlaceholder": "예: my-provider",
@@ -1143,6 +1147,8 @@
       "noAddedModels": "아직 추가된 모델이 없습니다",
       "addModel": "모델 추가",
       "addModelSearchPlaceholder": "추가할 모델 검색...",
+      "manualModelPlaceholder": "모델 ID 직접 입력",
+      "addManualModel": "추가",
       "mainModel": "주 모델",
       "setMainModel": "주 모델로 설정",
       "editModel": "모델 편집",
@@ -1168,6 +1174,18 @@
       "subtitle": "나중에 설정에서 언제든 바꿀 수 있어요",
       "back": "뒤로",
       "next": "다음"
+    },
+    "workspace": {
+      "title": "워크스페이스 만들기",
+      "subtitle": "기본 워크스페이스는 데스크톱의 OH-WorkSpace입니다.\n기존 폴더를 직접 선택할 수도 있습니다.",
+      "defaultLabel": "기본 워크스페이스",
+      "customLabel": "선택한 워크스페이스",
+      "defaultHint": "다른 폴더를 선택하지 않으면 이 디렉터리를 자동으로 만듭니다.\n순찰은 기본적으로 꺼져 있으며 나중에 설정에서 켤 수 있습니다.",
+      "choose": "폴더 선택",
+      "useDefault": "기본값 사용",
+      "back": "뒤로",
+      "next": "다음",
+      "saving": "저장 중..."
     },
     "tutorial": {
       "title": "준비 완료 ✿",
@@ -1221,6 +1239,47 @@
     "paste": "붙여넣기",
     "selectAll": "모두 선택"
   },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "오른쪽 작업공간",
+      "sessionFiles": "대화 파일",
+      "workspace": "작업공간"
+    },
+    "sessionFiles": {
+      "title": "대화 파일",
+      "empty": "이 대화에서는 아직 파일이 생성되거나 업로드되지 않았어요",
+      "actions": {
+        "preview": "미리보기",
+        "open": "열기",
+        "reveal": "위치 보기",
+        "copyPath": "경로 복사",
+        "copySelectedPaths": "경로 {n}개 복사",
+        "sendToBridge": "보내기...",
+        "sendToBridgeLoading": "Bridge 대화를 불러오는 중...",
+        "sendToBridgeEmpty": "보낼 수 있는 Bridge 대화가 없어요",
+        "sendToBridgeLoadFailed": "Bridge 대화를 불러오지 못했어요"
+      },
+      "bridgeLoadFailed": "Bridge 대화를 불러오지 못했어요: {error}",
+      "sendSuccess": "{target}(으)로 보냈어요",
+      "sendFailed": "{target}(으)로 보내지 못했어요: {error}",
+      "list": "대화 파일 목록",
+      "sort": {
+        "label": "대화 파일 정렬",
+        "timeDesc": "시간↓",
+        "nameAsc": "이름↑",
+        "nameDesc": "이름↓",
+        "typeAsc": "유형↑"
+      },
+      "status": {
+        "available": "사용 가능",
+        "expired": "만료됨"
+      }
+    },
+    "jian": {
+      "collapse": "Jian 접기",
+      "expand": "Jian 펼치기"
+    }
+  },
   "desk": {
     "title": "책상",
     "workspaceTitle": "작업 공간",
@@ -1249,10 +1308,16 @@
       "rename": "이름 변경",
       "copyPath": "경로 복사",
       "delete": "삭제",
+      "deleteSelected": "{count}개 항목 삭제",
       "deleteN": "{n}개 항목 삭제",
       "newMdFile": "새 Markdown 문서",
       "newFolder": "새 폴더"
     },
+    "deleteConfirm": "\"{name}\"을 시스템 휴지통으로 이동할까요?",
+    "deleteSelectedConfirm": "선택한 {count}개 항목을 시스템 휴지통으로 이동할까요?",
+    "trashFailed": "시스템 휴지통으로 이동하지 못했습니다",
+    "renameInvalid": "파일 이름에는 경로 구분자를 사용할 수 없습니다",
+    "renameFailed": "이름 변경 실패",
     "sort": {
       "label": "정렬",
       "mtime": "수정일",
@@ -1265,6 +1330,21 @@
       "nameDescShort": "이름↓",
       "sizeShort": "크기",
       "typeShort": "유형"
+    },
+    "filter": {
+      "label": "필터",
+      "images": "이미지",
+      "text": "텍스트",
+      "videos": "동영상",
+      "clear": "필터 지우기",
+      "activeShort": "{count} 유형"
+    },
+    "search": {
+      "placeholder": "작업 공간 검색",
+      "label": "작업 공간 파일 검색",
+      "results": "검색 결과",
+      "empty": "일치하는 파일이 없어요",
+      "root": "루트"
     }
   },
   "window": {
@@ -1808,7 +1888,7 @@
     "inputHelp": "/help로 명령어 목록 보기"
   },
   "sandbox": {
-    "blocked": "[보안] {reason}\n\n이 작업은 Hanako의 샌드박스 보안 정책에 의해 차단되었어요. 이것은 버그가 아니라 보안 보호 메커니즘이에요. 사용자에게 작업이 차단되었음과 이유를 알려주세요. 사용자는 설정에서 샌드박스 정책을 조정할 수 있어요.",
+    "blocked": "[보안] {reason}\n\n이 작업은 Hanako의 샌드박스 보안 정책에 의해 차단되었어요. 이는 명령이 경로나 권한 경계를 넘었다는 뜻이에요. 먼저 현재 워크스페이스, 정확한 경로 표기, 대상 파일이 허용된 워크스페이스 또는 session 경로에 있어야 하는지 확인하세요. 차단된 경로와 이유를 사용자에게 설명하고, 사용자가 명확히 결정한 경우에만 샌드박스 설정 변경을 논의하세요.",
     "noSudo": "sudo 사용이 금지되어 있어요",
     "noSu": "su 사용자 전환이 금지되어 있어요",
     "noChmod": "파일 권한 변경이 금지되어 있어요",
@@ -1826,7 +1906,7 @@
     "noBcdedit": "부팅 구성 수정이 금지되어 있어요",
     "noWmic": "WMI 명령이 금지되어 있어요",
     "restrictedPath": "명령이 제한된 경로에 접근했어요: {path}",
-    "writeRestricted": "[보안] 파일 시스템 쓰기가 워크스페이스 내로 제한되어 있어요. 이 작업은 샌드박스 보안 정책에 의해 차단되었어요. 사용자에게 알려주세요.",
+    "writeRestricted": "[보안] 파일 시스템 쓰기는 허용된 워크스페이스와 session 경로로 제한되어 있어요. 사용자에게 샌드박스 설정 변경을 묻기 전에 현재 워크스페이스와 경로 표기를 확인하세요.",
     "osRequired": "[sandbox] standard 모드는 OS 레벨 샌드박스가 필요하지만 현재 플랫폼이 지원하지 않아요 ({platform}). sandbox-exec (macOS) 또는 bubblewrap (Linux)을 설치하거나 full-access 모드로 전환해 주세요.",
     "opRead": "읽기",
     "opWrite": "쓰기",

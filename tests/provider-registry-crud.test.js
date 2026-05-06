@@ -128,6 +128,80 @@ describe("getCredentials", () => {
     expect(creds.api).toBe("openai-completions");
   });
 
+  it("OAuth provider 通过 authJsonKey 配置时仍用插件契约解析凭证", () => {
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({
+      "test-oauth": {
+        type: "oauth",
+        access: "oauth-access-token-abc",
+        refresh: "refresh-xyz",
+        expires: Date.now() + 3600_000,
+      },
+    }), "utf-8");
+
+    writeAddedModels({
+      "test-oauth": {
+        models: [{ id: "model-a" }],
+      },
+    });
+
+    const reg = new ProviderRegistry(tmpDir);
+    reg._plugins.clear();
+    reg._entries.clear();
+    reg._plugins.set("test-oauth-plugin", {
+      id: "test-oauth-plugin",
+      displayName: "Test OAuth",
+      authType: "oauth",
+      defaultBaseUrl: "https://api.test.com/v1",
+      defaultApi: "openai-completions",
+      authJsonKey: "test-oauth",
+    });
+
+    const creds = reg.getCredentials("test-oauth");
+    expect(creds).toEqual({
+      apiKey: "oauth-access-token-abc",
+      baseUrl: "https://api.test.com/v1",
+      api: "openai-completions",
+    });
+  });
+
+  it("OAuth provider 通过插件 ID 请求时能读取 authJsonKey 下的用户配置", () => {
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({
+      "test-oauth": {
+        type: "oauth",
+        access: "oauth-access-token-abc",
+        resourceUrl: "https://resource.test.com/v1",
+      },
+    }), "utf-8");
+
+    writeAddedModels({
+      "test-oauth": {
+        api: "openai-completions",
+        models: [{ id: "model-a" }],
+      },
+    });
+
+    const reg = new ProviderRegistry(tmpDir);
+    reg._plugins.clear();
+    reg._entries.clear();
+    reg._plugins.set("test-oauth-plugin", {
+      id: "test-oauth-plugin",
+      displayName: "Test OAuth",
+      authType: "oauth",
+      defaultBaseUrl: "",
+      defaultApi: "openai-completions",
+      authJsonKey: "test-oauth",
+    });
+
+    const creds = reg.getCredentials("test-oauth-plugin");
+    expect(creds).toEqual({
+      apiKey: "oauth-access-token-abc",
+      baseUrl: "https://resource.test.com/v1",
+      api: "openai-completions",
+    });
+  });
+
   it("API Key provider 不走 auth.json（即使 auth.json 有同名条目）", () => {
     const authPath = path.join(tmpDir, "auth.json");
     fs.writeFileSync(authPath, JSON.stringify({
@@ -228,6 +302,16 @@ describe("builtin default models", () => {
     writeAddedModels({});
     const reg = new ProviderRegistry(tmpDir);
     expect(reg.getDefaultModels("kimi-coding")[0]).toBe("kimi-for-coding");
+  });
+
+  it("keeps DeepSeek defaults aligned with the V4 API endpoint and model family", () => {
+    writeAddedModels({});
+    const reg = new ProviderRegistry(tmpDir);
+    expect(reg.get("deepseek").baseUrl).toBe("https://api.deepseek.com");
+    expect(reg.getDefaultModels("deepseek")).toEqual([
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+    ]);
   });
 });
 
@@ -485,6 +569,57 @@ describe("saveProvider", () => {
     const entry = reg.get("test-provider");
     expect(entry).toBeTruthy();
     expect(entry.baseUrl).toBe("https://saved.api.com/v1");
+  });
+
+  it("拒绝把官方 DeepSeek provider id 保存成模型", () => {
+    writeAddedModels({
+      deepseek: {
+        base_url: "https://api.deepseek.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["deepseek-v4-pro"],
+      },
+    });
+    const reg = new ProviderRegistry(tmpDir);
+
+    expect(() => reg.saveProvider("deepseek", { models: ["deepseek"] }))
+      .toThrow(/deepseek.*provider.*model/i);
+
+    const persisted = readAddedModels();
+    expect(persisted.deepseek.models).toEqual(["deepseek-v4-pro"]);
+  });
+
+  it("内置 provider 首次保存空 models 时填充默认模型列表", () => {
+    writeAddedModels({});
+    const reg = new ProviderRegistry(tmpDir);
+
+    reg.saveProvider("mimo", {
+      api_key: "sk-mimo",
+      base_url: "https://api.xiaomimimo.com/v1",
+      api: "openai-completions",
+      seed_default_models: true,
+    });
+
+    const persisted = readAddedModels();
+    expect(persisted.mimo.models).toEqual(reg.getDefaultModels("mimo"));
+    expect(persisted.mimo.seed_default_models).toBeUndefined();
+  });
+
+  it("已有 provider 显式保存空 models 时保留用户选择", () => {
+    writeAddedModels({
+      mimo: {
+        api_key: "sk-mimo",
+        base_url: "https://api.xiaomimimo.com/v1",
+        api: "openai-completions",
+        models: ["mimo-v2-pro"],
+      },
+    });
+    const reg = new ProviderRegistry(tmpDir);
+
+    reg.saveProvider("mimo", { models: [] });
+
+    const persisted = readAddedModels();
+    expect(persisted.mimo.models).toEqual([]);
   });
 });
 

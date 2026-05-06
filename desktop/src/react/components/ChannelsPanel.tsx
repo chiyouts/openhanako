@@ -5,6 +5,7 @@ import { useStore } from '../stores';
 import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
 import { renderMarkdown } from '../utils/markdown';
+import { MarkdownContent } from './chat/MarkdownContent';
 import { loadChannels, sendChannelMessage } from '../stores/channel-actions';
 import { resolveChannelMember, buildAgentMap, formatChannelTime, MemberAvatar } from './channels/ChannelList';
 import type { MemberInfo } from './channels/ChannelList';
@@ -90,9 +91,9 @@ export function ChannelMessages() {
                   <span className={styles.channelMsgTime}>{formatChannelTime(msg.timestamp)}</span>
                 </div>
               )}
-              <div
+              <MarkdownContent
                 className={styles.channelMsgText}
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.body || '') }}
+                html={renderMarkdown(msg.body || '')}
               />
             </div>
           </div>

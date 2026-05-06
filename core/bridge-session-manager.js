@@ -71,6 +71,7 @@ function withVisionExtension(resourceLoader, getBridge, getSessionPath, isEnable
  * @property {string} [name]
  * @property {string} [avatarUrl]
  * @property {string} [userId]
+ * @property {string} [chatId] - 平台投递地址；飞书等平台的 owner 身份 ID 不等于发送目标时必须保留
  * @property {string} [linkedSessionPath]
  *   - 预留字段：当该 bridge session 由某个桌面 session "推送"产生时，
  *     记录源桌面 session 的绝对路径。一期不写入（/push 命令在后续 phase 落地），

@@ -201,4 +201,15 @@ describe("AgentManager.createAgent default skills.enabled", () => {
     const cfg = YAML.load(fs.readFileSync(cfgPath, "utf-8"));
     expect(cfg.models.chat).toEqual({ id: "test-model", provider: "test-provider" });
   });
+
+  it("defaults patrol to disabled with a 31 minute interval for newly created agents", async () => {
+    skillsMock._allSkills = [];
+
+    const { id: newId } = await mgr.createAgent({ name: "DeskAgent", yuan: "hanako" });
+
+    const cfgPath = path.join(agentsDir, newId, "config.yaml");
+    const cfg = YAML.load(fs.readFileSync(cfgPath, "utf-8"));
+    expect(cfg.desk.heartbeat_enabled).toBe(false);
+    expect(cfg.desk.heartbeat_interval).toBe(31);
+  });
 });

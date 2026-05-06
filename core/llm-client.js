@@ -15,7 +15,7 @@ import { logLlmUsage, normalizeLlmUsage } from '../lib/llm/usage-observer.js';
  *   - anthropic-messages:  baseUrl + "/v1/messages"
  *   - openai-responses:    baseUrl + "/responses"
  *
- * Provider 兼容化：fetch 前统一调 normalizeProviderPayload(body, model, { mode: "utility" })，
+ * Provider 兼容化：fetch 前统一调 normalizeProviderPayload(body, model, { mode: "utility", outputBudgetSource: "system" })，
  * 与 chat 路径（engine.js 的 Pi SDK extension）共享同一个 provider-compat 模块。
  */
 
@@ -87,6 +87,7 @@ function convertContentForApi(content, api) {
  * @param {Array}  [opts.messages]     消息数组 [{ role, content }]
  * @param {number} [opts.temperature]  温度。未传时不写入请求体，使用 provider 默认值
  * @param {number} [opts.maxTokens]    最大输出 token (default 512)
+ * @param {"user"|"system"|"sdk-default"} [opts.outputBudgetSource] 输出上限来源。utility 默认为 system
  * @param {number} [opts.timeoutMs]    超时毫秒 (default 60000)
  * @param {AbortSignal} [opts.signal]  外部取消信号
  * @param {boolean} [opts.returnUsage] 返回 { text, usage }，默认保持旧接口返回纯文本
@@ -102,6 +103,7 @@ export async function callText({
   messages = [],
   temperature,
   maxTokens = 512,
+  outputBudgetSource = "system",
   timeoutMs = 60_000,
   signal,
   returnUsage = false,
@@ -177,6 +179,10 @@ export async function callText({
     };
   }
 
+  if (modelObj?.headers && typeof modelObj.headers === "object") {
+    headers = { ...modelObj.headers, ...headers };
+  }
+
   // Provider 兼容化（与 chat 路径共享 provider-compat）。
   // 把 callText opts 传入的 quirks 合入 model 对象，让 qwen.js 等子模块的
   // matches 能基于数据声明字段识别。modelObj 自身已有 quirks 时不覆盖。
@@ -191,7 +197,7 @@ export async function callText({
         ? { id: modelId, provider, api, quirks }
         : null
     );
-  body = normalizeProviderPayload(body, modelForCompat, { mode: "utility" });
+  body = normalizeProviderPayload(body, modelForCompat, { mode: "utility", outputBudgetSource });
 
   // ── 4. 发送请求 ──
   const SLOW_THRESHOLD_MS = 15_000;

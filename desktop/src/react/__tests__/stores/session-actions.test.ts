@@ -170,6 +170,10 @@ function installStoreMethods() {
     const bySession = mockState.todosBySession as Record<string, unknown>;
     bySession[path] = todos;
   });
+  s.setInlineError = vi.fn((path: string, text: string) => {
+    const inlineErrors = mockState.inlineErrors as Record<string, string | null>;
+    inlineErrors[path] = text;
+  });
   s.appendItem = vi.fn((path: string, item: unknown) => {
     const chat = mockState.chatSessions as Record<string, { items: unknown[] }>;
     const entry = chat[path];
@@ -339,6 +343,28 @@ describe('session-actions', () => {
       );
       expect(mockState.workspaceFolders).toEqual(['/reference-a']);
     });
+
+    it('surfaces the server error when pending session creation fails', async () => {
+      (globalThis.window as unknown as { t: (key: string) => string }).t = (key: string) =>
+        key === 'session.createFailed' ? 'Create session failed' : key;
+      Object.assign(mockState, {
+        pendingNewSession: true,
+        memoryEnabled: true,
+      });
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'session skill snapshot failed' }, false));
+
+      await expect(ensureSession()).resolves.toBe(false);
+
+      expect(mockState.inlineErrors).toMatchObject({
+        '': 'Create session failed: session skill snapshot failed',
+      });
+      expect(mockState.addToast).toHaveBeenCalledWith(
+        'Create session failed: session skill snapshot failed',
+        'error',
+        6000,
+      );
+      expect(mockState.pendingNewSession).toBe(true);
+    });
   });
 
   describe('loadMessages 竞态护栏', () => {
@@ -477,6 +503,29 @@ describe('session-actions', () => {
   });
 
   describe('switchSession 的 hasData 语义（#405 直接回归）', () => {
+    it('surfaces the server error when switching to an old session fails', async () => {
+      (globalThis.window as unknown as { t: (key: string) => string }).t = (key: string) =>
+        key === 'session.switchFailed' ? 'Switch session failed' : key;
+      Object.assign(mockState, {
+        currentSessionPath: '/session/current.jsonl',
+      });
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        error: 'Invalid session path',
+      }, false));
+
+      await switchSession('/session/old.jsonl');
+
+      expect(mockState.currentSessionPath).toBe('/session/current.jsonl');
+      expect(mockState.inlineErrors).toMatchObject({
+        '/session/current.jsonl': 'Switch session failed: Invalid session path',
+      });
+      expect(mockState.addToast).toHaveBeenCalledWith(
+        'Switch session failed: Invalid session path',
+        'error',
+        6000,
+      );
+    });
+
     it('后端返回 currentModelId，uncached session 仍然触发 loadMessages', async () => {
       // 1) /sessions/switch 响应
       mockFetch.mockResolvedValueOnce(jsonResponse({

@@ -8,22 +8,78 @@ import fs from "fs";
 import path from "path";
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
-import { getWechatQrcode, pollWechatQrcodeStatus } from "../../lib/bridge/wechat-login.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { parseSessionKey, collectKnownUsers, KNOWN_PLATFORMS } from "../../lib/bridge/session-key.js";
+import { isBridgeOwner, resolveBridgeOwnerUserId } from "../../lib/bridge/owner-policy.js";
+import { collectBridgeMediaAllowedRoots, isInsideBridgeMediaRoot } from "../../lib/bridge/media-roots.js";
 import { t } from "../i18n.js";
 import { resolveAgent, resolveAgentStrict } from "../utils/resolve-agent.js";
 
 const MAX_BRIDGE_MEDIA_SIZE = 50 * 1024 * 1024;
 
-export function createBridgeRoute(engine, bridgeManager) {
+function normalizeBridgeManagerRef(ref) {
+  if (ref && typeof ref.get === "function") {
+    return {
+      get: ref.get,
+      ensureReady: ref.ensureReady || ref.get,
+      getState: ref.getState || (() => ({ ready: !!ref.get(), initializing: false, error: null })),
+    };
+  }
+  if (typeof ref === "function") {
+    return {
+      get: ref,
+      ensureReady: ref,
+      getState: () => ({ ready: !!ref(), initializing: false, error: null }),
+    };
+  }
+  return {
+    get: () => ref || null,
+    ensureReady: async () => ref || null,
+    getState: () => ({ ready: !!ref, initializing: false, error: null }),
+  };
+}
+
+function bridgeUnavailable(c, state = {}) {
+  const error = state.error
+    ? `bridge manager unavailable: ${state.error}`
+    : "bridge manager is still starting";
+  return c.json({
+    ok: false,
+    error,
+    bridge: {
+      ready: false,
+      initializing: state.initializing !== false,
+      error: state.error || null,
+    },
+  }, 503);
+}
+
+export function createBridgeRoute(engine, bridgeManagerRef) {
   const route = new Hono();
+  const bridgeRef = normalizeBridgeManagerRef(bridgeManagerRef);
+
+  function resolveBridgeManager() {
+    return bridgeRef.get?.() || null;
+  }
+
+  async function ensureBridgeManager() {
+    const existing = resolveBridgeManager();
+    if (existing) return existing;
+    try {
+      return await bridgeRef.ensureReady?.() || null;
+    } catch {
+      return null;
+    }
+  }
 
   /** 获取所有平台连接状态（从 agent.config.bridge 读取） */
   route.get("/bridge/status", async (c) => {
     const agent = resolveAgent(engine, c);
-    const live = bridgeManager.getStatus(agent.id);
+    const manager = resolveBridgeManager();
+    const bridgeState = bridgeRef.getState?.() || { ready: !!manager, initializing: false, error: null };
+    const live = manager?.getStatus(agent.id) || {};
     const bridge = agent.config?.bridge || {};
+    const index = engine.getBridgeIndex(agent.id);
 
     const platformStatus = (plat, cfg, extraFields) => {
       return {
@@ -39,10 +95,10 @@ export function createBridgeRoute(engine, bridgeManager) {
     const fsAppId = bridge.feishu?.appId || "";
     const fsAppSecret = bridge.feishu?.appSecret || "";
 
-    // Build per-platform owner dict from agent config
+    // Build per-platform owner dict from the shared owner policy.
     const ownerDict = {};
     for (const plat of KNOWN_PLATFORMS) {
-      const o = bridge[plat]?.owner;
+      const o = resolveBridgeOwnerUserId({ platform: plat, agent, index });
       if (o) ownerDict[plat] = o;
     }
 
@@ -64,8 +120,11 @@ export function createBridgeRoute(engine, bridgeManager) {
       }),
       readOnly: engine.getBridgeReadOnly(),
       receiptEnabled: engine.getBridgeReceiptEnabled(),
-      knownUsers: collectKnownUsers(engine.getBridgeIndex(agent.id)),
+      knownUsers: collectKnownUsers(index),
       owner: ownerDict,
+      bridgeReady: !!manager,
+      bridgeInitializing: !!bridgeState.initializing,
+      bridgeError: bridgeState.error || null,
     });
   });
 
@@ -103,9 +162,11 @@ export function createBridgeRoute(engine, bridgeManager) {
 
     // Start/stop
     if (patch.enabled) {
-      bridgeManager.startPlatformFromConfig(platform, patch, agentId);
+      const manager = await ensureBridgeManager();
+      if (!manager) return bridgeUnavailable(c, bridgeRef.getState?.() || {});
+      manager.startPlatformFromConfig(platform, patch, agentId);
     } else {
-      bridgeManager.stopPlatform(platform, agentId);
+      resolveBridgeManager()?.stopPlatform(platform, agentId);
     }
 
     debugLog()?.log("api", `POST /api/bridge/config agent=${agentId} platform=${platform} enabled=${!!patch.enabled}`);
@@ -138,7 +199,7 @@ export function createBridgeRoute(engine, bridgeManager) {
     }
 
     const agent = resolveAgentStrict(engine, c);
-    bridgeManager.stopPlatform(platform, agent.id);
+    resolveBridgeManager()?.stopPlatform(platform, agent.id);
     agent.updateConfig({ bridge: { [platform]: { enabled: false } } });
 
     debugLog()?.log("api", `POST /api/bridge/stop agent=${agent.id} platform=${platform}`);
@@ -149,7 +210,7 @@ export function createBridgeRoute(engine, bridgeManager) {
   route.get("/bridge/messages", async (c) => {
     const limit = parseInt(c.req.query("limit"), 10) || 50;
     const agent = resolveAgent(engine, c);
-    return c.json({ messages: bridgeManager.getMessages(limit, agent.id) });
+    return c.json({ messages: resolveBridgeManager()?.getMessages(limit, agent.id) || [] });
   });
 
   /** 获取 bridge session 列表 */
@@ -158,12 +219,6 @@ export function createBridgeRoute(engine, bridgeManager) {
     const agent = resolveAgent(engine, c);
     const index = engine.getBridgeIndex(agent.id);
     const bridgeDir = path.join(agent.sessionDir, "bridge");
-    const agentBridge = agent.config?.bridge || {};
-    const owner = {};
-    for (const plat of KNOWN_PLATFORMS) {
-      const o = agentBridge[plat]?.owner;
-      if (o) owner[plat] = o;
-    }
     const sessions = [];
 
     for (const [sessionKey, raw] of Object.entries(index)) {
@@ -186,9 +241,8 @@ export function createBridgeRoute(engine, bridgeManager) {
         lastActive = stat.mtimeMs;
       } catch {}
 
-      // isOwner 运行时计算：per-agent owner dict
-      const ownerUserId = owner[plat] || null;
-      const isOwner = !!(entry.userId && ownerUserId && entry.userId === ownerUserId);
+      const userId = entry.userId || (plat === "wechat" && chatType === "dm" ? chatId : null);
+      const isOwner = isBridgeOwner({ platform: plat, chatType, userId, agent });
 
       sessions.push({
         sessionKey, platform: plat, chatType, chatId, file, lastActive,
@@ -281,7 +335,7 @@ export function createBridgeRoute(engine, bridgeManager) {
   /** 公开给外部平台拉取的临时媒体 URL（由 MediaPublisher token 控制） */
   route.get("/bridge/media/:token", async (c) => {
     const token = c.req.param("token");
-    const entry = bridgeManager.mediaPublisher?.resolve?.(token);
+    const entry = resolveBridgeManager()?.mediaPublisher?.resolve?.(token);
     if (!entry) return c.text("media not found", 404);
 
     let stat;
@@ -317,13 +371,8 @@ export function createBridgeRoute(engine, bridgeManager) {
 
     const agent = resolveAgentStrict(engine, c);
 
-    // 路径安全检查（对齐 fs.js 的 getAllowedRoots 逻辑）
-    const allowedRoots = [realpathAllowedRoot(engine.hanakoHome)].filter(Boolean);
-    const deskHome = agent.deskManager?.homePath;
-    if (deskHome) {
-      const root = realpathAllowedRoot(deskHome);
-      if (root) allowedRoots.push(root);
-    }
+    // 路径安全检查：对齐 Bridge runtime 的媒体发送白名单。
+    const allowedRoots = collectBridgeMediaAllowedRoots(engine, { agentId: agent.id, agent });
 
     // 先检查文件是否存在
     const resolved = path.resolve(filePath);
@@ -336,9 +385,7 @@ export function createBridgeRoute(engine, bridgeManager) {
     try { realPath = fs.realpathSync(resolved); }
     catch { return c.json({ error: "file not found" }, 404); }
 
-    const isSafe = allowedRoots.some(root =>
-      realPath === root || realPath.startsWith(root + path.sep)
-    );
+    const isSafe = isInsideBridgeMediaRoot(realPath, allowedRoots);
     if (!isSafe) {
       return c.json({ error: "path outside allowed roots" }, 403);
     }
@@ -352,10 +399,12 @@ export function createBridgeRoute(engine, bridgeManager) {
     } catch { return c.json({ error: "file not found" }, 404); }
 
     try {
+      const manager = await ensureBridgeManager();
+      if (!manager) return bridgeUnavailable(c, bridgeRef.getState?.() || {});
       if (typeof engine.registerSessionFile !== "function") {
         return c.json({ ok: false, error: "session file registry unavailable" }, 500);
       }
-      if (typeof bridgeManager.sendMediaItem !== "function") {
+      if (typeof manager.sendMediaItem !== "function") {
         return c.json({ ok: false, error: "bridge media delivery unavailable" }, 500);
       }
 
@@ -368,7 +417,7 @@ export function createBridgeRoute(engine, bridgeManager) {
         label: typeof body.label === "string" && body.label.trim() ? body.label.trim() : path.basename(realPath),
         origin: "bridge_manual_send",
       });
-      await bridgeManager.sendMediaItem(
+      await manager.sendMediaItem(
         platform,
         chatId,
         { type: "session_file", fileId: sessionFile.id, sessionPath },
@@ -464,6 +513,7 @@ export function createBridgeRoute(engine, bridgeManager) {
 
   /** 获取微信扫码登录二维码 */
   route.post("/bridge/wechat/qrcode", async (c) => {
+    const { getWechatQrcode } = await import("../../lib/bridge/wechat-login.js");
     return c.json(await getWechatQrcode());
   });
 
@@ -471,17 +521,11 @@ export function createBridgeRoute(engine, bridgeManager) {
   route.post("/bridge/wechat/qrcode-status", async (c) => {
     const body = await safeJson(c);
     const { qrcodeId } = body;
+    const { pollWechatQrcodeStatus } = await import("../../lib/bridge/wechat-login.js");
     return c.json(await pollWechatQrcodeStatus(qrcodeId));
   });
 
   return route;
-}
-
-function realpathAllowedRoot(root) {
-  if (!root) return null;
-  const resolved = path.resolve(root);
-  try { return fs.realpathSync(resolved); }
-  catch { return resolved; }
 }
 
 function buildBridgeManualSendSessionPath(agentId, platform, chatId) {

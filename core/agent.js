@@ -339,17 +339,6 @@ export class Agent {
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
       screenshotEnabled: false,
     });
-    this._computerUseTool = createComputerUseTool({
-      getComputerHost: () => this._cb?.getEngine?.()?.getComputerHost?.() || null,
-      getSessionModel: (sessionPath) => {
-        const engine = this._cb?.getEngine?.();
-        return engine?.getSessionByPath?.(sessionPath)?.model || null;
-      },
-      getAgentId: () => this.id,
-      getConfirmStore: () => this._cb?.getConfirmStore?.(),
-      approveComputerUseApp: (approval) => this._cb?.getEngine?.()?.approveComputerUseApp?.(approval),
-      emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
-    });
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
     });
@@ -366,6 +355,7 @@ export class Agent {
       getAgent: () => this,
       getSessionModel: (sessionPath) => this._cb?.getEngine?.()?.getSessionByPath?.(sessionPath)?.model || null,
       getCurrentModel: () => this._cb?.getEngine?.()?.currentModel || null,
+      getUiContext: (sessionPath) => this._cb?.getEngine?.()?.getUiContext?.(sessionPath) || null,
     });
 
     // 10. 设置修改工具
@@ -603,7 +593,7 @@ export class Agent {
     ] : [];
     const experienceTools = experienceEnabled ? this._experienceTools : [];
     const computerUseTools = this._isComputerUseAvailableForThisAgent()
-      ? [this._computerUseTool]
+      ? [this._getComputerUseTool()]
       : [];
     const browserTool = isExplicitTextOnlyModel(options.model)
       ? this._browserToolNoScreenshot
@@ -636,6 +626,23 @@ export class Agent {
   }
   get tools() {
     return this.getToolsSnapshot();
+  }
+
+  _getComputerUseTool() {
+    if (!this._computerUseTool) {
+      this._computerUseTool = createComputerUseTool({
+        getComputerHost: () => this._cb?.getEngine?.()?.getComputerHost?.() || null,
+        getSessionModel: (sessionPath) => {
+          const engine = this._cb?.getEngine?.();
+          return engine?.getSessionByPath?.(sessionPath)?.model || null;
+        },
+        getAgentId: () => this.id,
+        getConfirmStore: () => this._cb?.getConfirmStore?.(),
+        approveComputerUseApp: (approval) => this._cb?.getEngine?.()?.approveComputerUseApp?.(approval),
+        emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
+      });
+    }
+    return this._computerUseTool;
   }
 
   _isComputerUseAvailableForThisAgent() {
@@ -955,6 +962,15 @@ export class Agent {
       : "\n## Tool Usage Discipline\n\n" +
         "When multiple tools can accomplish the same task, prefer the one with the lowest cost and least disruption. " +
         "Do not reach for heavy tools when simpler ones can do the job."
+    );
+
+    parts.push(isZh
+      ? "\n## 当前视野\n\n" +
+        "用户界面有一份可查询的当前视野，包括当前浏览目录、主面板打开内容和钉住窗口。" +
+        "用户用“这个、这里、当前、打开的、选中的、钉住的、当前文件、当前文件夹”等说法指向界面时，先调用 current_status 获取 ui_context，再继续处理任务。"
+      : "\n## Current View\n\n" +
+        "The user interface has queryable current-view state, including the current viewed folder, main-panel content, and pinned viewer windows. " +
+        "When the user says things like this, here, current, open, selected, pinned, current file, or current folder to refer to the UI, call current_status for ui_context first, then continue the task."
     );
 
     parts.push(isZh

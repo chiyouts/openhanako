@@ -7,6 +7,7 @@ import { t } from "../i18n.js";
 import { modelRefEquals, parseModelRef } from "../../shared/model-ref.js";
 import { lookupKnown } from "../../shared/known-models.js";
 import { callText } from "../../core/llm-client.js";
+import { modelSupportsXhigh } from "../../core/session-thinking-level.js";
 
 /** 查询模型显示名：overrides > SDK name > known-models > id */
 function resolveModelName(id, sdkName, overrides, provider) {
@@ -15,22 +16,6 @@ function resolveModelName(id, sdkName, overrides, provider) {
   const known = lookupKnown(provider, id);
   if (known?.name) return known.name;
   return sdkName || id;
-}
-
-function lower(value) {
-  return typeof value === "string" ? value.toLowerCase() : "";
-}
-
-function modelSupportsXhigh(model) {
-  const id = lower(model?.id);
-  const known = lookupKnown(model?.provider, model?.id);
-  return model?.xhigh === true
-    || known?.xhigh === true
-    || id.includes("gpt-5.2")
-    || id.includes("gpt-5.3")
-    || id.includes("gpt-5.4")
-    || id.includes("opus-4-6")
-    || id.includes("opus-4.6");
 }
 
 function parseHealthModelRef(body) {
@@ -153,9 +138,10 @@ export function createModelsRoute(engine) {
         input: Array.isArray(sessionModel.input) ? sessionModel.input : ["text"],
         reasoning: sessionModel.reasoning,
         contextWindow: sessionModel.contextWindow,
+        ...(modelSupportsXhigh(sessionModel) ? { xhigh: true } : {}),
       } : null;
 
-      return c.json({ ok: true, model: modelInfo, adaptations: result.adaptations });
+      return c.json({ ok: true, model: modelInfo, adaptations: result.adaptations, thinkingLevel: result.thinkingLevel });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

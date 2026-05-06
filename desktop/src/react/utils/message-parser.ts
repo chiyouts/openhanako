@@ -123,6 +123,8 @@ export function truncateHead(s: string, max: number): string {
 
 export interface ToolDetail {
   text: string;
+  /** 鼠标悬浮时展示的完整详情，通常用于被截断的安全敏感参数 */
+  title?: string;
   /** 文件路径或 URL，存在时 ToolIndicator 渲染为可点击链接 */
   href?: string;
   /** 'file' 用 openFile，'url' 用 openExternal */
@@ -139,8 +141,10 @@ export function extractToolDetail(name: string, args: Record<string, unknown> | 
       const p = (args.file_path || args.path || '') as string;
       return { text: truncatePath(p), href: p || undefined, hrefType: 'file' };
     }
-    case 'bash':
-      return { text: truncateHead((args.command || '') as string, 40) };
+    case 'bash': {
+      const command = typeof args.command === 'string' ? args.command : '';
+      return { text: truncateHead(command, 40), title: command || undefined };
+    }
     case 'glob':
     case 'find':
       return { text: (args.pattern || '') as string };

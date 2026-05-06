@@ -179,7 +179,16 @@ describe('extractToolDetail', () => {
   it('bash 工具提取命令，无 href', () => {
     const d = extractToolDetail('bash', { command: 'ls -la' });
     expect(d.text).toBe('ls -la');
+    expect(d.title).toBe('ls -la');
     expect(d.href).toBeUndefined();
+  });
+
+  it('bash 工具长命令保留完整 title 供 hover 审计', () => {
+    const command = 'rm -rf /Users/jason/.claude/plugins/marketplaces/temp_*';
+    const d = extractToolDetail('bash', { command });
+
+    expect(d.text).toBe('rm -rf /Users/jason/.claude/plugins/mar…');
+    expect(d.title).toBe(command);
   });
 
   it('web_search 提取查询，无 href', () => {

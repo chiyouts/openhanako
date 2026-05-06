@@ -18,7 +18,7 @@
 }
 
 /* ── 纸质纹理：Surface 层 ── */
-:global(body:not(.no-paper-texture)) :global(.settings-panel) {
+:global(body.paper-texture) :global(.settings-panel) {
     background-image: url(../../assets/textures/rice-paper.png);
     background-repeat: repeat;
     background-size: 160px;
@@ -26,28 +26,28 @@
 }
 
 /* ── 纸质纹理：Card 层（所有 bg-card 元素，lighten 混合） ── */
-:global(body:not(.no-paper-texture)) .agent-card-inner,
-:global(body:not(.no-paper-texture)) .agent-create-card,
-:global(body:not(.no-paper-texture)) .agent-delete-card,
-:global(body:not(.no-paper-texture)) .agent-name-input,
-:global(body:not(.no-paper-texture)) .model-capsule-input,
-:global(body:not(.no-paper-texture)) .settings-input,
-:global(body:not(.no-paper-texture)) .settings-textarea,
-:global(body:not(.no-paper-texture)) .settings-select,
-:global(body:not(.no-paper-texture)) .settings-folder-browse,
-:global(body:not(.no-paper-texture)) .settings-folder-clear,
-:global(body:not(.no-paper-texture)) .capability-row,
-:global(body:not(.no-paper-texture)) .skills-list-item,
-:global(body:not(.no-paper-texture)) .sdw-trigger,
-:global(body:not(.no-paper-texture)) .sdw-popup,
-:global(body:not(.no-paper-texture)) .cml-picker,
-:global(body:not(.no-paper-texture)) .cml-picker-group,
-:global(body:not(.no-paper-texture)) .cml-edit-panel-input,
-:global(body:not(.no-paper-texture)) .cml-combo-dropdown,
-:global(body:not(.no-paper-texture)) .mdw-trigger,
-:global(body:not(.no-paper-texture)) .mdw-popup,
-:global(body:not(.no-paper-texture)) .mdw-group-label,
-:global(body:not(.no-paper-texture)) .mdw-custom-input {
+:global(body.paper-texture) .agent-card-inner,
+:global(body.paper-texture) .agent-create-card,
+:global(body.paper-texture) .agent-delete-card,
+:global(body.paper-texture) .agent-name-input,
+:global(body.paper-texture) .model-capsule-input,
+:global(body.paper-texture) .settings-input,
+:global(body.paper-texture) .settings-textarea,
+:global(body.paper-texture) .settings-select,
+:global(body.paper-texture) .settings-folder-browse,
+:global(body.paper-texture) .settings-folder-clear,
+:global(body.paper-texture) .capability-row,
+:global(body.paper-texture) .skills-list-item,
+:global(body.paper-texture) .sdw-trigger,
+:global(body.paper-texture) .sdw-popup,
+:global(body.paper-texture) .cml-picker,
+:global(body.paper-texture) .cml-picker-group,
+:global(body.paper-texture) .cml-edit-panel-input,
+:global(body.paper-texture) .cml-combo-dropdown,
+:global(body.paper-texture) .mdw-trigger,
+:global(body.paper-texture) .mdw-popup,
+:global(body.paper-texture) .mdw-group-label,
+:global(body.paper-texture) .mdw-custom-input {
     background-image: url(../../assets/textures/rice-paper.png);
     background-repeat: repeat;
     background-size: 160px;
@@ -163,10 +163,29 @@
 }
 
 .settings-main {
+    position: relative;
     flex: 1;
     overflow-y: auto;
     padding: 0 var(--settings-main-x-padding, var(--space-xl)) var(--space-xl);
     max-width: 640px;
+}
+
+.settings-panel-modal .settings-main::before {
+    content: "";
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: block;
+    height: 12px;
+    margin-bottom: -12px;
+    pointer-events: none;
+    transform: translateY(-14px);
+    background: linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--bg) 88%, transparent),
+        color-mix(in srgb, var(--bg) 42%, transparent) 46%,
+        transparent
+    );
 }
 
 
@@ -208,7 +227,7 @@
     transition: opacity 0.25s var(--ease-out);
 }
 
-:global(body:not(.no-paper-texture)) :global(.settings-loading-mask) {
+:global(body.paper-texture) :global(.settings-loading-mask) {
     background-image: url(../../assets/textures/rice-paper.png);
     background-repeat: repeat;
     background-size: 160px;

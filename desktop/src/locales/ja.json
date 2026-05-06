@@ -1055,6 +1055,7 @@
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
       "feishuHint": "Feishu オープンプラットフォームから取得",
+      "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
       "qqAppSecret": "App Secret",
@@ -1120,6 +1121,9 @@
     "provider": {
       "title": "AI プロバイダーを選択",
       "subtitle": "動作するには AI モデルプロバイダーが必要です。\nプロバイダーを選んで API Key を入力してください。",
+      "selectPlaceholder": "プロバイダーを選択",
+      "searchPlaceholder": "プロバイダーを検索...",
+      "empty": "プロバイダーが見つかりません",
       "custom": "カスタム...",
       "customName": "名前",
       "customNamePlaceholder": "例: my-provider",
@@ -1143,6 +1147,8 @@
       "noAddedModels": "まだモデルが追加されていません",
       "addModel": "モデルを追加",
       "addModelSearchPlaceholder": "追加するモデルを検索...",
+      "manualModelPlaceholder": "モデル ID を手動入力",
+      "addManualModel": "追加",
       "mainModel": "メインモデル",
       "setMainModel": "メインにする",
       "editModel": "モデルを編集",
@@ -1168,6 +1174,18 @@
       "subtitle": "あとから設定でいつでも変更できます",
       "back": "戻る",
       "next": "次へ"
+    },
+    "workspace": {
+      "title": "ワークスペースを作成",
+      "subtitle": "既定のワークスペースはデスクトップの OH-WorkSpace です。\n既存のフォルダーを選ぶこともできます。",
+      "defaultLabel": "既定のワークスペース",
+      "customLabel": "選択したワークスペース",
+      "defaultHint": "ほかのフォルダーを選ばない場合、このディレクトリを自動作成します。\n巡回は既定でオフです。あとで設定からオンにできます。",
+      "choose": "フォルダーを選択",
+      "useDefault": "既定を使う",
+      "back": "戻る",
+      "next": "次へ",
+      "saving": "保存中..."
     },
     "tutorial": {
       "title": "準備完了 ✿",
@@ -1221,6 +1239,47 @@
     "paste": "貼り付け",
     "selectAll": "すべて選択"
   },
+  "rightWorkspace": {
+    "tabs": {
+      "label": "右側ワークスペース",
+      "sessionFiles": "会話ファイル",
+      "workspace": "ワークスペース"
+    },
+    "sessionFiles": {
+      "title": "会話ファイル",
+      "empty": "この会話ではまだファイルが作成またはアップロードされていません",
+      "actions": {
+        "preview": "プレビュー",
+        "open": "開く",
+        "reveal": "場所を表示",
+        "copyPath": "パスをコピー",
+        "copySelectedPaths": "{n} 件のパスをコピー",
+        "sendToBridge": "送信先...",
+        "sendToBridgeLoading": "Bridge の会話を読み込み中...",
+        "sendToBridgeEmpty": "送信できる Bridge 会話がありません",
+        "sendToBridgeLoadFailed": "Bridge 会話の読み込みに失敗しました"
+      },
+      "bridgeLoadFailed": "Bridge 会話の読み込みに失敗しました：{error}",
+      "sendSuccess": "{target} に送信しました",
+      "sendFailed": "{target} への送信に失敗しました：{error}",
+      "list": "会話ファイル一覧",
+      "sort": {
+        "label": "会話ファイルを並べ替え",
+        "timeDesc": "時間↓",
+        "nameAsc": "名前↑",
+        "nameDesc": "名前↓",
+        "typeAsc": "種類↑"
+      },
+      "status": {
+        "available": "利用可能",
+        "expired": "期限切れ"
+      }
+    },
+    "jian": {
+      "collapse": "Jian をたたむ",
+      "expand": "Jian を開く"
+    }
+  },
   "desk": {
     "title": "デスク",
     "workspaceTitle": "ワークスペース",
@@ -1249,10 +1308,16 @@
       "rename": "名前を変更",
       "copyPath": "パスをコピー",
       "delete": "削除",
+      "deleteSelected": "{count} 件を削除",
       "deleteN": "{n} 件を削除",
       "newMdFile": "新しい Markdown ドキュメント",
       "newFolder": "新しいフォルダ"
     },
+    "deleteConfirm": "「{name}」をシステムのゴミ箱に移動しますか？",
+    "deleteSelectedConfirm": "選択した {count} 件をシステムのゴミ箱に移動しますか？",
+    "trashFailed": "システムのゴミ箱への移動に失敗しました",
+    "renameInvalid": "ファイル名にパス区切り文字は使えません",
+    "renameFailed": "名前の変更に失敗しました",
     "sort": {
       "label": "並べ替え",
       "mtime": "更新日",
@@ -1265,6 +1330,21 @@
       "nameDescShort": "名前↓",
       "sizeShort": "サイズ",
       "typeShort": "タイプ"
+    },
+    "filter": {
+      "label": "フィルター",
+      "images": "画像",
+      "text": "テキスト",
+      "videos": "動画",
+      "clear": "フィルターをクリア",
+      "activeShort": "{count} 種類"
+    },
+    "search": {
+      "placeholder": "ワークスペースを検索",
+      "label": "ワークスペースのファイルを検索",
+      "results": "検索結果",
+      "empty": "一致するファイルはありません",
+      "root": "ルート"
     }
   },
   "window": {
@@ -1808,7 +1888,7 @@
     "inputHelp": "/help でコマンド一覧を表示"
   },
   "sandbox": {
-    "blocked": "[セキュリティ] {reason}\n\nこの操作は Hanako のサンドボックスセキュリティポリシーによりブロックされました。これはバグではなく、セキュリティ保護機構の動作です。ユーザーに操作がブロックされたことと理由を説明してください。ユーザーは設定でサンドボックスポリシーを調整できます。",
+    "blocked": "[セキュリティ] {reason}\n\nこの操作は Hanako のサンドボックスセキュリティポリシーによりブロックされました。これはコマンドがパスまたは権限の境界を越えたことを示します。まず現在のワークスペース、具体的なパス表記、対象ファイルが許可されたワークスペースまたは session パスに属するべきかを確認してください。ブロックされたパスと理由をユーザーに説明し、サンドボックス設定の変更はユーザーが明示的に決めた場合にだけ相談してください。",
     "noSudo": "sudo の使用は禁止されています",
     "noSu": "su によるユーザー切り替えは禁止されています",
     "noChmod": "ファイル権限の変更は禁止されています",
@@ -1826,7 +1906,7 @@
     "noBcdedit": "ブート構成の変更は禁止されています",
     "noWmic": "WMI コマンドは禁止されています",
     "restrictedPath": "コマンドが制限されたパスにアクセスしました：{path}",
-    "writeRestricted": "[セキュリティ] ファイルシステムの書き込みはワークスペース内に制限されています。この操作はサンドボックスセキュリティポリシーによりブロックされました。ユーザーにお知らせください。",
+    "writeRestricted": "[セキュリティ] ファイルシステムの書き込みは許可されたワークスペースと session パスに制限されています。ユーザーにサンドボックス設定の変更を尋ねる前に、現在のワークスペースとパス表記を確認してください。",
     "osRequired": "[sandbox] standard モードには OS レベルのサンドボックスが必要ですが、現在のプラットフォームはサポートしていません（{platform}）。sandbox-exec (macOS) または bubblewrap (Linux) をインストールするか、full-access モードに切り替えてください。",
     "opRead": "読み取り",
     "opWrite": "書き込み",

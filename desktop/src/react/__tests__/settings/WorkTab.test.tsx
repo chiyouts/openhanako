@@ -99,4 +99,26 @@ describe('WorkTab workspace persistence', () => {
     });
     expect(window.platform.settingsChanged).not.toHaveBeenCalled();
   });
+
+  it('shows 31 minutes when the agent config omits the patrol interval', async () => {
+    mockHanaFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/agents/agent-a/config' && !options?.method) {
+        return Promise.resolve(jsonResponse({
+          desk: {
+            home_folder: '/old-home',
+            heartbeat_enabled: false,
+          },
+        }));
+      }
+      if (url === '/api/agents/agent-a/config' && options?.method === 'PUT') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const { WorkTab } = await import('../../settings/tabs/WorkTab');
+
+    render(<WorkTab />);
+
+    expect(await screen.findByDisplayValue('31')).toBeTruthy();
+  });
 });

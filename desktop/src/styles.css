@@ -54,15 +54,15 @@
 
 /* ========================================
    纸质纹理系统
-   开关：body.no-paper-texture 关闭全部纹理
+   开关：body.paper-texture 显式开启全部纹理
    三层：surface → card → 亮度补偿
    新增 card 元素只需往 Card 层追加选择器
    ======================================== */
 
 /* ① Surface 层：铺底元素直接叠纹理 */
-body:not(.no-paper-texture),
-body:not(.no-paper-texture) .titlebar,
-body:not(.no-paper-texture) .sidebar {
+body.paper-texture,
+body.paper-texture .titlebar,
+body.paper-texture .sidebar {
     background-image: url(./assets/textures/rice-paper.png);
     background-repeat: repeat;
     background-size: 160px;
@@ -70,17 +70,19 @@ body:not(.no-paper-texture) .sidebar {
 }
 
 /* ② Card 层：bg-card 元素用 lighten 混合，纹理暗部被背景色提亮 */
-body:not(.no-paper-texture) .jian-card,
-body:not(.no-paper-texture) .msg-card,
-body:not(.no-paper-texture) .input-wrapper,
-body:not(.no-paper-texture) .hana-warning-box,
-body:not(.no-paper-texture) .browser-floating-card,
-body:not(.no-paper-texture) .hana-toast,
-body:not(.no-paper-texture) .ob-input,
-body:not(.no-paper-texture) .provider-card,
-body:not(.no-paper-texture) .model-list,
-body:not(.no-paper-texture) .tutorial-card,
-body:not(.no-paper-texture) .yuan-chip {
+body.paper-texture .jian-card,
+body.paper-texture .msg-card,
+body.paper-texture .input-wrapper,
+body.paper-texture .hana-warning-box,
+body.paper-texture .browser-floating-card,
+body.paper-texture .hana-toast,
+body.paper-texture .ob-input,
+body.paper-texture .provider-card,
+body.paper-texture .ob-provider-trigger,
+body.paper-texture .ob-provider-menu,
+body.paper-texture .model-list,
+body.paper-texture .tutorial-card,
+body.paper-texture .yuan-chip {
     background-image: url(./assets/textures/rice-paper.png);
     background-repeat: repeat;
     background-size: 160px;
@@ -89,7 +91,7 @@ body:not(.no-paper-texture) .yuan-chip {
 }
 
 /* ③ 亮度补偿：暖白叠层抵消纹理变暗（暗色主题跳过） */
-html:not([data-theme="midnight"]):not([data-theme="midnight-contrast"]) body:not(.no-paper-texture)::before {
+html:not([data-theme="midnight"]):not([data-theme="midnight-contrast"]) body.paper-texture::before {
     content: '';
     position: fixed;
     inset: 0;
@@ -144,6 +146,41 @@ body {
     line-height: 1.7;
     font-size: 15px;
     -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* UI 文本默认不可选；真正的文本/编辑内容显式放开。 */
+input,
+textarea,
+select,
+option,
+[contenteditable="true"],
+[contenteditable="true"] *,
+.cm-editor,
+.cm-editor *,
+.md-content,
+.md-content *,
+.preview-markdown,
+.preview-markdown *,
+.preview-code,
+.preview-code *,
+.preview-csv,
+.preview-csv *,
+.preview-docx,
+.preview-docx *,
+[data-selectable="true"],
+[data-selectable="true"] * {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.md-content button,
+.md-content .copy-btn,
+.preview-markdown button,
+.preview-code .copy-btn {
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* 焦点环：屏蔽鼠标点击后的系统 -webkit-focus-ring-color（跟随 macOS 强调色，常出现橙色），
@@ -979,8 +1016,9 @@ html[data-platform="linux"] .tb-toggle-right {
 
 /* 列表 */
 .md-content ul, .md-content ol {
-    padding-left: 1.5em;
+    padding-inline-start: 2em;
     margin: var(--space-xs) 0;
+    list-style-position: outside;
 }
 
 .md-content li {
@@ -2140,6 +2178,7 @@ body.resizing .jian-sidebar-inner {
 }
 
 .context-menu-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -2149,6 +2188,56 @@ body.resizing .jian-sidebar-inner {
     cursor: pointer;
     transition: background 0.1s;
     white-space: nowrap;
+}
+
+.context-menu-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.context-menu-check {
+    width: 12px;
+    min-width: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-size: 0.68rem;
+    line-height: 1;
+}
+
+.context-menu-item.has-submenu {
+    padding-right: 26px;
+}
+
+.context-menu-item.has-submenu::after {
+    content: "›";
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.context-menu-submenu {
+    position: absolute;
+    top: -5px;
+    min-width: 190px;
+    background: var(--bg-card, var(--bg));
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-md);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.07);
+    padding: 4px 0;
+}
+
+.context-menu-submenu.right {
+    left: calc(100% + 4px);
+}
+
+.context-menu-submenu.left {
+    right: calc(100% + 4px);
 }
 
 .context-menu-item:hover {
@@ -2839,6 +2928,84 @@ html[data-platform="linux"] .onboarding {
     font-weight: 500;
 }
 
+.ob-provider-select {
+    position: relative;
+    width: 100%;
+}
+.ob-provider-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-xs);
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.86rem;
+    cursor: pointer;
+}
+.ob-provider-trigger:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.ob-provider-trigger svg {
+    width: 0.85rem;
+    height: 0.85rem;
+    flex-shrink: 0;
+}
+.ob-provider-menu {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+    box-shadow: 0 4px 16px var(--shadow, rgba(0,0,0,0.08));
+}
+.ob-provider-search {
+    border: none;
+    border-bottom: 1px solid var(--overlay-light);
+    border-radius: 0;
+    background: transparent;
+}
+.ob-provider-options {
+    max-height: 190px;
+    overflow-y: auto;
+    padding: var(--space-xs) 0;
+}
+.ob-provider-option {
+    width: 100%;
+    padding: 0.45rem 0.7rem;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8rem;
+    text-align: left;
+    cursor: pointer;
+}
+.ob-provider-option:hover {
+    background: var(--accent-bg, rgba(139,115,85,0.06));
+}
+.ob-provider-option.selected {
+    color: var(--accent);
+    background: var(--accent-bg, rgba(139,115,85,0.08));
+    font-weight: 500;
+}
+.ob-provider-empty {
+    padding: 0.75rem 0.7rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
 /* ── Custom provider ── */
 .custom-provider-row {
     width: 100%;
@@ -3151,6 +3318,35 @@ html[data-platform="linux"] .onboarding {
 .ob-add-model-option:disabled:hover {
     background: transparent;
 }
+.ob-add-model-manual {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-xs);
+    padding: var(--space-xs);
+    border-top: 1px solid var(--overlay-light);
+}
+.ob-add-model-manual-input {
+    min-width: 0;
+    border-radius: var(--radius-sm, 4px);
+}
+.ob-add-model-manual-btn {
+    padding: 0 var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+.ob-add-model-manual-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.ob-add-model-manual-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
 .ob-model-edit-panel {
     width: 100%;
     box-sizing: border-box;
@@ -3179,7 +3375,7 @@ html[data-platform="linux"] .onboarding {
     gap: var(--space-xs);
 }
 .ob-model-edit-field span,
-.ob-model-edit-check span {
+.ob-model-edit-toggle-row .hana-toggle-label {
     color: var(--text-muted);
     font-size: 0.72rem;
 }
@@ -3188,10 +3384,8 @@ html[data-platform="linux"] .onboarding {
     gap: var(--space-md);
     margin-top: var(--space-sm);
 }
-.ob-model-edit-check {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
+.ob-model-edit-toggle-row {
+    min-width: 0;
 }
 .ob-model-edit-actions {
     display: flex;
@@ -3233,6 +3427,70 @@ html[data-platform="linux"] .onboarding {
 }
 .ob-utility-section .sdw {
     max-width: 100%;
+}
+
+/* ── Workspace step ── */
+.ob-workspace-card {
+    width: 100%;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-card);
+}
+.ob-workspace-icon {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-secondary);
+}
+.ob-workspace-icon svg {
+    width: 24px;
+    height: 24px;
+}
+.ob-workspace-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.ob-workspace-label {
+    color: var(--text);
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+.ob-workspace-path {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding: 7px 9px;
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+.ob-workspace-hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.55;
+}
+.ob-workspace-actions {
+    width: 100%;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
 }
 
 /* ── Tutorial cards ── */

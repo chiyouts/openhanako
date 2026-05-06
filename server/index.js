@@ -56,7 +56,6 @@ import { ConfirmStore } from "../lib/confirm-store.js";
 import { DeferredResultStore } from "../lib/deferred-result-store.js";
 import { createDeferredResultExtension } from "../lib/extensions/deferred-result-ext.js";
 import { createCompactionGuardExtension } from "../lib/extensions/compaction-guard-ext.js";
-import { BridgeManager } from "../lib/bridge/bridge-manager.js";
 import { Hub } from "../hub/index.js";
 import { startCLI } from "./cli.js";
 import { fromRoot } from "../shared/hana-root.js";
@@ -134,8 +133,8 @@ const sessionFileCleanupTimer = setInterval(() => {
 }, 24 * 60 * 60 * 1000);
 sessionFileCleanupTimer.unref?.();
 
-// 加载 i18n
-loadLocale(engine.config?.locale);
+// 加载 i18n（engine.init 已经按全局偏好加载过，这里保持启动入口显式同步）
+loadLocale(engine.getLocale?.() || engine.config?.locale);
 
 // ── 启动令牌（阻止本机其他程序随意访问） ──
 const SERVER_TOKEN = process.env.HANA_TOKEN || crypto.randomBytes(16).toString("hex");
@@ -248,14 +247,20 @@ engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStor
 engine.registerExtensionFactory(createCompactionGuardExtension());
 
 // ── 启动默认 session ──
+// Desktop 会显式跳过：renderer 首屏就是 pending-new-session，首次发送消息时
+// 才需要创建 chat session；独立 server/CLI 保持旧行为。
 // 时序要求：所有 framework extension + plugin extension 都注册完之后再 create，
 // 否则 pi SDK ExtensionRunner 构造时拿不到这些 factory，extension 不会挂到
 // startup session 上（Codex 评审发现的 issue#437 部分失效场景）。
-if (engine.currentModel) {
+const shouldCreateStartupSession = process.env.HANA_CREATE_STARTUP_SESSION !== "0";
+if (shouldCreateStartupSession && engine.currentModel) {
   console.log("[server] ③ 创建 session...");
   await engine.createSession();
   console.log("[server] ③ Session created");
   dlog.log("server", `session created, model=${engine.currentModel.name}`);
+} else if (!shouldCreateStartupSession) {
+  console.log("[server] ③ 跳过启动期 session 创建");
+  dlog.log("server", "startup session creation skipped");
 } else {
   // 诊断信息：区分三种 currentModel=null 的情况，方便用户排查 (#414)
   const availableCount = engine.availableModels?.length ?? 0;
@@ -274,8 +279,59 @@ if (engine.currentModel) {
 }
 
 // ── 外部平台接入管理器 ──
-const bridgeManager = new BridgeManager({ engine, hub });
-hub.bridgeManager = bridgeManager;
+let bridgeManager = null;
+let bridgeManagerInitPromise = null;
+let bridgeManagerInitError = null;
+let bridgeAutoStartRequested = false;
+let bridgeAutoStartDone = false;
+
+function runBridgeAutoStart(manager) {
+  if (!manager || bridgeAutoStartDone) return;
+  bridgeAutoStartDone = true;
+  manager.autoStart(engine.agents);
+  dlog.log("server", "bridge autoStart done");
+}
+
+async function startBridgeManager({ autoStart = false } = {}) {
+  if (autoStart) bridgeAutoStartRequested = true;
+  if (bridgeManager) {
+    if (autoStart) runBridgeAutoStart(bridgeManager);
+    return bridgeManager;
+  }
+  if (bridgeManagerInitPromise) return bridgeManagerInitPromise;
+
+  bridgeManagerInitError = null;
+  bridgeManagerInitPromise = (async () => {
+    console.log("[server] Bridge manager 初始化...");
+    const { BridgeManager } = await import("../lib/bridge/bridge-manager.js");
+    const manager = new BridgeManager({ engine, hub });
+    bridgeManager = manager;
+    hub.bridgeManager = manager;
+    if (bridgeAutoStartRequested) runBridgeAutoStart(manager);
+    console.log("[server] Bridge manager 初始化完成");
+    return manager;
+  })().catch((err) => {
+    bridgeManagerInitError = err;
+    hub.bridgeManager = null;
+    console.error("[server] Bridge manager 初始化失败:", err.message);
+    dlog.error("server", `bridge init failed: ${err.stack || err.message}`);
+    return null;
+  }).finally(() => {
+    bridgeManagerInitPromise = null;
+  });
+
+  return bridgeManagerInitPromise;
+}
+
+const bridgeManagerRef = {
+  get: () => bridgeManager,
+  ensureReady: () => startBridgeManager(),
+  getState: () => ({
+    ready: !!bridgeManager,
+    initializing: !!bridgeManagerInitPromise,
+    error: bridgeManagerInitError?.message || null,
+  }),
+};
 
 const { restRoute: chatRestRoute, wsRoute: chatWsRoute } = createChatRoute(engine, hub, { upgradeWebSocket });
 app.route("/api", chatRestRoute);
@@ -293,7 +349,7 @@ app.route("/api", createChannelsRoute(engine, hub));
 app.route("/api", createDmRoute(engine));
 app.route("/api", createFsRoute(engine));
 app.route("/api", createPreferencesRoute(engine));
-app.route("/api", createBridgeRoute(engine, bridgeManager));
+app.route("/api", createBridgeRoute(engine, bridgeManagerRef));
 app.route("/api", createAuthRoute(engine));
 app.route("/api", createDiaryRoute(engine));
 app.route("/api", createConfirmRoute(confirmStore, engine));
@@ -362,15 +418,48 @@ app.get("/api/session-permission-mode", async (c) => {
   });
 });
 
+app.post("/api/session-thinking-level", async (c) => {
+  const { sessionPath, level } = await safeJson(c);
+  if (!sessionPath) return c.json({ error: "sessionPath required" }, 400);
+  const result = engine.setSessionThinkingLevel(sessionPath, level);
+  if (result?.ok === false) {
+    return c.json({
+      ok: false,
+      error: result.error || "failed to set session thinking level",
+      thinkingLevel: result.thinkingLevel || engine.getSessionThinkingLevel(sessionPath),
+    }, 409);
+  }
+  return c.json({
+    ok: true,
+    thinkingLevel: result.thinkingLevel,
+  });
+});
+
 app.post("/api/session-permission-mode", async (c) => {
-  const { mode, pendingNewSession } = await safeJson(c);
-  const result = pendingNewSession === true
+  const { mode, pendingNewSession, currentSessionOnly, sessionPath } = await safeJson(c);
+  const targetSessionPath = typeof sessionPath === "string" && sessionPath ? sessionPath : null;
+  const result = currentSessionOnly === true
+    ? engine.setCurrentSessionPermissionMode(mode)
+    : pendingNewSession === true
     ? engine.setPendingSessionPermissionMode(mode)
+    : targetSessionPath
+    ? engine.setSessionPermissionModeForSession(targetSessionPath, mode)
     : engine.setSessionPermissionMode(mode);
+  const explicitSession = currentSessionOnly === true || !!targetSessionPath;
+  if (explicitSession && result?.ok === false) {
+    return c.json({
+      ok: false,
+      error: result.error || "session permission mode requires an active session",
+      mode: result.mode,
+      accessMode: result.mode === "read_only" ? "read_only" : "operate",
+      defaultMode: engine.getSessionPermissionModeDefault(),
+    }, 409);
+  }
+  const scopedMode = pendingNewSession === true || explicitSession;
   return c.json({
     ok: result?.ok !== false,
-    mode: pendingNewSession === true ? result?.mode : engine.permissionMode,
-    accessMode: pendingNewSession === true
+    mode: scopedMode ? result?.mode : engine.permissionMode,
+    accessMode: scopedMode
       ? (result?.mode === "read_only" ? "read_only" : "operate")
       : engine.accessMode,
     defaultMode: engine.getSessionPermissionModeDefault(),
@@ -498,12 +587,13 @@ try {
     console.error("[server] 写入 server-info.json 失败:", e.message);
   }
 
-  // 自动启动已配置的外部平台
-  bridgeManager.autoStart(engine.agents);
-  dlog.log("server", "bridge autoStart done");
-
   // 通知就绪（server-info.json 已在上方写入，无需额外动作）
   console.log(`[server] ready: port=${actualPort}`);
+
+  // Bridge 平台依赖不属于 HTTP readiness 的前置条件。先让桌面端拿到
+  // server-info，再在后台加载外部平台 adapter，避免 Windows 上依赖加载
+  // 或杀毒扫描拖垮主启动握手。
+  startBridgeManager({ autoStart: true });
 
   // 独立运行模式：启动 CLI（TTY 环境下自动进入交互模式）
   if (process.stdin.isTTY) {
@@ -554,7 +644,7 @@ async function gracefulShutdown() {
     }
 
     // 3. 停止外部平台
-    bridgeManager.stopAll();
+    bridgeManager?.stopAll();
     dlog.log("server", "bridge stopped");
 
     // 4. flush deferred result store（debounce 可能有未写盘的脏数据）

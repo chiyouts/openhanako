@@ -6,11 +6,10 @@
  * 不持有 engine 引用，通过构造器注入依赖。
  */
 import fs from "fs";
-import path from "path";
-import os from "os";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { findModel, parseModelRef, requireModelRef } from "../shared/model-ref.js";
 import { t } from "../server/i18n.js";
+import { ensureDefaultWorkspace } from "../shared/default-workspace.js";
 
 const log = createModuleLogger("config");
 
@@ -142,8 +141,8 @@ export class ConfigCoordinator {
       if (folder && fs.existsSync(folder)) return folder;
     }
 
-    // 3. 硬编码 fallback
-    return path.join(os.homedir(), "Desktop");
+    // 3. 显式默认工作区，避免把整个桌面暴露成工作目录
+    return ensureDefaultWorkspace();
   }
 
   /**
@@ -361,12 +360,8 @@ export class ConfigCoordinator {
   }
 
   setThinkingLevel(level) {
-    // 持久化到全局 preference（跨 session 常驻）
+    // 全局 preference 只作为新 session 默认值；已有 session 的实际值归 SessionCoordinator。
     this._d.getPrefs().setThinkingLevel(level);
-    const session = this._d.getSession();
-    if (session) {
-      session.setThinkingLevel(this._d.getModels().resolveThinkingLevel(level));
-    }
   }
 
   /** 从 preference 读取用户设定的 thinking level */

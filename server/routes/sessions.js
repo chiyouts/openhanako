@@ -26,7 +26,9 @@ import {
   moveSessionFileSidecarSync,
   sessionFileSidecarPath,
 } from "../../lib/session-files/session-file-registry.js";
+import { deleteSessionSkillSnapshotSync } from "../../lib/skills/session-skill-snapshot.js";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.js";
+import { modelSupportsXhigh } from "../../core/session-thinking-level.js";
 
 function rcPlatformFromSessionKey(sessionKey) {
   const match = /^([a-z]+)_/i.exec(sessionKey || "");
@@ -388,6 +390,7 @@ export function createSessionsRoute(engine) {
         planMode: engine.planMode,
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
+        thinkingLevel: engine.getSessionThinkingLevel?.(newSessionPath) || engine.getThinkingLevel?.() || "auto",
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
       });
     } catch (err) {
@@ -443,6 +446,7 @@ export function createSessionsRoute(engine) {
         planMode: engine.planMode,
         permissionMode: engine.permissionMode,
         accessMode: engine.accessMode,
+        thinkingLevel: engine.getSessionThinkingLevel?.(sessionPath) || engine.getThinkingLevel?.() || "auto",
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
         cwd: engine.cwd,
         workspaceFolders: engine.getSessionWorkspaceFolders?.(sessionPath) || [],
@@ -456,6 +460,7 @@ export function createSessionsRoute(engine) {
         currentModelName: activeModel?.name || null,
         currentModelInput: Array.isArray(activeModel?.input) ? activeModel.input : null,
         currentModelReasoning: activeModel?.reasoning ?? null,
+        currentModelXhigh: modelSupportsXhigh(activeModel),
         currentModelContextWindow: activeModel?.contextWindow ?? null,
       });
     } catch (err) {
@@ -526,6 +531,7 @@ export function createSessionsRoute(engine) {
             if (stat.mtime.getTime() < cutoff) {
               await fs.unlink(fp);
               deleteSessionFileSidecarSync(fp);
+              deleteSessionSkillSnapshotSync(fp);
               deleted++;
               // 清理 titles.json 孤儿（key = 对应的活跃路径）
               const activeKey = path.join(agentsDir, agentId, "sessions", f);
@@ -661,6 +667,7 @@ export function createSessionsRoute(engine) {
       try {
         await fs.unlink(sessionPath);
         deleteSessionFileSidecarSync(sessionPath);
+        deleteSessionSkillSnapshotSync(sessionPath);
       } catch (err) {
         if (err.code === "ENOENT") {
           return c.json({ error: t("error.sessionNotFound") }, 404);

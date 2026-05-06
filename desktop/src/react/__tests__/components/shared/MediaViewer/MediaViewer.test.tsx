@@ -97,11 +97,14 @@ describe('MediaViewer interaction', () => {
     await waitFor(() => expect(getByTestId('video-stage-video')).toBeTruthy());
   });
 
-  it('shows the file name and sequence index in the top bar', () => {
+  it('shows the file name in the caption and sequence index in the top bar', () => {
     useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b'), fileRef('c')], currentId: 'b', origin: 'desk' });
     const { getByTestId } = render(<MediaViewer />);
     expect(getByTestId('media-viewer-index').textContent).toContain('2 / 3');
-    expect(getByTestId('media-viewer-name').textContent).toContain('b.png');
+    const caption = getByTestId('media-viewer-caption');
+    const name = getByTestId('media-viewer-name');
+    expect(caption.contains(name)).toBe(true);
+    expect(name.textContent).toContain('b.png');
   });
 
   it('dispatches zoom commands from keyboard shortcuts', () => {

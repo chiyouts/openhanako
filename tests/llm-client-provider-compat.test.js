@@ -74,6 +74,33 @@ describe("callText provider-compat routing", () => {
     expect(body.temperature).toBe(0);
   });
 
+  it("keeps utility output caps as system-owned request budgets", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "ok" } }],
+      }),
+    });
+
+    await callText({
+      api: "openai-completions",
+      baseUrl: "https://example.test/v1",
+      model: {
+        id: "custom-small-output",
+        provider: "openai-compatible",
+        api: "openai-completions",
+        maxTokens: 512,
+      },
+      messages: [{ role: "user", content: "hi" }],
+      timeoutMs: 5_000,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.max_tokens).toBe(512);
+  });
+
   it("serializes image content for openai-compatible chat completions", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
@@ -171,6 +198,35 @@ describe("callText provider-compat routing", () => {
         cache_control: { type: "ephemeral" },
       },
     ]);
+  });
+
+  it("forwards model request headers on utility requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        content: [{ type: "text", text: "ok" }],
+      }),
+    });
+
+    await callText({
+      api: "anthropic-messages",
+      apiKey: "sk-test",
+      baseUrl: "https://api.kimi.com/coding",
+      model: {
+        id: "kimi-for-coding",
+        provider: "kimi-coding",
+        headers: { "User-Agent": "KimiCLI/1.5" },
+      },
+      messages: [{ role: "user", content: "hi" }],
+      timeoutMs: 5_000,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers).toMatchObject({
+      "User-Agent": "KimiCLI/1.5",
+      "x-api-key": "sk-test",
+    });
   });
 
   it("keeps callText string-compatible by default and returns usage only when requested", async () => {

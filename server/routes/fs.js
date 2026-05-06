@@ -62,7 +62,8 @@ export function createFsRoute(engine) {
   function getAllowedRoots(c) {
     const roots = [hanakoHome];
     // desk 工作空间目录（用户可能配在 ~/.hanako 外面）
-    const deskHome = resolveAgent(engine, c)?.deskManager?.homePath;
+    const agent = resolveAgent(engine, c);
+    const deskHome = agent?.config?.desk?.home_folder || engine.getHomeCwd?.(agent?.id);
     if (deskHome) roots.push(path.resolve(deskHome));
     return roots;
   }

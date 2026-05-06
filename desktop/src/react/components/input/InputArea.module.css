@@ -119,47 +119,6 @@
     white-space: nowrap;
 }
 
-/* 工作空间目录按钮 */
-.desk-context-btn {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.2rem 0.55rem;
-    font-family: inherit;
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    background: var(--bg-card);
-    border: 1px solid rgba(var(--accent-rgb), 0.12);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: all var(--duration) var(--ease-out);
-    -webkit-app-region: no-drag;
-}
-
-.desk-context-btn:hover:not(:disabled) {
-    color: var(--accent);
-    border-color: rgba(var(--accent-rgb), 0.25);
-}
-
-.desk-context-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-}
-
-.desk-context-btn.active {
-    color: var(--accent);
-    border-color: rgba(var(--accent-rgb), 0.3);
-    background: rgba(var(--accent-rgb), 0.06);
-}
-
-.desk-context-label {
-    letter-spacing: 0.02em;
-    overflow: hidden;
-    text-overflow: clip;
-    white-space: nowrap;
-}
-
 /* ── Context Usage Ring ── */
 
 .context-ring {
@@ -911,6 +870,17 @@
     flex-shrink: 0;
 }
 
+.session-confirmation-confirm-wrap {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
+.session-confirmation-split {
+    display: inline-flex;
+    align-items: center;
+}
+
 .session-confirmation-button {
     display: inline-flex;
     align-items: center;
@@ -942,6 +912,61 @@
     background: var(--accent);
     border-color: var(--accent);
     color: white;
+}
+
+.session-confirmation-split-main {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.session-confirmation-menu-trigger {
+    min-width: 1.65rem;
+    width: 1.65rem;
+    padding: 0;
+    border-left-color: rgba(255, 255, 255, 0.24);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.session-confirmation-menu-trigger svg {
+    transition: transform 0.18s var(--ease-out);
+}
+
+.session-confirmation-menu-trigger[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+}
+
+.session-confirmation-menu {
+    position: fixed;
+    z-index: 10000;
+    min-width: 8.5rem;
+    padding: var(--space-xs);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 16px var(--shadow);
+    animation: dropdown-in 0.18s var(--ease-out);
+}
+
+.session-confirmation-menu-item {
+    display: block;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    font-family: inherit;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+
+.session-confirmation-menu-item:hover {
+    background: var(--accent-light);
+    color: var(--accent);
 }
 
 .session-confirmation-button-reject {

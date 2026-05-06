@@ -20,6 +20,8 @@ import {
   generateDescription,
 } from "./llm-utils.js";
 import { findModel, parseModelRef } from "../shared/model-ref.js";
+import { DEFAULT_HEARTBEAT_INTERVAL_MINUTES } from "../shared/default-workspace.js";
+import { relativePathInsideBase } from "./message-utils.js";
 
 const log = createModuleLogger("agent-mgr");
 
@@ -305,6 +307,11 @@ export class AgentManager {
     const yuanType = VALID_YUAN.includes(yuan) ? yuan : "hanako";
     const config = configSeed;
     config.agent = { ...(config.agent || {}), name: name.trim(), yuan: yuanType };
+    config.desk = {
+      ...(config.desk || {}),
+      heartbeat_enabled: false,
+      heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL_MINUTES,
+    };
     if (userName) {
       config.user = { ...(config.user || {}), name: userName };
     }
@@ -565,8 +572,8 @@ export class AgentManager {
   }
 
   agentIdFromSessionPath(sessionPath) {
-    const rel = path.relative(this._d.agentsDir, sessionPath);
-    if (rel.startsWith("..")) return null;
+    const rel = relativePathInsideBase(sessionPath, this._d.agentsDir);
+    if (rel === null || rel === "") return null;
     return rel.split(path.sep)[0] || null;
   }
 

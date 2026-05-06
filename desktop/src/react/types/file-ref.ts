@@ -31,5 +31,6 @@ export interface FileRef {
   missingAt?: number | null;
   timestamp?: number;
   sessionMessageId?: string;
+  sessionBlockIdx?: number;
   inlineData?: { base64: string; mimeType: string };
 }

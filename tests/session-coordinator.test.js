@@ -545,6 +545,114 @@ describe("SessionCoordinator", () => {
     expect(agent.buildSystemPrompt).toHaveBeenCalledTimes(1);
   });
 
+  it("snapshots skill files for a session so restored sessions do not read mutated source skills", async () => {
+    const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "skill-snapshot.jsonl");
+    const skillDir = path.join(tempDir, "skills", "stable-skill");
+    fs.mkdirSync(path.join(skillDir, "assets"), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: stable-skill\ndescription: Stable skill.\n---\n\noriginal body\n",
+      "utf-8",
+    );
+    fs.writeFileSync(path.join(skillDir, "assets", "note.txt"), "asset v1\n", "utf-8");
+
+    const skill = {
+      name: "stable-skill",
+      description: "Stable skill.",
+      filePath: path.join(skillDir, "SKILL.md"),
+      baseDir: skillDir,
+      source: "user",
+      sourceInfo: {
+        path: path.join(skillDir, "SKILL.md"),
+        baseDir: skillDir,
+        source: "local",
+      },
+    };
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      config: { locale: "zh-CN" },
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: () => "BASE",
+      tools: [],
+    };
+    fs.mkdirSync(agent.sessionDir, { recursive: true });
+    const freshSession = {
+      sessionManager: { getSessionFile: () => sessionFile },
+      subscribe: vi.fn(() => vi.fn()),
+      setActiveToolsByName: vi.fn(),
+      _baseSystemPrompt: "FINAL PROMPT WITH SKILL",
+      agent: { state: { systemPrompt: "FINAL PROMPT WITH SKILL" } },
+    };
+    const restoredSession = {
+      sessionManager: { getSessionFile: () => sessionFile },
+      subscribe: vi.fn(() => vi.fn()),
+      setActiveToolsByName: vi.fn(),
+      _baseSystemPrompt: "FINAL PROMPT CURRENT",
+      agent: { state: { systemPrompt: "FINAL PROMPT CURRENT" } },
+    };
+    createAgentSessionMock
+      .mockResolvedValueOnce({ session: freshSession })
+      .mockResolvedValueOnce({ session: restoredSession });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { id: "claude-opus-4-5", provider: "anthropic", name: "Claude" },
+        availableModels: [{ id: "claude-opus-4-5", provider: "anthropic", name: "Claude" }],
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => [],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [] }),
+      }),
+      getSkills: () => ({
+        getSkillsForAgent: () => ({ skills: [skill], diagnostics: [] }),
+      }),
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    const sessionMgr = {
+      getCwd: () => tempDir,
+      getSessionFile: () => sessionFile,
+      buildSessionContext: () => ({ model: { provider: "anthropic", modelId: "claude-opus-4-5" } }),
+    };
+
+    await coordinator.createSession(sessionMgr, tempDir, true);
+    const freshSkill = createAgentSessionMock.mock.calls[0][0].resourceLoader.getSkills().skills[0];
+    expect(freshSkill.filePath).not.toBe(skill.filePath);
+    expect(fs.readFileSync(freshSkill.filePath, "utf-8")).toContain("original body");
+    expect(fs.readFileSync(path.join(freshSkill.baseDir, "assets", "note.txt"), "utf-8")).toBe("asset v1\n");
+
+    fs.writeFileSync(path.join(skillDir, "SKILL.md"), "---\nname: stable-skill\ndescription: Stable skill.\n---\n\nmutated body\n", "utf-8");
+    fs.rmSync(path.join(skillDir, "assets"), { recursive: true, force: true });
+
+    await coordinator.createSession(sessionMgr, tempDir, true, null, { restore: true });
+    const restoredSkill = createAgentSessionMock.mock.calls[1][0].resourceLoader.getSkills().skills[0];
+    expect(restoredSkill.filePath).toBe(freshSkill.filePath);
+    expect(fs.readFileSync(restoredSkill.filePath, "utf-8")).toContain("original body");
+    expect(fs.readFileSync(path.join(restoredSkill.baseDir, "assets", "note.txt"), "utf-8")).toBe("asset v1\n");
+  });
+
   it("restores frozen append prompts so provider prompt patches survive cold restore", async () => {
     const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "deepseek-restore.jsonl");
     const deepseekModel = {

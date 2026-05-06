@@ -90,6 +90,77 @@ async function listWorkspaceFiles(dir) {
   return items.filter(Boolean).sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
 }
 
+const WORKSPACE_SEARCH_SKIP_DIRS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  ".next",
+  ".turbo",
+  "dist",
+  "build",
+  "coverage",
+]);
+const WORKSPACE_SEARCH_LIMIT = 80;
+
+function toRelativeSubdir(root, target) {
+  const rel = path.relative(root, target);
+  return rel.split(path.sep).filter(Boolean).join("/");
+}
+
+async function searchWorkspaceFiles(root, query, {
+  limit = WORKSPACE_SEARCH_LIMIT,
+} = {}) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return [];
+  const results = [];
+
+  async function walk(dir) {
+    if (results.length >= limit) return;
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      if (err.code !== "ENOENT" && err.code !== "EACCES") {
+        console.warn(`[desk] search readdir failed for ${dir}: ${err.message}`);
+      }
+      return;
+    }
+
+    entries.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+    for (const entry of entries) {
+      if (results.length >= limit) break;
+      if (entry.name.startsWith(".")) continue;
+      const fullPath = path.join(dir, entry.name);
+      const isDir = entry.isDirectory();
+      if (isDir && WORKSPACE_SEARCH_SKIP_DIRS.has(entry.name)) continue;
+      const relativePath = toRelativeSubdir(root, fullPath);
+      const parentSubdir = toRelativeSubdir(root, path.dirname(fullPath));
+
+      if (entry.name.toLowerCase().includes(needle)) {
+        try {
+          const stat = await fs.promises.stat(fullPath);
+          results.push({
+            name: entry.name,
+            relativePath,
+            parentSubdir,
+            isDir,
+            size: isDir ? null : stat.size,
+            mtime: stat.mtime.toISOString(),
+          });
+        } catch (err) {
+          if (err.code !== "ENOENT") console.warn(`[desk] search stat failed for ${entry.name}: ${err.message}`);
+        }
+      }
+
+      if (isDir) await walk(fullPath);
+    }
+  }
+
+  await walk(root);
+  return results.sort((a, b) => a.relativePath.localeCompare(b.relativePath, "zh")).slice(0, limit);
+}
+
 export function createDeskRoute(engine, hub) {
   const route = new Hono();
 
@@ -463,6 +534,26 @@ export function createDeskRoute(engine, hub) {
     return c.json({ files: await listWorkspaceFiles(target), subdir: subdir || "", basePath: dir });
   });
 
+  /** 搜索工作空间文件名（递归，默认跳过隐藏目录和常见依赖/构建目录） */
+  route.get("/desk/search-files", async (c) => {
+    const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
+    if (!dir) return c.json({ results: [], basePath: null, query: c.req.query("q") || "" });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    const query = c.req.query("q") || "";
+    const limitRaw = Number.parseInt(c.req.query("limit") || "", 10);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(limitRaw, WORKSPACE_SEARCH_LIMIT)
+      : WORKSPACE_SEARCH_LIMIT;
+    let stat = null;
+    try {
+      stat = await fs.promises.stat(dir);
+    } catch {
+      return c.json({ results: [], basePath: dir, query });
+    }
+    if (!stat.isDirectory()) return c.json({ error: t("error.pathNotFound") });
+    return c.json({ results: await searchWorkspaceFiles(dir, query, { limit }), basePath: dir, query });
+  });
+
   /** 读取指定目录的 jian.md */
   route.get("/desk/jian", async (c) => {
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
@@ -524,12 +615,21 @@ export function createDeskRoute(engine, hub) {
     const { action, subdir: sub, paths, name, content, oldName, newName } = body;
 
     // 解析子目录
+    const isValidSubdir = (value) => {
+      const subdir = value || "";
+      return !(subdir.includes("\\") || subdir.includes("..") || subdir.startsWith("."));
+    };
     const subdirStr = sub || "";
-    if (subdirStr && (subdirStr.includes("\\") || subdirStr.includes("..") || subdirStr.startsWith("."))) {
-      return c.json({ error: "invalid subdir" });
-    }
+    if (!isValidSubdir(subdirStr)) return c.json({ error: "invalid subdir" });
     const dir = subdirStr ? path.join(baseDir, subdirStr) : baseDir;
     if (!isInsidePath(dir, baseDir)) return c.json({ error: "invalid path" });
+
+    const subdirToDir = (value) => {
+      const subdir = value || "";
+      if (!isValidSubdir(subdir)) return null;
+      const target = subdir ? path.join(baseDir, subdir) : baseDir;
+      return isInsidePath(target, baseDir) ? target : null;
+    };
 
     switch (action) {
       case "upload": {
@@ -622,6 +722,63 @@ export function createDeskRoute(engine, hub) {
           }
         }
         return c.json({ ok: true, results, files: await listWorkspaceFiles(dir) });
+      }
+
+      case "movePaths": {
+        const items = body.items;
+        const destSubdir = body.destSubdir || "";
+        const currentSubdir = body.currentSubdir || "";
+        if (!Array.isArray(items) || items.length === 0) return c.json({ error: "items[] required" });
+        const destDir = subdirToDir(destSubdir);
+        if (!destDir) return c.json({ error: "invalid destSubdir" });
+        if (!fs.existsSync(destDir) || !fs.statSync(destDir).isDirectory()) {
+          return c.json({ error: "destSubdir is not a directory" });
+        }
+
+        const affectedSubdirs = new Set([destSubdir, currentSubdir]);
+        const results = [];
+        for (const item of items) {
+          const sourceSubdir = item && typeof item.sourceSubdir === "string" ? item.sourceSubdir : "";
+          const itemName = item && typeof item.name === "string" ? path.basename(item.name) : "";
+          if (!itemName) { results.push({ name: item?.name, error: "invalid name" }); continue; }
+          const sourceDir = subdirToDir(sourceSubdir);
+          if (!sourceDir) { results.push({ name: itemName, error: "invalid sourceSubdir" }); continue; }
+
+          const src = path.join(sourceDir, itemName);
+          const dest = path.join(destDir, itemName);
+          if (!isInsidePath(src, sourceDir) || !isInsidePath(dest, destDir)) {
+            results.push({ name: itemName, error: "invalid path" });
+            continue;
+          }
+          if (!fs.existsSync(src)) { results.push({ name: itemName, error: "not found" }); continue; }
+          if (src === dest) { results.push({ name: itemName, ok: true, skipped: true }); continue; }
+          if (fs.existsSync(dest)) { results.push({ name: itemName, error: "target already exists" }); continue; }
+
+          const sourceRel = sourceSubdir ? `${sourceSubdir}/${itemName}` : itemName;
+          if (fs.statSync(src).isDirectory() && (destSubdir === sourceRel || destSubdir.startsWith(`${sourceRel}/`))) {
+            results.push({ name: itemName, error: "cannot move folder into itself" });
+            continue;
+          }
+
+          try {
+            fs.renameSync(src, dest);
+            affectedSubdirs.add(sourceSubdir);
+            affectedSubdirs.add(destSubdir);
+            results.push({ name: itemName, ok: true });
+          } catch (err) {
+            results.push({ name: itemName, error: err.message });
+          }
+        }
+
+        const filesByPath = {};
+        for (const subdir of affectedSubdirs) {
+          if (!isValidSubdir(subdir)) continue;
+          const targetDir = subdirToDir(subdir);
+          if (targetDir && fs.existsSync(targetDir) && fs.statSync(targetDir).isDirectory()) {
+            filesByPath[subdir] = await listWorkspaceFiles(targetDir);
+          }
+        }
+        return c.json({ ok: true, results, filesByPath, files: await listWorkspaceFiles(dir) });
       }
 
       case "remove": {

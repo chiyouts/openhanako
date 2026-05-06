@@ -7,6 +7,10 @@ import {
   getThinkingFormat,
   getReasoningProfile,
 } from "../core/provider-compat.js";
+import {
+  resolveOutputBudgetPolicy,
+  resolveOutputCapCapability,
+} from "../core/provider-compat/output-budget.js";
 
 describe("isDeepSeekModel", () => {
   it("只把官方 DeepSeek provider / baseUrl 视为 DeepSeek 兼容路径", () => {
@@ -96,6 +100,93 @@ describe("getReasoningProfile", () => {
   });
 });
 
+describe("resolveOutputCapCapability", () => {
+  it("marks Anthropic-compatible message protocol as requiring an output cap", () => {
+    const capability = resolveOutputCapCapability({
+      id: "claude-compatible",
+      provider: "custom-anthropic-proxy",
+      api: "anthropic-messages",
+    });
+    expect(capability).toMatchObject({
+      id: "anthropic-messages",
+      required: true,
+      preserveImplicitSdkDefault: true,
+    });
+  });
+
+  it("marks official DeepSeek as owned by the DeepSeek provider compat path", () => {
+    const capability = resolveOutputCapCapability({
+      id: "deepseek-v4-flash",
+      provider: "deepseek",
+      api: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+    });
+    expect(capability).toMatchObject({
+      id: "official-deepseek",
+      required: false,
+      preserveImplicitSdkDefault: true,
+    });
+  });
+});
+
+describe("resolveOutputBudgetPolicy", () => {
+  it("treats SDK-default chat caps on optional providers as removable request noise", () => {
+    const policy = resolveOutputBudgetPolicy({
+      id: "deepseek-v4-flash",
+      provider: "dashscope",
+      api: "openai-completions",
+      maxTokens: 384000,
+    }, { mode: "chat", outputBudgetSource: "sdk-default" });
+
+    expect(policy).toMatchObject({
+      mode: "chat",
+      source: "sdk-default",
+      preserveForSource: false,
+      removeImplicitSdkDefault: true,
+      capability: {
+        id: "default-optional",
+        required: false,
+        preserveImplicitSdkDefault: false,
+      },
+    });
+  });
+
+  it("preserves system-owned chat caps even when the value equals the SDK default", () => {
+    const policy = resolveOutputBudgetPolicy({
+      id: "custom-model",
+      provider: "openai-compatible",
+      api: "openai-completions",
+      maxTokens: 384000,
+    }, { mode: "chat", outputBudgetSource: "system" });
+
+    expect(policy).toMatchObject({
+      source: "system",
+      preserveForSource: true,
+      removeImplicitSdkDefault: false,
+    });
+  });
+
+  it("marks protocol-required output caps as non-removable regardless of source", () => {
+    const policy = resolveOutputBudgetPolicy({
+      id: "claude-compatible",
+      provider: "custom-anthropic-proxy",
+      api: "anthropic-messages",
+      maxTokens: 128000,
+    }, { mode: "chat", outputBudgetSource: "sdk-default" });
+
+    expect(policy).toMatchObject({
+      source: "sdk-default",
+      preserveForSource: false,
+      removeImplicitSdkDefault: false,
+      capability: {
+        id: "anthropic-messages",
+        required: true,
+        preserveImplicitSdkDefault: true,
+      },
+    });
+  });
+});
+
 describe("normalizeProviderPayload — 通用层", () => {
   it("剥离空 tools 数组（dashscope/volcengine 兼容）", () => {
     const payload = {
@@ -169,6 +260,159 @@ describe("normalizeProviderPayload — 通用层", () => {
       thinking: { type: "enabled" },
     };
     const result = normalizeProviderPayload(payload, null);
+    expect(result.thinking).toEqual({ type: "enabled" });
+  });
+
+  it("移除 OpenAI-compatible provider 上由 SDK 注入的隐式输出上限", () => {
+    const payload = {
+      model: "deepseek-v4-flash",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+      max_completion_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "deepseek-v4-flash",
+      provider: "dashscope",
+      api: "openai-completions",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      reasoning: true,
+      maxTokens: 384000,
+    }, { mode: "chat", reasoningLevel: "high" });
+    expect(result).not.toBe(payload);
+    expect(result).not.toHaveProperty("max_completion_tokens");
+    expect(result).not.toHaveProperty("max_tokens");
+    expect(result.reasoning_effort).toBe("high");
+    expect(payload.max_completion_tokens).toBe(32000);
+  });
+
+  it("模型能力低于 32000 时也移除 SDK 从 maxTokens 投影出的隐式上限", () => {
+    const payload = {
+      model: "custom-small-output",
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 8192,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "custom-small-output",
+      provider: "openai-compatible",
+      api: "openai-completions",
+      maxTokens: 8192,
+    }, { mode: "chat" });
+    expect(result).not.toHaveProperty("max_completion_tokens");
+    expect(payload.max_completion_tokens).toBe(8192);
+  });
+
+  it("保留用户或调用方显式给出的非 SDK 默认输出上限", () => {
+    const payload = {
+      model: "custom-model",
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 12000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "custom-model",
+      provider: "openai-compatible",
+      api: "openai-completions",
+      maxTokens: 384000,
+    }, { mode: "chat" });
+    expect(result).toBe(payload);
+    expect(result.max_completion_tokens).toBe(12000);
+  });
+
+  it("保留系统显式给出的输出上限，即使数值等于 SDK 隐式默认", () => {
+    const payload = {
+      model: "custom-model",
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "custom-model",
+      provider: "openai-compatible",
+      api: "openai-completions",
+      maxTokens: 384000,
+    }, { mode: "chat", outputBudgetSource: "system" });
+    expect(result).toBe(payload);
+    expect(result.max_completion_tokens).toBe(32000);
+  });
+
+  it("保留用户显式给出的输出上限，即使数值等于 SDK 隐式默认", () => {
+    const payload = {
+      model: "custom-model",
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "custom-model",
+      provider: "openai-compatible",
+      api: "openai-completions",
+      maxTokens: 384000,
+    }, { mode: "chat", outputBudgetSource: "user" });
+    expect(result).toBe(payload);
+    expect(result.max_completion_tokens).toBe(32000);
+  });
+
+  it("显式标记为 SDK 默认来源时仍移除可省略 provider 的隐式输出上限", () => {
+    const payload = {
+      model: "custom-model",
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "custom-model",
+      provider: "openai-compatible",
+      api: "openai-completions",
+      maxTokens: 384000,
+    }, { mode: "chat", outputBudgetSource: "sdk-default" });
+    expect(result).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("保留协议必填 provider 上看起来像 SDK 默认的输出上限", () => {
+    const payload = {
+      model: "claude-opus-4-7",
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "claude-opus-4-7",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      maxTokens: 128000,
+    }, { mode: "chat" });
+    expect(result.max_tokens).toBe(32000);
+    expect(payload.max_tokens).toBe(32000);
+  });
+
+  it("保留自定义 Anthropic-compatible provider 的协议必填输出上限", () => {
+    const payload = {
+      model: "claude-compatible",
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "claude-compatible",
+      provider: "custom-anthropic-proxy",
+      api: "anthropic-messages",
+      maxTokens: 128000,
+      compat: { thinkingFormat: "anthropic" },
+    }, { mode: "chat" });
+    expect(result.max_tokens).toBe(32000);
+    expect(payload.max_tokens).toBe(32000);
+  });
+
+  it("官方 DeepSeek 仍交给 DeepSeek 子模块抬升 thinking 输出预算", () => {
+    const payload = {
+      model: "deepseek-v4-flash",
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 32000,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "deepseek-v4-flash",
+      provider: "deepseek",
+      api: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      reasoning: true,
+      maxTokens: 384000,
+    }, { mode: "chat", reasoningLevel: "high" });
+    expect(result).not.toHaveProperty("max_completion_tokens");
+    expect(result.max_tokens).toBe(65536);
     expect(result.thinking).toEqual({ type: "enabled" });
   });
 });

@@ -15,6 +15,7 @@ interface Props {
 
 export const MarkdownContent = memo(function MarkdownContent({ html, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const classes = className ? `md-content ${className}` : 'md-content';
 
   useEffect(() => {
     if (ref.current) injectCopyButtons(ref.current);
@@ -23,7 +24,7 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className }
   return (
     <div
       ref={ref}
-      className={className || 'md-content'}
+      className={classes}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

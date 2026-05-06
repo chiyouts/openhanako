@@ -2,7 +2,7 @@
  * ToolGroupBlock — 工具调用组，含展开/折叠
  */
 
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, useEffect } from 'react';
 import styles from './Chat.module.css';
 import { extractToolDetail } from '../../utils/message-parser';
 import type { ToolDetail } from '../../utils/message-parser';
@@ -27,6 +27,9 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools: rawTools, co
   // subagent 有独立卡片，不在工具组里重复显示
   const tools = rawTools.filter(t => t.name !== 'subagent');
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  useEffect(() => {
+    setCollapsed(initialCollapsed);
+  }, [initialCollapsed]);
   const toggle = useCallback(() => setCollapsed(v => !v), []);
 
   if (tools.length === 0) return null;
@@ -88,6 +91,7 @@ function handleDetailClick(e: React.MouseEvent, detail: ToolDetail) {
 const ToolIndicator = memo(function ToolIndicator({ tool, agentName }: { tool: ToolCall; agentName: string }) {
   const detail = extractToolDetail(tool.name, tool.args);
   const label = getToolLabel(tool.name, tool.done ? 'done' : 'running', agentName);
+  const detailTitle = detail.title || detail.href;
 
   // 如果 args 里有 tag 类型信息（如 agent 名）
   const tag = tool.args?.agentId as string | undefined;
@@ -100,13 +104,13 @@ const ToolIndicator = memo(function ToolIndicator({ tool, agentName }: { tool: T
           detail.href ? (
             <span
               className={`${styles.toolDetail} ${styles.toolDetailLink}`}
-              title={detail.href}
+              title={detailTitle}
               onClick={(e) => handleDetailClick(e, detail)}
             >
               {detail.text}
             </span>
           ) : (
-            <span className={styles.toolDetail}>{detail.text}</span>
+            <span className={styles.toolDetail} title={detailTitle}>{detail.text}</span>
           )
         )}
         {tag && <span className={styles.toolTag}>{tag}</span>}

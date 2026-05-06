@@ -26,8 +26,8 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
 
   // 未编辑时，从 summary 同步已保存的 key 到输入框
   useEffect(() => {
-    if (!keyEdited && summary.api_key) {
-      setKeyVal(summary.api_key);
+    if (!keyEdited) {
+      setKeyVal(summary.api_key || '');
     }
   }, [summary.api_key, keyEdited]);
 
@@ -45,6 +45,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       derivedBaseUrl,
       isPresetSetup: !!isPresetSetup,
       isLocalPreset: !!presetInfo?.local,
+      seedDefaultModels: !!presetInfo && (summary.models?.length ?? 0) === 0,
       api,
     });
     if (!plan.shouldSave) return;
@@ -54,7 +55,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
         const testRes = await hanaFetch('/api/providers/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base_url: plan.effectiveUrl, api: plan.api, api_key: plan.key }),
+          body: JSON.stringify({ name: providerId, base_url: plan.effectiveUrl, api: plan.api, api_key: plan.key }),
         });
         const testData = await testRes.json();
         if (!testData.ok) {
@@ -90,7 +91,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
       const testRes = await hanaFetch('/api/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_url: urlVal.trim() || derivedBaseUrl, api, api_key: keyVal.trim() || undefined }),
+        body: JSON.stringify({ name: providerId, base_url: urlVal.trim() || derivedBaseUrl, api, api_key: keyVal.trim() || undefined }),
       });
       const testData = await testRes.json();
       setConnStatus(testData.ok ? 'ok' : 'fail');

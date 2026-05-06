@@ -23,6 +23,7 @@ import { resolveWorkspaceSkillPaths } from "../shared/workspace-skill-paths.js";
 import { resolveHanaPiAgentDir, resolveHanaPiProjectDir } from "../shared/hana-runtime-paths.js";
 import { PluginManager } from "./plugin-manager.js";
 import { DefaultResourceLoader, SettingsManager } from "../lib/pi-sdk/index.js";
+import { loadLocale } from "../server/i18n.js";
 
 /** 已知的外部 AI 工具技能目录（相对 $HOME） */
 export const WELL_KNOWN_SKILL_PATHS = [
@@ -88,6 +89,10 @@ import { createMockComputerProvider } from "./computer-use/providers/mock-provid
 import { createMacosCuaProvider } from "./computer-use/providers/macos-cua-provider.js";
 import { createWindowsUiaProvider } from "./computer-use/providers/windows-uia-provider.js";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.js";
+import {
+  getSkillNameTranslationCachePath,
+  translateSkillNamesWithCache,
+} from "../lib/skills/skill-name-translation-cache.js";
 
 export class HanaEngine {
   /**
@@ -231,17 +236,12 @@ export class HanaEngine {
       path.join(this.hanakoHome, "checkpoints")
     );
 
-    this._computerProviders = new ComputerProviderRegistry();
-    this._computerProviders.register(createMockComputerProvider({ providerId: "mock" }));
-    this._computerProviders.register(createMacosCuaProvider());
-    this._computerProviders.register(createWindowsUiaProvider());
-    this._computerHost = new ComputerHost({
-      providers: this._computerProviders,
-      defaultProviderId: "mock",
-      getSettings: () => this.getComputerUseSettings(),
-      getAccessMode: (sessionPath) => this._sessionCoord.getAccessMode(sessionPath),
-      getPrimaryAgentId: () => this._prefs.getPrimaryAgent(),
-    });
+    // Computer Use runtime is deliberately lazy. Constructing the provider
+    // registry resolves native helper paths and wires platform-specific
+    // runners; keep startup cold until the global switch is enabled or a
+    // Computer Use endpoint/tool explicitly needs the host.
+    this._computerProviders = null;
+    this._computerHost = null;
 
     // ── Plugin Manager ──
     this._pluginManager = null;  // initialized async in initPlugins()
@@ -260,11 +260,9 @@ export class HanaEngine {
     // 避免每一轮对话都重复广播 image_stripped_notice 事件。
     this._imageStripNotified = new Set();
 
-    // UI context 注入（用户当前视野）：sessionPath → { currentViewed, activeFile,
+    // UI context（用户当前视野）：sessionPath → { currentViewed, activeFile,
     // activePreview, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.js
-    // 写入；session-coordinator 注册的 `context` extension hook 每轮读取并拼 reminder
-    // 到 last user message 开头（不写进 session.entries，不累积）。
-    // 详见 core/ui-context-reminder.js 和 docs/superpowers/specs/2026-04-22-viewer-spawn-and-context-injection-design.md
+    // 写入；current_status 工具按需读取 ui_context 来解析“这个 / 当前打开的”等指代。
     this._uiContextBySession = new Map();
 
     // DevTools 日志
@@ -328,11 +326,11 @@ export class HanaEngine {
 
   /**
    * 写入某 session 当前的 UI context（用户视野）。
-   * 前端在发每条 prompt 时带上；context extension hook 每轮读取拼 reminder。
+   * 前端在发每条 prompt 时带上；current_status(ui_context) 按需读取。
    * 传 null / undefined 等价于删除（显式清空）。
    *
    * @param {string} sessionPath
-   * @param {import("./ui-context-reminder.js").UiContext|null|undefined} ctx
+   * @param {{currentViewed?: string|null, activeFile?: string|null, activePreview?: string|null, pinnedFiles?: string[]}|null|undefined} ctx
    */
   setUiContext(sessionPath, ctx) {
     if (!sessionPath) return;
@@ -515,10 +513,30 @@ export class HanaEngine {
   setSharedModels(p) { return this._configCoord.setSharedModels(p); }
   isVisionAuxiliaryEnabled() { return this.getSharedModels()?.vision_enabled === true; }
   getVisionBridge() { return this._visionBridge; }
-  getComputerHost() { return this._computerHost; }
-  getComputerProviders() { return this._computerProviders; }
+  _ensureComputerRuntime() {
+    if (!this._computerProviders || !this._computerHost) {
+      this._computerProviders = new ComputerProviderRegistry();
+      this._computerProviders.register(createMockComputerProvider({ providerId: "mock" }));
+      this._computerProviders.register(createMacosCuaProvider());
+      this._computerProviders.register(createWindowsUiaProvider());
+      this._computerHost = new ComputerHost({
+        providers: this._computerProviders,
+        defaultProviderId: "mock",
+        getSettings: () => this.getComputerUseSettings(),
+        getAccessMode: (sessionPath) => this._sessionCoord.getAccessMode(sessionPath),
+        getPrimaryAgentId: () => this._prefs.getPrimaryAgent(),
+      });
+    }
+    return { providers: this._computerProviders, host: this._computerHost };
+  }
+  getComputerHost() { return this._ensureComputerRuntime().host; }
+  getComputerProviders() { return this._ensureComputerRuntime().providers; }
   getComputerUseSettings() { return this._prefs.getComputerUseSettings(); }
-  setComputerUseSettings(partial) { return this._prefs.setComputerUseSettings(partial); }
+  setComputerUseSettings(partial) {
+    const settings = this._prefs.setComputerUseSettings(partial);
+    if (settings.enabled === true) this._ensureComputerRuntime();
+    return settings;
+  }
   approveComputerUseApp(approval) { return this._prefs.approveComputerUseApp(approval); }
   revokeComputerUseApp(approval) { return this._prefs.revokeComputerUseApp(approval); }
   resolveVisionConfig() {
@@ -548,6 +566,8 @@ export class HanaEngine {
   async setDefaultModel(id, provider, opts) { return this._configCoord.setDefaultModel(id, provider, opts); }
   getThinkingLevel() { return this._configCoord.getThinkingLevel(); }
   setThinkingLevel(l) { return this._configCoord.setThinkingLevel(l); }
+  getSessionThinkingLevel(sessionPath) { return this._sessionCoord.getSessionThinkingLevel(sessionPath); }
+  setSessionThinkingLevel(sessionPath, level) { return this._sessionCoord.setSessionThinkingLevel(sessionPath, level); }
   getSandbox() { return this._prefs.getSandbox(); }
   setSandbox(v) { this._prefs.setSandbox(v); }
   getFileBackup() { return this._prefs.getFileBackup(); }
@@ -589,6 +609,8 @@ export class HanaEngine {
   get permissionMode() { return this._sessionCoord.getPermissionMode(); }
   getSessionPermissionMode(sessionPath) { return this._sessionCoord.getPermissionMode(sessionPath); }
   setSessionPermissionMode(mode) { return this._sessionCoord.setPermissionMode(mode); }
+  setSessionPermissionModeForSession(sessionPath, mode) { return this._sessionCoord.setSessionPermissionMode(sessionPath, mode); }
+  setCurrentSessionPermissionMode(mode) { return this._sessionCoord.setCurrentSessionPermissionMode(mode); }
   setPendingSessionPermissionMode(mode) { return this._sessionCoord.setPendingPermissionMode(mode); }
   getSessionPermissionModeDefault() { return this._sessionCoord.getPermissionModeDefault(); }
   get accessMode() { return this._sessionCoord.getAccessMode(); }
@@ -817,6 +839,10 @@ export class HanaEngine {
       log,
     });
 
+    // 频道初始化和 agent 构造会调用 server-side i18n。locale 是 global
+    // preference，必须在任何会写持久化文案的初始化逻辑前加载。
+    loadLocale(this._prefs.getLocale());
+
     // 1. Pi SDK + 模型基础设施（必须在 agent init 之前，agent 需要解析记忆模型）
     log(`[init] 1/5 Pi SDK 初始化...`);
     this._models.init();
@@ -836,6 +862,7 @@ export class HanaEngine {
         await this._channels.setupChannelsForNewAgent(id);
       }
     }
+    await this._channels.repairChannelCursorProjection();
 
     // 3. ResourceLoader + Skills
     log(`[init] 3/5 ResourceLoader 初始化...`);
@@ -884,6 +911,9 @@ export class HanaEngine {
               || findUniqueModelById(this._models.availableModels, p.model)
               || null;
             const reasoningLevel = resolveRequestReasoningLevel(this._models, this._prefs, ctx);
+            // The SDK hook exposes the serialized body, but not whether maxTokens came
+            // from user intent or buildBaseOptions' model-derived default. Keep source
+            // unspecified here; output-budget removes only values matching that SDK default.
             return normalizeProviderPayload(p, requestModel, { mode: "chat", reasoningLevel });
           });
         },
@@ -1280,8 +1310,21 @@ export class HanaEngine {
     return _summarizeTitle(this.resolveUtilityConfig(this._utilityOptionsForContext(opts)), ut, at, opts);
   }
 
-  async translateSkillNames(names, lang) {
-    return _translateSkillNames(this.resolveUtilityConfig(), names, lang);
+  async translateSkillNames(names, lang, opts = {}) {
+    const skills = Array.isArray(opts.skills)
+      ? opts.skills
+      : (opts.agentId ? this.getAllSkills(opts.agentId) : this._skillMgr?.allSkills || []);
+    return translateSkillNamesWithCache({
+      cachePath: getSkillNameTranslationCachePath(this.hanakoHome),
+      skills,
+      names,
+      lang,
+      translateMissing: (missingNames) => _translateSkillNames(
+        this.resolveUtilityConfig(opts.agentId ? { agentId: opts.agentId } : undefined),
+        missingNames,
+        lang,
+      ),
+    });
   }
 
   async summarizeActivity(sp, preloaded, opts = {}) {

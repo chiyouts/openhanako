@@ -326,6 +326,78 @@ describe("BridgeManager._handleMessage", () => {
       );
     });
 
+    it("sends proactive WeChat replies to the unique known DM user when owner is not configured", async () => {
+      const { bm, engine } = createMocks();
+      const wechatAdapter = {
+        capabilities: { proactive: false },
+        canReply: vi.fn().mockReturnValue(true),
+        sendReply: vi.fn().mockResolvedValue(),
+      };
+      bm._platforms.clear();
+      bm._platforms.set("wechat:hana", {
+        adapter: wechatAdapter,
+        status: "connected",
+        agentId: "hana",
+        platform: "wechat",
+      });
+      engine.getAgent.mockImplementation((id) => {
+        if (id === "hana") return { agentName: "TestAgent", config: { bridge: { wechat: {} } }, sessionDir: os.tmpdir() };
+        return null;
+      });
+      engine.getBridgeIndex = vi.fn().mockReturnValue({
+        "wx_dm_wx-user@hana": {
+          file: "owner/wx.jsonl",
+          userId: "wx-user",
+          name: "微信用户",
+        },
+      });
+
+      const result = await bm.sendProactive("hello", "hana");
+
+      expect(wechatAdapter.canReply).toHaveBeenCalledWith("wx-user");
+      expect(wechatAdapter.sendReply).toHaveBeenCalledWith("wx-user", "hello");
+      expect(result).toMatchObject({
+        platform: "wechat",
+        chatId: "wx-user",
+        sessionKey: "wx_dm_wx-user@hana",
+      });
+    });
+
+    it("sends proactive Feishu replies to the stored DM chatId instead of the owner user id", async () => {
+      const { bm, engine } = createMocks();
+      const feishuAdapter = {
+        sendReply: vi.fn().mockResolvedValue(),
+      };
+      bm._platforms.clear();
+      bm._platforms.set("feishu:hana", {
+        adapter: feishuAdapter,
+        status: "connected",
+        agentId: "hana",
+        platform: "feishu",
+      });
+      engine.getAgent.mockImplementation((id) => {
+        if (id === "hana") return { agentName: "TestAgent", config: { bridge: { feishu: { owner: "owner-user-id" } } }, sessionDir: os.tmpdir() };
+        return null;
+      });
+      engine.getBridgeIndex = vi.fn().mockReturnValue({
+        "fs_dm_owner-open-id@hana": {
+          file: "owner/fs.jsonl",
+          userId: "owner-user-id",
+          chatId: "oc_owner_chat",
+          name: "Owner",
+        },
+      });
+
+      const result = await bm.sendProactive("hello", "hana");
+
+      expect(feishuAdapter.sendReply).toHaveBeenCalledWith("oc_owner_chat", "hello");
+      expect(result).toMatchObject({
+        platform: "feishu",
+        chatId: "oc_owner_chat",
+        sessionKey: "fs_dm_owner-open-id@hana",
+      });
+    });
+
     it("passes message_id when downloading feishu image attachments", async () => {
       const { bm, hub } = createMocks();
       const feishuAdapter = {
@@ -405,6 +477,37 @@ describe("BridgeManager._handleMessage", () => {
             mimeType: "text/plain",
             buffer: expect.any(Buffer),
           })],
+        }),
+      );
+    });
+
+    it("persists Feishu chatId in bridge session metadata for later proactive delivery", async () => {
+      const { bm, hub } = createMocks();
+      const feishuAdapter = {
+        sendReply: vi.fn().mockResolvedValue(),
+        sendBlockReply: vi.fn().mockResolvedValue(),
+        stop: vi.fn(),
+      };
+      bm._platforms.set("feishu:hana", { adapter: feishuAdapter, status: "connected", agentId: "hana", platform: "feishu" });
+
+      bm._handleMessage("feishu", {
+        sessionKey: "fs_dm_owner-open-id@hana",
+        text: "hi",
+        userId: "owner-user-id",
+        senderName: "Owner",
+        chatId: "oc_owner_chat",
+        agentId: "hana",
+      });
+
+      await vi.advanceTimersByTimeAsync(2100);
+
+      expect(hub.send).toHaveBeenCalledWith(
+        tagged("Owner: hi"),
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            userId: "owner-user-id",
+            chatId: "oc_owner_chat",
+          }),
         }),
       );
     });

@@ -20,7 +20,11 @@ describe("getPlatformPromptNote", () => {
       "Platform: win32\n" +
       "Shell: bash\n" +
       "OS Version: TestOS 1.2.3\n" +
-      "Command syntax: use bash/POSIX syntax for pipes, paths, and redirection. Discard output with /dev/null; do not use CMD's nul device unless the command is explicitly run through cmd.exe."
+      "Host OS is Windows, but the bash tool runs in a bash-compatible layer such as Git Bash, MSYS2, or bundled MinGit.\n" +
+      "Command syntax: use bash/POSIX syntax for pipes, paths, environment variables, and redirection.\n" +
+      "Prefer bash-compatible paths such as /c/Users/name/file when a Windows path is needed.\n" +
+      "Use cmd.exe /c or powershell.exe -NoProfile -Command only when you explicitly need a Windows-native command.\n" +
+      "Discard bash output with /dev/null; do not use CMD's nul device unless the command is explicitly run through cmd.exe."
     );
   });
 

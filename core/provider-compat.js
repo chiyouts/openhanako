@@ -10,7 +10,8 @@
  *
  * 本文件只保留：
  *   1. dispatcher（按 matches 分发到子模块，first-match-wins）
- *   2. 与 provider 无关的通用补丁（stripEmptyTools, stripIncompatibleThinking）
+ *   2. 与 provider 无关的通用补丁（stripEmptyTools, stripIncompatibleThinking,
+ *      normalizeImplicitOutputBudget）
  *   3. 协议鉴别函数（isDeepSeekModel, isAnthropicModel, getThinkingFormat）— 供其他 hana 模块复用
  *
  * 不允许在本文件加任何 provider-specific 实现细节；新 provider 一律开
@@ -20,6 +21,7 @@
 import * as deepseek from "./provider-compat/deepseek.js";
 import * as qwen from "./provider-compat/qwen.js";
 import * as anthropic from "./provider-compat/anthropic.js";
+import { normalizeImplicitOutputBudget } from "./provider-compat/output-budget.js";
 import {
   getReasoningProfile as getDeclaredReasoningProfile,
   getThinkingFormat as getDeclaredThinkingFormat,
@@ -97,7 +99,7 @@ function stripIncompatibleThinking(payload, model) {
  *
  * @param {object} payload — 即将发送的 HTTP body（OpenAI / Anthropic 风格）
  * @param {object|null|undefined} model — 完整 model 对象 {id, provider, baseUrl, reasoning, maxTokens, quirks, ...}
- * @param {{ mode?: "chat" | "utility", reasoningLevel?: string }} [options]
+ * @param {{ mode?: "chat" | "utility", reasoningLevel?: string, outputBudgetSource?: "user" | "system" | "sdk-default", maxTokensSource?: string, userMaxTokens?: number }} [options]
  * @returns {object} 处理后的 payload
  */
 export function normalizeProviderPayload(payload, model, options = {}) {
@@ -108,6 +110,7 @@ export function normalizeProviderPayload(payload, model, options = {}) {
   // 1. 通用补丁（与 provider 无关）
   result = stripEmptyTools(result);
   result = stripIncompatibleThinking(result, model);
+  result = normalizeImplicitOutputBudget(result, model, options);
 
   // 2. Provider-specific 补丁（按 matches 分发，first-match-wins）
   for (const mod of PROVIDER_MODULES) {

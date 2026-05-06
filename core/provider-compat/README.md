@@ -6,7 +6,7 @@
 ## 核心纪律
 
 1. **唯一对外入口**：所有出站 payload 兼容必须经过 [`core/provider-compat.js`](../provider-compat.js) 的 `normalizeProviderPayload(payload, model, options)`。chat 路径（`engine.js` 注册的 `before_provider_request` 钩子）和 utility 路径（`llm-client.js` 的 `callText`）共享这一个入口。需要在 provider serializer 之前处理的 replay/history 规则走同文件的 `normalizeProviderContextMessages(messages, model, options)`。
-2. **通用补丁留主入口**：与 provider 无关的处理（空 tools 数组剥离、按 `compat.thinkingFormat` 剥离不兼容的 `thinking` 字段）写在 `provider-compat.js` 主入口。
+2. **通用补丁留主入口**：与 provider 无关的处理（空 tools 数组剥离、按 `compat.thinkingFormat` 剥离不兼容的 `thinking` 字段、移除 SDK 注入的隐式 output cap）写在 `provider-compat.js` 主入口或同目录通用 helper。
 3. **Provider-specific 补丁拆子文件**：每个 provider 一个 `core/provider-compat/<name>.js`，互不串扰。
 4. **接口契约**：每个子文件 export `matches(model) → boolean`（必须容忍 `model = null/undefined`，不抛错）和 `apply(payload, model, options) → payload`（不可 mutate 输入 payload）。如果该 provider 有 serializer 前的 replay/history 约束，可以额外 export `normalizeContextMessages(messages, model, options) → messages`。
 5. **dispatch 单调性**：dispatcher 按数组顺序遍历，第一个 `matches` 返回 true 的子模块负责处理（first-match-wins）。一个 model 只匹配一个子模块。新 provider 默认加在数组末尾；只有当模块的 `matches` 是另一模块的子集（更具体的规则）时才前置，避免被通用规则吞掉。
@@ -100,6 +100,25 @@ export function apply(payload, model, options) { ... }
 6. 每个 profile 都要有测试覆盖：model-sync 投影、profile 推导、chat payload、utility payload、历史回放规则。
 
 判断标准：如果换一个同 format 的 provider 之后规则还成立，放进 `thinkingFormat`；如果只对某个 provider 或某个模型族成立，放进 `reasoningProfile`。
+
+## 输出预算策略
+
+`maxOutput` / `model.maxTokens` 在 Hana 数据层表示模型能力上限，不表示每次请求的默认输出长度。
+Pi SDK 的 `streamSimple` 会在调用方未传 `maxTokens` 时，把 `min(model.maxTokens, 32000)` 注入请求体。
+对 OpenAI-compatible / Gemini / Mistral 这类 output cap 可省略的 provider，这会把 Hana 的模型能力 metadata
+误变成本次请求策略，改变供应商默认行为，也可能与 thinking budget 冲突。
+
+通用层通过 `provider-compat/output-budget.js` 处理这件事。该文件内部维护
+`OUTPUT_CAP_CAPABILITIES`，集中声明 output cap 是否必填、是否需要保留 SDK
+默认值，并通过 `resolveOutputBudgetPolicy()` 把请求来源、provider 能力和
+是否可移除隐式 SDK 默认值收敛成一个可测试的策略对象，避免把 provider 规则散落在调用点。
+
+1. chat 请求中，如果 payload 的 output cap 等于 Pi SDK 从 `model.maxTokens` 推导出的隐式默认值，则移除该字段，让供应商默认生效。
+2. utility 请求不移除 output cap，因为 `callText` 默认把短输出上限标记为 `outputBudgetSource: "system"`。
+3. Anthropic / Bedrock / `anthropic-messages` 这类协议必填 output cap 的 provider 不移除。
+4. 官方 DeepSeek endpoint 不移除，继续交给 `deepseek.js` 统一转换字段并确保 thinking 输出预算合法。
+5. 真正的用户级或系统级单次输出上限，调用方必须通过 `options.outputBudgetSource = "user" | "system"` 或等价显式 source 传入，通用层不得静默移除显式意图。
+6. chat hook 拿不到 Pi SDK `maxTokens` 的来源，保持 source 为 `unspecified`；兼容层只在字段值等于 Pi SDK 隐式默认时移除，避免误删未来真实的非默认上限。
 
 ## 已知子模块
 

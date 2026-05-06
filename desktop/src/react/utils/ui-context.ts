@@ -4,8 +4,7 @@
  * 每次发 WS prompt 前调用一次，把用户当下视野（浏览目录 / 预览焦点 /
  * 派生 viewer 钉住的文件）拼成后端约定的 uiContext payload。
  *
- * 后端在 context extension hook 里根据这份 payload 生成 reminder 注入
- * 到 last user message（见 core/ui-context-reminder.js）。
+ * 后端保存这份 payload，供 current_status 工具的 ui_context key 按需查询。
  *
  * 所有字段都空时返回 null，节省 WS 传输；后端收到 null 会清空旧值。
  */

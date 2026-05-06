@@ -43,4 +43,28 @@ describe("config workspace routes", () => {
       cwd_history: [nextWorkspace, oldWorkspace],
     });
   });
+
+  it("exposes and creates the default onboarding workspace", async () => {
+    const homeDir = path.join(tmpDir, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    const homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(homeDir);
+    const { createConfigRoute } = await import("../server/routes/config.js");
+    const engine = { config: {} };
+    const app = new Hono();
+    app.route("/api", createConfigRoute(engine));
+
+    const expected = path.join(homeDir, "Desktop", "OH-WorkSpace");
+
+    const getRes = await app.request("/api/config/default-workspace");
+    expect(getRes.status).toBe(200);
+    await expect(getRes.json()).resolves.toEqual({ path: expected });
+    expect(fs.existsSync(expected)).toBe(false);
+
+    const postRes = await app.request("/api/config/default-workspace", { method: "POST" });
+    expect(postRes.status).toBe(200);
+    await expect(postRes.json()).resolves.toEqual({ ok: true, path: expected });
+    expect(fs.statSync(expected).isDirectory()).toBe(true);
+
+    homedirSpy.mockRestore();
+  });
 });

@@ -69,7 +69,7 @@ function allNames() {
 }
 
 describe("session-coordinator tool snapshot (createSession)", () => {
-  let tmpDir, agentDir, sessionDir, coord, fakeSessionPath, activeToolsSpy, currentAgentConfig, defaultModeSaveSpy, storedDefaultMode, lastSessionOptions;
+  let tmpDir, agentDir, sessionDir, coord, fakeSessionPath, activeToolsSpy, currentAgentConfig, defaultModeSaveSpy, storedDefaultMode, storedThinkingLevel, lastSessionOptions, fakeEngine;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -84,7 +84,13 @@ describe("session-coordinator tool snapshot (createSession)", () => {
     activeToolsSpy = vi.fn();
     defaultModeSaveSpy = vi.fn();
     storedDefaultMode = "ask";
+    storedThinkingLevel = "auto";
     lastSessionOptions = null;
+    fakeEngine = {
+      getUiContext: vi.fn(() => null),
+      isVisionAuxiliaryEnabled: vi.fn(() => false),
+      getVisionBridge: vi.fn(() => null),
+    };
 
     sessionManagerCreateMock.mockReturnValue({ getCwd: () => tmpDir });
     sessionManagerOpenMock.mockReturnValue({ getCwd: () => tmpDir });
@@ -119,7 +125,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
         currentModel: { id: "test-model", name: "test-model" },
         authStorage: {},
         modelRegistry: {},
-        resolveThinkingLevel: () => "medium",
+        resolveThinkingLevel: (level) => level === "auto" ? "medium" : level,
       }),
       getResourceLoader: () => ({
         getSystemPrompt: () => "mock-prompt",
@@ -134,7 +140,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
       switchAgentOnly: async () => {},
       getConfig: () => ({}),
       getPrefs: () => ({
-        getThinkingLevel: () => "medium",
+        getThinkingLevel: () => storedThinkingLevel,
         getSessionPermissionModeDefault: () => storedDefaultMode,
         setSessionPermissionModeDefault: defaultModeSaveSpy,
       }),
@@ -143,6 +149,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
       getAgentById: () => null,
       listAgents: () => [],
       getDeferredResultStore: () => null,
+      getEngine: () => fakeEngine,
     });
   });
 
@@ -235,6 +242,83 @@ describe("session-coordinator tool snapshot (createSession)", () => {
 
     expect(coord.getPermissionMode(nextPath)).toBe("read_only");
     expect(defaultModeSaveSpy).not.toHaveBeenCalled();
+  });
+
+  it("persists the resolved thinking level as session-owned state when creating a session", async () => {
+    storedThinkingLevel = "high";
+    currentAgentConfig = { tools: { disabled: [] } };
+
+    const { sessionPath } = await coord.createSession(null, tmpDir, true);
+
+    expect(lastSessionOptions.thinkingLevel).toBe("high");
+    expect(coord.getSessionThinkingLevel(sessionPath)).toBe("high");
+
+    const meta = JSON.parse(await fsp.readFile(path.join(sessionDir, "session-meta.json"), "utf-8"));
+    expect(meta[path.basename(sessionPath)]).toMatchObject({
+      thinkingLevel: "high",
+    });
+  });
+
+  it("can switch only the current session permission mode without mutating the runtime default", async () => {
+    currentAgentConfig = { tools: { disabled: [] } };
+    const { sessionPath: firstPath } = await coord.createSession(null, tmpDir, true);
+
+    const result = coord.setCurrentSessionPermissionMode("operate");
+
+    expect(result).toMatchObject({ ok: true, mode: "operate", enabled: false });
+    expect(coord.getPermissionMode(firstPath)).toBe("operate");
+    expect(coord.getPermissionModeDefault()).toBe("ask");
+
+    const secondSessionPath = path.join(sessionDir, "second-ask-session.jsonl");
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        sessionManager: { getSessionFile: () => secondSessionPath },
+        subscribe: vi.fn(() => vi.fn()),
+        model: { id: "test-model", name: "test-model" },
+        setActiveToolsByName: activeToolsSpy,
+      },
+    });
+    const { sessionPath: secondPath } = await coord.createSession(null, tmpDir, true);
+
+    expect(coord.getPermissionMode(secondPath)).toBe("ask");
+    expect(defaultModeSaveSpy).not.toHaveBeenCalled();
+
+    const meta = JSON.parse(await fsp.readFile(path.join(sessionDir, "session-meta.json"), "utf-8"));
+    expect(meta[path.basename(firstPath)]).toMatchObject({
+      permissionMode: "operate",
+      accessMode: "operate",
+      planMode: false,
+    });
+    expect(meta[path.basename(secondPath)]).toMatchObject({
+      permissionMode: "ask",
+      accessMode: "operate",
+      planMode: false,
+    });
+  });
+
+  it("can switch an explicit loaded session permission mode without relying on focus", async () => {
+    currentAgentConfig = { tools: { disabled: [] } };
+    const { sessionPath: firstPath } = await coord.createSession(null, tmpDir, true);
+    coord.setPermissionMode("read_only");
+
+    const secondSessionPath = path.join(sessionDir, "focused-session.jsonl");
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        sessionManager: { getSessionFile: () => secondSessionPath },
+        subscribe: vi.fn(() => vi.fn()),
+        model: { id: "test-model", name: "test-model" },
+        setActiveToolsByName: activeToolsSpy,
+      },
+    });
+    const { sessionPath: secondPath } = await coord.createSession(null, tmpDir, true);
+    expect(coord.currentSessionPath).toBe(secondPath);
+
+    const result = coord.setSessionPermissionMode(firstPath, "operate");
+
+    expect(result).toMatchObject({ ok: true, mode: "operate", enabled: false });
+    expect(coord.getPermissionMode(firstPath)).toBe("operate");
+    expect(coord.getPermissionMode(secondPath)).toBe("read_only");
+    expect(coord.getPermissionModeDefault()).toBe("read_only");
   });
 
   it("new session with pending read-only access mode keeps tool schema stable", async () => {
@@ -412,6 +496,29 @@ describe("session-coordinator tool snapshot (createSession)", () => {
 
     expect(after).toEqual(before);
     expect(after.join("\n")).not.toMatch(/READ-ONLY MODE|ASK MODE|只读模式|先问模式/);
+  });
+
+  it("does not inject passive UI context into the last user message", async () => {
+    currentAgentConfig = { tools: { disabled: [] } };
+    fakeEngine.getUiContext.mockReturnValue({
+      currentViewed: tmpDir,
+      activeFile: path.join(tmpDir, "diary.md"),
+      activePreview: null,
+      pinnedFiles: [],
+    });
+    await coord.createSession(null, tmpDir, true);
+
+    const extensions = lastSessionOptions.resourceLoader.getExtensions().extensions;
+    const contextHandlers = extensions.flatMap((extension) => extension.handlers?.get?.("context") || []);
+    const messages = [{ role: "user", content: "跑一遍测试" }];
+    for (const handler of contextHandlers) {
+      await handler({ messages }, {
+        cwd: tmpDir,
+        sessionManager: { getSessionFile: () => fakeSessionPath },
+      });
+    }
+
+    expect(messages).toEqual([{ role: "user", content: "跑一遍测试" }]);
   });
 
   it("restores accessMode from session meta before applying tools", async () => {

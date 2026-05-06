@@ -29,7 +29,7 @@ describe('ImageStage', () => {
     expect((window as any).platform.getFileUrl).toHaveBeenCalledWith('/a.png');
   });
 
-  it('wheel 事件触发 transform 变化', async () => {
+  it('只有按住 Option 滚轮才触发图片缩放', async () => {
     const { container } = render(<ImageStage file={file} viewport={{ width: 800, height: 600 }} />);
     await waitFor(() => {
       const img = container.querySelector('img');
@@ -43,11 +43,46 @@ describe('ImageStage', () => {
     const stage = container.querySelector('[data-testid="image-stage"]')!;
     const before = (stage as HTMLElement).style.transform || '';
     fireEvent.wheel(stage, { deltaY: -100, clientX: 400, clientY: 300 });
-    const after = (stage as HTMLElement).style.transform || '';
-    expect(after).not.toBe(before);
+    fireEvent.wheel(stage, { deltaY: -100, clientX: 400, clientY: 300, ctrlKey: true });
+    fireEvent.wheel(stage, { deltaY: -100, clientX: 400, clientY: 300, shiftKey: true });
+    fireEvent.wheel(stage, { deltaY: -100, clientX: 400, clientY: 300, altKey: true, metaKey: true });
+    expect((stage as HTMLElement).style.transform || '').toBe(before);
+
+    fireEvent.wheel(stage, { deltaY: -100, clientX: 400, clientY: 300, altKey: true });
+    expect((stage as HTMLElement).style.transform || '').not.toBe(before);
   });
 
-  it('natural size 就绪后 img 样式含 scale', async () => {
+  it('Option 缩放后允许鼠标拖拽平移图片', async () => {
+    const { container } = render(<ImageStage file={file} viewport={{ width: 800, height: 600 }} />);
+    await waitFor(() => {
+      const img = container.querySelector('img');
+      expect(img?.getAttribute('src')).toBeTruthy();
+    });
+
+    const img = container.querySelector('img')!;
+    Object.defineProperty(img, 'naturalWidth', { value: 400, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: 300, configurable: true });
+    fireEvent.load(img);
+
+    const stage = container.querySelector('[data-testid="image-stage"]') as HTMLElement;
+    stage.setPointerCapture = vi.fn();
+    stage.releasePointerCapture = vi.fn();
+    stage.hasPointerCapture = vi.fn(() => true);
+
+    fireEvent.wheel(stage, { deltaY: -100, clientX: 400, clientY: 300, altKey: true });
+    const zoomed = stage.style.transform;
+
+    fireEvent.pointerDown(stage, { pointerId: 1, button: 0, clientX: 120, clientY: 140 });
+    expect(stage.style.cursor).toBe('grabbing');
+    fireEvent.pointerMove(stage, { pointerId: 1, clientX: 150, clientY: 180 });
+    expect(stage.style.transform).not.toBe(zoomed);
+
+    fireEvent.pointerUp(stage, { pointerId: 1 });
+    expect(stage.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(stage.style.cursor).toBe('grab');
+  });
+
+  it('natural size 就绪后图片在视口中央按 fit scale 显示', async () => {
     const { container } = render(<ImageStage file={file} viewport={{ width: 1000, height: 800 }} />);
     await waitFor(() => {
       const img = container.querySelector('img');
@@ -60,7 +95,7 @@ describe('ImageStage', () => {
     // scale(1.8) = 0.9 * min(1000/500, 800/400) = 0.9 * 2
     await waitFor(() => {
       const t = (container.querySelector('[data-testid="image-stage"]') as HTMLElement).style.transform;
-      expect(t).toMatch(/scale\(1\.8\)/);
+      expect(t).toBe('translate(50px, 40px) scale(1.8)');
     });
   });
 

@@ -130,6 +130,7 @@ export interface SessionModel {
   /** 输入模态数组（Pi SDK 标准字段），镜像后端 /models, /models/switch 响应。 */
   input?: ("text" | "image")[];
   reasoning?: boolean;
+  xhigh?: boolean;
   contextWindow?: number;
 }
 

@@ -16,6 +16,7 @@ import { ExecutionRouter } from "./execution-router.js";
 import { findModel, parseModelRef } from "../shared/model-ref.js";
 import { isLocalBaseUrl } from "../shared/net-utils.js";
 import { syncModels } from "./model-sync.js";
+import { enrichModelFromKnownMetadata } from "./model-known-enrichment.js";
 
 export class ModelManager {
   /**
@@ -37,12 +38,13 @@ export class ModelManager {
   /** 初始�?AuthStorage + ModelRegistry + 新架构模�?*/
   init() {
     this._authStorage = AuthStorage.create(path.join(this._hanakoHome, "auth.json"));
+    this.providerRegistry.reload();
+    this._removeApiKeyProviderAuthEntries();
     this._modelRegistry = createModelRegistry(
       this._authStorage,
       path.join(this._hanakoHome, "models.json"),
     );
 
-    this.providerRegistry.reload();
     this.executionRouter = new ExecutionRouter(
       (ref) => this._resolveFromAvailable(ref),
       this.providerRegistry,
@@ -103,7 +105,7 @@ export class ModelManager {
       // 没有�?added-models.yaml 里的 provider �?全部放行（兼容未知来源）
       if (!allowed) return true;
       return allowed.has(m.id);
-    });
+    }).map(enrichModelFromKnownMetadata);
     return this._availableModels;
   }
 
@@ -118,6 +120,7 @@ export class ModelManager {
    * @returns {boolean} 是否有变�?
    */
   async syncAndRefresh() {
+    this._removeApiKeyProviderAuthEntries();
     const rawProviders = this.providerRegistry.getAllProvidersRaw();
     // 合并 plugin 默认值（base_url/api），YAML 里可能只存了 api_key + models
     const providers = {};
@@ -170,6 +173,25 @@ export class ModelManager {
       if (authKey !== id) map[id] = authKey;
     }
     return map;
+  }
+
+  /**
+   * Hana 的 API-key provider 凭证源是 added-models.yaml → models.json。
+   * AuthStorage 只保留 OAuth 条目，避免 Pi SDK 优先读取 stale auth.json。
+   * @private
+   */
+  _removeApiKeyProviderAuthEntries() {
+    if (!this._authStorage || !this.providerRegistry) return;
+    this._authStorage.reload?.();
+
+    for (const entry of this.providerRegistry.getAll().values()) {
+      if (entry.authType === "oauth") continue;
+      const authKeys = new Set([entry.id, entry.authJsonKey]);
+      for (const authKey of authKeys) {
+        if (!authKey || !this._authStorage.has?.(authKey)) continue;
+        this._authStorage.remove(authKey);
+      }
+    }
   }
 
   /**

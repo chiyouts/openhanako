@@ -20,6 +20,7 @@ import {
   normalizeProviderAuthType,
   providerCredentialAllowsMissingApiKey,
 } from "../shared/provider-auth.js";
+import { validateProviderModels } from "../shared/provider-model-validation.js";
 
 const _defaultModels = JSON.parse(
   fs.readFileSync(fromRoot("lib", "default-models.json"), "utf-8"),
@@ -337,12 +338,13 @@ export class ProviderRegistry {
   get(providerId) {
     if (this._entries.size === 0) this.reload();
     const direct = this._entries.get(providerId);
-    if (direct) return direct;
+    if (direct?.isBuiltin) return direct;
     // 反向查找：providerId 可能是某个 OAuth provider 的 authJsonKey
     // 如 "openai-codex" → "openai-codex-oauth"
     for (const entry of this._entries.values()) {
       if (entry.authJsonKey === providerId && entry.id !== providerId) return entry;
     }
+    if (direct) return direct;
     return null;
   }
 
@@ -470,18 +472,28 @@ export class ProviderRegistry {
    */
   getCredentials(providerId) {
     const userConfig = this._loadAddedModels();
-    const uc = userConfig[providerId];
+    const entry = this.get(providerId);
+    const candidateIds = [];
+    const addCandidate = (id) => {
+      if (id && !candidateIds.includes(id)) candidateIds.push(id);
+    };
+    addCandidate(providerId);
+    addCandidate(entry?.id);
+    addCandidate(entry?.authJsonKey);
+
+    const configId = candidateIds.find(id => Object.prototype.hasOwnProperty.call(userConfig, id));
+    const uc = configId ? userConfig[configId] : null;
     if (!uc) return null;
 
-    const plugin = this._plugins.get(providerId);
+    const plugin = this._plugins.get(entry?.id || providerId);
     let apiKey = uc.api_key || "";
     let oauthBaseUrl = "";
 
     // OAuth provider: YAML 没有 api_key，从 auth.json 取 access token + resourceUrl
     if (!apiKey) {
-      const authType = uc.auth_type || plugin?.authType;
+      const authType = normalizeProviderAuthType(uc.auth_type || entry?.authType || plugin?.authType);
       if (authType === "oauth") {
-        const authJsonKey = plugin?.authJsonKey || providerId;
+        const authJsonKey = entry?.authJsonKey || plugin?.authJsonKey || providerId;
         const oauth = this._readOAuthEntry(authJsonKey);
         apiKey = oauth.token;
         oauthBaseUrl = oauth.resourceUrl;
@@ -490,8 +502,8 @@ export class ProviderRegistry {
 
     return {
       apiKey,
-      baseUrl: uc.base_url || oauthBaseUrl || plugin?.defaultBaseUrl || "",
-      api: uc.api || plugin?.defaultApi || "",
+      baseUrl: uc.base_url || oauthBaseUrl || entry?.baseUrl || plugin?.defaultBaseUrl || "",
+      api: uc.api || entry?.api || plugin?.defaultApi || "",
     };
   }
 
@@ -563,7 +575,9 @@ export class ProviderRegistry {
     );
     if (exists) return;
 
-    userConfig[providerId].models.push(model);
+    const nextModels = [...userConfig[providerId].models, model];
+    validateProviderModels(providerId, nextModels, { baseUrl: userConfig[providerId].base_url });
+    userConfig[providerId].models = nextModels;
     this._saveAddedModels(userConfig);
     this._entries.clear();
   }
@@ -613,7 +627,7 @@ export class ProviderRegistry {
     }
 
     let found = false;
-    uc.models = uc.models.map((m) => {
+    const nextModels = uc.models.map((m) => {
       const mid = typeof m === "object" ? m.id : m;
       if (mid !== modelId) return m;
       found = true;
@@ -632,9 +646,11 @@ export class ProviderRegistry {
 
     // upsert：模型不在列表中时自动添加
     if (!found) {
-      uc.models.push({ id: modelId, ...safe });
+      nextModels.push({ id: modelId, ...safe });
     }
 
+    validateProviderModels(providerId, nextModels, { baseUrl: uc.base_url });
+    uc.models = nextModels;
     this._saveAddedModels(userConfig);
     this._entries.clear();
   }
@@ -646,7 +662,16 @@ export class ProviderRegistry {
    */
   saveProvider(providerId, data) {
     const userConfig = this._loadAddedModels();
-    userConfig[providerId] = { ...(userConfig[providerId] || {}), ...data };
+    const { seed_default_models: seedDefaultModels, ...providerData } = data || {};
+    const nextProvider = { ...(userConfig[providerId] || {}), ...providerData };
+
+    if (seedDefaultModels && (!Array.isArray(nextProvider.models) || nextProvider.models.length === 0)) {
+      const defaults = this.getDefaultModels(providerId);
+      if (defaults.length > 0) nextProvider.models = [...defaults];
+    }
+
+    validateProviderModels(providerId, nextProvider.models, { baseUrl: nextProvider.base_url });
+    userConfig[providerId] = nextProvider;
     this._saveAddedModels(userConfig);
     this._entries.clear();
   }

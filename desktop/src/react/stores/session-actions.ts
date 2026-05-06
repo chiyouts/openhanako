@@ -216,6 +216,7 @@ export async function switchSession(path: string): Promise<void> {
     if (myVersion !== _switchVersion) return;
     if (data.error) {
       console.error('[session] switch failed:', data.error);
+      showSessionSwitchError(path, data.error);
       return;
     }
 
@@ -286,6 +287,9 @@ export async function switchSession(path: string): Promise<void> {
         mode: data.permissionMode || data.accessMode,
       },
     }));
+    if (data.thinkingLevel) {
+      useStore.getState().setThinkingLevel(data.thinkingLevel);
+    }
 
     // 刷新模型列表（当前 session 的模型可能不同）
     loadModels();
@@ -300,6 +304,7 @@ export async function switchSession(path: string): Promise<void> {
         provider: data.currentModelProvider,
         input: Array.isArray(data.currentModelInput) ? data.currentModelInput : undefined,
         reasoning: data.currentModelReasoning ?? undefined,
+        xhigh: data.currentModelXhigh ?? undefined,
         contextWindow: data.currentModelContextWindow ?? undefined,
       });
     }
@@ -322,6 +327,7 @@ export async function switchSession(path: string): Promise<void> {
     });
   } catch (err) {
     console.error('[session] switch failed:', err);
+    showSessionSwitchError(path, errorMessage(err));
   }
 }
 
@@ -405,6 +411,7 @@ export async function ensureSession(): Promise<boolean> {
     const data = await res.json();
     if (data.error) {
       console.error('[session] create failed:', data.error);
+      showSessionCreationError(data.error);
       return false;
     }
 
@@ -443,6 +450,9 @@ export async function ensureSession(): Promise<boolean> {
     }
 
     useStore.setState(patch);
+    if (data.thinkingLevel) {
+      useStore.getState().setThinkingLevel(data.thinkingLevel);
+    }
 
     await resetDeskForSessionCwd(data.cwd || null);
 
@@ -470,6 +480,7 @@ export async function ensureSession(): Promise<boolean> {
     return true;
   } catch (err) {
     console.error('[session] create failed:', err);
+    showSessionCreationError(errorMessage(err));
     return false;
   }
 }
@@ -651,4 +662,30 @@ export async function pinSession(path: string, pinned: boolean): Promise<boolean
 
 export function showSidebarToast(text: string, duration = 3000): void {
   useStore.getState().addToast(text, 'info', duration);
+}
+
+function tr(key: string): string {
+  return typeof window !== 'undefined' && typeof window.t === 'function'
+    ? window.t(key)
+    : key;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err || 'Unknown error');
+}
+
+function showSessionCreationError(detail: unknown): void {
+  const label = tr('session.createFailed');
+  const message = `${label}: ${errorMessage(detail)}`;
+  const state = useStore.getState();
+  state.setInlineError?.(state.currentSessionPath || '', message, 6000);
+  state.addToast(message, 'error', 6000);
+}
+
+function showSessionSwitchError(targetPath: string, detail: unknown): void {
+  const label = tr('session.switchFailed');
+  const message = `${label}: ${errorMessage(detail)}`;
+  const state = useStore.getState();
+  state.setInlineError?.(state.currentSessionPath || targetPath || '', message, 6000);
+  state.addToast(message, 'error', 6000);
 }

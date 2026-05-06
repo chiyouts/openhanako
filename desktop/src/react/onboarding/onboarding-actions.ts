@@ -3,6 +3,7 @@
  */
 
 import { AGENT_ID } from './constants';
+import { DEFAULT_HEARTBEAT_INTERVAL_MINUTES } from '../../../../shared/default-workspace-constants.js';
 
 export type HanaFetch = (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -186,5 +187,48 @@ export async function saveUserName(hanaFetch: HanaFetch, name: string): Promise<
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user: { name } }),
+  });
+}
+
+// ── Workspace ──
+
+export async function loadDefaultWorkspace(hanaFetch: HanaFetch): Promise<string> {
+  const res = await hanaFetch('/api/config/default-workspace');
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.path || '';
+}
+
+async function ensureDefaultWorkspace(hanaFetch: HanaFetch): Promise<string> {
+  const res = await hanaFetch('/api/config/default-workspace', { method: 'POST' });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.path || '';
+}
+
+interface SaveWorkspaceParams {
+  hanaFetch: HanaFetch;
+  workspacePath: string;
+  defaultPath: string;
+}
+
+export async function saveWorkspace({ hanaFetch, workspacePath, defaultPath }: SaveWorkspaceParams): Promise<void> {
+  const selected = workspacePath.trim();
+  if (!selected) throw new Error('workspacePath is required');
+
+  if (selected === defaultPath) {
+    await ensureDefaultWorkspace(hanaFetch);
+  }
+
+  await hanaFetch(`/api/agents/${AGENT_ID}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      desk: {
+        home_folder: selected,
+        heartbeat_enabled: false,
+        heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL_MINUTES,
+      },
+    }),
   });
 }
