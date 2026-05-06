@@ -152,7 +152,7 @@ export function createPluginsRoute(engine) {
       }
 
       const entry = await pm.installPlugin(targetDir);
-      engine.syncPluginExtensions();
+      await engine.syncPluginExtensions();
       return c.json({
         ...entry,
         ...(sourceFile ? { sourceFile } : {}),
@@ -169,7 +169,7 @@ export function createPluginsRoute(engine) {
     const id = c.req.param("id");
     try {
       const pluginDir = await pm.removePlugin(id);
-      engine.syncPluginExtensions();
+      await engine.syncPluginExtensions();
       if (pluginDir && fs.existsSync(pluginDir)) {
         fs.rmSync(pluginDir, { recursive: true, force: true });
       }
@@ -191,7 +191,7 @@ export function createPluginsRoute(engine) {
       } else {
         await pm.disablePlugin(id);
       }
-      engine.syncPluginExtensions();
+      await engine.syncPluginExtensions();
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 404);
@@ -213,7 +213,7 @@ export function createPluginsRoute(engine) {
     const { allow_full_access } = await c.req.json();
     if (typeof allow_full_access === "boolean") {
       await pm.setFullAccess(allow_full_access);
-      engine.syncPluginExtensions();
+      await engine.syncPluginExtensions();
     }
     return c.json(visiblePlugins(pm, { source: "community" }));
   });
