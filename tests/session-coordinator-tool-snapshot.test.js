@@ -69,7 +69,7 @@ function allNames() {
 }
 
 describe("session-coordinator tool snapshot (createSession)", () => {
-  let tmpDir, agentDir, sessionDir, coord, fakeSessionPath, activeToolsSpy, currentAgentConfig, defaultModeSaveSpy, storedDefaultMode, storedThinkingLevel, lastSessionOptions;
+  let tmpDir, agentDir, sessionDir, coord, fakeSessionPath, activeToolsSpy, currentAgentConfig, defaultModeSaveSpy, storedDefaultMode, storedThinkingLevel, lastSessionOptions, fakeEngine;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,6 +86,11 @@ describe("session-coordinator tool snapshot (createSession)", () => {
     storedDefaultMode = "ask";
     storedThinkingLevel = "auto";
     lastSessionOptions = null;
+    fakeEngine = {
+      getUiContext: vi.fn(() => null),
+      isVisionAuxiliaryEnabled: vi.fn(() => false),
+      getVisionBridge: vi.fn(() => null),
+    };
 
     sessionManagerCreateMock.mockReturnValue({ getCwd: () => tmpDir });
     sessionManagerOpenMock.mockReturnValue({ getCwd: () => tmpDir });
@@ -144,6 +149,7 @@ describe("session-coordinator tool snapshot (createSession)", () => {
       getAgentById: () => null,
       listAgents: () => [],
       getDeferredResultStore: () => null,
+      getEngine: () => fakeEngine,
     });
   });
 
@@ -465,6 +471,29 @@ describe("session-coordinator tool snapshot (createSession)", () => {
 
     expect(after).toEqual(before);
     expect(after.join("\n")).not.toMatch(/READ-ONLY MODE|ASK MODE|只读模式|先问模式/);
+  });
+
+  it("does not inject passive UI context into the last user message", async () => {
+    currentAgentConfig = { tools: { disabled: [] } };
+    fakeEngine.getUiContext.mockReturnValue({
+      currentViewed: tmpDir,
+      activeFile: path.join(tmpDir, "diary.md"),
+      activePreview: null,
+      pinnedFiles: [],
+    });
+    await coord.createSession(null, tmpDir, true);
+
+    const extensions = lastSessionOptions.resourceLoader.getExtensions().extensions;
+    const contextHandlers = extensions.flatMap((extension) => extension.handlers?.get?.("context") || []);
+    const messages = [{ role: "user", content: "跑一遍测试" }];
+    for (const handler of contextHandlers) {
+      await handler({ messages }, {
+        cwd: tmpDir,
+        sessionManager: { getSessionFile: () => fakeSessionPath },
+      });
+    }
+
+    expect(messages).toEqual([{ role: "user", content: "跑一遍测试" }]);
   });
 
   it("restores accessMode from session meta before applying tools", async () => {

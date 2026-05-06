@@ -30,6 +30,7 @@ describe("current_status tool", () => {
       "logical_date",
       "agent",
       "model",
+      "ui_context",
     ]);
     expect(payload.usage).toContain("list");
     expect(payload.usage).toContain("get");
@@ -108,6 +109,47 @@ describe("current_status tool", () => {
         id: "claude-sonnet-4-5",
         provider: "anthropic",
         name: "Claude Sonnet 4.5",
+      },
+    });
+  });
+
+  it("returns passive UI context metadata for get ui_context", async () => {
+    const tool = createCurrentStatusTool({
+      getUiContext: (sessionPath) => sessionPath.endsWith("s1.jsonl")
+        ? {
+            currentViewed: "/workspace/notes",
+            activeFile: "/workspace/notes/diary.md",
+            activePreview: null,
+            pinnedFiles: ["/workspace/spec.md"],
+          }
+        : null,
+    });
+
+    const payload = textPayload(await tool.execute("call_1", { action: "get", key: "ui_context" }, null, null, makeCtx()));
+
+    expect(payload).toEqual({
+      ui_context: {
+        currentViewed: "/workspace/notes",
+        activeFile: "/workspace/notes/diary.md",
+        activePreview: null,
+        pinnedFiles: ["/workspace/spec.md"],
+      },
+    });
+  });
+
+  it("returns an empty UI context shape when no visible UI context is stored", async () => {
+    const tool = createCurrentStatusTool({
+      getUiContext: () => null,
+    });
+
+    const payload = textPayload(await tool.execute("call_1", { action: "get", key: "ui_context" }, null, null, makeCtx()));
+
+    expect(payload).toEqual({
+      ui_context: {
+        currentViewed: null,
+        activeFile: null,
+        activePreview: null,
+        pinnedFiles: [],
       },
     });
   });

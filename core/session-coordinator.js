@@ -24,7 +24,6 @@ import {
 } from "./session-permission-mode.js";
 import { findModel } from "../shared/model-ref.js";
 import { computeToolSnapshot, DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.js";
-import { buildUiContextReminder, injectReminderIntoLastUserMessage } from "./ui-context-reminder.js";
 import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
@@ -384,33 +383,16 @@ export class SessionCoordinator {
       agentsFilesResult: agentsFilesResultSnapshot,
     };
 
-    // UI context 注入扩展：在每次 LLM 调用前把用户视野拼成 <user-context>…</user-context>
-    // 前置到 last user message，只影响这一次请求（Pi SDK deep copy messages），
-    // 不写进 session.entries。handler 错误兜底不抛，避免阻塞对话。
+    // Vision 辅助注入扩展：只在目标模型需要图片辅助笔记时注入视觉上下文。
+    // 用户当前 UI 视野不再自动注入；需要时由 current_status(ui_context) 显式查询。
     const getEngine = this._d.getEngine;
-    const uiContextExtension = {
-      path: "hana-ui-context-injection",
+    const visionAuxiliaryExtension = {
+      path: "hana-desktop-vision-context-injection",
       tools: new Map(),
       handlers: new Map([
         [
           "context",
           [
-            async (event, ctx) => {
-              try {
-                const engine = getEngine?.();
-                if (!engine) return undefined;
-                const sp = ctx.sessionManager?.getSessionFile?.();
-                if (!sp) return undefined;
-                const uiCtx = engine.getUiContext?.(sp);
-                if (!uiCtx) return undefined;
-                const reminder = buildUiContextReminder(uiCtx, ctx.cwd);
-                if (!reminder) return undefined;
-                return injectReminderIntoLastUserMessage(event.messages, reminder);
-              } catch (err) {
-                log.warn(`ui-context injection failed: ${err?.message || err}`);
-                return undefined;
-              }
-            },
             async (event, ctx) => {
               try {
                 const engine = getEngine?.();
@@ -435,7 +417,7 @@ export class SessionCoordinator {
       messageRenderers: new Map(),
     };
 
-    // Wrap resourceLoader: per-session prompt snapshot + plan mode injection + ui context extension
+    // Wrap resourceLoader: per-session prompt snapshot + plan mode injection + vision auxiliary extension
     const resourceLoaderProps = {
       getSystemPrompt: {
         value: () => systemPromptSnapshot,
@@ -445,7 +427,7 @@ export class SessionCoordinator {
           const base = baseResourceLoader.getExtensions?.() ?? { extensions: [], errors: [] };
           return {
             ...base,
-            extensions: [...(base.extensions || []), uiContextExtension],
+            extensions: [...(base.extensions || []), visionAuxiliaryExtension],
           };
         },
       },
