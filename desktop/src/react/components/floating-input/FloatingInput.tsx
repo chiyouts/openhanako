@@ -16,6 +16,7 @@ import styles from './FloatingInput.module.css';
 
 const CLOSE_DURATION_MS = 150;
 const FALLBACK_HEIGHT = 56;
+const FLOATING_INPUT_WIDTH_RATIO = 2 / 9;
 
 interface ViewportSize {
   width: number;
@@ -134,7 +135,7 @@ export function FloatingInput({
   const position = useMemo(() => {
     if (!anchorRect || viewport.width <= 0 || viewport.height <= 0) return null;
     return computeFloatingInputPosition(anchorRect, viewport, {
-      width: viewport.width / 3,
+      width: viewport.width * FLOATING_INPUT_WIDTH_RATIO,
       height: floatingHeight,
     });
   }, [anchorRect, floatingHeight, viewport]);

@@ -67,6 +67,7 @@ export function SelectionFloatingInput() {
       onSubmit={handleSubmit}
       onClose={handleClose}
       disabled={disabled}
+      autoFocus={false}
       ariaLabel={t('input.floatingInput')}
       submitLabel={t('chat.send')}
     />

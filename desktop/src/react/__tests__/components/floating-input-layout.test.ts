@@ -13,6 +13,12 @@ function block(selector: string): string {
 }
 
 describe('floating input layout', () => {
+  it('uses two thirds of the original one-third viewport width', () => {
+    const input = block('.floating-input');
+
+    expect(input).toMatch(/width:\s*calc\(100vw\s*\*\s*2\s*\/\s*9\)/);
+  });
+
   it('keeps single-line text optically centered and gives the left edge chat-input breathing room', () => {
     const form = block('.floating-input-form');
     const input = block('.floating-input-box');

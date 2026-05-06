@@ -1,7 +1,7 @@
 .floating-input {
     position: fixed;
     z-index: 2147483000;
-    width: calc(100vw / 3);
+    width: calc(100vw * 2 / 9);
     transform-origin: top center;
     transform: scale(var(--floating-input-pre-scale, 0.97));
     opacity: 0;
