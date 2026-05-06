@@ -19,6 +19,7 @@ const { createFileWatchRegistry } = require("./file-watch-registry.cjs");
 const { readTextFileSnapshot, writeTextFileIfUnchanged } = require("./file-text-io.cjs");
 const { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 const themeRegistry = require('./src/shared/theme-registry.cjs');
+const { resolveTrashItemPath } = require("./src/shared/trash-item-path.cjs");
 const {
   configureClientSingleInstance,
   focusExistingWindow,
@@ -2573,10 +2574,11 @@ wrapIpcBestEffortHandler("show-in-finder", (_event, filePath) => {
 });
 
 wrapIpcBestEffortHandler("trash-item", async (_event, filePath) => {
-  if (!filePath || !path.isAbsolute(filePath)) return false;
+  const targetPath = resolveTrashItemPath(filePath);
+  if (!targetPath) return false;
   try {
-    fs.lstatSync(filePath);
-    await shell.trashItem(filePath);
+    fs.lstatSync(targetPath);
+    await shell.trashItem(targetPath);
     return true;
   } catch (err) {
     console.warn("[trash-item] failed:", err?.message || err);
