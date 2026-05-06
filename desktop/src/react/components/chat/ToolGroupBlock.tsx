@@ -2,7 +2,7 @@
  * ToolGroupBlock — 工具调用组，含展开/折叠
  */
 
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, useEffect } from 'react';
 import styles from './Chat.module.css';
 import { extractToolDetail } from '../../utils/message-parser';
 import type { ToolDetail } from '../../utils/message-parser';
@@ -27,6 +27,9 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools: rawTools, co
   // subagent 有独立卡片，不在工具组里重复显示
   const tools = rawTools.filter(t => t.name !== 'subagent');
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  useEffect(() => {
+    setCollapsed(initialCollapsed);
+  }, [initialCollapsed]);
   const toggle = useCallback(() => setCollapsed(v => !v), []);
 
   if (tools.length === 0) return null;

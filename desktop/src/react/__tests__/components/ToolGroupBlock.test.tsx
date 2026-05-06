@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ToolGroupBlock } from '../../components/chat/ToolGroupBlock';
@@ -31,5 +32,50 @@ describe('ToolGroupBlock', () => {
     const detail = screen.getByTitle(command);
 
     expect(detail.textContent).toBe('rm -rf /Users/jason/.claude/plugins/mar…');
+  });
+
+  it('syncs a multi-tool group to collapsed when the completed block updates', () => {
+    const { rerender } = render(
+      <ToolGroupBlock
+        collapsed={false}
+        tools={[
+          { name: 'bash', args: { command: 'npm test' }, done: true, success: true },
+          { name: 'read', args: { file_path: '/tmp/report.md' }, done: false, success: false },
+        ]}
+      />,
+    );
+
+    const content = screen.getByText('npm test').closest('div')?.parentElement;
+    expect(content).toBeTruthy();
+    expect(content?.className).not.toContain('toolGroupContentCollapsed');
+
+    rerender(
+      <ToolGroupBlock
+        collapsed={true}
+        tools={[
+          { name: 'bash', args: { command: 'npm test' }, done: true, success: true },
+          { name: 'read', args: { file_path: '/tmp/report.md' }, done: true, success: true },
+        ]}
+      />,
+    );
+
+    expect(content?.className).toContain('toolGroupContentCollapsed');
+  });
+
+  it('keeps a single tool as a plain indicator without a fold summary', () => {
+    render(
+      <ToolGroupBlock
+        collapsed={true}
+        tools={[{
+          name: 'bash',
+          args: { command: 'npm test' },
+          done: true,
+          success: true,
+        }]}
+      />,
+    );
+
+    expect(screen.queryByText('toolGroup.count')).toBeNull();
+    expect(screen.getByText('npm test')).toBeTruthy();
   });
 });
