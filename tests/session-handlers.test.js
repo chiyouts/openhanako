@@ -367,7 +367,7 @@ function registerProviderHandlers(bus, engine) {
   });
 
   bus.handle("agent:config", async ({ agentId }) => {
-    const agent = engine.agentManager.getAgent(agentId);
+    const agent = engine.getAgent(agentId);
     if (!agent) return { error: "not_found" };
     return { config: agent.config };
   });
@@ -436,9 +436,7 @@ describe("agent:config", () => {
   it("returns agent config", async () => {
     const bus = new EventBus();
     const engine = {
-      agentManager: {
-        getAgent: vi.fn(() => ({ config: { imageModel: { id: "img-1", provider: "test" } } })),
-      },
+      getAgent: vi.fn(() => ({ config: { imageModel: { id: "img-1", provider: "test" } } })),
     };
     registerProviderHandlers(bus, engine);
 
@@ -448,7 +446,7 @@ describe("agent:config", () => {
 
   it("returns error for missing agent", async () => {
     const bus = new EventBus();
-    const engine = { agentManager: { getAgent: vi.fn(() => null) } };
+    const engine = { getAgent: vi.fn(() => null) };
     registerProviderHandlers(bus, engine);
 
     const result = await bus.request("agent:config", { agentId: "missing" });

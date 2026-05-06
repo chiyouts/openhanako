@@ -27,7 +27,7 @@ export default function registerMcpRoutes(app, ctx) {
 
   app.get("/state", currentState);
 
-  app.put("/enabled", async (c) => {
+  async function setGlobalEnabled(c) {
     const rt = runtime();
     if (!rt) return c.json({ error: "not initialized" }, 503);
     const { enabled } = await c.req.json();
@@ -35,9 +35,13 @@ export default function registerMcpRoutes(app, ctx) {
       await rt.setEnabled(enabled === true);
       return currentState(c);
     } catch (err) {
+      ctx.log.error(`set global enabled failed: ${err.message}`);
       return c.json({ error: err.message }, 400);
     }
-  });
+  }
+
+  app.put("/settings/enabled", setGlobalEnabled);
+  app.put("/enabled", setGlobalEnabled);
 
   async function addConnector(c) {
     const rt = runtime();

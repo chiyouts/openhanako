@@ -20,7 +20,10 @@ export function Toggle({ on, onChange, label, disabled = false }: ToggleProps) {
         aria-label={label}
         role="switch"
         aria-checked={on}
-        onClick={() => onChange(!on)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onChange(!on);
+        }}
       />
       {label && <span className="hana-toggle-label">{label}</span>}
     </div>

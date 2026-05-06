@@ -25,34 +25,44 @@ export async function loadMcpState(agentId: string): Promise<McpState> {
 }
 
 export async function setMcpEnabled(enabled: boolean): Promise<void> {
-  await hanaFetch('/api/plugins/mcp/enabled', {
+  const res = await hanaFetch('/api/plugins/mcp/settings/enabled', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   });
+  const data = await jsonOrError<McpState>(res);
+  if (typeof data?.enabled !== 'boolean') {
+    throw new Error('MCP enabled endpoint returned an invalid state');
+  }
+  if (data.enabled !== enabled) {
+    throw new Error(`MCP enabled state did not persist: expected ${enabled}, got ${data.enabled}`);
+  }
 }
 
 export async function addMcpConnector(input: McpConnectorInput): Promise<void> {
-  await hanaFetch('/api/plugins/mcp/connectors', {
+  const res = await hanaFetch('/api/plugins/mcp/connectors', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
+  await jsonOrError(res);
 }
 
 export async function removeMcpConnector(connectorId: string): Promise<void> {
-  await hanaFetch(`/api/plugins/mcp/connectors/${encodeURIComponent(connectorId)}`, {
+  const res = await hanaFetch(`/api/plugins/mcp/connectors/${encodeURIComponent(connectorId)}`, {
     method: 'DELETE',
   });
+  await jsonOrError(res);
 }
 
 export async function runMcpConnectorAction(
   connectorId: string,
   action: 'start' | 'stop' | 'refresh-tools',
 ): Promise<void> {
-  await hanaFetch(`/api/plugins/mcp/connectors/${encodeURIComponent(connectorId)}/${action}`, {
+  const res = await hanaFetch(`/api/plugins/mcp/connectors/${encodeURIComponent(connectorId)}/${action}`, {
     method: 'POST',
   });
+  await jsonOrError(res);
 }
 
 export async function setAgentMcpConnector(
@@ -60,11 +70,12 @@ export async function setAgentMcpConnector(
   connectorId: string,
   enabled: boolean,
 ): Promise<void> {
-  await hanaFetch(`/api/plugins/mcp/agents/${encodeURIComponent(agentId)}/connectors/${encodeURIComponent(connectorId)}`, {
+  const res = await hanaFetch(`/api/plugins/mcp/agents/${encodeURIComponent(agentId)}/connectors/${encodeURIComponent(connectorId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   });
+  await jsonOrError(res);
 }
 
 export async function setAgentMcpTool(
@@ -73,11 +84,12 @@ export async function setAgentMcpTool(
   toolName: string,
   enabled: boolean,
 ): Promise<void> {
-  await hanaFetch(`/api/plugins/mcp/agents/${encodeURIComponent(agentId)}/connectors/${encodeURIComponent(connectorId)}`, {
+  const res = await hanaFetch(`/api/plugins/mcp/agents/${encodeURIComponent(agentId)}/connectors/${encodeURIComponent(connectorId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tools: { [toolName]: enabled } }),
   });
+  await jsonOrError(res);
 }
 
 export async function startMcpOAuth(connectorId: string): Promise<{ sessionId: string; url: string }> {
@@ -93,7 +105,8 @@ export async function pollMcpOAuth(sessionId: string): Promise<{ status: string;
 }
 
 export async function logoutMcpOAuth(connectorId: string): Promise<void> {
-  await hanaFetch(`/api/plugins/mcp/connectors/${encodeURIComponent(connectorId)}/oauth/logout`, {
+  const res = await hanaFetch(`/api/plugins/mcp/connectors/${encodeURIComponent(connectorId)}/oauth/logout`, {
     method: 'POST',
   });
+  await jsonOrError(res);
 }

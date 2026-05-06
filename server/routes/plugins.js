@@ -27,12 +27,12 @@ async function proxyToPlugin(c, pluginApp, pluginId, agentId) {
   const headers = new Headers(c.req.raw.headers);
   if (agentId) headers.set("X-Hana-Agent-Id", agentId);
 
+  const hasBody = c.req.method !== "GET" && c.req.method !== "HEAD";
   const subReq = new Request(url.toString(), {
     method: c.req.method,
     headers,
-    body: c.req.method !== "GET" && c.req.method !== "HEAD"
-      ? c.req.raw.body
-      : undefined,
+    body: hasBody ? c.req.raw.body : undefined,
+    ...(hasBody ? { duplex: "half" } : {}),
   });
   return pluginApp.fetch(subReq);
 }

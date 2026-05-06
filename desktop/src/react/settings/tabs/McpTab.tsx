@@ -69,6 +69,10 @@ export function McpTab() {
   };
 
   const toggleGlobal = (enabled: boolean) => run('global', () => setMcpEnabled(enabled));
+  const toggleGlobalFromRow = () => {
+    if (busyKey === 'global') return;
+    toggleGlobal(!state.enabled);
+  };
 
   const addConnector = (input: McpConnectorInput) => run('add', () => addMcpConnector(input));
 
@@ -104,7 +108,16 @@ export function McpTab() {
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="mcp">
       <SettingsSection title={t('settings.mcp.masterTitle')}>
-        <div className={styles['skills-list-item']}>
+        <div
+          className={styles['skills-list-item']}
+          tabIndex={busyKey === 'global' ? -1 : 0}
+          onClick={toggleGlobalFromRow}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            toggleGlobalFromRow();
+          }}
+        >
           <div className={styles['skills-list-info']}>
             <div className={styles['skills-list-name']}>{t('settings.mcp.masterName')}</div>
             <div className={styles['skills-list-desc']}>{t('settings.mcp.masterDesc')}</div>
