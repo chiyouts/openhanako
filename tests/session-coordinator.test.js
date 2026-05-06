@@ -545,6 +545,92 @@ describe("SessionCoordinator", () => {
     expect(agent.buildSystemPrompt).toHaveBeenCalledTimes(1);
   });
 
+  it("restores a prompt-snapshotted session with xhigh before the SDK model is available", async () => {
+    const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "xhigh-restore.jsonl");
+    const agent = {
+      id: "hana",
+      agentDir: path.join(tempDir, "agents", "hana"),
+      sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
+      sessionMemoryEnabled: true,
+      memoryMasterEnabled: true,
+      config: { locale: "zh-CN" },
+      setMemoryEnabled: vi.fn(),
+      buildSystemPrompt: vi.fn(() => "CURRENT BASE"),
+      tools: [],
+    };
+    fs.mkdirSync(agent.sessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agent.sessionDir, "session-meta.json"),
+      JSON.stringify({
+        [path.basename(sessionFile)]: {
+          thinkingLevel: "xhigh",
+          promptSnapshot: {
+            version: 1,
+            systemPrompt: "FROZEN BASE",
+            appendSystemPrompt: [],
+            skillsResult: { skills: [], diagnostics: [] },
+            agentsFilesResult: { agentsFiles: [] },
+          },
+        },
+      }),
+    );
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        sessionManager: { getSessionFile: () => sessionFile },
+        subscribe: vi.fn(() => vi.fn()),
+        setActiveToolsByName: vi.fn(),
+        model: { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek V4 Pro" },
+      },
+    });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        currentModel: { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek V4 Pro" },
+        availableModels: [{ id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek V4 Pro" }],
+        authStorage: {},
+        modelRegistry: {},
+        resolveThinkingLevel: (level) => level,
+      }),
+      getResourceLoader: () => ({
+        getSystemPrompt: () => "BASE",
+        getAppendSystemPrompt: () => [],
+        getExtensions: () => ({ extensions: [], errors: [] }),
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [] }),
+      }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "xhigh" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      listAgents: () => [],
+    });
+
+    await coordinator.createSession(
+      {
+        getCwd: () => tempDir,
+        getSessionFile: () => sessionFile,
+      },
+      tempDir,
+      true,
+      null,
+      { restore: true },
+    );
+
+    expect(createAgentSessionMock).toHaveBeenCalledOnce();
+    expect(createAgentSessionMock.mock.calls[0][0].thinkingLevel).toBe("high");
+    expect(createAgentSessionMock.mock.calls[0][0].resourceLoader.getSystemPrompt()).toBe("FROZEN BASE");
+  });
+
   it("stores skill pointers for a session and omits restored skills whose source was deleted", async () => {
     const sessionFile = path.join(tempDir, "agents", "hana", "sessions", "skill-snapshot.jsonl");
     const skillDir = path.join(tempDir, "skills", "stable-skill");
