@@ -2407,12 +2407,12 @@ wrapIpcBestEffortHandler("select-folder", async (event) => {
   return result.filePaths[0];
 });
 
-// 选择附件文件（多选，支持文件和文件夹）
+// 选择附件文件（多选文件；Windows/Linux 不支持同一 dialog 同时选文件和文件夹）
 wrapIpcBestEffortHandler("select-files", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return [];
   const result = await dialog.showOpenDialog(win, {
-    properties: ["openFile", "openDirectory", "multiSelections"],
+    properties: ["openFile", "multiSelections"],
     title: mt("dialog.selectFiles", null, "Select Files"),
   });
   if (result.canceled || !result.filePaths.length) return [];
