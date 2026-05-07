@@ -1608,6 +1608,10 @@
       "context": 128000,
       "maxOutput": 4096
     },
+    "gpt-image-2": {
+      "name": "GPT Image 2",
+      "type": "image"
+    },
     "gpt-image-1": {
       "name": "GPT Image 1",
       "type": "image"
@@ -6202,6 +6206,10 @@
     }
   },
   "openai-codex-oauth": {
+    "gpt-image-2": {
+      "name": "GPT Image 2",
+      "type": "image"
+    },
     "gpt-4o": {
       "name": "GPT-4o",
       "context": 128000,

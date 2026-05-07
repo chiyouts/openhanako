@@ -27,6 +27,7 @@ import { languages } from '@codemirror/language-data';
 import { markdownHighlight, codeHighlight } from '../editor/highlight';
 import { markdownTheme, codeTheme } from '../editor/theme';
 import { markdownBlockDecoField, markdownDecoPlugin } from '../editor/md-decorations';
+import { mermaidDecoField } from '../editor/mermaid-field';
 import { linkClickHandler } from '../editor/link-handler';
 import { tableDecoField } from '../editor/table-field';
 import { csvTableField } from '../editor/csv-field';
@@ -268,7 +269,7 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
         c.highlight.of(
           syntaxHighlighting(isMd ? markdownHighlight : codeHighlight),
         ),
-        c.conceal.of(isMd ? [markdownDecoPlugin, markdownBlockDecoField] : []),
+        c.conceal.of(isMd ? [markdownDecoPlugin, markdownBlockDecoField, mermaidDecoField] : []),
         ...(isMd ? [tableDecoField] : []),
         ...(isCsv ? [csvTableField] : []),
         c.theme.of(isMd || isCsv ? markdownTheme : codeTheme),

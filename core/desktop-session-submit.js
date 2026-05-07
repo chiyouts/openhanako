@@ -91,6 +91,7 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
     type: "session_user_message",
     message: {
       text: displayMessage?.text ?? text ?? "",
+      timestamp: Date.now(),
       attachments: displayAttachments,
       quotedText: displayMessage?.quotedText,
       skills: displayMessage?.skills,

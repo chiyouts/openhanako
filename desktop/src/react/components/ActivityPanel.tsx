@@ -7,6 +7,7 @@ import { loadSessions, switchSession } from '../stores/session-actions';
 import { formatSessionDate, injectCopyButtons, parseMoodFromContent } from '../utils/format';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import { getMd } from '../utils/markdown';
+import { useMermaidDiagrams } from '../hooks/use-mermaid-diagrams';
 import fp from './FloatingPanels.module.css';
 import chatStyles from './chat/Chat.module.css';
 
@@ -296,6 +297,7 @@ function DetailBody({ messages }: { messages: DetailMessage[] }) {
       injectCopyButtons(bodyRef.current);
     }
   }, [messages]);
+  useMermaidDiagrams(bodyRef, [messages]);
 
   return (
     <div className={fp.floatingPanelBody} ref={bodyRef}>

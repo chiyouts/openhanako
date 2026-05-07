@@ -95,7 +95,7 @@ class StreamBufferManager {
     if (existing) return;
 
     const id = existingId || `stream-${Date.now()}`;
-    const msg: ChatMessage = { id, role: 'assistant', blocks: [] };
+    const msg: ChatMessage = { id, role: 'assistant', blocks: [], timestamp: Date.now() };
     store.appendItem(buf.sessionPath, { type: 'message', data: msg });
     bumpMessageLiveVersion(buf.sessionPath);
     buf.messageId = id;

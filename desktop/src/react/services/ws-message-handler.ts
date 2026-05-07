@@ -157,6 +157,15 @@ function sameJsonish(a: any, b: any): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+function normalizeMessageTimestamp(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
 function replayUserMessageAlreadyHydrated(sessionPath: string, message: any): boolean {
   const session = useStore.getState().chatSessions[sessionPath];
   const last = session?.items?.[session.items.length - 1];
@@ -373,6 +382,7 @@ export function handleServerMessage(msg: any): void {
           role: 'user',
           text,
           textHtml: text ? renderMarkdown(text) : undefined,
+          timestamp: normalizeMessageTimestamp(msg.message.timestamp),
           attachments: msg.message.attachments,
           quotedText: msg.message.quotedText,
           skills: msg.message.skills,

@@ -63,6 +63,7 @@ export default function (app, ctx) {
   const IMAGE_PROVIDER_PRESETS = [
     { id: "volcengine", displayName: "火山引擎 (豆包)" },
     { id: "openai", displayName: "OpenAI" },
+    { id: "openai-codex-oauth", displayName: "OpenAI Codex (OAuth)" },
   ];
 
   // Known image models per provider (mirrors known-models.json type:image entries)
@@ -74,10 +75,14 @@ export default function (app, ctx) {
       { id: "doubao-seedream-5-0-lite-260128", name: "Seedream 5.0 Lite" },
     ],
     openai: [
+      { id: "gpt-image-2", name: "GPT Image 2" },
       { id: "gpt-image-1", name: "GPT Image 1" },
       { id: "gpt-image-1.5", name: "GPT Image 1.5" },
       { id: "gpt-image-1-mini", name: "GPT Image 1 Mini" },
       { id: "dall-e-3", name: "DALL-E 3" },
+    ],
+    "openai-codex-oauth": [
+      { id: "gpt-image-2", name: "GPT Image 2" },
     ],
   };
 

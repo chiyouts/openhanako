@@ -34,6 +34,17 @@ describe("known-models dictionary", () => {
     });
   });
 
+  it("declares GPT Image 2 as an image model for OpenAI and Codex OAuth", () => {
+    expect(lookupKnown("openai", "gpt-image-2")).toEqual({
+      name: "GPT Image 2",
+      type: "image",
+    });
+    expect(lookupKnown("openai-codex-oauth", "gpt-image-2")).toEqual({
+      name: "GPT Image 2",
+      type: "image",
+    });
+  });
+
   it("declares recent frontier and agent model metadata by provider", () => {
     expect(lookupKnown("openai", "gpt-5.5")).toMatchObject({
       context: 1050000,

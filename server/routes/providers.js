@@ -180,6 +180,36 @@ export function createProvidersRoute(engine) {
     }));
   }
 
+  function normalizeRemoteModels(data, api) {
+    if (api === "anthropic-messages") {
+      return (data.data || []).map(m => ({
+        id: m.id,
+        name: m.display_name || m.id,
+        context: m.max_input_tokens ?? null,
+        maxOutput: m.max_tokens ?? null,
+      }));
+    }
+
+    if (api === "google-generative-ai") {
+      return (data.models || []).map(m => {
+        const id = m.baseModelId || String(m.name || "").replace(/^models\//, "");
+        return {
+          id,
+          name: m.displayName || id,
+          context: m.inputTokenLimit ?? null,
+          maxOutput: m.outputTokenLimit ?? null,
+        };
+      }).filter(m => m.id);
+    }
+
+    return (data.data || []).map(m => ({
+      id: m.id,
+      name: m.id,
+      context: m.context_length || m.context_window || m.max_context_length || null,
+      maxOutput: m.max_completion_tokens || m.max_output_tokens || null,
+    }));
+  }
+
   function filterProviderModels(name, models, baseUrl = "") {
     const { models: filtered, ignoredModels } = filterDiscoveredProviderModels(name, models, { baseUrl });
     const payload = { models: filtered };
@@ -252,9 +282,8 @@ export function createProvidersRoute(engine) {
     // ── 2. 远程 list models（baseUrl 为空时跳过）──
     if (effectiveBaseUrl) {
       try {
-        const isAnthropic = effectiveApi === "anthropic-messages";
         const base = effectiveBaseUrl.replace(/\/+$/, "");
-        const url = isAnthropic ? `${base}/v1/models?limit=1000` : `${base}/models`;
+        const url = effectiveApi === "anthropic-messages" ? `${base}/v1/models?limit=1000` : `${base}/models`;
 
         let headers = { "Content-Type": "application/json" };
         if (effectiveKey) {
@@ -275,18 +304,7 @@ export function createProvidersRoute(engine) {
 
         if (res.ok) {
           const data = await res.json();
-          // 两种协议的响应字段名不同，分别归一化
-          const remoteModels = (data.data || []).map(m => isAnthropic ? ({
-            id: m.id,
-            name: m.display_name || m.id,
-            context: m.max_input_tokens ?? null,
-            maxOutput: m.max_tokens ?? null,
-          }) : ({
-            id: m.id,
-            name: m.id,
-            context: m.context_length || m.context_window || m.max_context_length || null,
-            maxOutput: m.max_completion_tokens || m.max_output_tokens || null,
-          }));
+          const remoteModels = normalizeRemoteModels(data, effectiveApi);
           const { models, ignoredModels } = filterDiscoveredProviderModels(name, remoteModels, {
             baseUrl: effectiveBaseUrl,
           });

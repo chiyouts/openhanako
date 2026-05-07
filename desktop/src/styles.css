@@ -932,6 +932,38 @@ html[data-platform="linux"] .tb-toggle-right {
     border-radius: var(--radius-sm);
 }
 
+.md-content .mermaid-diagram {
+    margin: var(--space-sm) 0;
+    padding: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--overlay-subtle);
+    overflow-x: auto;
+}
+
+.md-content .mermaid-source[hidden] {
+    display: none;
+}
+
+.md-content .mermaid-rendered {
+    min-width: 0;
+    overflow-x: auto;
+    color: var(--text);
+}
+
+.md-content .mermaid-rendered svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+}
+
+.md-content .mermaid-diagram.is-error .mermaid-rendered {
+    margin-bottom: var(--space-xs);
+    color: var(--coral);
+    font-size: 0.82em;
+}
+
 /* 行内代码 */
 .md-content code {
     font-family: var(--font-mono);

@@ -7,6 +7,7 @@
 
 import { memo, useRef, useEffect } from 'react';
 import { injectCopyButtons } from '../../utils/format';
+import { useMermaidDiagrams } from '../../hooks/use-mermaid-diagrams';
 
 interface Props {
   html: string;
@@ -20,6 +21,7 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className }
   useEffect(() => {
     if (ref.current) injectCopyButtons(ref.current);
   }, [html]);
+  useMermaidDiagrams(ref, [html]);
 
   return (
     <div

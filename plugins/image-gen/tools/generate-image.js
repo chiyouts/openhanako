@@ -23,6 +23,33 @@ export const parameters = {
   required: ["prompt"],
 };
 
+async function adapterIsAvailable(adapter, submitCtx) {
+  if (typeof adapter?.checkAuth !== "function") return true;
+  try {
+    const result = await adapter.checkAuth(submitCtx);
+    return result?.ok !== false;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveImageAdapter(input, registry, submitCtx) {
+  if (input.provider) return registry.get(input.provider);
+
+  const defaultProvider = submitCtx.config?.get?.("defaultImageModel")?.provider;
+  if (defaultProvider) {
+    const adapter = registry.get(defaultProvider);
+    if (adapter && await adapterIsAvailable(adapter, submitCtx)) return adapter;
+  }
+
+  const adapters = registry.getByType("image");
+  for (let i = adapters.length - 1; i >= 0; i--) {
+    const adapter = adapters[i];
+    if (await adapterIsAvailable(adapter, submitCtx)) return adapter;
+  }
+  return adapters.at(-1) || null;
+}
+
 export async function execute(input, ctx) {
   const { registry, store, poller } = ctx._mediaGen || {};
   if (!registry || !store || !poller) {
@@ -33,10 +60,8 @@ export async function execute(input, ctx) {
   const generatedDir = path.join(ctx.dataDir, "generated");
   const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config };
 
-  // Resolve adapter: explicit → last registered (external adapters take over)
-  const adapter = input.provider
-    ? registry.get(input.provider)
-    : registry.getByType("image").at(-1) || null;
+  // Resolve adapter: explicit → configured default → latest credentialed adapter.
+  const adapter = await resolveImageAdapter(input, registry, submitCtx);
   if (!adapter) {
     return { content: [{ type: "text", text: "没有可用的图片生成 provider" }] };
   }

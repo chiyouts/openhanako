@@ -468,7 +468,7 @@ export class ProviderRegistry {
    * OAuth provider 若 YAML 无 api_key，自动从 auth.json 补全 access token；
    * 若 auth.json 含 resourceUrl 且 YAML 未配 base_url，用 resourceUrl 作为 baseUrl。
    * @param {string} providerId
-   * @returns {{ apiKey: string, baseUrl: string, api: string } | null}
+   * @returns {{ apiKey: string, baseUrl: string, api: string, accountId?: string } | null}
    */
   getCredentials(providerId) {
     const userConfig = this._loadAddedModels();
@@ -483,27 +483,30 @@ export class ProviderRegistry {
 
     const configId = candidateIds.find(id => Object.prototype.hasOwnProperty.call(userConfig, id));
     const uc = configId ? userConfig[configId] : null;
-    if (!uc) return null;
-
     const plugin = this._plugins.get(entry?.id || providerId);
-    let apiKey = uc.api_key || "";
+    const authType = normalizeProviderAuthType(uc?.auth_type || entry?.authType || plugin?.authType);
+    if (!uc && authType !== "oauth") return null;
+
+    let apiKey = uc?.api_key || "";
     let oauthBaseUrl = "";
+    let oauthAccountId = "";
 
     // OAuth provider: YAML 没有 api_key，从 auth.json 取 access token + resourceUrl
     if (!apiKey) {
-      const authType = normalizeProviderAuthType(uc.auth_type || entry?.authType || plugin?.authType);
       if (authType === "oauth") {
         const authJsonKey = entry?.authJsonKey || plugin?.authJsonKey || providerId;
         const oauth = this._readOAuthEntry(authJsonKey);
         apiKey = oauth.token;
         oauthBaseUrl = oauth.resourceUrl;
+        oauthAccountId = oauth.accountId;
       }
     }
 
     return {
       apiKey,
-      baseUrl: uc.base_url || oauthBaseUrl || entry?.baseUrl || plugin?.defaultBaseUrl || "",
-      api: uc.api || entry?.api || plugin?.defaultApi || "",
+      baseUrl: uc?.base_url || oauthBaseUrl || entry?.baseUrl || plugin?.defaultBaseUrl || "",
+      api: uc?.api || entry?.api || plugin?.defaultApi || "",
+      ...(oauthAccountId ? { accountId: oauthAccountId } : {}),
     };
   }
 
@@ -511,7 +514,7 @@ export class ProviderRegistry {
    * 从 auth.json 读取 OAuth 条目（token + resourceUrl）
    * @private
    * @param {string} authJsonKey - auth.json 中的 key
-   * @returns {{ token: string, resourceUrl: string }}
+   * @returns {{ token: string, resourceUrl: string, accountId: string }}
    */
   _readOAuthEntry(authJsonKey) {
     try {
@@ -523,15 +526,19 @@ export class ProviderRegistry {
         this._authJsonMtime = mtime;
       }
       const entry = this._authJsonCache?.[authJsonKey];
-      if (!entry) return { token: "", resourceUrl: "" };
-      if (typeof entry === "string") return { token: entry, resourceUrl: "" };
+      if (!entry) return { token: "", resourceUrl: "", accountId: "" };
+      if (typeof entry === "string") return { token: entry, resourceUrl: "", accountId: "" };
       let token = "";
       if (typeof entry.access === "string") token = entry.access;
       else if (typeof entry.apiKey === "string") token = entry.apiKey;
       else if (typeof entry.token === "string") token = entry.token;
-      return { token, resourceUrl: entry.resourceUrl || "" };
+      return {
+        token,
+        resourceUrl: entry.resourceUrl || "",
+        accountId: entry.accountId || "",
+      };
     } catch {
-      return { token: "", resourceUrl: "" };
+      return { token: "", resourceUrl: "", accountId: "" };
     }
   }
 

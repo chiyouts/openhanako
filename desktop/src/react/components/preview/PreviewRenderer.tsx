@@ -11,6 +11,7 @@ import { parseCSV, injectCopyButtons } from '../../utils/format';
 import { fileIconSvg } from '../../utils/icons';
 import { openFilePreview } from '../../utils/file-preview';
 import { useStore } from '../../stores';
+import { useMermaidDiagrams } from '../../hooks/use-mermaid-diagrams';
 import type { PreviewItem } from '../../types';
 
 // ── LegacyMediaFallback ──
@@ -68,6 +69,7 @@ function MarkdownPreview({ content }: { content: string }) {
       injectCopyButtons(divRef.current);
     }
   }, [content]);
+  useMermaidDiagrams(divRef, [content]);
 
   return (
     <div

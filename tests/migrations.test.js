@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 13;
+const LATEST_DATA_VERSION = 14;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -1212,6 +1212,87 @@ describe("#7 migrateVisionToImage", () => {
     runMigration7(prefs);
 
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #14: migrate Gemini OpenAI compatibility configs to native Google API", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration14(prefs) {
+    prefs.savePreferences({ _dataVersion: 13 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+  }
+
+  function writeAddedModelsYaml(providers) {
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump({ providers }, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+      "utf-8",
+    );
+  }
+
+  function readAddedModelsYaml() {
+    return YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+  }
+
+  it("rewrites official Gemini OpenAI endpoint configs to the native Google API", () => {
+    const prefs = makePrefs(userDir);
+    writeAddedModelsYaml({
+      gemini: {
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gemini-3.1-pro-preview"],
+      },
+    });
+
+    runMigration14(prefs);
+
+    const raw = readAddedModelsYaml();
+    expect(raw.providers.gemini.base_url).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(raw.providers.gemini.api).toBe("google-generative-ai");
+    expect(raw.providers.gemini.models).toEqual(["gemini-3.1-pro-preview"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("also repairs custom aliases that point directly at the official Gemini OpenAI endpoint", () => {
+    const prefs = makePrefs(userDir);
+    writeAddedModelsYaml({
+      "my-gemini": {
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        api_key: "sk-test",
+        models: ["gemini-3-flash-preview"],
+      },
+      "proxy-gemini": {
+        base_url: "https://proxy.example.com/v1/openai",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gemini-3-flash-preview"],
+      },
+    });
+
+    runMigration14(prefs);
+
+    const raw = readAddedModelsYaml();
+    expect(raw.providers["my-gemini"].base_url).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(raw.providers["my-gemini"].api).toBe("google-generative-ai");
+    expect(raw.providers["proxy-gemini"].base_url).toBe("https://proxy.example.com/v1/openai");
+    expect(raw.providers["proxy-gemini"].api).toBe("openai-completions");
   });
 });
 

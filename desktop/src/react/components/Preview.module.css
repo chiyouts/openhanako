@@ -400,6 +400,43 @@
     cursor: text;
 }
 
+:global(.cm-mermaid-widget) {
+    display: block;
+    margin: var(--space-xs) 0;
+    padding: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--overlay-subtle);
+    cursor: text;
+    overflow-x: auto;
+}
+
+:global(.cm-mermaid-widget:hover),
+:global(.cm-mermaid-widget:focus) {
+    background: var(--overlay-light);
+}
+
+:global(.cm-mermaid-widget .mermaid-source[hidden]) {
+    display: none;
+}
+
+:global(.cm-mermaid-widget .mermaid-rendered) {
+    overflow-x: auto;
+}
+
+:global(.cm-mermaid-widget .mermaid-rendered svg) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+}
+
+:global(.cm-mermaid-widget.is-error .mermaid-rendered) {
+    margin-bottom: var(--space-xs);
+    color: var(--coral);
+    font-size: 0.82em;
+}
+
 /* CSV 表格 widget（编辑器内渲染） */
 :global(.cm-csv-table-widget) {
     overflow-x: auto;

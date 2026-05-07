@@ -32,6 +32,15 @@ function makeBusCtx(apiKey, baseUrl, providerId = "volcengine") {
   };
 }
 
+function makeCodexJwt(accountId) {
+  const payload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: accountId,
+    },
+  })).toString("base64url");
+  return `header.${payload}.signature`;
+}
+
 describe("volcengine adapter", () => {
   beforeEach(() => mockFetch.mockReset());
 
@@ -199,5 +208,104 @@ describe("openai adapter", () => {
     await expect(openaiImageAdapter.submit({
       prompt: "test", model: "test",
     }, ctx)).rejects.toThrow(/429/);
+  });
+});
+
+describe("openai codex oauth adapter", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it("uses Codex OAuth credentials and saves image_generation_call results", async () => {
+    const { openaiCodexImageAdapter } = await import("../plugins/image-gen/adapters/openai-codex.js");
+
+    const fakeB64 = Buffer.from("fake-codex-image").toString("base64");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [
+          { type: "message", content: [{ type: "output_text", text: "done" }] },
+          { type: "image_generation_call", result: fakeB64 },
+        ],
+      }),
+    });
+
+    const ctx = makeBusCtx("oauth-token", "https://chatgpt.com/backend-api", "openai-codex-oauth");
+    ctx.bus.request = vi.fn(async (type, payload) => {
+      if (type === "provider:credentials" && payload.providerId === "openai-codex-oauth") {
+        return {
+          apiKey: "oauth-token",
+          baseUrl: "https://chatgpt.com/backend-api",
+          api: "openai-codex-responses",
+          accountId: "acct_123",
+        };
+      }
+      return { error: "not_found" };
+    });
+
+    const result = await openaiCodexImageAdapter.submit({
+      prompt: "a quiet notebook on a wooden desk",
+      model: "gpt-image-2",
+      ratio: "1:1",
+      quality: "high",
+      format: "png",
+    }, ctx);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    expect(opts.headers.Authorization).toBe("Bearer oauth-token");
+    expect(opts.headers["chatgpt-account-id"]).toBe("acct_123");
+    expect(opts.headers["OpenAI-Beta"]).toBe("responses=experimental");
+
+    const body = JSON.parse(opts.body);
+    expect(body.model).toBe("gpt-5.5");
+    expect(body.stream).toBe(false);
+    expect(body.store).toBe(false);
+    expect(body.input[0].content[0]).toEqual({
+      type: "input_text",
+      text: "a quiet notebook on a wooden desk",
+    });
+    expect(body.tools[0]).toMatchObject({
+      type: "image_generation",
+      size: "1024x1024",
+      quality: "high",
+      output_format: "png",
+    });
+
+    expect(result.files).toHaveLength(1);
+    expect(typeof result.taskId).toBe("string");
+  });
+
+  it("derives the Codex account id from the OAuth token when credentials omit it", async () => {
+    const { openaiCodexImageAdapter } = await import("../plugins/image-gen/adapters/openai-codex.js");
+
+    const fakeB64 = Buffer.from("fake-codex-image").toString("base64");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [{ type: "image_generation_call", result: fakeB64 }],
+      }),
+    });
+
+    const ctx = makeBusCtx(
+      makeCodexJwt("acct_from_token"),
+      "https://chatgpt.com/backend-api",
+      "openai-codex-oauth",
+    );
+
+    await openaiCodexImageAdapter.submit({
+      prompt: "test",
+    }, ctx);
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers["chatgpt-account-id"]).toBe("acct_from_token");
+  });
+
+  it("requires a decodable Codex account id for ChatGPT backend requests", async () => {
+    const { openaiCodexImageAdapter } = await import("../plugins/image-gen/adapters/openai-codex.js");
+
+    const ctx = makeBusCtx("oauth-token", "https://chatgpt.com/backend-api", "openai-codex-oauth");
+
+    await expect(openaiCodexImageAdapter.submit({
+      prompt: "test",
+    }, ctx)).rejects.toThrow(/account/i);
   });
 });

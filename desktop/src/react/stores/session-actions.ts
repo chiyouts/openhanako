@@ -141,7 +141,7 @@ function buildInflightAssistantMessage(snap: StreamBufferSnapshot): ChatMessage 
     const displayText = snap.text.replace(/<tool_code>[\s\S]*?<\/tool_code>\s*/g, '');
     blocks.push({ type: 'text', html: renderMarkdown(displayText) });
   }
-  return { id: snap.messageId || `inflight-${Date.now()}`, role: 'assistant', blocks };
+  return { id: snap.messageId || `inflight-${Date.now()}`, role: 'assistant', blocks, timestamp: Date.now() };
 }
 
 /** 上滑加载更早的消息（分页） */

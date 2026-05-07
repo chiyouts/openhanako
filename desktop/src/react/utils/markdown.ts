@@ -186,6 +186,31 @@ function applyMarkdownPlugins(md: MarkdownItInstance): void {
   md.use(texBracketMath);
   md.use(taskLists, { enabled: false, label: true });
   md.use(obsidianHighlights);
+  md.use(mermaidFences);
+}
+
+function fenceLanguage(info: string): string {
+  return info.trim().split(/\s+/)[0]?.toLowerCase() || '';
+}
+
+function mermaidFences(md: MarkdownItInstance): void {
+  const defaultFence = md.renderer.rules.fence
+    ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+
+  md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    if (fenceLanguage(token.info) !== 'mermaid') {
+      return defaultFence(tokens, idx, options, env, self);
+    }
+
+    const source = md.utils.escapeHtml(token.content);
+    return [
+      '<div class="mermaid-diagram">',
+      `<pre class="mermaid-source"><code>${source}</code></pre>`,
+      '<div class="mermaid-rendered"></div>',
+      '</div>\n',
+    ].join('');
+  };
 }
 
 /** 获取默认 md 实例（html: false, katex 插件） */

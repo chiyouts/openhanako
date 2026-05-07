@@ -153,6 +153,7 @@ export const PROVIDER_PRESETS = API_PROVIDER_PRESETS.map(preset => ({
 
 export const API_FORMAT_OPTIONS = [
   { value: 'openai-completions', label: 'OpenAI Compatible' },
+  { value: 'google-generative-ai', label: 'Google Gemini' },
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
   { value: 'openai-responses', label: 'OpenAI Responses' },
   { value: 'openai-codex-responses', label: 'ChatGPT Codex (Plus/Pro)' },

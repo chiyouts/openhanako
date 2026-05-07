@@ -125,6 +125,34 @@ describe("generate-image tool — adapter resolution", () => {
     expect(registry.getByType).toHaveBeenCalledWith("image");
     expect(registry.get).not.toHaveBeenCalled();
   });
+
+  it("falls back to the newest credentialed image adapter when a later adapter is unavailable", async () => {
+    const openaiAdapter = makeAdapter({
+      id: "openai",
+      submit: vi.fn(async () => ({ taskId: "task-openai", files: ["img.png"] })),
+    });
+    const codexAdapter = makeAdapter({
+      id: "openai-codex-oauth",
+      checkAuth: vi.fn(async () => ({ ok: false, message: "no_credentials" })),
+      submit: vi.fn(async () => {
+        throw new Error("Provider \"openai-codex-oauth\" 未登录。");
+      }),
+    });
+    const registry = {
+      get: vi.fn(),
+      getDefault: vi.fn(),
+      getByType: vi.fn(() => [openaiAdapter, codexAdapter]),
+    };
+    const store = { add: vi.fn(), update: vi.fn() };
+    const poller = { add: vi.fn() };
+    const ctx = makeCtx({ registry, store, poller });
+
+    const result = await execute({ prompt: "a desk lamp" }, ctx);
+
+    expect(openaiAdapter.submit).toHaveBeenCalledOnce();
+    expect(codexAdapter.submit).not.toHaveBeenCalled();
+    expect(result.details.card.type).toBe("iframe");
+  });
 });
 
 describe("generate-image tool — submit error", () => {

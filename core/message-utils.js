@@ -89,7 +89,9 @@ export async function loadSessionHistoryMessages(engine, explicitPath) {
       try {
         const entry = JSON.parse(line);
         if (entry.type === "message" && entry.message) {
-          messages.push(entry.message);
+          const message = { ...entry.message };
+          if (entry.timestamp) message.timestamp = entry.timestamp;
+          messages.push(message);
         }
       } catch {
         // 跳过损坏行

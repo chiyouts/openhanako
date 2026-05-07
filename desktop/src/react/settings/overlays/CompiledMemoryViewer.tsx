@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useSettingsStore } from '../store';
 import { hanaFetch } from '../api';
 import { t } from '../helpers';
 import { renderMarkdown } from '../../utils/markdown';
+import { useMermaidDiagrams } from '../../hooks/use-mermaid-diagrams';
 import styles from '../Settings.module.css';
 
 export function CompiledMemoryViewer() {
   const [visible, setVisible] = useState(false);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useMermaidDiagrams(contentRef, [content, loading]);
 
   useEffect(() => {
     const handler = () => { setVisible(true); load(); };
@@ -61,7 +64,11 @@ export function CompiledMemoryViewer() {
           {loading ? (
             <div className="memory-viewer-empty">Loading...</div>
           ) : content.trim() ? (
-            <div className={`${styles['compiled-memory-md']} ${'md-content'}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
+            <div
+              ref={contentRef}
+              className={`${styles['compiled-memory-md']} ${'md-content'}`}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+            />
           ) : (
             <div className="memory-viewer-empty">{t('settings.memory.compiledEmpty')}</div>
           )}

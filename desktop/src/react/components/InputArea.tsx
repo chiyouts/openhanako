@@ -7,24 +7,32 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type Ref } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import type { Editor } from '@tiptap/core';
 import { useStore } from '../stores';
 import { selectPreviewItems, selectActiveTabId } from '../stores/preview-slice';
+import { selectSessionFiles } from '../stores/selectors/file-refs';
 import { isImageFile } from '../utils/format';
 import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
 import { ensureSession, loadSessions } from '../stores/session-actions';
-import { loadDeskFiles, toggleJianSidebar } from '../stores/desk-actions';
+import { loadDeskFiles, searchDeskFiles, toggleJianSidebar } from '../stores/desk-actions';
 import { getWebSocket } from '../services/websocket';
 import { collectUiContext } from '../utils/ui-context';
 import { formatQuotedSelectionForPrompt } from '../utils/quoted-selection';
 import type { ThinkingLevel } from '../stores/model-slice';
 import { SlashCommandMenu } from './input/SlashCommandMenu';
+import { FileMentionMenu } from './input/FileMentionMenu';
 import { InputStatusBars } from './input/InputStatusBars';
 import { InputContextRow } from './input/InputContextRow';
 import { InputControlBar } from './input/InputControlBar';
 import type { PermissionMode } from './input/PlanModeButton';
 import { SessionConfirmationPrompt } from './input/SessionConfirmationPrompt';
 import { serializeEditor } from '../utils/editor-serializer';
+import {
+  buildFileMentionItems,
+  mergeEditorFileRefs,
+  type FileMentionItem,
+} from '../utils/file-mention-items';
 import { useSkillSlashItems } from '../hooks/use-slash-items';
 import { notifyPasteUploadFailure } from '../utils/paste-upload-feedback';
 import { extractPlainUrlPaste } from '../utils/plain-url-paste';
@@ -42,10 +50,17 @@ import {
 import { attachFilesFromPaths } from '../MainContent';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import styles from './input/InputArea.module.css';
-import type { TodoItem } from '../types';
+import type { DeskSearchResult, TodoItem } from '../types';
 import type { ChatListItem, SessionConfirmationBlock } from '../stores/chat-types';
 
 const EMPTY_TODOS: TodoItem[] = [];
+const EMPTY_FILE_REFS: readonly import('../types/file-ref').FileRef[] = Object.freeze([]);
+
+interface FileMentionRange {
+  from: number;
+  to: number;
+  query: string;
+}
 
 function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string): SessionConfirmationBlock | null {
   if (!items) return null;
@@ -61,6 +76,36 @@ function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, c
     }
   }
   return null;
+}
+
+function findFileMentionRange(editor: Editor | null): FileMentionRange | null {
+  if (!editor?.state?.selection) return null;
+  const { selection } = editor.state;
+  if (!selection.empty) return null;
+  const before = selection.$from.parent.textBetween(0, selection.$from.parentOffset, '\n', '\n');
+  const atIndex = before.lastIndexOf('@');
+  if (atIndex < 0) return null;
+  if (atIndex > 0 && /\S/.test(before[atIndex - 1])) return null;
+  const query = before.slice(atIndex + 1);
+  if (/[\s@]/.test(query)) return null;
+  return {
+    from: selection.from - query.length - 1,
+    to: selection.from,
+    query,
+  };
+}
+
+function editorHasInlineNode(editor: Editor | null, nodeType: string): boolean {
+  if (!editor?.state?.doc) return false;
+  let found = false;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === nodeType) {
+      found = true;
+      return false;
+    }
+    return !found;
+  });
+  return found;
 }
 
 export type { SlashItem };
@@ -90,9 +135,13 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const compacting = useStore(s => currentSessionPath ? s.compactingSessions.includes(currentSessionPath) : false);
   const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? null);
   const sessionTodos = useStore(s => (s.currentSessionPath && s.todosBySession[s.currentSessionPath]) || EMPTY_TODOS);
+  const sessionFiles = useStore(s => (s.currentSessionPath ? selectSessionFiles(s, s.currentSessionPath) : EMPTY_FILE_REFS));
   const attachedFiles = useStore(s => s.attachedFiles);
   const docContextAttached = useStore(s => s.docContextAttached);
   const quotedSelection = useStore(s => s.quotedSelection);
+  const deskFiles = useStore(s => s.deskFiles);
+  const deskBasePath = useStore(s => s.deskBasePath);
+  const deskCurrentPath = useStore(s => s.deskCurrentPath);
   const previewItems = useStore(selectPreviewItems);
   const activeTabId = useStore(selectActiveTabId);
   const previewOpen = useStore(s => s.previewOpen);
@@ -109,7 +158,6 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   // input 数组缺失视为未知；只有显式 text-only 的模型才在 UI 上标记“辅助视觉”。
   const supportsVision = !Array.isArray(currentModelInfo?.input) || currentModelInfo.input.includes("image");
   const modelSwitching = useStore(s => s.modelSwitching);
-  const sessionHasMessages = useStore(s => !!(s.currentSessionPath && s.chatSessions[s.currentSessionPath]?.items?.length));
   const currentSessionItems = useStore(s => s.currentSessionPath ? s.chatSessions[s.currentSessionPath]?.items : undefined);
   const pendingSessionConfirmation = useMemo(() => {
     const latest = findLatestInputSessionConfirmation(currentSessionItems);
@@ -128,9 +176,17 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
 
   const isComposing = useRef(false);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const fileMenuRef = useRef<HTMLDivElement>(null);
   const slashBtnRef = useRef<HTMLButtonElement>(null);
   const slashDismissedTextRef = useRef<string | null>(null);
+  const fileMentionSearchSeqRef = useRef(0);
   const [inputText, setInputText] = useState('');
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [fileSelected, setFileSelected] = useState(0);
+  const [fileMentionRange, setFileMentionRange] = useState<FileMentionRange | null>(null);
+  const [fileMentionQuery, setFileMentionQuery] = useState('');
+  const [fileMentionSearchResults, setFileMentionSearchResults] = useState<DeskSearchResult[]>([]);
+  const [fileMentionBusy, setFileMentionBusy] = useState(false);
 
   useEffect(() => {
     if (pendingSessionConfirmation) {
@@ -264,6 +320,24 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     return getSlashMatches(inputText, slashCommands);
   }, [inputText, slashCommands]);
 
+  const fileMentionItems = useMemo(() => buildFileMentionItems({
+    query: fileMentionQuery,
+    attachedFiles,
+    sessionFiles,
+    deskFiles,
+    deskBasePath,
+    deskCurrentPath,
+    searchResults: fileMentionSearchResults,
+  }), [
+    attachedFiles,
+    deskBasePath,
+    deskCurrentPath,
+    deskFiles,
+    fileMentionQuery,
+    fileMentionSearchResults,
+    sessionFiles,
+  ]);
+
   const dismissSlashMenu = useCallback(() => {
     const text = editor?.getText().trim() ?? inputText.trim();
     slashDismissedTextRef.current = text.startsWith('/') ? text : null;
@@ -274,6 +348,44 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     slashDismissedTextRef.current = null;
     setSlashMenuOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!fileMenuOpen) {
+      setFileMentionSearchResults([]);
+      setFileMentionBusy(false);
+      return;
+    }
+
+    const query = fileMentionQuery.trim();
+    const seq = ++fileMentionSearchSeqRef.current;
+    if (!query) {
+      setFileMentionSearchResults([]);
+      setFileMentionBusy(false);
+      return;
+    }
+
+    setFileMentionBusy(true);
+    const timer = window.setTimeout(() => {
+      searchDeskFiles(query)
+        .then((results) => {
+          if (fileMentionSearchSeqRef.current === seq) setFileMentionSearchResults(results);
+        })
+        .catch((err: unknown) => {
+          if (fileMentionSearchSeqRef.current === seq) setFileMentionSearchResults([]);
+          console.warn('[file-mention] search failed', err);
+        })
+        .finally(() => {
+          if (fileMentionSearchSeqRef.current === seq) setFileMentionBusy(false);
+        });
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [fileMentionQuery, fileMenuOpen]);
+
+  useEffect(() => {
+    if (fileSelected < fileMentionItems.length) return;
+    setFileSelected(Math.max(0, fileMentionItems.length - 1));
+  }, [fileMentionItems.length, fileSelected]);
 
   const handleSlashToggle = useCallback(() => {
     if (slashMenuOpen) dismissSlashMenu();
@@ -295,7 +407,19 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         slashDismissedTextRef.current = null;
       }
       const slashMatches = getSlashMatches(text, slashCommands);
-      if (slashMatches.length > 0 && slashDismissedTextRef.current !== text.trim()) {
+      const fileMention = findFileMentionRange(editor);
+      if (fileMention) {
+        setFileMentionRange(fileMention);
+        setFileMentionQuery(fileMention.query);
+        setFileMenuOpen(true);
+        setFileSelected(0);
+        setSlashMenuOpen(false);
+      } else {
+        setFileMenuOpen(false);
+        setFileMentionRange(null);
+        setFileMentionQuery('');
+      }
+      if (!fileMention && slashMatches.length > 0 && slashDismissedTextRef.current !== text.trim()) {
         setSlashMenuOpen(true);
         setSlashSelected(0);
       } else {
@@ -345,9 +469,20 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [dismissSlashMenu, slashMenuOpen]);
 
+  useEffect(() => {
+    if (!fileMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (fileMenuRef.current?.contains(e.target as Node)) return;
+      setFileMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [fileMenuOpen]);
+
   // Can send?
   const hasContent = inputText.trim().length > 0 || attachedFiles.length > 0 || docContextAttached || !!quotedSelection
-    || (editor?.getJSON().content?.some(n => n.type === 'skillBadge') ?? false);
+    || editorHasInlineNode(editor, 'skillBadge')
+    || editorHasInlineNode(editor, 'fileBadge');
   const canSend = hasContent && connected && !isStreaming && !modelSwitching;
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
@@ -448,11 +583,33 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     setSlashMenuOpen(false);
   }, [editor]);
 
+  const handleFileMentionSelect = useCallback((item: FileMentionItem) => {
+    if (!editor || !fileMentionRange) return;
+    editor.chain()
+      .focus()
+      .deleteRange({ from: fileMentionRange.from, to: fileMentionRange.to })
+      .insertContent({
+        type: 'fileBadge',
+        attrs: {
+          fileId: item.fileId || null,
+          path: item.path,
+          name: item.name,
+          isDirectory: !!item.isDirectory,
+          mimeType: item.mimeType || null,
+        },
+      })
+      .insertContent(' ')
+      .run();
+    setFileMenuOpen(false);
+    setFileMentionRange(null);
+    setFileMentionQuery('');
+  }, [editor, fileMentionRange]);
+
   // ── Send message ──
   const handleSend = useCallback(async () => {
     if (!editor) return;
     const editorJson = editor.getJSON();
-    const { text: rawText, skills } = serializeEditor(editorJson);
+    const { text: rawText, skills, fileRefs } = serializeEditor(editorJson);
     const text = rawText.trim();
 
     const slashSelection = resolveSlashSubmitSelection({
@@ -467,7 +624,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       return;
     }
 
-    const hasFiles = attachedFiles.length > 0;
+    const inputFiles = mergeEditorFileRefs(attachedFiles, fileRefs);
+    const hasFiles = inputFiles.length > 0;
     if ((!text && !hasFiles && !docContextAttached && !useStore.getState().quotedSelection) || !connected) return;
     if (isStreaming) return;
     if (sending) return;
@@ -482,11 +640,11 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       }
 
       // 分离图片和非图片附件；后端决定原生图片、视觉桥或显式报错。
-      const imageFiles = hasFiles ? attachedFiles.filter(f => !f.isDirectory && isImageFile(f.name)) : [];
-      const otherFiles = hasFiles ? attachedFiles.filter(f => f.isDirectory || !isImageFile(f.name)) : [];
+      const imageFiles = hasFiles ? inputFiles.filter(f => !f.isDirectory && isImageFile(f.name)) : [];
+      const otherFiles = hasFiles ? inputFiles.filter(f => f.isDirectory || !isImageFile(f.name)) : [];
 
       const imagePreflight = await evaluateChatImageSendPreflight({
-        attachments: attachedFiles,
+        attachments: inputFiles,
         model: currentModelInfo,
         loadVisionAuxiliaryConfig,
       });
@@ -543,7 +701,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         finalText = finalText ? `${finalText}\n\n${quoteStr}` : quoteStr;
       }
 
-      const allFiles = [...(hasFiles ? attachedFiles : [])];
+      const allFiles = [...(hasFiles ? inputFiles : [])];
       if (docForRender) allFiles.push({ path: docForRender.path, name: docForRender.name });
 
       editor.commands.clearContent();
@@ -582,7 +740,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     } finally {
       setSending(false);
     }
-  }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, t]);
+  }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
 
   // ── Steer ──
   const handleSteer = useCallback(async () => {
@@ -596,7 +754,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       const { renderMarkdown } = await import('../utils/markdown');
       useStore.getState().appendItem(sessionPath, {
         type: 'message',
-        data: { id: `user-${Date.now()}`, role: 'user', text, textHtml: renderMarkdown(text) },
+        data: { id: `user-${Date.now()}`, role: 'user', text, textHtml: renderMarkdown(text), timestamp: Date.now() },
       });
     }
     editor.commands.clearContent();
@@ -614,6 +772,29 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
 
   // ── Key handler ──
   const handleEditorKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (fileMenuOpen && (fileMentionItems.length > 0 || fileMentionBusy)) {
+      if (e.key === 'ArrowDown' && fileMentionItems.length > 0) {
+        e.preventDefault();
+        setFileSelected(i => (i + 1) % fileMentionItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp' && fileMentionItems.length > 0) {
+        e.preventDefault();
+        setFileSelected(i => (i - 1 + fileMentionItems.length) % fileMentionItems.length);
+        return;
+      }
+      if ((e.key === 'Tab' || e.key === 'Enter') && fileMentionItems.length > 0) {
+        e.preventDefault();
+        const item = fileMentionItems[fileSelected];
+        if (item) handleFileMentionSelect(item);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setFileMenuOpen(false);
+        return;
+      }
+    }
     if (slashMenuOpen && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelected(i => (i + 1) % filteredCommands.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelected(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return; }
@@ -629,7 +810,21 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       e.preventDefault();
       if (isStreaming && (editor?.getText().trim())) handleSteer(); else handleSend();
     }
-  }, [dismissSlashMenu, handleSend, handleSteer, isStreaming, editor, slashMenuOpen, filteredCommands, slashSelected]);
+  }, [
+    dismissSlashMenu,
+    fileMentionBusy,
+    fileMentionItems,
+    fileMenuOpen,
+    fileSelected,
+    filteredCommands,
+    handleFileMentionSelect,
+    handleSend,
+    handleSteer,
+    isStreaming,
+    editor,
+    slashMenuOpen,
+    slashSelected,
+  ]);
 
   const handleSlashResultClick = useCallback(() => {
     if (!slashResult?.deskDir) return;
@@ -658,6 +853,17 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         {slashMenuOpen && filteredCommands.length > 0 && (
           <SlashCommandMenu commands={filteredCommands} selected={slashSelected} busy={slashBusy}
             onSelect={handleSlashSelect} onHover={(i) => setSlashSelected(i)} />
+        )}
+      </div>
+      <div className={styles['slash-menu-anchor']} ref={fileMenuRef}>
+        {fileMenuOpen && (fileMentionItems.length > 0 || fileMentionBusy) && (
+          <FileMentionMenu
+            items={fileMentionItems}
+            selected={fileSelected}
+            busy={fileMentionBusy}
+            onSelect={handleFileMentionSelect}
+            onHover={(i) => setFileSelected(i)}
+          />
         )}
       </div>
       <div className={styles['input-stack']}>

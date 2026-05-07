@@ -24,4 +24,43 @@ describe('input editor extensions', () => {
 
     editor.destroy();
   });
+
+  it('serializes file badges as readable text and attachment references', () => {
+    const editor = new Editor({
+      extensions: createInputEditorExtensions(''),
+      content: {
+        type: 'doc',
+        content: [{
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Read ' },
+            {
+              type: 'fileBadge',
+              attrs: {
+                fileId: 'sf_readme',
+                path: '/workspace/README.md',
+                name: 'README.md',
+                isDirectory: false,
+                mimeType: 'text/markdown',
+              },
+            },
+            { type: 'text', text: ' before editing.' },
+          ],
+        }],
+      },
+    });
+
+    const serialized = serializeEditor(editor.getJSON());
+
+    expect(serialized.text).toBe('Read @README.md before editing.');
+    expect(serialized.fileRefs).toEqual([{
+      fileId: 'sf_readme',
+      path: '/workspace/README.md',
+      name: 'README.md',
+      isDirectory: false,
+      mimeType: 'text/markdown',
+    }]);
+
+    editor.destroy();
+  });
 });

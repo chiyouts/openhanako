@@ -364,7 +364,12 @@ export class Hub {
     this._sessionHandlerCleanups.push(bus.handle("provider:credentials", async ({ providerId }) => {
       const creds = engine.providerRegistry.getCredentials(providerId);
       if (!creds?.apiKey) return { error: "no_credentials" };
-      return { apiKey: creds.apiKey, baseUrl: creds.baseUrl, api: creds.api };
+      return {
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
+        api: creds.api,
+        ...(creds.accountId ? { accountId: creds.accountId } : {}),
+      };
     }));
 
     this._sessionHandlerCleanups.push(bus.handle("provider:models-by-type", async ({ type, providerId }) => {

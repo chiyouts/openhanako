@@ -22,9 +22,10 @@ interface Props {
   sessionPath: string;
   readOnly?: boolean;
   hideIdentity?: boolean;
+  messageRef?: (element: HTMLDivElement | null) => void;
 }
 
-export const UserMessage = memo(function UserMessage({ message, showAvatar, sessionPath, readOnly = false, hideIdentity = false }: Props) {
+export const UserMessage = memo(function UserMessage({ message, showAvatar, sessionPath, readOnly = false, hideIdentity = false, messageRef }: Props) {
   const userAvatarUrl = useStore(s => s.userAvatarUrl);
   const t = window.t ?? ((p: string) => p);
   const userName = useStore(s => s.userName) || t('common.me');
@@ -85,6 +86,7 @@ export const UserMessage = memo(function UserMessage({ message, showAvatar, sess
 
   return (
     <div className={`${styles.messageGroup} ${styles.messageGroupUser}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
+         ref={messageRef}
          data-message-id={message.id}>
       {showAvatar && !hideIdentity && (
         <div className={`${styles.avatarRow} ${styles.avatarRowUser}`}>

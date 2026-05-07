@@ -744,7 +744,29 @@ describe("syncModels", () => {
     expect(result.providers.deepseek.models[0].name).toBe("DeepSeek Chat");
   });
 
-  it("sets compat.supportsStore=false for gemini provider (avoid 400 from /v1beta/openai)", async () => {
+  it("projects Gemini native API without OpenAI-chat store compatibility flags", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      gemini: {
+        base_url: "https://generativelanguage.googleapis.com/v1beta",
+        api: "google-generative-ai",
+        api_key: "sk-test",
+        models: ["gemini-3-flash-preview"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.gemini.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(result.providers.gemini.api).toBe("google-generative-ai");
+    expect(result.providers.gemini.models[0].compat).toEqual({
+      supportsDeveloperRole: false,
+    });
+  });
+
+  it("sets compat.supportsStore=false for Gemini OpenAI compatibility configs (avoid 400 from /v1beta/openai)", async () => {
     const syncModels = await loadSync();
 
     const providers = {

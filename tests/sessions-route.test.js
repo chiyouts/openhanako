@@ -275,6 +275,46 @@ describe("sessions route", () => {
     });
   });
 
+  it("includes session entry timestamps on displayable history messages", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "hello", images: [], thinking: "", toolUses: [] })
+      .mockReturnValueOnce({ text: "hi back", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "user", content: "hello", timestamp: "2026-05-07T05:42:00.000Z" },
+      { role: "assistant", content: "hi back", timestamp: "2026-05-07T05:43:00.000Z" },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions/messages");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toEqual([
+      {
+        id: "0",
+        role: "user",
+        content: "hello",
+        timestamp: "2026-05-07T05:42:00.000Z",
+      },
+      {
+        id: "1",
+        role: "assistant",
+        content: "hi back",
+        timestamp: "2026-05-07T05:43:00.000Z",
+      },
+    ]);
+  });
+
   it("refreshes session file lifecycle metadata when rebuilding history blocks", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.js");
     const msgUtils = await import("../core/message-utils.js");

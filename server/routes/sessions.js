@@ -223,7 +223,15 @@ export function createSessionsRoute(engine) {
       for (const m of sourceMessages) {
         if (m.role === "user") {
           const { text, images } = extractTextContent(m.content);
-          if (text || images.length) allMessages.push({ id: String(globalIdx++), role: "user", content: text, images: images.length ? images : undefined });
+          if (text || images.length) {
+            allMessages.push({
+              id: String(globalIdx++),
+              role: "user",
+              content: text,
+              images: images.length ? images : undefined,
+              ...(m.timestamp ? { timestamp: m.timestamp } : {}),
+            });
+          }
         } else if (m.role === "assistant") {
           const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
           if (text || toolUses.length) {
@@ -233,6 +241,7 @@ export function createSessionsRoute(engine) {
               content: text,
               thinking: thinking || undefined,
               toolCalls: toolUses.length ? toolUses : undefined,
+              ...(m.timestamp ? { timestamp: m.timestamp } : {}),
             });
           }
         } else if (m.role === "toolResult") {

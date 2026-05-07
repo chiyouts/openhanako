@@ -1051,6 +1051,98 @@
     gap: var(--space-sm);
 }
 
+.timelineNav {
+    position: absolute;
+    top: 76px;
+    right: 5px;
+    bottom: var(--chat-scrollbar-bottom-inset);
+    width: 22px;
+    z-index: 4;
+    opacity: 0.52;
+    transition: opacity 0.18s ease-out;
+}
+
+.timelineNav:hover,
+.timelineNav:focus-within {
+    opacity: 1;
+}
+
+.timelineRail {
+    position: absolute;
+    top: 0;
+    right: 7px;
+    bottom: 0;
+    width: 1px;
+    background: rgba(128, 128, 128, 0.16);
+    transform: scaleX(0.5);
+    transform-origin: center;
+}
+
+.timelineMarker {
+    position: absolute;
+    right: 0;
+    width: 18px;
+    height: 14px;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+}
+
+.timelineDot {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    width: 2px;
+    height: 2px;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.54;
+    transition: width 0.14s ease-out, height 0.14s ease-out, opacity 0.14s ease-out, right 0.14s ease-out;
+}
+
+.timelineMarker:hover .timelineDot,
+.timelineMarker:focus-visible .timelineDot,
+.timelineMarkerActive .timelineDot {
+    right: 5px;
+    width: 4px;
+    height: 4px;
+    opacity: 0.82;
+}
+
+.timelineMarker:focus-visible {
+    outline: none;
+}
+
+.timelineLabel {
+    position: absolute;
+    top: 50%;
+    right: 18px;
+    transform: translateY(-50%) translateX(4px);
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    padding: calc(var(--space-xs) / 2) var(--space-xs);
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-family: var(--font-serif);
+    font-size: 0.7rem;
+    line-height: 1.2;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+}
+
+.timelineMarker:hover .timelineLabel,
+.timelineMarker:focus-visible .timelineLabel {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+}
+
 .loadMoreHint {
     text-align: center;
     padding: 0.5rem 0;

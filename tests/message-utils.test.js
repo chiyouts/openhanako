@@ -170,6 +170,38 @@ describe("loadSessionHistoryMessages", () => {
     const result = await loadSessionHistoryMessages(engine, undefined);
     expect(result).toEqual([]);
   });
+
+  it("从 JSONL entry 透传消息写入时间", async () => {
+    const sessionPath = path.join(tmpDir, "with-timestamps.jsonl");
+    fs.writeFileSync(sessionPath, [
+      JSON.stringify({
+        type: "message",
+        timestamp: "2026-05-07T05:42:00.000Z",
+        message: { role: "user", content: [{ type: "text", text: "hi" }] },
+      }),
+      JSON.stringify({
+        type: "message",
+        timestamp: "2026-05-07T05:43:00.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+      }),
+      "",
+    ].join("\n"), "utf-8");
+
+    const result = await loadSessionHistoryMessages({}, sessionPath);
+
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "hi" }],
+        timestamp: "2026-05-07T05:42:00.000Z",
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: "2026-05-07T05:43:00.000Z",
+      },
+    ]);
+  });
 });
 
 describe("loadLatestAssistantSummaryFromSessionFile", () => {

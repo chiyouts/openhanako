@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import type { ChatListItem } from '../../stores/chat-types';
 import { UserMessage } from './UserMessage';
 import { AssistantMessage } from './AssistantMessage';
@@ -9,6 +9,7 @@ interface Props {
   agentId?: string | null;
   readOnly?: boolean;
   hideUserIdentity?: boolean;
+  registerMessageElement?: (messageId: string, element: HTMLDivElement | null) => void;
 }
 
 export const ChatTranscript = memo(function ChatTranscript({
@@ -17,6 +18,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   agentId,
   readOnly = false,
   hideUserIdentity = false,
+  registerMessageElement,
 }: Props) {
   return (
     <>
@@ -29,6 +31,7 @@ export const ChatTranscript = memo(function ChatTranscript({
           agentId={agentId}
           readOnly={readOnly}
           hideUserIdentity={hideUserIdentity}
+          registerMessageElement={registerMessageElement}
         />
       ))}
     </>
@@ -42,6 +45,7 @@ const TranscriptItemView = memo(function TranscriptItemView({
   agentId,
   readOnly,
   hideUserIdentity,
+  registerMessageElement,
 }: {
   item: ChatListItem;
   prevItem?: ChatListItem;
@@ -49,7 +53,13 @@ const TranscriptItemView = memo(function TranscriptItemView({
   agentId?: string | null;
   readOnly: boolean;
   hideUserIdentity: boolean;
+  registerMessageElement?: (messageId: string, element: HTMLDivElement | null) => void;
 }) {
+  const messageId = item.type === 'message' ? item.data.id : null;
+  const messageRef = useCallback((element: HTMLDivElement | null) => {
+    if (messageId) registerMessageElement?.(messageId, element);
+  }, [messageId, registerMessageElement]);
+
   if (item.type === 'compaction') return null;
 
   const msg = item.data;
@@ -64,6 +74,7 @@ const TranscriptItemView = memo(function TranscriptItemView({
         sessionPath={sessionPath}
         readOnly={readOnly}
         hideIdentity={hideUserIdentity}
+        messageRef={messageRef}
       />
     );
   }
@@ -75,6 +86,7 @@ const TranscriptItemView = memo(function TranscriptItemView({
       sessionPath={sessionPath}
       agentId={agentId}
       readOnly={readOnly}
+      messageRef={messageRef}
     />
   );
 });

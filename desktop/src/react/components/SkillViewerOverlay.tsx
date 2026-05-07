@@ -10,6 +10,7 @@ import { useStore } from '../stores';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 
 import { getMdWithOpts } from '../utils/markdown';
+import { useMermaidDiagrams } from '../hooks/use-mermaid-diagrams';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
@@ -28,6 +29,19 @@ interface TreeItem {
 }
 
 const md = getMdWithOpts({ html: true, linkify: true, breaks: true });
+
+function SkillMarkdown({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useMermaidDiagrams(ref, [html]);
+
+  return (
+    <div
+      ref={ref}
+      className="md-content"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
 
 export function SkillViewerOverlay() {
   const data = useStore(s => s.skillViewerData) as SkillInfo | null;
@@ -154,7 +168,7 @@ export function SkillViewerOverlay() {
                     <div className="sv-description-text">{description}</div>
                   </div>
                 )}
-                <div className="md-content" dangerouslySetInnerHTML={{ __html: rendered }} />
+                <SkillMarkdown html={rendered} />
               </>
             ) : (
               <pre><code>{content}</code></pre>

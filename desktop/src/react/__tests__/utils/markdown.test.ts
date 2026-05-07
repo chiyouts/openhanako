@@ -49,6 +49,21 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<div style=');
   });
 
+  it('marks mermaid fenced code blocks as renderable diagram placeholders', () => {
+    const html = renderMarkdown([
+      '```mermaid',
+      'graph TD',
+      '  A-->B',
+      '```',
+    ].join('\n'));
+
+    expect(html).toContain('class="mermaid-diagram"');
+    expect(html).toContain('class="mermaid-source"');
+    expect(html).toContain('class="mermaid-rendered"');
+    expect(html).toContain('graph TD');
+    expect(html).not.toContain('<code class="language-mermaid"');
+  });
+
   it('renders filtered HTML in markdown preview mode', () => {
     const html = renderMarkdownPreview([
       '<div style="background: #f0f7ff; border: 1px solid #bee1e6; border-radius: 8px; padding: 16px; margin: 12px 0;">',
@@ -99,5 +114,19 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('url(');
     expect(html).not.toContain('position');
     expect(html).not.toContain('fixed');
+  });
+
+  it('preserves generated mermaid placeholder classes in markdown preview mode', () => {
+    const html = renderMarkdownPreview([
+      '```mermaid',
+      'sequenceDiagram',
+      '  A->>B: hello',
+      '```',
+    ].join('\n'));
+
+    expect(html).toContain('class="mermaid-diagram"');
+    expect(html).toContain('class="mermaid-source"');
+    expect(html).toContain('class="mermaid-rendered"');
+    expect(html).toContain('sequenceDiagram');
   });
 });
