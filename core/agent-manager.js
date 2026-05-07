@@ -497,6 +497,8 @@ export class AgentManager {
 
   async _doSwitchAgent(agentId) {
     const hub = this._d.getHub();
+    const engine = this._d.getEngine?.();
+    const previousCwd = engine?.cwd || null;
     // pause/resume 严格配对：try/finally 保证 resume 一定调到，
     // 包括 _doSwitchAgentOnly / syncAgentSkills / createSession 任一抛错的路径。
     await hub?.pauseForAgentSwitch();
@@ -504,8 +506,16 @@ export class AgentManager {
       await this._doSwitchAgentOnly(agentId);
       this._d.getSkills().syncAgentSkills(this.agent);
       this._d.getPrefs().savePrimaryAgent(agentId);
-      await this._d.getSessionCoordinator().createSession();
+      const homeFolder = engine?.getExplicitHomeCwd?.(agentId) || null;
+      const nextCwd = homeFolder || previousCwd || engine?.getHomeCwd?.(agentId) || undefined;
+      const sessionResult = await this._d.getSessionCoordinator().createSession(null, nextCwd);
+      const cwd = sessionResult?.session?.sessionManager?.getCwd?.() || nextCwd || null;
       log.log(`已切换到助手: ${this.agent.agentName} (${agentId})`);
+      return {
+        ...sessionResult,
+        cwd,
+        homeFolder,
+      };
     } finally {
       hub?.resumeAfterAgentSwitch();
     }

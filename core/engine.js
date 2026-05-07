@@ -464,10 +464,14 @@ export class HanaEngine {
   get memoryModelUnavailableReason() { return this.agent.memoryModelUnavailableReason; }
   get planMode() { return this._sessionCoord.getPlanMode(); }
   getPrimaryAgentId() { return this._prefs.getPrimaryAgent(); }
-  get homeCwd() { return this._configCoord.getHomeFolder(this._readPrimaryAgent()) || null; }
+  get homeCwd() { return this.getHomeCwd(this.currentAgentId); }
 
   getHomeCwd(agentId) {
-    return this._configCoord.getHomeFolder(agentId) || null;
+    return this._configCoord.getHomeFolder(agentId || this.currentAgentId) || null;
+  }
+
+  getExplicitHomeCwd(agentId) {
+    return this._configCoord.getExplicitHomeFolder(agentId || this.currentAgentId) || null;
   }
   _createResourceLoaderOptions(skillsDir) {
     const cwd = resolveHanaPiProjectDir(this.hanakoHome);

@@ -273,6 +273,20 @@ describe('session-actions', () => {
       expect(mockLoadDeskFiles).toHaveBeenCalledWith('', '/workspace/AgentHome');
     });
 
+    it('uses the current session cwd for a new session when the agent has no explicit home folder', async () => {
+      (mockState as Record<string, unknown>).homeFolder = null;
+      (mockState as Record<string, unknown>).deskBasePath = '/workspace/current-session';
+      (mockState as Record<string, unknown>).deskCurrentPath = 'notes';
+      (mockState as Record<string, unknown>).deskFiles = [{ name: 'stale.md' }];
+
+      await createNewSession();
+
+      expect(mockState.selectedFolder).toBe('/workspace/current-session');
+      expect(mockState.deskBasePath).toBe('/workspace/current-session');
+      expect(mockState.deskCurrentPath).toBe('notes');
+      expect(mockLoadDeskFiles).toHaveBeenCalledWith('notes', '/workspace/current-session');
+    });
+
     it('invalidates an in-flight session switch so the new-session desk stays on the agent home folder', async () => {
       (mockState as Record<string, unknown>).currentSessionPath = '/session/hana.jsonl';
       (mockState as Record<string, unknown>).deskBasePath = '/workspace/Desktop/project-hana';

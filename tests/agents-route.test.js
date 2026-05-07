@@ -71,6 +71,62 @@ describe("agents route", () => {
     expect(engine.emitEvent).not.toHaveBeenCalled();
   });
 
+  it("returns and emits the switched session workspace contract", async () => {
+    const { createAgentsRoute } = await import("../server/routes/agents.js");
+    const app = new Hono();
+    const engine = {
+      currentAgentId: "target",
+      config: { cwd_history: ["/old"] },
+      switchAgent: vi.fn().mockResolvedValue({
+        sessionPath: "/sessions/target.jsonl",
+        cwd: "/workspace/target",
+        homeFolder: "/workspace/target",
+      }),
+      updateConfig: vi.fn().mockResolvedValue(undefined),
+      getSessionWorkspaceFolders: vi.fn(() => ["/workspace/reference"]),
+      getAgent: vi.fn(() => ({
+        agentName: "Target",
+        memoryMasterEnabled: false,
+      })),
+      emitEvent: vi.fn(),
+    };
+
+    app.route("/api", createAgentsRoute(engine));
+
+    const res = await app.request("/api/agents/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "target" }),
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(engine.updateConfig).toHaveBeenCalledWith({
+      last_cwd: "/workspace/target",
+      cwd_history: ["/workspace/target", "/old"],
+    }, { agentId: "target" });
+    expect(data).toMatchObject({
+      ok: true,
+      agent: { id: "target", name: "Target" },
+      sessionPath: "/sessions/target.jsonl",
+      cwd: "/workspace/target",
+      homeFolder: "/workspace/target",
+      workspaceFolders: ["/workspace/reference"],
+      cwdHistory: ["/workspace/target", "/old"],
+      memoryMasterEnabled: false,
+    });
+    expectAppEvent(engine.emitEvent, "agent-switched", {
+      agentId: "target",
+      agentName: "Target",
+      sessionPath: "/sessions/target.jsonl",
+      cwd: "/workspace/target",
+      homeFolder: "/workspace/target",
+      workspaceFolders: ["/workspace/reference"],
+      cwdHistory: ["/workspace/target", "/old"],
+      memoryMasterEnabled: false,
+    });
+  });
+
   it("emits models-changed for provider-only config updates before the early return", async () => {
     const agentId = "hana";
     const agentDir = path.join(tempRoot, agentId);

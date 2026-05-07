@@ -9,6 +9,7 @@ const mockApplyAgentIdentity = vi.fn(async () => {});
 const mockLoadAgents = vi.fn(async () => {});
 const mockLoadAvatars = vi.fn();
 const mockLoadSessions = vi.fn(async () => {});
+const mockSwitchSession = vi.fn(async () => {});
 const mockConnectWebSocket = vi.fn();
 const mockGetWebSocket = vi.fn<() => WebSocket | null>(() => null);
 const mockSetStatus = vi.fn();
@@ -48,6 +49,7 @@ vi.mock('../stores/agent-actions', () => ({
 
 vi.mock('../stores/session-actions', () => ({
   loadSessions: mockLoadSessions,
+  switchSession: mockSwitchSession,
 }));
 
 vi.mock('../services/websocket', () => ({
@@ -105,6 +107,7 @@ describe('initApp bridge indicator', () => {
     mockLoadAgents.mockReset();
     mockLoadAvatars.mockReset();
     mockLoadSessions.mockReset();
+    mockSwitchSession.mockReset();
     mockConnectWebSocket.mockReset();
     mockGetWebSocket.mockReset();
     mockSetStatus.mockReset();

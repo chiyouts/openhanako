@@ -1,7 +1,26 @@
-import { describe, it, expect, vi } from "vitest";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { ConfigCoordinator } from "../core/config-coordinator.js";
 
 describe("updateConfig with agentId", () => {
+  const tempRoots = [];
+
+  afterEach(() => {
+    for (const dir of tempRoots.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeTempDir(name) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hana-config-coord-"));
+    tempRoots.push(root);
+    const dir = path.join(root, name);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   function makeDeps(overrides = {}) {
     const focusAgent = {
       id: "focus",
@@ -36,6 +55,23 @@ describe("updateConfig with agentId", () => {
       },
     };
   }
+
+  it("returns only the requested agent explicit home folder", () => {
+    const focusHome = makeTempDir("focus-home");
+    const { focusAgent, targetAgent, deps } = makeDeps({
+      getPrefs: () => ({
+        getPrimaryAgent: () => "focus",
+        getPreferences: () => ({ primaryAgent: "focus" }),
+        savePreferences: vi.fn(),
+      }),
+    });
+    focusAgent.config.desk = { home_folder: focusHome };
+    targetAgent.config.desk = {};
+    const coord = new ConfigCoordinator(deps);
+
+    expect(coord.getExplicitHomeFolder("target")).toBeNull();
+    expect(coord.getHomeFolder("target")).not.toBe(focusHome);
+  });
 
   it("传入 agentId 时刷新目标 agent 而非焦点 agent", async () => {
     const { focusAgent, targetAgent, deps } = makeDeps();

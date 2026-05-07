@@ -385,14 +385,15 @@ export async function createNewSession(): Promise<void> {
   }
 
   const s = useStore.getState();
+  const defaultFolder = s.homeFolder || s.deskBasePath || null;
 
   useStore.setState({
     welcomeVisible: true,
     currentSessionPath: null,
     pendingSessionSwitchPath: null,
-    // 新 session 的默认 cwd 归 Agent home 所有；当前 deskBasePath 只是视图状态，
-    // 不能反向污染下一次会话的执行目录和沙箱边界。
-    selectedFolder: s.homeFolder || null,
+    // 有显式 Agent home 时以 home 为准；没有绑定 workspace 的 agent
+    // 以当前 session cwd 延续工作流，不从其他 agent 的 home_folder 推导。
+    selectedFolder: defaultFolder,
     workspaceFolders: [],
     selectedAgentId: null,
     pendingNewSession: true,
@@ -401,7 +402,7 @@ export async function createNewSession(): Promise<void> {
     docContextAttached: false,
   });
 
-  await activateWorkspaceDesk(s.homeFolder || null);
+  await activateWorkspaceDesk(defaultFolder);
 
   // 重置 context ring
   useStore.setState({ contextTokens: null, contextWindow: null, contextPercent: null });

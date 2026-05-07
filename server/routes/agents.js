@@ -41,6 +41,7 @@ import {
   clearInlineProviderCredentialFields,
   hasInlineProviderCredentialPatch,
 } from "./provider-credentials.js";
+import { mergeWorkspaceHistory } from "../../shared/workspace-history.js";
 
 // ── 工具函数 ──
 
@@ -176,15 +177,47 @@ export function createAgentsRoute(engine) {
       if (!id?.trim() || !validateId(id)) {
         return c.json({ error: "invalid id" }, 400);
       }
-      await engine.switchAgent(id);
+      const switchResult = await engine.switchAgent(id);
       const agentName = engine.getAgent(id)?.agentName || id;
-      emitAppEvent(engine, "agent-switched", { agentId: id, agentName });
+      const cwd = switchResult?.cwd || engine.cwd || null;
+      const sessionPath = switchResult?.sessionPath || engine.currentSessionPath || null;
+      const homeFolder = switchResult?.homeFolder ?? engine.getExplicitHomeCwd?.(id) ?? null;
+      const workspaceFolders = sessionPath
+        ? (engine.getSessionWorkspaceFolders?.(sessionPath) || [])
+        : [];
+      const cwdHistory = cwd
+        ? mergeWorkspaceHistory(engine.config?.cwd_history, [cwd])
+        : mergeWorkspaceHistory(engine.config?.cwd_history, []);
+      if (cwd) {
+        await engine.updateConfig?.(
+          { last_cwd: cwd, cwd_history: cwdHistory },
+          { agentId: id },
+        );
+      }
+      const memoryMasterEnabled = engine.getAgent(id)?.memoryMasterEnabled !== false;
+      const eventPayload = {
+        agentId: id,
+        agentName,
+        sessionPath,
+        cwd,
+        homeFolder,
+        workspaceFolders,
+        cwdHistory,
+        memoryMasterEnabled,
+      };
+      emitAppEvent(engine, "agent-switched", eventPayload);
       return c.json({
         ok: true,
         agent: {
           id,
           name: agentName,
         },
+        sessionPath,
+        cwd,
+        homeFolder,
+        workspaceFolders,
+        cwdHistory,
+        memoryMasterEnabled,
       });
     } catch (err) {
       return c.json({ error: err.message }, 500);
