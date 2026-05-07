@@ -126,7 +126,6 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
 
   return (
     <nav className={styles.timelineNav} aria-label="对话时间导航">
-      <div className={styles.timelineRail} aria-hidden="true" />
       {anchors.map((anchor) => {
         const layout = layouts[anchor.messageId];
         if (!layout) return null;

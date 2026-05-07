@@ -43,6 +43,23 @@ describe('chat bottom overlay layout', () => {
     );
   });
 
+  it('keeps the timeline compact, rail-free, and only reveals markers from the right hover zone', () => {
+    const timelineSource = read('components/chat/ChatTimelineNavigator.tsx');
+    const styleSource = read('components/chat/Chat.module.css');
+
+    expect(timelineSource).not.toContain('timelineRail');
+    expect(styleSource).not.toContain('.timelineRail');
+    expect(styleSource).toMatch(
+      /\.timelineNav\s*\{[\s\S]*top:\s*76px;[\s\S]*height:\s*50%;/,
+    );
+    expect(styleSource).toMatch(
+      /\.timelineMarker\s*\{[\s\S]*opacity:\s*0;/,
+    );
+    expect(styleSource).toMatch(
+      /\.timelineNav:hover\s+\.timelineMarker,\s*\.timelineNav:focus-within\s+\.timelineMarker\s*\{[\s\S]*opacity:\s*1;/,
+    );
+  });
+
   it('session footer leaves one extra line of breathing room above the input top edge', () => {
     const styleSource = read('components/chat/Chat.module.css');
 

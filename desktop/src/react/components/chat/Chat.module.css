@@ -1061,27 +1061,9 @@
     position: absolute;
     top: 76px;
     right: 5px;
-    bottom: var(--chat-scrollbar-bottom-inset);
+    height: 50%;
     width: 22px;
     z-index: 4;
-    opacity: 0.52;
-    transition: opacity 0.18s ease-out;
-}
-
-.timelineNav:hover,
-.timelineNav:focus-within {
-    opacity: 1;
-}
-
-.timelineRail {
-    position: absolute;
-    top: 0;
-    right: 7px;
-    bottom: 0;
-    width: 1px;
-    background: rgba(128, 128, 128, 0.16);
-    transform: scaleX(0.5);
-    transform-origin: center;
 }
 
 .timelineMarker {
@@ -1095,6 +1077,15 @@
     color: var(--text-muted);
     cursor: pointer;
     padding: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s ease-out;
+}
+
+.timelineNav:hover .timelineMarker,
+.timelineNav:focus-within .timelineMarker {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .timelineDot {
