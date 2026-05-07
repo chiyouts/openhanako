@@ -273,6 +273,44 @@ describe("MediaDeliveryService", () => {
     });
   });
 
+  it("passes bridge reply context metadata to media adapters", async () => {
+    const service = makeService({
+      id: "sf_image",
+      filename: "image.png",
+      mime: "image/png",
+      kind: "image",
+      publicUrl: "https://cdn.example.com/image.png",
+    });
+    const adapter = {
+      mediaCapabilities: QQ_MEDIA_CAPABILITIES,
+      sendMedia: vi.fn(async () => {}),
+    };
+
+    await service.send({
+      adapter,
+      chatId: "group-openid",
+      platform: "qq",
+      mediaItem: { type: "session_file", fileId: "sf_image" },
+      isGroup: true,
+      replyContext: {
+        messageId: "qq-mid-1",
+        targetType: "group",
+      },
+    });
+
+    expect(adapter.sendMedia).toHaveBeenCalledWith("group-openid", "https://cdn.example.com/image.png", {
+      kind: "image",
+      mime: "image/png",
+      filename: "image.png",
+      isGroup: true,
+      targetScope: "group",
+      replyContext: {
+        messageId: "qq-mid-1",
+        targetType: "group",
+      },
+    });
+  });
+
   it("delivers QQ local images through direct local file upload", async () => {
     const filePath = makeTempFile("image.png", Buffer.from([0x89, 0x50, 0x4E, 0x47]));
     const service = makeService({

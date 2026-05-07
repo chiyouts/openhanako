@@ -75,6 +75,35 @@ describe("createTelegramAdapter media delivery", () => {
     adapter.stop();
   });
 
+  it("keeps Telegram replies and media inside the inbound forum topic", async () => {
+    const { adapter, bot } = makeAdapter();
+
+    await adapter.sendReply("chat-1", "hello", { messageThreadId: 67890 });
+    await adapter.sendBlockReply("chat-1", "block", { messageThreadId: 67890 });
+    await adapter.sendMedia("chat-1", "https://example.com/image.png", {
+      replyContext: { messageThreadId: 67890 },
+    });
+    await adapter.sendMediaBuffer("chat-1", Buffer.from("png"), {
+      mime: "image/png",
+      filename: "image.png",
+      replyContext: { messageThreadId: 67890 },
+    });
+
+    expect(bot.sendMessage).toHaveBeenNthCalledWith(1, "chat-1", "hello", {
+      message_thread_id: 67890,
+    });
+    expect(bot.sendMessage).toHaveBeenNthCalledWith(2, "chat-1", "block", {
+      message_thread_id: 67890,
+    });
+    expect(bot.sendPhoto).toHaveBeenNthCalledWith(1, "chat-1", "https://example.com/image.png", {
+      message_thread_id: 67890,
+    });
+    expect(bot.sendPhoto).toHaveBeenNthCalledWith(2, "chat-1", Buffer.from("png"), {
+      message_thread_id: 67890,
+    }, { filename: "image.png", contentType: "image/png" });
+    adapter.stop();
+  });
+
   it("declares Telegram draft streaming and sends required draft metadata", async () => {
     const { adapter, bot } = makeAdapter();
 

@@ -117,6 +117,68 @@ describe("BridgeManager._handleMessage", () => {
       expect(adapter.sendReply).toHaveBeenCalledWith("g1", "AI response");
     });
 
+    it("carries QQ message ids through group replies as passive reply context", async () => {
+      const { bm, hub, adapter: telegramAdapter } = createMocks();
+      const qqAdapter = {
+        sendReply: vi.fn().mockResolvedValue(),
+        sendBlockReply: vi.fn().mockResolvedValue(),
+        sendTypingIndicator: vi.fn().mockResolvedValue(),
+        stop: vi.fn(),
+      };
+      bm._platforms.set("qq:hana", { adapter: qqAdapter, status: "connected", agentId: "hana", platform: "qq" });
+
+      await bm._handleMessage("qq", {
+        sessionKey: "qq_group_g1@hana",
+        text: "hello",
+        senderName: "Alice",
+        userId: "user1",
+        isGroup: true,
+        chatId: "g1",
+        agentId: "hana",
+        _msgId: "qq-mid-1",
+        replyTargetType: "group",
+      });
+
+      await vi.waitFor(() => expect(hub.send).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(qqAdapter.sendReply).toHaveBeenCalledWith(
+        "g1",
+        "AI response",
+        expect.objectContaining({
+          messageId: "qq-mid-1",
+          isGroup: true,
+          targetScope: "group",
+          targetType: "group",
+        }),
+      ));
+      expect(telegramAdapter.sendReply).not.toHaveBeenCalledWith("g1", "AI response", expect.anything());
+    });
+
+    it("carries Telegram forum topic ids through group replies", async () => {
+      const { bm, hub, adapter } = createMocks();
+
+      await bm._handleMessage("telegram", {
+        sessionKey: "tg_group_g1@hana",
+        text: "topic ping",
+        senderName: "Alice",
+        userId: "user1",
+        isGroup: true,
+        chatId: "g1",
+        agentId: "hana",
+        messageThreadId: 42,
+      });
+
+      await vi.waitFor(() => expect(hub.send).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(adapter.sendReply).toHaveBeenCalledWith(
+        "g1",
+        "AI response",
+        expect.objectContaining({
+          messageThreadId: 42,
+          isGroup: true,
+          targetScope: "group",
+        }),
+      ));
+    });
+
     it("prefixes sender name in group messages", async () => {
       const { bm, hub } = createMocks();
 
@@ -252,6 +314,45 @@ describe("BridgeManager._handleMessage", () => {
         expect.objectContaining({ sessionKey: "tg_dm_owner123@hana", role: "owner" }),
       );
       expect(adapter.sendReply).toHaveBeenCalledWith("owner123", "AI response");
+    });
+
+    it("uses the latest QQ DM message id for debounced passive replies", async () => {
+      const { bm, adapter: telegramAdapter } = createMocks();
+      const qqAdapter = {
+        sendReply: vi.fn().mockResolvedValue(),
+        sendBlockReply: vi.fn().mockResolvedValue(),
+        sendTypingIndicator: vi.fn().mockResolvedValue(),
+        stop: vi.fn(),
+      };
+      bm._platforms.set("qq:hana", { adapter: qqAdapter, status: "connected", agentId: "hana", platform: "qq" });
+
+      bm._handleMessage("qq", {
+        sessionKey: "qq_dm_owner123@hana",
+        text: "first",
+        userId: "owner123",
+        chatId: "owner123",
+        agentId: "hana",
+        _msgId: "qq-dm-1",
+        replyTargetType: "user",
+      });
+      bm._handleMessage("qq", {
+        sessionKey: "qq_dm_owner123@hana",
+        text: "second",
+        userId: "owner123",
+        chatId: "owner123",
+        agentId: "hana",
+        _msgId: "qq-dm-2",
+        replyTargetType: "user",
+      });
+
+      await vi.advanceTimersByTimeAsync(2100);
+
+      expect(qqAdapter.sendReply).toHaveBeenCalledWith(
+        "owner123",
+        "AI response",
+        expect.objectContaining({ messageId: "qq-dm-2", targetType: "user" }),
+      );
+      expect(telegramAdapter.sendReply).not.toHaveBeenCalledWith("owner123", "AI response", expect.anything());
     });
 
     it("resets debounce timer on each new message", async () => {

@@ -183,6 +183,41 @@ describe("createQQAdapter media delivery", () => {
     adapter.stop();
   });
 
+  it("sends QQ group text replies as passive replies with msg_id and distinct msg_seq values", async () => {
+    const adapter = createQQAdapter({
+      appID: "app-id",
+      appSecret: "app-secret",
+      agentId: "hana",
+      onMessage: vi.fn(),
+    });
+
+    await adapter.sendReply("group-openid", "first", {
+      messageId: "qq-mid-1",
+      targetType: "group",
+      isGroup: true,
+    });
+    await adapter.sendReply("group-openid", "second", {
+      messageId: "qq-mid-1",
+      targetType: "group",
+      isGroup: true,
+    });
+
+    const messageCalls = fetch.mock.calls.filter(([url]) => String(url).includes("/v2/groups/group-openid/messages"));
+    expect(messageCalls).toHaveLength(2);
+    expect(JSON.parse(messageCalls[0][1].body)).toMatchObject({
+      content: "first",
+      msg_id: "qq-mid-1",
+      msg_seq: 1,
+    });
+    expect(JSON.parse(messageCalls[1][1].body)).toMatchObject({
+      content: "second",
+      msg_id: "qq-mid-1",
+      msg_seq: 2,
+    });
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("/v2/users/group-openid/messages"))).toBe(false);
+    adapter.stop();
+  });
+
   it("uploads local group images through QQ group chunked upload", async () => {
     const filePath = makeTempFile("image.png", "helloworld");
     const adapter = createQQAdapter({
@@ -208,6 +243,35 @@ describe("createQQAdapter media delivery", () => {
     expect(JSON.parse(messageCall[1].body)).toMatchObject({
       msg_type: 7,
       media: { file_info: "file-info" },
+    });
+    adapter.stop();
+  });
+
+  it("sends QQ rich media replies with passive reply context", async () => {
+    const adapter = createQQAdapter({
+      appID: "app-id",
+      appSecret: "app-secret",
+      agentId: "hana",
+      onMessage: vi.fn(),
+    });
+
+    await adapter.sendMedia("group-openid", "https://cdn.example.com/image.png", {
+      kind: "image",
+      mime: "image/png",
+      filename: "image.png",
+      isGroup: true,
+      replyContext: {
+        messageId: "qq-mid-1",
+        targetType: "group",
+      },
+    });
+
+    const messageCall = fetch.mock.calls.find(([url]) => String(url).includes("/v2/groups/group-openid/messages"));
+    expect(JSON.parse(messageCall[1].body)).toMatchObject({
+      msg_type: 7,
+      media: { file_info: "file-info" },
+      msg_id: "qq-mid-1",
+      msg_seq: 1,
     });
     adapter.stop();
   });
