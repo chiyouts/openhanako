@@ -117,7 +117,6 @@ export function injectCopyButtons(container: HTMLElement): void {
   const pres = container.querySelectorAll('pre');
   for (const pre of pres) {
     if (pre.querySelector('.copy-btn')) continue;
-    // eslint-disable-next-line no-restricted-syntax -- copy button injected into rendered Markdown HTML, outside React tree
     const btn = document.createElement('button');
     btn.className = 'copy-btn';
     btn.textContent = t('attach.copy');

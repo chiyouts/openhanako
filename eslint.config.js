@@ -51,7 +51,22 @@ export default [
       'react-hooks': reactHooks,
     },
     rules: {
-      // Prevent document.createElement in React components
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
+
+  // React components should render with JSX. DOM utilities, CodeMirror widgets,
+  // and tests may create DOM nodes directly.
+  {
+    files: ['desktop/src/react/**/*.tsx'],
+    ignores: [
+      'desktop/src/react/**/__tests__/**',
+      'desktop/src/react/**/*.test.tsx',
+    ],
+    rules: {
       'no-restricted-syntax': [
         'error',
         {
@@ -61,10 +76,6 @@ export default [
             'React 组件中不要用 document.createElement，用 JSX。如确需操作 DOM（canvas/resize），加 eslint-disable 注释说明原因。',
         },
       ],
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
 

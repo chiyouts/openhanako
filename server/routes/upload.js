@@ -29,23 +29,97 @@ import { registerSessionFileFromRequest } from "../../lib/session-files/session-
 import { sessionFilesCacheDir } from "../../lib/session-files/session-file-registry.js";
 
 const MAX_FILES = 9;
+const MAX_FILENAME_BYTES = 255;
+const WINDOWS_RESERVED_CHARS = new Set(["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]);
+const WINDOWS_RESERVED_DEVICE_NAMES = new Set([
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9",
+]);
 
 function extFromMime(mimeType) {
   return extensionFromChatImageMime(mimeType);
 }
 
+function isControlCodePoint(codePoint) {
+  return (codePoint >= 0x00 && codePoint <= 0x1f) || (codePoint >= 0x80 && codePoint <= 0x9f);
+}
+
+function truncateUtf8Bytes(value, maxBytes) {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  let result = "";
+  let used = 0;
+  for (const char of value) {
+    const bytes = Buffer.byteLength(char, "utf8");
+    if (used + bytes > maxBytes) break;
+    result += char;
+    used += bytes;
+  }
+  return result;
+}
+
+function stripUnsafeFileNameChars(value) {
+  let cleaned = "";
+  for (const char of value) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint == null || isControlCodePoint(codePoint)) continue;
+    if (WINDOWS_RESERVED_CHARS.has(char)) continue;
+    cleaned += char;
+  }
+  return cleaned;
+}
+
+function trimWindowsTrailingChars(value) {
+  return value.replace(/[ .]+$/u, "");
+}
+
+function normalizeWindowsDeviceName(filename) {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  if (!WINDOWS_RESERVED_DEVICE_NAMES.has(base.toLowerCase())) return filename;
+  return `file-${filename}`;
+}
+
+function sanitizeFileNameCandidate(value) {
+  const crossPlatformBase = path.posix.basename(value.replace(/\\/g, "/"));
+  const stripped = stripUnsafeFileNameChars(crossPlatformBase).trim();
+  const trimmed = trimWindowsTrailingChars(stripped);
+  if (!trimmed || trimmed === "." || trimmed === "..") return "";
+  return trimmed;
+}
+
 function sanitizeBlobName(name, mimeType) {
   const fallback = `pasted${extFromMime(mimeType) || ".png"}`;
   if (!name || typeof name !== "string") return fallback;
-  // 去掉路径分隔符、控制字符；只保留 basename
-  const base = path.basename(name).replace(/[\x00-\x1f/\\]/g, "").trim();
+  // 用户传入的 name 不可信：只保留跨平台 basename，再清理文件系统保留字符。
+  let base = sanitizeFileNameCandidate(name);
   if (!base) return fallback;
   // 强制扩展名匹配 mimeType（防止 .exe 假装 image/png）
   const want = extFromMime(mimeType);
   if (want && path.extname(base).toLowerCase() !== want) {
-    return path.basename(base, path.extname(base)) + want;
+    base = path.basename(base, path.extname(base)) + want;
   }
-  return base;
+  base = normalizeWindowsDeviceName(base);
+  return truncateUtf8Bytes(base, MAX_FILENAME_BYTES) || fallback;
 }
 
 class UploadPathError extends Error {
@@ -120,7 +194,9 @@ function resolveUploadTarget(engine, sessionPath) {
 }
 
 function uniqueUploadName(base, ext) {
-  return `${base}_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}${ext}`;
+  const suffix = `_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+  const maxBaseBytes = Math.max(1, MAX_FILENAME_BYTES - Buffer.byteLength(suffix + ext, "utf8"));
+  return `${truncateUtf8Bytes(base, maxBaseBytes)}${suffix}${ext}`;
 }
 
 export function createUploadRoute(engine) {

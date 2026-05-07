@@ -813,8 +813,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 return;
               }
               // Reject prompt while model switch is in progress
-              const switchingEntry = engine._sessionCoord?.sessions?.get(promptSessionPath);
-              if (switchingEntry?._switching) {
+              if (engine.isSessionSwitching(promptSessionPath)) {
                 wsSend(ws, { type: "error", message: "正在切换模型，请稍候", sessionPath: promptSessionPath });
                 return;
               }

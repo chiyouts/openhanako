@@ -28,6 +28,36 @@ vi.mock("../lib/debug-log.js", () => ({
 import { SessionCoordinator } from "../core/session-coordinator.js";
 
 describe("SessionCoordinator.switchSessionModel", () => {
+  it("reports per-session model switch state through a public query", () => {
+    const coord = new SessionCoordinator({
+      agentsDir: "/tmp/agents",
+      getAgent: () => ({ sessionDir: "/tmp/sessions" }),
+      getActiveAgentId: () => "hana",
+      getModels: () => null,
+      getResourceLoader: () => null,
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: () => {},
+      getHomeCwd: () => "/tmp",
+      agentIdFromSessionPath: () => null,
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+
+    coord.sessions.set("/tmp/session.jsonl", {
+      session: {},
+      _switching: true,
+    });
+
+    expect(coord.isSessionSwitching("/tmp/session.jsonl")).toBe(true);
+    expect(coord.isSessionSwitching("/tmp/missing.jsonl")).toBe(false);
+  });
+
   it("does not crash when context usage exists and adaptation is needed", async () => {
     const coord = new SessionCoordinator({
       agentsDir: "/tmp/agents",

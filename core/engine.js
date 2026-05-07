@@ -433,6 +433,7 @@ export class HanaEngine {
   /** 确保桌面 session 已加载进 cache 但不改 UI 焦点（Phase 2-C：/rc 接管态用） */
   async ensureSessionLoaded(p) { return this._sessionCoord.ensureSessionLoaded(p); }
   isSessionStreaming(p) { return this._sessionCoord.isSessionStreaming(p); }
+  isSessionSwitching(p) { return this._sessionCoord.isSessionSwitching(p); }
   async abortSessionByPath(p) { return this._sessionCoord.abortSessionByPath(p); }
   async listSessions() { return this._sessionCoord.listSessions(); }
   async listArchivedSessions() { return this._sessionCoord.listArchivedSessions(); }

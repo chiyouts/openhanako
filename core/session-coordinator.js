@@ -1516,6 +1516,10 @@ export class SessionCoordinator {
     return !!this.getSessionByPath(sessionPath)?.isStreaming;
   }
 
+  isSessionSwitching(sessionPath) {
+    return !!this._sessions.get(sessionPath)?._switching;
+  }
+
   async abortSessionByPath(sessionPath) {
     return this.abortSession(sessionPath);
   }
