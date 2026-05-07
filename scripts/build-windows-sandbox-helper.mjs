@@ -40,11 +40,17 @@ export function buildWindowsSandboxCompileCommand({ source, output } = {}) {
   ].join(" ");
 }
 
-export function buildWindowsSandboxBatchCommand({ devCmd, compileCommand, arch } = {}) {
+export function buildWindowsSandboxBatchScript({ devCmd, compileCommand, arch } = {}) {
   if (!compileCommand) throw new Error("compileCommand is required");
-  if (!devCmd) return compileCommand;
   const msvcArch = arch === "arm64" ? "arm64" : "x64";
-  return `call ${quoteCmd(devCmd)} -arch=${msvcArch} && ${compileCommand}`;
+  const lines = ["@echo off"];
+  if (devCmd) {
+    lines.push(`call ${quoteCmd(devCmd)} -arch=${msvcArch}`);
+    lines.push("if errorlevel 1 exit /b %errorlevel%");
+  }
+  lines.push(compileCommand);
+  lines.push("exit /b %errorlevel%");
+  return `${lines.join("\r\n")}\r\n`;
 }
 
 function findVsDevCmd() {
@@ -68,8 +74,9 @@ function findVsDevCmd() {
 
 function runCompile(command, { rootDir, arch }) {
   const devCmd = findVsDevCmd();
-  const fullCommand = buildWindowsSandboxBatchCommand({ devCmd, compileCommand: command, arch });
-  execFileSync("cmd.exe", ["/d", "/s", "/c", fullCommand], {
+  const scriptPath = path.join(windowsSandboxHelperOutputDir({ rootDir, arch }), "build-windows-sandbox-helper.cmd");
+  fs.writeFileSync(scriptPath, buildWindowsSandboxBatchScript({ devCmd, compileCommand: command, arch }), "utf-8");
+  execFileSync("cmd.exe", ["/d", "/c", scriptPath], {
     cwd: rootDir,
     stdio: "inherit",
     windowsHide: true,
