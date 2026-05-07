@@ -417,8 +417,8 @@ export class Agent {
         agentId,
         listAgents,
         isEnabled: () => this._cb?.isChannelsEnabled?.() ?? false,
-        onPost: (channelName, senderId) => {
-          this._channelPostHandler?.(channelName, senderId);
+        onPost: (channelName, senderId, message) => {
+          this._channelPostHandler?.(channelName, senderId, message);
         },
       });
 

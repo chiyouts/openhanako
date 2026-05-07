@@ -475,7 +475,12 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     } else if (event.type === "notification") {
       broadcast({ type: "notification", title: event.title, body: event.body });
     } else if (event.type === "channel_new_message") {
-      broadcast({ type: "channel_new_message", channelName: event.channelName, sender: event.sender });
+      broadcast({
+        type: "channel_new_message",
+        channelName: event.channelName,
+        sender: event.sender,
+        message: event.message || null,
+      });
     } else if (event.type === "dm_new_message") {
       broadcast({ type: "dm_new_message", from: event.from, to: event.to });
     } else if (event.type === "message_end") {

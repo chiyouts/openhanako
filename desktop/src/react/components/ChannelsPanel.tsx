@@ -13,6 +13,8 @@ import styles from './channels/Channels.module.css';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- isComposing 等 nativeEvent 字段需 as any */
 
+const CHANNEL_SCROLL_THRESHOLD = 80;
+
 export function ChannelsPanel() {
   const currentTab = useStore(s => s.currentTab);
   const channelsEnabled = useStore(s => s.channelsEnabled);
@@ -51,12 +53,69 @@ export function ChannelMessages() {
   const currentAgentId = useStore(s => s.currentAgentId);
   const agentMap = useMemo(() => buildAgentMap(agents), [agents]);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const previousChannelRef = useRef<string | null>(null);
+  const previousLengthRef = useRef(0);
+  const [showNewMessages, setShowNewMessages] = useState(false);
 
-  // Auto-scroll: find the parent .channel-messages container
+  const getScrollContainer = useCallback(() => (
+    wrapperRef.current?.closest('.channel-messages') as HTMLElement | null
+  ), []);
+
+  const checkNearBottom = useCallback(() => {
+    const el = getScrollContainer();
+    if (!el) return true;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight <= CHANNEL_SCROLL_THRESHOLD;
+    isNearBottomRef.current = near;
+    if (near) setShowNewMessages(false);
+    return near;
+  }, [getScrollContainer]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = getScrollContainer();
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    isNearBottomRef.current = true;
+    setShowNewMessages(false);
+  }, [getScrollContainer]);
+
   useEffect(() => {
-    const el = wrapperRef.current?.closest('.channel-messages') as HTMLElement | null;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    isNearBottomRef.current = true;
+    previousChannelRef.current = null;
+    previousLengthRef.current = 0;
+    setShowNewMessages(false);
+  }, [currentChannel]);
+
+  useEffect(() => {
+    const el = getScrollContainer();
+    if (!el) return;
+    const onScroll = () => { checkNearBottom(); };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [checkNearBottom, getScrollContainer, messages.length]);
+
+  useEffect(() => {
+    const el = getScrollContainer();
+    const channelChanged = previousChannelRef.current !== currentChannel;
+    const previousLength = previousLengthRef.current;
+    const grew = messages.length > previousLength;
+
+    if (el && messages.length > 0) {
+      if (channelChanged || previousLength === 0) {
+        scrollToBottom();
+      } else if (grew) {
+        const nearNow = el.scrollHeight - el.scrollTop - el.clientHeight <= CHANNEL_SCROLL_THRESHOLD;
+        if (isNearBottomRef.current || nearNow) {
+          scrollToBottom();
+        } else {
+          setShowNewMessages(true);
+        }
+      }
+    }
+
+    previousChannelRef.current = currentChannel;
+    previousLengthRef.current = messages.length;
+  }, [currentChannel, getScrollContainer, messages.length, scrollToBottom]);
 
   if (!currentChannel || messages.length === 0) {
     return <div className={styles.channelWelcome}>{t('channel.noMessages')}</div>;
@@ -67,41 +126,56 @@ export function ChannelMessages() {
   let lastSender: string | null = null;
 
   return (
-    <div ref={wrapperRef}>
-      {messages.map((msg, idx) => {
-        const isContinuation = msg.sender === lastSender;
-        const senderInfo = resolveChannelMember(msg.sender, userName, userAvatarUrl, agents, currentAgentId, agentMap);
-        const isSelf = senderInfo.isUser || (isDM && msg.sender === (currentAgentId || ''));
-        const el = (
-          <div
-            key={`${msg.timestamp}-${msg.sender}-${idx}`}
-            className={
-              styles.channelMsg
-              + (isContinuation ? ` ${styles.channelMsgContinuation}` : '')
-              + (isSelf ? ` ${styles.channelMsgSelf}` : '')
-            }
-          >
-            <div className={styles.channelMsgAvatar}>
-              <MemberAvatar info={senderInfo} className={styles.channelMsgAvatarImg} />
+    <>
+      <div ref={wrapperRef}>
+        {messages.map((msg, idx) => {
+          const isContinuation = msg.sender === lastSender;
+          const senderInfo = resolveChannelMember(msg.sender, userName, userAvatarUrl, agents, currentAgentId, agentMap);
+          const isSelf = senderInfo.isUser || (isDM && msg.sender === (currentAgentId || ''));
+          const el = (
+            <div
+              key={`${msg.timestamp}-${msg.sender}-${idx}`}
+              className={
+                styles.channelMsg
+                + (isContinuation ? ` ${styles.channelMsgContinuation}` : '')
+                + (isSelf ? ` ${styles.channelMsgSelf}` : '')
+              }
+            >
+              <div className={styles.channelMsgAvatar}>
+                <MemberAvatar info={senderInfo} className={styles.channelMsgAvatarImg} />
+              </div>
+              <div className={styles.channelMsgBody}>
+                {!isContinuation && (
+                  <div className={styles.channelMsgHeader}>
+                    <span className={styles.channelMsgSender}>{senderInfo.displayName}</span>
+                    <span className={styles.channelMsgTime}>{formatChannelTime(msg.timestamp)}</span>
+                  </div>
+                )}
+                <MarkdownContent
+                  className={styles.channelMsgText}
+                  html={renderMarkdown(msg.body || '')}
+                />
+              </div>
             </div>
-            <div className={styles.channelMsgBody}>
-              {!isContinuation && (
-                <div className={styles.channelMsgHeader}>
-                  <span className={styles.channelMsgSender}>{senderInfo.displayName}</span>
-                  <span className={styles.channelMsgTime}>{formatChannelTime(msg.timestamp)}</span>
-                </div>
-              )}
-              <MarkdownContent
-                className={styles.channelMsgText}
-                html={renderMarkdown(msg.body || '')}
-              />
-            </div>
-          </div>
-        );
-        lastSender = msg.sender;
-        return el;
-      })}
-    </div>
+          );
+          lastSender = msg.sender;
+          return el;
+        })}
+      </div>
+      {showNewMessages && (
+        <button
+          type="button"
+          className={styles.channelNewMessagesBtn}
+          onClick={scrollToBottom}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 5v14" />
+            <path d="m19 12-7 7-7-7" />
+          </svg>
+          <span>{t('channel.newMessages')}</span>
+        </button>
+      )}
+    </>
   );
 }
 

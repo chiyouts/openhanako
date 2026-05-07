@@ -14,6 +14,7 @@
     "info": "Channel info",
     "readOnly": "🔒 This is a private message between agents, view only",
     "inputPlaceholder": "Send a message...",
+    "newMessages": "New messages",
     "sendFailed": "Send failed",
     "createTitle": "New Channel",
     "createName": "Channel name",

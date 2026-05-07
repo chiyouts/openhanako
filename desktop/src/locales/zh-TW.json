@@ -13,6 +13,7 @@
     "info": "頻道資訊",
     "readOnly": "🔒 這是 Agent 之間的私信，僅可查看",
     "inputPlaceholder": "發訊息...",
+    "newMessages": "有新訊息",
     "sendFailed": "傳送失敗",
     "createTitle": "新建頻道",
     "createName": "頻道名稱",

@@ -448,6 +448,30 @@
     flex-direction: row-reverse;
 }
 
+.channelNewMessagesBtn {
+    position: sticky;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: fit-content;
+    margin-top: var(--space-sm);
+    padding: 6px 12px;
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--accent);
+    box-shadow: 0 4px 14px var(--shadow);
+    font-size: 0.78rem;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.channelNewMessagesBtn:hover {
+    background: rgba(var(--accent-rgb), 0.08);
+}
+
 /* ── 频道输入区 ── */
 .channelInputWrapper {
     display: flex;

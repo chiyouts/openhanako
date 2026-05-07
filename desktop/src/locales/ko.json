@@ -13,6 +13,7 @@
     "info": "채널 정보",
     "readOnly": "🔒 에이전트 간 비공개 메시지예요. 열람만 가능해요",
     "inputPlaceholder": "메시지를 보내세요...",
+    "newMessages": "새 메시지",
     "sendFailed": "전송 실패",
     "createTitle": "새 채널",
     "createName": "채널 이름",

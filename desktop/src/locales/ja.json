@@ -13,6 +13,7 @@
     "info": "チャンネル情報",
     "readOnly": "🔒 エージェント間のプライベートメッセージです。閲覧のみ可能です",
     "inputPlaceholder": "メッセージを送信...",
+    "newMessages": "新しいメッセージ",
     "sendFailed": "送信に失敗しました",
     "createTitle": "新しいチャンネル",
     "createName": "チャンネル名",

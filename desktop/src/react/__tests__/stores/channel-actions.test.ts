@@ -123,6 +123,43 @@ describe('channel-actions', () => {
     });
   });
 
+  describe('appendChannelMessage', () => {
+    it('追加当前频道的新消息并刷新频道预览，不清空已有消息', async () => {
+      mockState.currentChannel = 'ch1';
+      mockState.channelMessages = [
+        { sender: 'testuser', timestamp: '2026-05-07 17:00:00', body: 'old' },
+      ];
+      mockState.channels = [{
+        id: 'ch1',
+        name: 'general',
+        members: [],
+        lastMessage: 'old',
+        lastSender: 'testuser',
+        lastTimestamp: '2026-05-07 17:00:00',
+        newMessageCount: 3,
+        isDM: false,
+      }];
+      mockState.channelTotalUnread = 3;
+
+      const { appendChannelMessage } = await import('../../stores/channel-actions');
+      appendChannelMessage('ch1', {
+        sender: 'hanako',
+        timestamp: '2026-05-07 17:01:00',
+        body: 'new reply',
+      });
+
+      expect(mockState.channelMessages).toEqual([
+        { sender: 'testuser', timestamp: '2026-05-07 17:00:00', body: 'old' },
+        { sender: 'hanako', timestamp: '2026-05-07 17:01:00', body: 'new reply' },
+      ]);
+      expect((mockState.channels as Array<{ lastMessage: string; newMessageCount: number }>)[0]).toMatchObject({
+        lastMessage: 'new reply',
+        newMessageCount: 0,
+      });
+      expect(mockState.channelTotalUnread).toBe(0);
+    });
+  });
+
   describe('toggleChannelsEnabled', () => {
     it('切换开关状态', async () => {
       mockState.channelsEnabled = true;

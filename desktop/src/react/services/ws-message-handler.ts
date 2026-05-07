@@ -13,7 +13,11 @@ import { updateKeyed } from '../stores/create-keyed-slice';
 import { loadSessions as loadSessionsAction } from '../stores/session-actions';
 import { handleLegacyArtifactBlock } from '../stores/preview-actions';
 import { loadDeskFiles } from '../stores/desk-actions';
-import { loadChannels as loadChannelsAction, openChannel as openChannelAction } from '../stores/channel-actions';
+import {
+  appendChannelMessage as appendChannelMessageAction,
+  loadChannels as loadChannelsAction,
+  openChannel as openChannelAction,
+} from '../stores/channel-actions';
 import { showError } from '../utils/ui-helpers';
 import { handleAppEvent } from './app-event-actions';
 import {
@@ -449,7 +453,9 @@ export function handleServerMessage(msg: any): void {
     case 'channel_new_message': {
       const store = useStore.getState();
       const isViewing = store.currentTab === 'channels' && store.currentChannel === msg.channelName && document.visibilityState === 'visible';
-      if (msg.channelName && isViewing) {
+      if (msg.channelName && isViewing && msg.message) {
+        appendChannelMessageAction(msg.channelName, msg.message);
+      } else if (msg.channelName && isViewing) {
         openChannelAction(msg.channelName);
       } else if (msg.channelName) {
         loadChannelsAction();
