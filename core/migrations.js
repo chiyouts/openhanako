@@ -23,6 +23,7 @@ import { persistBrowserScreenshotFileSync } from "../lib/session-files/browser-s
 import { getInvalidProviderModelIds } from "../shared/provider-model-validation.js";
 import { normalizeThinkingLevelForModel } from "./session-thinking-level.js";
 import { lookupKnown } from "../shared/known-models.js";
+import { SESSION_PREFIX_MAP } from "../lib/bridge/session-key.js";
 
 // ── 迁移表 ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,8 @@ const migrations = {
   15: repairLegacySessionSidecarThinkingLevels,
   // 视频能力进入 model.input 后，修补老的模型投影和残留 override
   16: migrateVideoCapabilityProjection,
+  // bridge sessionKey 引入 @agentId 后，修补旧 index 中无 agent 维度的 key
+  17: migrateBridgeSessionKeysToAgentScoped,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -1296,6 +1299,126 @@ function migrateVideoCapabilityProjection(ctx) {
   const modelsPatched = repairModelsJsonVideoInputs(ctx);
   const overridesPatched = promoteAgentVideoOverrides(ctx);
   ctx.log?.(`[migrations] #16: video capability projected (models=${modelsPatched}, overrides=${overridesPatched})`);
+}
+
+/**
+ * #17 — bridge sessionKey 补齐 agent 维度
+ *
+ * 旧格式：wx_dm_user / tg_dm_user
+ * 新格式：wx_dm_user@hana / tg_dm_user@hana
+ *
+ * index 文件本身已经位于 per-agent 目录下，因此 agentId 的权威来源是目录名。
+ * 微信 userId 可能自带 @（例如 openim），不能用 "包含 @" 判断是否已迁移，
+ * 只能判断 key 是否以当前 owner agent 的 @agentId 结尾。
+ */
+function migrateBridgeSessionKeysToAgentScoped(ctx) {
+  const { agentsDir, log } = ctx;
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    return;
+  }
+
+  let migrated = 0;
+  let merged = 0;
+  let collisions = 0;
+
+  for (const dir of agentDirs) {
+    const agentId = dir.name;
+    const cfgPath = path.join(agentsDir, agentId, "config.yaml");
+    if (!fs.existsSync(cfgPath)) continue;
+
+    const indexPath = path.join(agentsDir, agentId, "sessions", "bridge", "bridge-sessions.json");
+    const result = migrateOneBridgeSessionIndex(indexPath, agentId, log);
+    migrated += result.migrated;
+    merged += result.merged;
+    collisions += result.collisions;
+  }
+
+  log?.(`[migrations] #17: bridge session keys scoped (migrated=${migrated}, merged=${merged}, collisions=${collisions})`);
+}
+
+function migrateOneBridgeSessionIndex(indexPath, agentId, log) {
+  let raw;
+  try {
+    raw = fs.readFileSync(indexPath, "utf-8");
+  } catch {
+    return { migrated: 0, merged: 0, collisions: 0 };
+  }
+
+  let index;
+  try {
+    index = JSON.parse(raw);
+  } catch (err) {
+    log?.(`[migrations] #17: skipped unreadable bridge index ${indexPath}: ${err.message}`);
+    return { migrated: 0, merged: 0, collisions: 0 };
+  }
+  if (!index || typeof index !== "object" || Array.isArray(index)) {
+    return { migrated: 0, merged: 0, collisions: 0 };
+  }
+
+  let changed = false;
+  let migrated = 0;
+  let merged = 0;
+  let collisions = 0;
+
+  for (const oldKey of Object.keys(index)) {
+    const newKey = scopedBridgeSessionKey(oldKey, agentId);
+    if (!newKey || newKey === oldKey) continue;
+
+    const oldRaw = index[oldKey];
+    const targetRaw = index[newKey];
+    if (targetRaw === undefined) {
+      index[newKey] = oldRaw;
+      delete index[oldKey];
+      migrated++;
+      changed = true;
+      continue;
+    }
+
+    const oldEntry = normalizeBridgeIndexEntryForMigration(oldRaw);
+    const targetEntry = normalizeBridgeIndexEntryForMigration(targetRaw);
+    if (oldEntry.file && targetEntry.file) {
+      collisions++;
+      continue;
+    }
+
+    index[newKey] = serializeBridgeIndexEntryForMigration(targetRaw, {
+      ...oldEntry,
+      ...targetEntry,
+      file: targetEntry.file || oldEntry.file,
+    });
+    delete index[oldKey];
+    merged++;
+    changed = true;
+  }
+
+  if (changed) {
+    const tmp = indexPath + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(index, null, 2) + "\n", "utf-8");
+    fs.renameSync(tmp, indexPath);
+  }
+
+  return { migrated, merged, collisions };
+}
+
+function scopedBridgeSessionKey(key, agentId) {
+  if (!key || !agentId || String(key).endsWith(`@${agentId}`)) return null;
+  if (!SESSION_PREFIX_MAP.some(([prefix]) => String(key).startsWith(prefix))) return null;
+  return `${key}@${agentId}`;
+}
+
+function normalizeBridgeIndexEntryForMigration(raw) {
+  if (!raw) return {};
+  return typeof raw === "string" ? { file: raw } : { ...raw };
+}
+
+function serializeBridgeIndexEntryForMigration(previousRaw, entry) {
+  if (typeof previousRaw === "string" && Object.keys(entry).length === 1 && typeof entry.file === "string") {
+    return entry.file;
+  }
+  return entry;
 }
 
 function repairModelsJsonVideoInputs(ctx) {

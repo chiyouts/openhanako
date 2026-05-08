@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 16;
+const LATEST_DATA_VERSION = 17;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -1592,5 +1592,109 @@ describe("migration #10 — cleanupSummarizerCompilerRemnants", () => {
     });
 
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #17 — migrateBridgeSessionKeysToAgentScoped", () => {
+  let tmpDir, userDir, agentsDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    userDir = path.join(tmpDir, "user");
+    agentsDir = path.join(tmpDir, "agents");
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeBridgeIndex(agentId, index) {
+    const bridgeDir = path.join(agentsDir, agentId, "sessions", "bridge");
+    fs.mkdirSync(bridgeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(bridgeDir, "bridge-sessions.json"),
+      JSON.stringify(index, null, 2) + "\n",
+      "utf-8",
+    );
+  }
+
+  function readBridgeIndex(agentId) {
+    return JSON.parse(fs.readFileSync(
+      path.join(agentsDir, agentId, "sessions", "bridge", "bridge-sessions.json"),
+      "utf-8",
+    ));
+  }
+
+  it("adds the owning agent suffix to legacy bridge session keys", () => {
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+    writeBridgeIndex("hana", {
+      "wx_dm_wx-user": { file: "owner/wx.jsonl", userId: "wx-user", name: "Alice" },
+      "tg_dm_12345": "owner/tg.jsonl",
+      "wx_dm_someone@openim": { file: "owner/openim.jsonl", userId: "someone@openim" },
+      "wx_dm_existing@hana": { file: "owner/current.jsonl", userId: "existing" },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 16 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const index = readBridgeIndex("hana");
+    expect(index["wx_dm_wx-user"]).toBeUndefined();
+    expect(index["tg_dm_12345"]).toBeUndefined();
+    expect(index["wx_dm_someone@openim"]).toBeUndefined();
+    expect(index["wx_dm_wx-user@hana"]).toEqual({ file: "owner/wx.jsonl", userId: "wx-user", name: "Alice" });
+    expect(index["tg_dm_12345@hana"]).toBe("owner/tg.jsonl");
+    expect(index["wx_dm_someone@openim@hana"]).toEqual({ file: "owner/openim.jsonl", userId: "someone@openim" });
+    expect(index["wx_dm_existing@hana"]).toEqual({ file: "owner/current.jsonl", userId: "existing" });
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("fills an existing scoped metadata entry from legacy history", () => {
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+    writeBridgeIndex("hana", {
+      "wx_dm_user": { file: "owner/legacy.jsonl", userId: "user", name: "Old" },
+      "wx_dm_user@hana": { name: "Current", chatId: "user" },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 16 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const index = readBridgeIndex("hana");
+    expect(index["wx_dm_user"]).toBeUndefined();
+    expect(index["wx_dm_user@hana"]).toEqual({
+      file: "owner/legacy.jsonl",
+      userId: "user",
+      name: "Current",
+      chatId: "user",
+    });
+  });
+
+  it("keeps legacy history when the scoped key already has history", () => {
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+    writeBridgeIndex("hana", {
+      "wx_dm_user": { file: "owner/legacy.jsonl", userId: "user", name: "Old" },
+      "wx_dm_user@hana": { file: "owner/current.jsonl", userId: "user", name: "Current" },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 16 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const index = readBridgeIndex("hana");
+    expect(index["wx_dm_user"]).toEqual({ file: "owner/legacy.jsonl", userId: "user", name: "Old" });
+    expect(index["wx_dm_user@hana"]).toEqual({ file: "owner/current.jsonl", userId: "user", name: "Current" });
   });
 });
