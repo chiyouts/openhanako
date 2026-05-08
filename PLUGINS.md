@@ -440,6 +440,26 @@ window.parent.postMessage({ type: 'ready' }, '*');
 <link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
 ```
 
+React 插件 UI 建议使用 `@hana/plugin-components`，它提供和 Hana 当前控件接近的 Button、IconButton、TextInput、Textarea、Select、Switch、SettingRow、CardShell、List、EmptyState 等基础组件：
+
+```tsx
+import { Button, CardShell, HanaThemeProvider, SettingRow, Switch } from "@hana/plugin-components";
+import "@hana/plugin-components/styles.css";
+
+export function PluginPanel() {
+  return (
+    <HanaThemeProvider mode="inherit">
+      <CardShell title="同步">
+        <SettingRow label="启用" control={<Switch checked label="开启" />} />
+        <Button variant="primary">运行</Button>
+      </CardShell>
+    </HanaThemeProvider>
+  );
+}
+```
+
+`HanaThemeProvider` 支持三种模式：`inherit` 读取宿主 CSS 变量并走 SDK fallback；`hana` 固定使用某个 Hana 主题 token；`custom` 只覆盖插件显式传入的 token，未传字段继续 fallback。组件只依赖 `hana-plugin-*` class 和 CSS 变量，不导入 renderer 内部组件。
+
 ### Widget（侧栏组件）⚡ full-access
 
 插件可以在右侧 Jian 侧栏注册一个组件。Widget 与 Page 可以同时声明，互不冲突。

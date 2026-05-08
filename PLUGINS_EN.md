@@ -440,6 +440,26 @@ The host appends `hana-theme` and `hana-css` query parameters to the iframe URL.
 <link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
 ```
 
+React plugin UIs should use `@hana/plugin-components`. It provides Button, IconButton, TextInput, Textarea, Select, Switch, SettingRow, CardShell, List, EmptyState, and related primitives that match Hana's current controls:
+
+```tsx
+import { Button, CardShell, HanaThemeProvider, SettingRow, Switch } from "@hana/plugin-components";
+import "@hana/plugin-components/styles.css";
+
+export function PluginPanel() {
+  return (
+    <HanaThemeProvider mode="inherit">
+      <CardShell title="Sync">
+        <SettingRow label="Enabled" control={<Switch checked label="On" />} />
+        <Button variant="primary">Run</Button>
+      </CardShell>
+    </HanaThemeProvider>
+  );
+}
+```
+
+`HanaThemeProvider` supports three modes: `inherit` reads host CSS variables and then uses SDK fallback tokens; `hana` pins the UI to a named Hana theme token set; `custom` only overrides explicitly provided tokens and lets missing fields continue through the fallback chain. Components depend only on `hana-plugin-*` classes and CSS variables, not renderer internals.
+
 ### Widget (Sidebar Component) ⚡ full-access
 
 A plugin can register a component in the right-side Jian sidebar. A widget and a page can be declared simultaneously in the same plugin — they are independent and do not conflict.
