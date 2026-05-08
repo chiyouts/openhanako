@@ -107,11 +107,29 @@ describe("SkillManager metadata scanning", () => {
     expect(externalSkills[0].name).toBe("external-skill");
     expect(externalSkills[0].description).toBe("Safe external description.");
     expect(externalSkills[0].disableModelInvocation).toBe(true);
+    expect(externalSkills[0].sourceIdentity).toMatchObject({
+      kind: "skill_source",
+      owner: "external",
+      skillName: "external-skill",
+      filePath: path.join(externalSkillDir, "SKILL.md"),
+      baseDir: externalSkillDir,
+      editable: false,
+      readonly: true,
+    });
 
     expect(learnedSkills).toHaveLength(1);
     expect(learnedSkills[0].name).toBe("learned-skill");
     expect(learnedSkills[0].description).toBe("Learned skill description.");
     expect(learnedSkills[0].disableModelInvocation).toBe(false);
+    expect(learnedSkills[0].sourceIdentity).toMatchObject({
+      kind: "skill_source",
+      owner: "learned",
+      skillName: "learned-skill",
+      filePath: path.join(learnedDir, "SKILL.md"),
+      baseDir: learnedDir,
+      editable: true,
+      readonly: false,
+    });
   });
 
   it("workspace skills 参与 runtime skill 集，但不污染 agent 全局技能列表", () => {
@@ -168,6 +186,16 @@ describe("SkillManager metadata scanning", () => {
     expect(runtimeInfo.find(s => s.name === "workspace-skill")).toMatchObject({
       enabled: true,
       managedBy: "workspace",
+      readonly: false,
+      sourceIdentity: {
+        kind: "skill_source",
+        owner: "workspace",
+        skillName: "workspace-skill",
+        filePath: path.join(workspaceSkillDir, "SKILL.md"),
+        baseDir: workspaceSkillDir,
+        editable: true,
+        readonly: false,
+      },
     });
 
     const runtimeSkills = manager.getSkillsForAgent(agent);

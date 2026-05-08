@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { lookupKnown } from "../shared/known-models.js";
 
 describe("known-models dictionary", () => {
+  it("treats missing model ids as unknown instead of throwing", () => {
+    expect(lookupKnown("openai", undefined)).toBeNull();
+    expect(lookupKnown(undefined, undefined)).toBeNull();
+  });
+
   it("keeps current OpenAI GPT-5.4 API context metadata", () => {
     expect(lookupKnown("openai", "gpt-5.4")).toMatchObject({
       name: "GPT-5.4",

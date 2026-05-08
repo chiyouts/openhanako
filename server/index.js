@@ -242,9 +242,9 @@ hub.eventBus.handle("session:get-titles", async ({ paths }) => {
 });
 
 // Register Pi SDK extension factory
-engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStore));
+await engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStore));
 // Compaction guard — 防 session 因上下文超限死锁（issue#437）
-engine.registerExtensionFactory(createCompactionGuardExtension());
+await engine.registerExtensionFactory(createCompactionGuardExtension());
 
 // ── 启动默认 session ──
 // Desktop 会显式跳过：renderer 首屏就是 pending-new-session，首次发送消息时

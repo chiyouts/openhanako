@@ -28,6 +28,7 @@ function _ensureLoaded() {
  * @returns {object|null}
  */
 export function lookupKnown(provider, modelId) {
+  if (typeof modelId !== "string" || modelId.length === 0) return null;
   _ensureLoaded();
   if (provider && _raw[provider]?.[modelId]) return _raw[provider][modelId];
   const bare = modelId.includes("/") ? modelId.split("/").pop() : null;

@@ -597,6 +597,8 @@ export class HanaEngine {
   setLocale(l) { this._prefs.setLocale(l); }
   getEditor() { return this._prefs.getEditor(); }
   setEditor(p) { return this._prefs.setEditor(p); }
+  getWorkspaceUiState(workspaceRoot) { return this._prefs.getWorkspaceUiState(workspaceRoot); }
+  setWorkspaceUiState(workspaceRoot, state) { return this._prefs.setWorkspaceUiState(workspaceRoot, state); }
   getTimezone() { return this._prefs.getTimezone(); }
   setTimezone(tz) { this._prefs.setTimezone(tz); }
   getUpdateChannel() { return this._prefs.getUpdateChannel(); }
@@ -880,69 +882,71 @@ export class HanaEngine {
     const externalPaths = this._getResolvedExternalSkillPaths(null);
 
     this._skills = new SkillManager({ skillsDir, externalPaths });
+    this._coreExtensionFactories = [
+      /**
+       * Provider payload 兼容化（chat 路径）。与 callText 共享 core/provider-compat.js，
+       * 是两条调用路径唯一的 normalize 入口——末端只在"流式 vs 非流式 fetch"分叉。
+       *
+       * ctx.model 是 Pi SDK 标准入参，正常 chat session 都会带；少数 edge case
+       * （子 session / 工具内调）下偏 SDK 实现可能不带，此时只在 payload.model
+       * 唯一匹配时补 model；重复 id 直接不猜 provider，避免错套 provider 兼容。
+       */
+      (pi) => {
+        pi.on("context", (event, ctx) => {
+          const model = ctx?.model;
+          if (!model) return;
+          const reasoningLevel = resolveRequestReasoningLevel(this._models, this._prefs, ctx);
+          const messages = normalizeProviderContextMessages(event.messages, model, {
+            mode: "chat",
+            reasoningLevel,
+          });
+          if (messages === event.messages) return;
+          return { messages };
+        });
+
+        pi.on("before_provider_request", (event, ctx) => {
+          const p = event.payload;
+          if (!p) return p;
+          const requestModel = ctx?.model
+            || findUniqueModelById(this._models.availableModels, p.model)
+            || null;
+          const reasoningLevel = resolveRequestReasoningLevel(this._models, this._prefs, ctx);
+          // The SDK hook exposes the serialized body, but not whether maxTokens came
+          // from user intent or buildBaseOptions' model-derived default. Keep source
+          // unspecified here; output-budget removes only values matching that SDK default.
+          return normalizeProviderPayload(p, requestModel, { mode: "chat", reasoningLevel });
+        });
+      },
+      /**
+       * Capability-aware message adaptation：把历史里的 ImageContent block
+       * 替换为 TextContent 占位，避免不支持 image 的 provider 反序列化失败
+       * （如 issue #441：messages[N]: unknown variant `image_url`, expected `text`）。
+       * 非静默降级：每个 session 首次剥图时通过事件总线通知 UI。
+       */
+      (pi) => {
+        pi.on("context", (event, ctx) => {
+          const model = ctx?.model;
+          if (!model) return;
+          const { messages, stripped } = sanitizeMessagesForModel(event.messages, model);
+          if (stripped === 0) return;
+          const sessionPath = ctx?.sessionManager?.getSessionFile?.();
+          if (sessionPath && !this._imageStripNotified.has(sessionPath)) {
+            this._imageStripNotified.add(sessionPath);
+            this._emitEvent({
+              type: "image_stripped_notice",
+              modelId: model.id,
+              modelProvider: model.provider,
+              count: stripped,
+            }, sessionPath);
+          }
+          return { messages };
+        });
+      },
+    ];
+    this._extensionFactories = [...this._coreExtensionFactories];
     this._resourceLoader = new DefaultResourceLoader({
       ...this._createResourceLoaderOptions(skillsDir),
-      extensionFactories: this._extensionFactories = [
-        /**
-         * Provider payload 兼容化（chat 路径）。与 callText 共享 core/provider-compat.js，
-         * 是两条调用路径唯一的 normalize 入口——末端只在"流式 vs 非流式 fetch"分叉。
-         *
-         * ctx.model 是 Pi SDK 标准入参，正常 chat session 都会带；少数 edge case
-         * （子 session / 工具内调）下偏 SDK 实现可能不带，此时只在 payload.model
-         * 唯一匹配时补 model；重复 id 直接不猜 provider，避免错套 provider 兼容。
-         */
-        (pi) => {
-          pi.on("context", (event, ctx) => {
-            const model = ctx?.model;
-            if (!model) return;
-            const reasoningLevel = resolveRequestReasoningLevel(this._models, this._prefs, ctx);
-            const messages = normalizeProviderContextMessages(event.messages, model, {
-              mode: "chat",
-              reasoningLevel,
-            });
-            if (messages === event.messages) return;
-            return { messages };
-          });
-
-          pi.on("before_provider_request", (event, ctx) => {
-            const p = event.payload;
-            if (!p) return p;
-            const requestModel = ctx?.model
-              || findUniqueModelById(this._models.availableModels, p.model)
-              || null;
-            const reasoningLevel = resolveRequestReasoningLevel(this._models, this._prefs, ctx);
-            // The SDK hook exposes the serialized body, but not whether maxTokens came
-            // from user intent or buildBaseOptions' model-derived default. Keep source
-            // unspecified here; output-budget removes only values matching that SDK default.
-            return normalizeProviderPayload(p, requestModel, { mode: "chat", reasoningLevel });
-          });
-        },
-        /**
-         * Capability-aware message adaptation：把历史里的 ImageContent block
-         * 替换为 TextContent 占位，避免不支持 image 的 provider 反序列化失败
-         * （如 issue #441：messages[N]: unknown variant `image_url`, expected `text`）。
-         * 非静默降级：每个 session 首次剥图时通过事件总线通知 UI。
-         */
-        (pi) => {
-          pi.on("context", (event, ctx) => {
-            const model = ctx?.model;
-            if (!model) return;
-            const { messages, stripped } = sanitizeMessagesForModel(event.messages, model);
-            if (stripped === 0) return;
-            const sessionPath = ctx?.sessionManager?.getSessionFile?.();
-            if (sessionPath && !this._imageStripNotified.has(sessionPath)) {
-              this._imageStripNotified.add(sessionPath);
-              this._emitEvent({
-                type: "image_stripped_notice",
-                modelId: model.id,
-                modelProvider: model.provider,
-                count: stripped,
-              }, sessionPath);
-            }
-            return { messages };
-          });
-        },
-      ],
+      extensionFactories: this._extensionFactories,
     });
     await this._resourceLoader.reload();
 
@@ -1084,7 +1088,7 @@ export class HanaEngine {
     }
 
     // Inject plugin extension factories into ResourceLoader (same array reference)
-    this._syncExtensionFactories();
+    await this.syncPluginExtensions();
   }
 
   /**
@@ -1094,9 +1098,15 @@ export class HanaEngine {
    */
   _syncExtensionFactories() {
     if (!this._extensionFactories) return;
+    const coreFactories = this._coreExtensionFactories || [];
     const frameworkFactories = this._frameworkExtFactories || [];
     const pluginFactories = this._pluginManager?.getExtensionFactories() || [];
-    this._extensionFactories.splice(1, Infinity, ...frameworkFactories, ...pluginFactories);
+    this._extensionFactories.splice(0, Infinity, ...coreFactories, ...frameworkFactories, ...pluginFactories);
+  }
+
+  async _reloadResourceLoaderForExtensionFactories() {
+    if (!this._resourceLoader?.reload) return;
+    await this._resourceLoader.reload();
   }
 
   /**
@@ -1104,17 +1114,20 @@ export class HanaEngine {
    * Tracked separately so _syncExtensionFactories preserves them across plugin hot-reloads.
    * Only affects sessions created after this call.
    */
-  registerExtensionFactory(factory) {
+  async registerExtensionFactory(factory) {
     if (!this._extensionFactories) return;
     if (!this._frameworkExtFactories) this._frameworkExtFactories = [];
     this._frameworkExtFactories.push(factory);
-    this._syncExtensionFactories();
+    await this.syncPluginExtensions();
   }
 
   get pluginManager() { return this._pluginManager; }
 
   /** 插件热操作后调用，同步 extension factories 到 ResourceLoader */
-  syncPluginExtensions() { this._syncExtensionFactories(); }
+  async syncPluginExtensions() {
+    this._syncExtensionFactories();
+    await this._reloadResourceLoaderForExtensionFactories();
+  }
 
   // ════════════════════════════
   //  工具构建

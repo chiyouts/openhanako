@@ -425,9 +425,18 @@ export class Hub {
     }));
 
     this._sessionHandlerCleanups.push(bus.handle("agent:config", async ({ agentId }) => {
-      const agent = engine.agentManager.getAgent(agentId);
-      if (!agent) return { error: "not_found" };
+      const { agent, error } = resolveAgentForBus(engine, agentId);
+      if (error) return { error };
       return { config: agent.config };
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("agent:update-config", async ({ agentId, partial }) => {
+      const { agent, error } = resolveAgentForBus(engine, agentId);
+      if (error) return { error };
+      if (typeof engine.updateConfig !== "function") return { error: "agent_update_unavailable" };
+      await engine.updateConfig(partial || {}, { agentId });
+      const { agent: fresh } = resolveAgentForBus(engine, agentId);
+      return { config: fresh?.config || agent.config };
     }));
   }
 
@@ -440,6 +449,14 @@ export class Hub {
     }
   }
 
+}
+
+function resolveAgentForBus(engine, agentId) {
+  if (!agentId) return { error: "agent_id_required" };
+  if (typeof engine?.getAgent !== "function") return { error: "agent_lookup_unavailable" };
+  const agent = engine.getAgent(agentId);
+  if (!agent) return { error: "not_found" };
+  return { agent };
 }
 
 function hasDisplayImageAttachments(displayMessage) {

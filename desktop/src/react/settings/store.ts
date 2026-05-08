@@ -10,6 +10,7 @@ export interface Agent {
   yuan: string;
   isPrimary: boolean;
   hasAvatar?: boolean;
+  memoryMasterEnabled?: boolean;
 }
 
 export interface SkillInfo {
@@ -39,6 +40,14 @@ export interface ProviderSummary {
   supports_oauth: boolean;
   is_coding_plan?: boolean;
   can_delete: boolean;
+}
+
+export interface PluginSettingsTab {
+  pluginId: string;
+  id: string;
+  title: string | Record<string, string>;
+  icon?: string | null;
+  nativeComponent: string;
 }
 
 export interface SettingsState {
@@ -75,6 +84,7 @@ export interface SettingsState {
   // plugins
   pluginAllowFullAccess: boolean;
   pluginUserDir: string;
+  pluginSettingsTabs: PluginSettingsTab[];
 
   // toast
   toastMessage: string;
@@ -126,6 +136,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
   // plugins
   pluginAllowFullAccess: false,
   pluginUserDir: '',
+  pluginSettingsTabs: [],
 
   // toast
   toastMessage: '',

@@ -415,8 +415,11 @@ const ScreenshotBlock = memo(function ScreenshotBlock({ block, sessionPath, mess
 // skill block
 
 const SkillBlock = memo(function SkillBlock({ block }: { block: any }) {
+  const skillFilePath = typeof block.installedSkillSource?.filePath === 'string'
+    ? block.installedSkillSource.filePath
+    : block.skillFilePath;
   return (
-    <div className={styles.skillCard} onClick={() => openSkillPreview(block.skillName, block.skillFilePath)} style={{ cursor: 'pointer' }}>
+    <div className={styles.skillCard} onClick={() => openSkillPreview(block.skillName, skillFilePath)} style={{ cursor: 'pointer' }}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2L2 7l10 5 10-5-10-5z" />
         <path d="M2 17l10 5 10-5" />

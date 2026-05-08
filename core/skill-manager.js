@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import chokidar from "chokidar";
 import { parseSkillMetadata } from "../lib/skills/skill-metadata.js";
+import { sourceIdentityForSkill } from "../lib/skills/skill-file-identity.js";
 
 // chokidar 默认会对"绝对路径里任意段带点"判定为隐藏，而用户的 skill 根
 // （~/.hanako/skills、workspace 下的 .agents/... 等）自身就住在隐藏目录里，
@@ -52,6 +53,7 @@ export class SkillManager {
     this._allSkills = resourceLoader.getSkills().skills;
     for (const s of this._allSkills) {
       s._hidden = hiddenSkills.has(s.name);
+      s.sourceIdentity = sourceIdentityForSkill(s);
     }
     for (const [, ag] of agents) {
       this._allSkills.push(...this.scanLearnedSkills(ag.agentDir));
@@ -80,6 +82,7 @@ export class SkillManager {
       externalLabel: s._externalLabel || null,
       externalPath: s._externalPath || null,
       readonly: !!s._readonly,
+      sourceIdentity: s.sourceIdentity || null,
     }));
   }
 
@@ -98,6 +101,7 @@ export class SkillManager {
       externalPath: s._externalPath || null,
       readonly: !!s._readonly,
       managedBy: s._managedBy || null,
+      sourceIdentity: s.sourceIdentity || null,
     }));
   }
 
@@ -139,6 +143,7 @@ export class SkillManager {
     this._allSkills = resourceLoader.getSkills().skills;
     for (const s of this._allSkills) {
       s._hidden = this._hiddenSkills.has(s.name);
+      s.sourceIdentity = sourceIdentityForSkill(s);
     }
     for (const [, ag] of agents) {
       this._allSkills.push(...this.scanLearnedSkills(ag.agentDir));
@@ -224,21 +229,35 @@ export class SkillManager {
           try {
             const content = fs.readFileSync(skillFile, "utf-8");
             const meta = parseSkillMetadata(content, entry.name);
+            const owner = scope === "workspace"
+              ? "workspace"
+              : (label.startsWith("plugin:") ? "plugin" : "external");
+            const readonly = owner !== "workspace";
+            const baseDir = path.join(dirPath, entry.name);
             results.push({
               name: meta.name,
               description: meta.description,
               filePath: skillFile,
-              baseDir: path.join(dirPath, entry.name),
+              baseDir,
               source: "external",
               disableModelInvocation: meta.disableModelInvocation,
               _agentId: null,
               _hidden: false,
               _externalLabel: label,
               _externalPath: dirPath,
-              _readonly: true,
+              _readonly: readonly,
               _pluginSkill: label.startsWith("plugin:"),
               _workspaceSkill: scope === "workspace",
               _managedBy: scope === "workspace" ? "workspace" : null,
+              sourceIdentity: sourceIdentityForSkill({
+                name: meta.name,
+                filePath: skillFile,
+                baseDir,
+                source: "external",
+                _pluginSkill: label.startsWith("plugin:"),
+                _workspaceSkill: scope === "workspace",
+                _externalLabel: label,
+              }, { owner }),
             });
           } catch {}
         }
@@ -318,15 +337,22 @@ export class SkillManager {
       try {
         const content = fs.readFileSync(skillFile, "utf-8");
         const meta = parseSkillMetadata(content, entry.name);
+        const baseDir = path.join(learnedDir, entry.name);
         results.push({
           name: meta.name,
           description: meta.description,
           filePath: skillFile,
-          baseDir: path.join(learnedDir, entry.name),
+          baseDir,
           source: "learned",
           disableModelInvocation: meta.disableModelInvocation,
           _agentId: agentId,
           _hidden: false,
+          sourceIdentity: sourceIdentityForSkill({
+            name: meta.name,
+            filePath: skillFile,
+            baseDir,
+            source: "learned",
+          }),
         });
       } catch {}
     }

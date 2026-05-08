@@ -19,6 +19,7 @@ import { safeCopyDir } from "../../shared/safe-fs.js";
 import { resolveAgent } from "../utils/resolve-agent.js";
 import { validateId, agentExists } from "../utils/validation.js";
 import { registerSessionFileFromRequest } from "../../lib/session-files/session-file-response.js";
+import { createSkillSourceIdentity } from "../../lib/skills/skill-file-identity.js";
 
 /** 从 SKILL.md frontmatter 解析 name */
 function parseSkillName(skillMdPath) {
@@ -210,6 +211,12 @@ export function createSkillsRoute(engine) {
           }
         }
       }
+      const installedSkillSource = createSkillSourceIdentity({
+        owner: "user",
+        skillName: safeName,
+        filePath: path.join(dstDir, "SKILL.md"),
+        baseDir: dstDir,
+      });
 
       // 重新加载 skills
       await engine.reloadSkills();
@@ -240,6 +247,7 @@ export function createSkillsRoute(engine) {
       return c.json({
         ok: true,
         skill: skill || { name: safeName, type: "user" },
+        installedSkillSource,
         ...(sourceFile ? { sourceFile } : {}),
       });
     } catch (err) {

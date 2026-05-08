@@ -6,6 +6,17 @@ import { freshImport } from "./fresh-import.js";
 const KNOWN_CONTRIBUTION_DIRS = [
   "tools", "routes", "skills", "agents", "commands", "providers",
 ];
+const DEFAULT_PLUGIN_LOAD_TIMEOUT_MS = 15_000;
+
+class PluginLoadTimeoutError extends Error {
+  constructor(pluginId, stage, ms) {
+    super(`Plugin "${pluginId}" ${stage} timed out after ${ms}ms`);
+    this.name = "PluginLoadTimeoutError";
+    this.pluginId = pluginId;
+    this.stage = stage;
+    this.timeoutMs = ms;
+  }
+}
 
 /** Semver compare: returns true if a >= b */
 function semverGte(a, b) {
@@ -24,7 +35,19 @@ export class PluginManager {
    * pluginsDirs: 多个扫描目录，先内嵌后用户（靠前的优先）
    * 兼容旧签名 { pluginsDir: string } → 自动转为单元素数组
    */
-  constructor({ pluginsDirs, pluginsDir, dataDir, bus, preferencesManager, appVersion, getSessionPath, registerSessionFile, slashRegistry }) {
+  constructor({
+    pluginsDirs,
+    pluginsDir,
+    dataDir,
+    bus,
+    preferencesManager,
+    appVersion,
+    getSessionPath,
+    registerSessionFile,
+    slashRegistry,
+    loadTimeoutMs,
+    lifecycleTimeoutMs,
+  }) {
     this._pluginsDirs = pluginsDirs || (pluginsDir ? [pluginsDir] : []);
     this._dataDir = dataDir;
     this._bus = bus;
@@ -48,9 +71,14 @@ export class PluginManager {
     this._extensionFactories = [];
     this._pages = [];
     this._widgets = [];
+    this._settingsTabs = [];
 
     // Slash command registry（可选；无则仅保留 palette 路径向后兼容）
     this._slashRegistry = slashRegistry || null;
+    const timeoutMs = Number(loadTimeoutMs ?? lifecycleTimeoutMs);
+    this._loadTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : DEFAULT_PLUGIN_LOAD_TIMEOUT_MS;
   }
 
   scan() {
@@ -138,8 +166,9 @@ export class PluginManager {
 
       this._plugins.set(desc.id, entry);
       try {
-        await this._loadPlugin(entry);
+        await this._loadPluginWithBoundary(entry);
         entry.status = "loaded";
+        entry.error = null;
       } catch (err) {
         entry.status = "failed";
         entry.error = err.message;
@@ -148,7 +177,79 @@ export class PluginManager {
     }
   }
 
-  async _loadPlugin(entry) {
+  async _loadPluginWithBoundary(entry) {
+    const loadToken = Symbol(entry.id);
+    entry._loadToken = loadToken;
+    entry._loadCancelled = false;
+    entry.error = null;
+    const start = Date.now();
+    console.log(`[plugin-manager] loading plugin "${entry.id}"...`);
+
+    try {
+      await this._withLoadTimeout(
+        entry,
+        this._loadPlugin(entry, loadToken),
+        "load",
+      );
+      if (entry._loadToken !== loadToken || entry._loadCancelled) {
+        throw new Error(`Plugin "${entry.id}" load was cancelled`);
+      }
+      console.log(`[plugin-manager] plugin "${entry.id}" loaded (${Date.now() - start}ms)`);
+    } catch (err) {
+      entry._loadCancelled = true;
+      await this._cleanupPluginEntry(entry);
+      throw err;
+    }
+  }
+
+  async _withLoadTimeout(entry, promise, stage) {
+    let timer = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            entry._loadCancelled = true;
+            reject(new PluginLoadTimeoutError(entry.id, entry._loadStage || stage, this._loadTimeoutMs));
+          }, this._loadTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async _runLoadStage(entry, stage, fn) {
+    const start = Date.now();
+    entry._loadStage = stage;
+    console.log(`[plugin-manager] loading "${entry.id}" ${stage}...`);
+    try {
+      const result = await fn();
+      console.log(`[plugin-manager] loaded "${entry.id}" ${stage} (${Date.now() - start}ms)`);
+      return result;
+    } catch (err) {
+      console.error(`[plugin-manager] "${entry.id}" ${stage} failed:`, err?.message || err);
+      throw err;
+    }
+  }
+
+  async _runLoadStageIf(entry, condition, stage, fn) {
+    if (!condition) return undefined;
+    return this._runLoadStage(entry, stage, fn);
+  }
+
+  _hasContributionDir(entry, dirName) {
+    return fs.existsSync(path.join(entry.pluginDir, dirName));
+  }
+
+  _assertActiveLoad(entry, loadToken) {
+    if (entry._loadToken !== loadToken || entry._loadCancelled) {
+      throw new Error(`Plugin "${entry.id}" load was cancelled`);
+    }
+  }
+
+  async _loadPlugin(entry, loadToken) {
     const accessLevel = (entry.source === "builtin" || entry.trust === "full-access")
       ? "full-access"
       : "restricted";
@@ -164,34 +265,66 @@ export class PluginManager {
     });
 
     // All plugins: declarative contributions
-    await this._loadTools(entry);
-    await this._loadSkillPaths(entry);
-    await this._loadCommands(entry);
-    await this._loadAgentTemplates(entry);  // JSON declaration, no code execution
-    this._loadConfiguration(entry);
+    this._assertActiveLoad(entry, loadToken);
+    await this._runLoadStageIf(entry, this._hasContributionDir(entry, "tools"), "tools", () => this._loadTools(entry));
+    this._assertActiveLoad(entry, loadToken);
+    await this._runLoadStageIf(entry, this._hasContributionDir(entry, "skills"), "skills", () => this._loadSkillPaths(entry));
+    this._assertActiveLoad(entry, loadToken);
+    await this._runLoadStageIf(entry, this._hasContributionDir(entry, "commands"), "commands", () => this._loadCommands(entry));
+    this._assertActiveLoad(entry, loadToken);
+    await this._runLoadStageIf(entry, this._hasContributionDir(entry, "agents"), "agent templates", () => this._loadAgentTemplates(entry));  // JSON declaration, no code execution
+    this._assertActiveLoad(entry, loadToken);
+    await this._runLoadStageIf(entry, !!entry.manifest?.contributes?.configuration, "configuration", () => this._loadConfiguration(entry));
 
     // Full-access only: system-level extension points
     if (accessLevel === "full-access") {
-      await this._loadRoutes(entry);
-      await this._loadExtensions(entry);
-      await this._loadProviders(entry);
-      this._loadPage(entry);
-      this._loadWidget(entry);
+      this._assertActiveLoad(entry, loadToken);
+      await this._runLoadStageIf(entry, this._hasContributionDir(entry, "routes"), "routes", () => this._loadRoutes(entry));
+      this._assertActiveLoad(entry, loadToken);
+      await this._runLoadStageIf(entry, this._hasContributionDir(entry, "extensions"), "extensions", () => this._loadExtensions(entry));
+      this._assertActiveLoad(entry, loadToken);
+      await this._runLoadStageIf(entry, this._hasContributionDir(entry, "providers"), "providers", () => this._loadProviders(entry));
+      this._assertActiveLoad(entry, loadToken);
+      await this._runLoadStageIf(entry, !!entry.manifest?.contributes?.page, "page", () => this._loadPage(entry));
+      this._assertActiveLoad(entry, loadToken);
+      await this._runLoadStageIf(entry, !!entry.manifest?.contributes?.widget, "widget", () => this._loadWidget(entry));
+      this._assertActiveLoad(entry, loadToken);
+      await this._runLoadStageIf(entry, !!entry.manifest?.contributes?.settingsTab, "settings tab", () => this._loadSettingsTab(entry));
 
       // Lifecycle (index.js)
       const indexPath = path.join(entry.pluginDir, "index.js");
       if (fs.existsSync(indexPath)) {
-        const mod = await freshImport(indexPath);
+        this._assertActiveLoad(entry, loadToken);
+        const mod = await this._runLoadStage(entry, "lifecycle import", () => freshImport(indexPath));
         const PluginClass = mod.default;
         if (PluginClass && typeof PluginClass === "function") {
           const instance = new PluginClass();
           entry.instance = instance;
           instance.ctx = entry.ctx;
           instance.register = (disposable) => {
-            if (typeof disposable === "function") entry._disposables.push(disposable);
+            if (typeof disposable !== "function") return;
+            if (entry._loadToken !== loadToken || entry._loadCancelled) {
+              try { disposable(); } catch (err) {
+                console.error(`[plugin-manager] "${entry.id}" late disposable error:`, err.message);
+              }
+              return;
+            }
+            entry._disposables.push(disposable);
           };
-          instance.ctx.registerTool = (toolDef) => this.addTool(entry.id, toolDef);
-          if (typeof instance.onload === "function") await instance.onload();
+          instance.ctx.registerTool = (toolDef) => {
+            const dispose = this.addTool(entry.id, toolDef);
+            if (entry._loadToken !== loadToken || entry._loadCancelled) {
+              try { dispose(); } catch (err) {
+                console.error(`[plugin-manager] "${entry.id}" late dynamic tool cleanup error:`, err.message);
+              }
+              return () => {};
+            }
+            return dispose;
+          };
+          if (typeof instance.onload === "function") {
+            this._assertActiveLoad(entry, loadToken);
+            await this._runLoadStage(entry, "lifecycle onload", () => instance.onload());
+          }
         }
       }
     }
@@ -264,6 +397,12 @@ export class PluginManager {
       _pluginId: pluginId,
       _dynamic: true,
     };
+    if (typeof toolDef.isEnabledForAgentConfig === "function") {
+      tool.isEnabledForAgentConfig = toolDef.isEnabledForAgentConfig;
+    }
+    if (toolDef.metadata && typeof toolDef.metadata === "object") {
+      tool.metadata = { ...toolDef.metadata };
+    }
     this._tools.push(tool);
     return () => {
       const idx = this._tools.indexOf(tool);
@@ -488,6 +627,30 @@ export class PluginManager {
     });
   }
 
+  _loadSettingsTab(entry) {
+    const settingsTab = entry.manifest?.contributes?.settingsTab;
+    if (!settingsTab) return;
+    if (entry.source !== "builtin") {
+      entry.ctx?.log?.warn('settingsTab contribution is only available to bundled built-in plugins, skipping');
+      return;
+    }
+    if (entry.accessLevel !== 'full-access') {
+      entry.ctx?.log?.warn('settingsTab contribution requires full-access, skipping');
+      return;
+    }
+    if (typeof settingsTab.nativeComponent !== "string" || !settingsTab.nativeComponent) {
+      entry.ctx?.log?.warn('settingsTab contribution requires nativeComponent, skipping');
+      return;
+    }
+    this._settingsTabs.push({
+      pluginId: entry.id,
+      id: settingsTab.id || entry.id,
+      title: settingsTab.title || entry.name || entry.id,
+      icon: settingsTab.icon || null,
+      nativeComponent: settingsTab.nativeComponent,
+    });
+  }
+
   // ── Task 10: Agent templates + Provider loader ───────────────────────────
 
   async _loadAgentTemplates(entry) {
@@ -575,8 +738,9 @@ export class PluginManager {
       }
 
       try {
-        await this._loadPlugin(entry);
+        await this._loadPluginWithBoundary(entry);
         entry.status = "loaded";
+        entry.error = null;
       } catch (err) {
         entry.status = "failed";
         entry.error = err.message;
@@ -656,8 +820,9 @@ export class PluginManager {
         await this.unloadPlugin(pluginId);
       }
       try {
-        await this._loadPlugin(entry);
+        await this._loadPluginWithBoundary(entry);
         entry.status = "loaded";
+        entry.error = null;
       } catch (err) {
         entry.status = "failed";
         entry.error = err.message;
@@ -680,8 +845,9 @@ export class PluginManager {
 
         if (allow && entry.status === "restricted") {
           try {
-            await this._loadPlugin(entry);
+            await this._loadPluginWithBoundary(entry);
             entry.status = "loaded";
+            entry.error = null;
           } catch (err) {
             entry.status = "failed";
             entry.error = err.message;
@@ -697,9 +863,8 @@ export class PluginManager {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  async unloadPlugin(pluginId) {
-    const entry = this._plugins.get(pluginId);
-    if (!entry) return;
+  async _cleanupPluginEntry(entry) {
+    const pluginId = entry.id;
 
     // 1. 生命周期清理（onunload + disposables）
     if (entry.instance) {
@@ -727,7 +892,16 @@ export class PluginManager {
     this._extensionFactories = this._extensionFactories.filter(e => e.pluginId !== pluginId);
     this._pages = this._pages.filter(p => p.pluginId !== pluginId);
     this._widgets = this._widgets.filter(w => w.pluginId !== pluginId);
+    this._settingsTabs = this._settingsTabs.filter(t => t.pluginId !== pluginId);
     this.routeRegistry.delete(pluginId);
+  }
+
+  async unloadPlugin(pluginId) {
+    const entry = this._plugins.get(pluginId);
+    if (!entry) return;
+
+    entry._loadCancelled = true;
+    await this._cleanupPluginEntry(entry);
 
     entry.status = "unloaded";
   }
@@ -768,6 +942,7 @@ export class PluginManager {
 
   getPages() { return [...this._pages]; }
   getWidgets() { return [...this._widgets]; }
+  getSettingsTabs() { return [...this._settingsTabs]; }
 
   getPlugin(id) { return this._plugins.get(id) || null; }
   listPlugins() { return [...this._plugins.values()]; }

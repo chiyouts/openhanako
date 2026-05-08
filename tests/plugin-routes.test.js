@@ -47,6 +47,8 @@ function mockEngine(overrides = {}) {
   const routeRegistry = new Map();
   const allowFullAccess = overrides.allowFullAccess ?? false;
   return {
+    currentAgentId: "hanako",
+    getAgent: overrides.getAgent || (() => ({ id: "hanako" })),
     syncPluginExtensions: vi.fn(),
     pluginManager: {
       listPlugins: () => overrides.plugins || [],
@@ -161,6 +163,30 @@ describe("plugin management API", () => {
         body: JSON.stringify({ enabled: true }),
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("plugin proxy route namespaces", () => {
+    it("dispatches plugin settings routes without hitting plugin management enablement", async () => {
+      const enableFn = vi.fn().mockResolvedValue();
+      const engine = mockEngine({ enablePlugin: enableFn });
+      const pluginApp = new Hono();
+      pluginApp.put("/settings/enabled", async (c) => {
+        const body = await c.req.json();
+        return c.json({ routed: "plugin", enabled: body.enabled === true });
+      });
+      engine.pluginManager.routeRegistry.set("mcp", pluginApp);
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/mcp/settings/enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ routed: "plugin", enabled: true });
+      expect(enableFn).not.toHaveBeenCalled();
     });
   });
 

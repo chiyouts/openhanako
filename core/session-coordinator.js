@@ -33,7 +33,10 @@ import {
   normalizeThinkingLevelForModel,
   resolveThinkingLevelForModel,
 } from "./session-thinking-level.js";
-import { snapshotSkillsForSession } from "../lib/skills/session-skill-snapshot.js";
+import {
+  resolveSessionSkillsForRuntime,
+  snapshotSkillsForSession,
+} from "../lib/skills/session-skill-snapshot.js";
 
 const log = createModuleLogger("session");
 
@@ -57,6 +60,22 @@ function jsonClone(value, fallback) {
 
 function normalizeStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+
+function computeRuntimeDisabledToolNames(tools, agentConfig, context = {}) {
+  const disabled = [];
+  for (const tool of tools || []) {
+    if (!tool?.name || typeof tool.isEnabledForAgentConfig !== "function") continue;
+    try {
+      if (!tool.isEnabledForAgentConfig(agentConfig, context)) {
+        disabled.push(tool.name);
+      }
+    } catch (err) {
+      log.warn(`tool "${tool.name}" runtime enablement check failed, disabling for fresh session: ${err.message}`);
+      disabled.push(tool.name);
+    }
+  }
+  return disabled;
 }
 
 function freezeSkillsResult(value) {
@@ -435,7 +454,7 @@ export class SessionCoordinator {
         value: () => [...appendSystemPromptSnapshot],
       },
       getSkills: {
-        value: () => freezeSkillsResult(skillsResultSnapshot),
+        value: () => resolveSessionSkillsForRuntime(skillsResultSnapshot),
       },
       getAgentsFiles: {
         value: () => freezeAgentsFilesResult(agentsFilesResultSnapshot),
@@ -536,6 +555,15 @@ export class SessionCoordinator {
       ...(sessionTools || []).map((t) => t.name).filter(Boolean),
       ...(sessionCustomTools || []).map((t) => t.name).filter(Boolean),
     ];
+    const allToolObjects = [
+      ...(sessionTools || []),
+      ...(sessionCustomTools || []),
+    ];
+    const runtimeDisabledToolNames = computeRuntimeDisabledToolNames(
+      allToolObjects,
+      agent.config,
+      { agentId: creatingAgentId, restore },
+    );
     let snapshotToolNames = null;  // null signals "do not call setActiveToolsByName"
 
     if (restore) {
@@ -562,7 +590,9 @@ export class SessionCoordinator {
           // preserve the historical snapshot, but honors the user's current
           // disabled-tool intent.
           const disabled = agent.config?.tools?.disabled ?? DEFAULT_DISABLED_TOOL_NAMES;
-          snapshotToolNames = computeToolSnapshot(allToolNames, disabled);
+          snapshotToolNames = computeToolSnapshot(allToolNames, disabled, {
+            extraDisabled: runtimeDisabledToolNames,
+          });
         }
         // else Case B (meta absent via ENOENT): snapshotToolNames stays null
       }
@@ -572,7 +602,9 @@ export class SessionCoordinator {
       // update_settings and dm are off by default. Explicit `[]` means "all on"
       // and is preserved via nullish-coalescing rather than `||`.
       const disabled = agent.config?.tools?.disabled ?? DEFAULT_DISABLED_TOOL_NAMES;
-      snapshotToolNames = computeToolSnapshot(allToolNames, disabled);
+      snapshotToolNames = computeToolSnapshot(allToolNames, disabled, {
+        extraDisabled: runtimeDisabledToolNames,
+      });
     }
 
     Object.assign(sessionEntry, {
