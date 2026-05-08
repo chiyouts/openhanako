@@ -1020,6 +1020,7 @@
 .settings-input {
     font-family: inherit;
     font-size: 0.85rem;
+    line-height: 1.5;
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
@@ -1667,6 +1668,7 @@
 .settings-select {
     font-family: inherit;
     font-size: 0.85rem;
+    line-height: 1.5;
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
@@ -4384,6 +4386,7 @@ a.about-link:hover {
     width: 100%;
     font-family: inherit;
     font-size: 0.85rem;
+    line-height: 1.5;
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
@@ -4975,6 +4978,7 @@ a.about-link:hover {
     width: 100%;
     font-family: inherit;
     font-size: 0.85rem;
+    line-height: 1.5;
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
