@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../stores';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 
-import { getMdWithOpts } from '../utils/markdown';
+import { renderMarkdownPreview } from '../utils/markdown';
 import { useMermaidDiagrams } from '../hooks/use-mermaid-diagrams';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
@@ -27,8 +27,6 @@ interface TreeItem {
   isDir?: boolean;
   children?: TreeItem[];
 }
-
-const md = getMdWithOpts({ html: true, linkify: true, breaks: true });
 
 function SkillMarkdown({ html }: { html: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -120,7 +118,7 @@ export function SkillViewerOverlay() {
         body = content.slice(fmMatch[0].length);
         description = parseFmDescription(fmMatch[1]);
       }
-      rendered = md.render(body);
+      rendered = renderMarkdownPreview(body);
     }
   }
 

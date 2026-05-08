@@ -17,6 +17,21 @@ const REMOVE_WITH_CONTENT = new Set([
 
 const GLOBAL_ATTRS = new Set(['title', 'style']);
 const ALLOWED_CLASS_NAMES = new Set([
+  'markdown-callout',
+  'markdown-callout-title',
+  'markdown-callout-note',
+  'markdown-callout-abstract',
+  'markdown-callout-info',
+  'markdown-callout-todo',
+  'markdown-callout-tip',
+  'markdown-callout-success',
+  'markdown-callout-question',
+  'markdown-callout-warning',
+  'markdown-callout-failure',
+  'markdown-callout-danger',
+  'markdown-callout-bug',
+  'markdown-callout-example',
+  'markdown-callout-quote',
   'mermaid-diagram',
   'mermaid-source',
   'mermaid-rendered',
@@ -157,6 +172,11 @@ function sanitizeAttributes(element: Element, tagName: string): void {
       const className = sanitizeClass(attr.value);
       if (className) element.setAttribute('class', className);
       else element.removeAttribute(attr.name);
+      continue;
+    }
+
+    if (tagName === 'details' && name === 'open') {
+      element.setAttribute('open', 'open');
       continue;
     }
 

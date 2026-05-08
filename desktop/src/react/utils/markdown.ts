@@ -5,8 +5,10 @@
  */
 
 import markdownit from 'markdown-it';
+import type StateCore from 'markdown-it/lib/rules_core/state_core.mjs';
 import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs';
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs';
+import type Token from 'markdown-it/lib/token.mjs';
 import mk from '@traptitech/markdown-it-katex';
 import taskLists from 'markdown-it-task-lists';
 import 'katex/dist/katex.min.css';
@@ -24,6 +26,146 @@ const INLINE_MATH_OPEN = '\\(';
 const INLINE_MATH_CLOSE = '\\)';
 const BLOCK_MATH_OPEN = '\\[';
 const BLOCK_MATH_CLOSE = '\\]';
+const CALLOUT_MARKER_RE = /^\s*\[!([A-Za-z][A-Za-z0-9_-]*)\]([+-])?(?:[ \t]+(.+?))?\s*$/;
+
+const CALLOUT_ALIASES: Record<string, string> = {
+  note: 'note',
+  abstract: 'abstract',
+  summary: 'abstract',
+  tldr: 'abstract',
+  info: 'info',
+  todo: 'todo',
+  tip: 'tip',
+  hint: 'tip',
+  important: 'tip',
+  success: 'success',
+  check: 'success',
+  done: 'success',
+  question: 'question',
+  help: 'question',
+  faq: 'question',
+  warning: 'warning',
+  caution: 'warning',
+  attention: 'warning',
+  failure: 'failure',
+  fail: 'failure',
+  missing: 'failure',
+  danger: 'danger',
+  error: 'danger',
+  bug: 'bug',
+  example: 'example',
+  quote: 'quote',
+  cite: 'quote',
+};
+
+function normalizeCalloutType(type: string): string {
+  return CALLOUT_ALIASES[type.toLowerCase()] || 'note';
+}
+
+function titleCaseCalloutType(type: string): string {
+  return type
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function findMatchingBlockquoteClose(tokens: Token[], openIndex: number): number {
+  let depth = 0;
+  for (let i = openIndex; i < tokens.length; i += 1) {
+    if (tokens[i].type === 'blockquote_open') depth += 1;
+    if (tokens[i].type === 'blockquote_close') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function findFirstDirectParagraph(tokens: Token[], openIndex: number, closeIndex: number): number {
+  const parentLevel = tokens[openIndex].level;
+  for (let i = openIndex + 1; i < closeIndex; i += 1) {
+    const token = tokens[i];
+    if (token.level !== parentLevel + 1) continue;
+    if (token.type === 'paragraph_open') return i;
+    if (!token.hidden) return -1;
+  }
+  return -1;
+}
+
+function makeCalloutTitleTokens(state: StateCore, title: string, foldable: boolean, level: number): Token[] {
+  const open = new state.Token(
+    foldable ? 'callout_summary_open' : 'callout_title_open',
+    foldable ? 'summary' : 'div',
+    1,
+  );
+  open.attrSet('class', 'markdown-callout-title');
+  open.level = level;
+
+  const inline = new state.Token('inline', '', 0);
+  inline.content = title;
+  inline.children = [];
+  inline.level = level + 1;
+
+  const close = new state.Token(
+    foldable ? 'callout_summary_close' : 'callout_title_close',
+    foldable ? 'summary' : 'div',
+    -1,
+  );
+  close.level = level;
+
+  return [open, inline, close];
+}
+
+function obsidianCallouts(md: MarkdownItInstance): void {
+  md.core.ruler.after('block', 'obsidian_callouts', (state: StateCore) => {
+    const tokens = state.tokens;
+
+    for (let i = 0; i < tokens.length; i += 1) {
+      const open = tokens[i];
+      if (open.type !== 'blockquote_open') continue;
+
+      const closeIndex = findMatchingBlockquoteClose(tokens, i);
+      if (closeIndex < 0) continue;
+
+      const paragraphIndex = findFirstDirectParagraph(tokens, i, closeIndex);
+      const inlineIndex = paragraphIndex + 1;
+      if (
+        paragraphIndex < 0 ||
+        tokens[paragraphIndex]?.type !== 'paragraph_open' ||
+        tokens[inlineIndex]?.type !== 'inline' ||
+        tokens[paragraphIndex + 2]?.type !== 'paragraph_close'
+      ) {
+        continue;
+      }
+
+      const inline = tokens[inlineIndex];
+      const lineEnd = inline.content.indexOf('\n');
+      const firstLine = lineEnd >= 0 ? inline.content.slice(0, lineEnd) : inline.content;
+      const match = CALLOUT_MARKER_RE.exec(firstLine);
+      if (!match) continue;
+
+      const sourceType = match[1];
+      const canonicalType = normalizeCalloutType(sourceType);
+      const foldMarker = match[2] || '';
+      const foldable = foldMarker === '+' || foldMarker === '-';
+      const title = (match[3]?.trim() || titleCaseCalloutType(sourceType));
+
+      open.tag = foldable ? 'details' : 'div';
+      open.attrSet('class', `markdown-callout markdown-callout-${canonicalType}`);
+      if (foldable && foldMarker === '+') open.attrSet('open', 'open');
+
+      const close = tokens[closeIndex];
+      close.tag = foldable ? 'details' : 'div';
+
+      tokens.splice(i + 1, 0, ...makeCalloutTitleTokens(state, title, foldable, open.level + 1));
+
+      if (lineEnd >= 0) {
+        inline.content = inline.content.slice(lineEnd + 1);
+      } else {
+        tokens.splice(paragraphIndex + 3, 3);
+      }
+    }
+  });
+}
 
 function normalizeSafeBackgroundColor(raw: string): string | null {
   const color = raw.trim();
@@ -186,6 +328,7 @@ function applyMarkdownPlugins(md: MarkdownItInstance): void {
   md.use(texBracketMath);
   md.use(taskLists, { enabled: false, label: true });
   md.use(obsidianHighlights);
+  md.use(obsidianCallouts);
   md.use(mermaidFences);
 }
 
@@ -237,19 +380,6 @@ export function getPreviewMd(): MarkdownItInstance {
   });
   applyMarkdownPlugins(_previewMd);
   return _previewMd;
-}
-
-const _cache = new Map<string, MarkdownItInstance>();
-
-/** 获取自定义选项的 md 实例（缓存复用） */
-export function getMdWithOpts(opts: Parameters<typeof markdownit>[0]): MarkdownItInstance {
-  const key = JSON.stringify(opts);
-  let inst = _cache.get(key);
-  if (!inst) {
-    inst = markdownit(opts);
-    _cache.set(key, inst);
-  }
-  return inst;
 }
 
 export function renderMarkdown(src: string): string {

@@ -1049,6 +1049,65 @@ html[data-platform="linux"] .tb-toggle-right {
     font-style: italic;
 }
 
+/* Callout：正文里的轻提示，和工具调用卡片保持视觉区分 */
+.md-content .markdown-callout {
+    --callout-rgb: var(--accent-rgb, 83, 125, 150);
+    margin: 0.65em 0;
+    padding: 0.55em 0.8em 0.6em 0.9em;
+    border-left: 2px solid rgba(var(--callout-rgb), 0.58);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: rgba(var(--callout-rgb), 0.055);
+    color: var(--text);
+    font-style: normal;
+}
+
+.md-content details.markdown-callout {
+    cursor: default;
+}
+
+.md-content .markdown-callout-title {
+    margin: 0 0 0.25em 0;
+    color: rgb(var(--callout-rgb));
+    font-size: 0.88em;
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.md-content summary.markdown-callout-title {
+    cursor: pointer;
+}
+
+.md-content .markdown-callout > :last-child {
+    margin-bottom: 0;
+}
+
+.md-content .markdown-callout-abstract,
+.md-content .markdown-callout-info,
+.md-content .markdown-callout-todo,
+.md-content .markdown-callout-question,
+.md-content .markdown-callout-example {
+    --callout-rgb: var(--accent-rgb, 83, 125, 150);
+}
+
+.md-content .markdown-callout-tip,
+.md-content .markdown-callout-success {
+    --callout-rgb: 92, 137, 106;
+}
+
+.md-content .markdown-callout-warning {
+    --callout-rgb: 166, 113, 57;
+}
+
+.md-content .markdown-callout-failure,
+.md-content .markdown-callout-danger,
+.md-content .markdown-callout-bug {
+    --callout-rgb: var(--coral-rgb, 139, 44, 31);
+}
+
+.md-content .markdown-callout-quote {
+    --callout-rgb: 116, 111, 104;
+}
+
 /* 列表 */
 .md-content ul, .md-content ol {
     padding-inline-start: 2em;
