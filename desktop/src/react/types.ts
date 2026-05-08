@@ -15,6 +15,14 @@ export interface AutoUpdateState {
   error: string | null;
 }
 
+export interface AutoLaunchStatus {
+  supported: boolean;
+  openAtLogin: boolean;
+  openedAtLogin: boolean;
+  status: string | null;
+  executableWillLaunchAtLogin?: boolean | null;
+}
+
 // ── 核心数据结构 ──
 
 export interface Session {
@@ -277,6 +285,8 @@ export interface PlatformApi {
   autoUpdateState?(): Promise<AutoUpdateState>;
   autoUpdateSetChannel?(channel: 'stable' | 'beta'): Promise<void>;
   onAutoUpdateState?(callback: (state: AutoUpdateState) => void): (() => void) | void;
+  getAutoLaunchStatus?(): Promise<AutoLaunchStatus>;
+  setAutoLaunchEnabled?(enabled: boolean): Promise<AutoLaunchStatus>;
 
   // ── Skill viewer overlay ──
   onShowSkillViewer?(callback: (data: unknown) => void): void;

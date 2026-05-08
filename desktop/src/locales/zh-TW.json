@@ -712,6 +712,7 @@
       "updateCheckBtn": "檢查更新",
       "updateNeedInstall": "請先將 Hanako 移動到應用程式資料夾",
       "updateDiskSpace": "磁碟空間不足，無法下載更新",
+      "launchAtLogin": "開機自啟",
       "betaUpdates": "接收測試版更新",
       "autoCheckUpdates": "自動檢查更新"
     },

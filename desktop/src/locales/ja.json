@@ -712,6 +712,7 @@
       "updateCheckBtn": "アップデートを確認",
       "updateNeedInstall": "先に Hanako をアプリケーションフォルダに移動してください",
       "updateDiskSpace": "ディスク容量不足のため、アップデートをダウンロードできません",
+      "launchAtLogin": "ログイン時に起動",
       "betaUpdates": "ベータ版アップデートを受け取る",
       "autoCheckUpdates": "アップデートを自動で確認"
     },

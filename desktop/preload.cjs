@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("hana", {
   autoUpdateInstall: () => ipcRenderer.invoke("auto-update-install"),
   autoUpdateState: () => ipcRenderer.invoke("auto-update-state"),
   autoUpdateSetChannel: (ch) => ipcRenderer.invoke("auto-update-set-channel", ch),
+  getAutoLaunchStatus: () => ipcRenderer.invoke("get-auto-launch-status"),
+  setAutoLaunchEnabled: (enabled) => ipcRenderer.invoke("set-auto-launch-enabled", enabled),
   onAutoUpdateState: (cb) => {
     const handler = (_, state) => cb(state);
     ipcRenderer.on("auto-update-state", handler);

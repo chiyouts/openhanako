@@ -717,6 +717,7 @@
       "updateCheckBtn": "Check for updates",
       "updateNeedInstall": "Please move Hanako to the Applications folder first",
       "updateDiskSpace": "Not enough disk space to download update",
+      "launchAtLogin": "Launch at login",
       "betaUpdates": "Receive beta updates",
       "autoCheckUpdates": "Check for updates automatically"
     },
