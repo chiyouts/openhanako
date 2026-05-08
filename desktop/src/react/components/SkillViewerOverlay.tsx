@@ -11,6 +11,7 @@ import { hanaFetch } from '../hooks/use-hana-fetch';
 
 import { renderMarkdownPreview } from '../utils/markdown';
 import { useMermaidDiagrams } from '../hooks/use-mermaid-diagrams';
+import { Overlay } from '../ui';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
@@ -123,8 +124,14 @@ export function SkillViewerOverlay() {
   }
 
   return (
-    <div className="sv-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div className="sv-container">
+    <Overlay
+      open
+      onClose={close}
+      backdrop="dim"
+      zIndex={2000}
+      className="sv-container"
+      disableContainerAnimation
+    >
         {/* 顶栏 */}
         <div className="sv-topbar">
           <button className="sv-close" onClick={close}>
@@ -176,8 +183,7 @@ export function SkillViewerOverlay() {
 
         {/* Toast */}
         {toast && <div className="sv-toast show">{toast}</div>}
-      </div>
-    </div>
+    </Overlay>
   );
 }
 
