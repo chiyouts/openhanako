@@ -3,6 +3,7 @@
  */
 import React, { useState } from 'react';
 import { t } from '../../helpers';
+import { SelectWidget } from '../../widgets/SelectWidget';
 import styles from '../../Settings.module.css';
 
 // ── Types ──
@@ -64,17 +65,15 @@ export function OwnerSelect({ platform, users, currentOwner, onChange }: OwnerSe
     <div className={`${styles['settings-form-field']} ${'bridge-owner-field'}`}>
       <label className={`${styles['settings-form-label']} ${'bridge-owner-label'}`}>{t('settings.bridge.ownerSelect')}</label>
       <p className="bridge-owner-warning">{t('settings.bridge.ownerWarning')}</p>
-      <select
-        className={`${styles['settings-input']} ${'bridge-owner-select'}`}
+      <SelectWidget
         value={currentOwner || ''}
-        onChange={(e) => handleChange(e.target.value)}
+        onChange={handleChange}
         disabled={users.length === 0}
-      >
-        <option value="">{users.length > 0 ? '—' : t('settings.bridge.ownerNone')}</option>
-        {users.map((u) => (
-          <option key={u.userId} value={u.userId}>{u.name || u.userId}</option>
-        ))}
-      </select>
+        options={[
+          { value: '', label: users.length > 0 ? '—' : t('settings.bridge.ownerNone') },
+          ...users.map((u) => ({ value: u.userId, label: u.name || u.userId })),
+        ]}
+      />
 
       {pendingUserId !== null && (
         <div className={`${styles['memory-confirm-overlay']} ${styles['visible']}`} onClick={(e) => { if (e.target === e.currentTarget) cancel(); }}>

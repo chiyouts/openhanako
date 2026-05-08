@@ -5,6 +5,7 @@ import { hanaFetch } from '../../api';
 import { invalidateConfigCache } from '../../../hooks/use-config';
 import { t } from '../../helpers';
 import { useAnchoredDropdown } from '../../hooks/useAnchoredDropdown';
+import { SelectWidget } from '../../widgets/SelectWidget';
 import styles from '../../Settings.module.css';
 
 interface Props {
@@ -200,64 +201,64 @@ export function MediaProviderDetail({ providerId, provider, config, onSaveConfig
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {t('settings.media.size')}
               </span>
-              <select
-                style={{ fontFamily: 'inherit', fontSize: '0.75rem', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+              <SelectWidget
                 value={defaults.size || ''}
-                onChange={(e) => updateDefault('size', e.target.value || undefined)}
-              >
-                <option value="2K">2K</option>
-                <option value="4K">4K</option>
-              </select>
+                onChange={(v) => updateDefault('size', v || undefined)}
+                options={[
+                  { value: '2K', label: '2K' },
+                  { value: '4K', label: '4K' },
+                ]}
+              />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {t('settings.media.aspectRatio')}
               </span>
-              <select
-                style={{ fontFamily: 'inherit', fontSize: '0.75rem', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+              <SelectWidget
                 value={defaults.aspect_ratio || ''}
-                onChange={(e) => updateDefault('aspect_ratio', e.target.value || undefined)}
-              >
-                <option value="">默认</option>
-                <option value="1:1">1:1</option>
-                <option value="4:3">4:3</option>
-                <option value="3:4">3:4</option>
-                <option value="16:9">16:9</option>
-                <option value="9:16">9:16</option>
-                <option value="3:2">3:2</option>
-                <option value="2:3">2:3</option>
-                <option value="21:9">21:9</option>
-              </select>
+                onChange={(v) => updateDefault('aspect_ratio', v || undefined)}
+                options={[
+                  { value: '',     label: '默认' },
+                  { value: '1:1',  label: '1:1' },
+                  { value: '4:3',  label: '4:3' },
+                  { value: '3:4',  label: '3:4' },
+                  { value: '16:9', label: '16:9' },
+                  { value: '9:16', label: '9:16' },
+                  { value: '3:2',  label: '3:2' },
+                  { value: '2:3',  label: '2:3' },
+                  { value: '21:9', label: '21:9' },
+                ]}
+              />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {t('settings.media.format')}
               </span>
-              <select
-                style={{ fontFamily: 'inherit', fontSize: '0.75rem', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+              <SelectWidget
                 value={defaults.format || ''}
-                onChange={(e) => updateDefault('format', e.target.value || undefined)}
-              >
-                <option value="">默认</option>
-                <option value="png">PNG</option>
-                <option value="jpeg">JPEG</option>
-                <option value="webp">WebP</option>
-              </select>
+                onChange={(v) => updateDefault('format', v || undefined)}
+                options={[
+                  { value: '',     label: '默认' },
+                  { value: 'png',  label: 'PNG' },
+                  { value: 'jpeg', label: 'JPEG' },
+                  { value: 'webp', label: 'WebP' },
+                ]}
+              />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {t('settings.media.quality')}
               </span>
-              <select
-                style={{ fontFamily: 'inherit', fontSize: '0.75rem', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+              <SelectWidget
                 value={defaults.quality || ''}
-                onChange={(e) => updateDefault('quality', e.target.value || undefined)}
-              >
-                <option value="">默认</option>
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
-              </select>
+                onChange={(v) => updateDefault('quality', v || undefined)}
+                options={[
+                  { value: '',       label: '默认' },
+                  { value: 'low',    label: '低' },
+                  { value: 'medium', label: '中' },
+                  { value: 'high',   label: '高' },
+                ]}
+              />
             </div>
           </div>
         </div>

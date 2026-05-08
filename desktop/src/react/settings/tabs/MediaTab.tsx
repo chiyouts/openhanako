@@ -5,6 +5,7 @@ import { t } from '../helpers';
 import { MediaProviderDetail } from './media/MediaProviderDetail';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
+import { SelectWidget } from '../widgets/SelectWidget';
 import styles from '../Settings.module.css';
 
 interface MediaProvider {
@@ -134,11 +135,9 @@ export function MediaTab() {
         <SettingsRow
           label={t('settings.media.defaultModel')}
           control={
-            <select
-              className={styles['settings-select']}
+            <SelectWidget
               value={config.defaultImageModel ? `${config.defaultImageModel.provider}/${config.defaultImageModel.id}` : ''}
-              onChange={(e) => {
-                const val = e.target.value;
+              onChange={(val) => {
                 if (!val) {
                   saveConfig({ defaultImageModel: undefined });
                   return;
@@ -146,14 +145,14 @@ export function MediaTab() {
                 const [provider, ...rest] = val.split('/');
                 saveConfig({ defaultImageModel: { id: rest.join('/'), provider } });
               }}
-            >
-              <option value="">—</option>
-              {allImageModels.map(m => (
-                <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-                  {m.provider} / {m.name || m.id}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: '—' },
+                ...allImageModels.map(m => ({
+                  value: `${m.provider}/${m.id}`,
+                  label: `${m.provider} / ${m.name || m.id}`,
+                })),
+              ]}
+            />
           }
         />
       </SettingsSection>

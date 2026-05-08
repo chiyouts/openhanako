@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { t } from '../../helpers';
 import styles from '../../Settings.module.css';
+import { SelectWidget } from '../../widgets/SelectWidget';
 import { parseKeyValueLines, serializeKeyValueLines } from './mcp-config';
 import type { McpAuthType, McpConnector, McpConnectorInput, McpTransport } from './types';
 
@@ -131,14 +132,14 @@ export function ConnectorForm({
         </div>
         <div className={fieldHalfClass}>
           <label className={styles['settings-form-label']}>{t('settings.mcp.connectorMode')}</label>
-          <select
-            className={styles['settings-select']}
+          <SelectWidget
             value={form.mode}
-            onChange={(e) => setForm({ ...form, mode: e.target.value as FormMode })}
-          >
-            <option value="remote">{t('settings.mcp.modeRemote')}</option>
-            <option value="local">{t('settings.mcp.modeLocal')}</option>
-          </select>
+            onChange={(v) => setForm({ ...form, mode: v as FormMode })}
+            options={[
+              { value: 'remote', label: t('settings.mcp.modeRemote') },
+              { value: 'local',  label: t('settings.mcp.modeLocal') },
+            ]}
+          />
         </div>
       </div>
       <div className={fieldFullClass}>
@@ -165,29 +166,29 @@ export function ConnectorForm({
             </div>
             <div className={fieldHalfClass}>
               <label className={styles['settings-form-label']}>{t('settings.mcp.transport')}</label>
-              <select
-                className={styles['settings-select']}
+              <SelectWidget
                 value={form.transport}
-                onChange={(e) => setForm({ ...form, transport: e.target.value as McpTransport })}
-              >
-                <option value="remote">{t('settings.mcp.transportAuto')}</option>
-                <option value="streamable-http">{t('settings.mcp.transportStreamable')}</option>
-                <option value="sse">{t('settings.mcp.transportSse')}</option>
-              </select>
+                onChange={(v) => setForm({ ...form, transport: v as McpTransport })}
+                options={[
+                  { value: 'remote',          label: t('settings.mcp.transportAuto') },
+                  { value: 'streamable-http', label: t('settings.mcp.transportStreamable') },
+                  { value: 'sse',             label: t('settings.mcp.transportSse') },
+                ]}
+              />
             </div>
           </div>
           <div className={styles['settings-form-grid']}>
             <div className={fieldHalfClass}>
               <label className={styles['settings-form-label']}>{t('settings.mcp.authType')}</label>
-              <select
-                className={styles['settings-select']}
+              <SelectWidget
                 value={form.authType}
-                onChange={(e) => setForm({ ...form, authType: e.target.value as McpAuthType })}
-              >
-                <option value="none">{t('settings.mcp.authNone')}</option>
-                <option value="bearer">{t('settings.mcp.authBearer')}</option>
-                <option value="oauth">{t('settings.mcp.authOAuth')}</option>
-              </select>
+                onChange={(v) => setForm({ ...form, authType: v as McpAuthType })}
+                options={[
+                  { value: 'none',   label: t('settings.mcp.authNone') },
+                  { value: 'bearer', label: t('settings.mcp.authBearer') },
+                  { value: 'oauth',  label: t('settings.mcp.authOAuth') },
+                ]}
+              />
             </div>
             {form.authType === 'bearer' && (
               <div className={fieldHalfClass}>

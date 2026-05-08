@@ -4,6 +4,7 @@ import { autoSaveConfig, t } from '../helpers';
 import { hanaFetch } from '../api';
 import { loadSettingsConfig } from '../actions';
 import { Toggle } from '../widgets/Toggle';
+import { SelectWidget } from '../widgets/SelectWidget';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
 import { ExpandableRow } from '../components/ExpandableRow';
@@ -49,15 +50,15 @@ export function SecurityTab() {
     await loadSettingsConfig();
   }, []);
 
-  const handleRetentionChange = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const days = parseInt(e.target.value, 10);
+  const handleRetentionChange = useCallback(async (value: string) => {
+    const days = parseInt(value, 10);
     const current = useSettingsStore.getState().settingsConfig?.file_backup || {};
     await autoSaveConfig({ file_backup: { ...current, retention_days: days } }, { silent: true });
     await loadSettingsConfig();
   }, []);
 
-  const handleMaxSizeChange = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const kb = parseInt(e.target.value, 10);
+  const handleMaxSizeChange = useCallback(async (value: string) => {
+    const kb = parseInt(value, 10);
     const current = useSettingsStore.getState().settingsConfig?.file_backup || {};
     await autoSaveConfig({ file_backup: { ...current, max_file_size_kb: kb } }, { silent: true });
     await loadSettingsConfig();
@@ -128,30 +129,22 @@ export function SecurityTab() {
             <SettingsRow
               label={t('settings.security.retention')}
               control={
-                <select
-                  className={styles['settings-select']}
-                  value={fileBackup.retention_days}
+                <SelectWidget
+                  value={String(fileBackup.retention_days)}
                   onChange={handleRetentionChange}
-                >
-                  {RETENTION_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{t(opt.key)}</option>
-                  ))}
-                </select>
+                  options={RETENTION_OPTIONS.map(opt => ({ value: String(opt.value), label: t(opt.key) }))}
+                />
               }
             />
 
             <SettingsRow
               label={t('settings.security.maxFileSize')}
               control={
-                <select
-                  className={styles['settings-select']}
-                  value={fileBackup.max_file_size_kb}
+                <SelectWidget
+                  value={String(fileBackup.max_file_size_kb)}
                   onChange={handleMaxSizeChange}
-                >
-                  {SIZE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                  options={SIZE_OPTIONS.map(opt => ({ value: String(opt.value), label: opt.label }))}
+                />
               }
             />
 
