@@ -648,6 +648,7 @@ export class Agent {
 
   _isComputerUseAvailableForThisAgent() {
     const engine = this._cb?.getEngine?.();
+    if (engine?.isComputerUseSupported?.() === false) return false;
     const settings = engine?.getComputerUseSettings?.();
     if (settings?.enabled !== true) return false;
     const primaryAgentId = engine?.getPrimaryAgentId?.() || null;

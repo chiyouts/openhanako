@@ -90,6 +90,10 @@ import { ComputerProviderRegistry } from "./computer-use/provider-registry.js";
 import { createMockComputerProvider } from "./computer-use/providers/mock-provider.js";
 import { createMacosCuaProvider } from "./computer-use/providers/macos-cua-provider.js";
 import { createWindowsUiaProvider } from "./computer-use/providers/windows-uia-provider.js";
+import {
+  effectiveComputerUseSettings,
+  isComputerUsePlatformSupported,
+} from "./computer-use/platform-support.js";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.js";
 import {
   getSkillNameTranslationCachePath,
@@ -524,6 +528,9 @@ export class HanaEngine {
   isVisionAuxiliaryEnabled() { return this.getSharedModels()?.vision_enabled === true; }
   getVisionBridge() { return this._visionBridge; }
   _ensureComputerRuntime() {
+    if (!this.isComputerUseSupported()) {
+      throw new Error("Computer Use is not supported on this platform.");
+    }
     if (!this._computerProviders || !this._computerHost) {
       this._computerProviders = new ComputerProviderRegistry();
       this._computerProviders.register(createMockComputerProvider({ providerId: "mock" }));
@@ -541,11 +548,18 @@ export class HanaEngine {
   }
   getComputerHost() { return this._ensureComputerRuntime().host; }
   getComputerProviders() { return this._ensureComputerRuntime().providers; }
-  getComputerUseSettings() { return this._prefs.getComputerUseSettings(); }
+  isComputerUseSupported(platform = process.platform) { return isComputerUsePlatformSupported(platform); }
+  getComputerUseSettings() {
+    return effectiveComputerUseSettings(this._prefs.getComputerUseSettings(), { platform: process.platform });
+  }
   setComputerUseSettings(partial) {
+    if (!this.isComputerUseSupported() && partial?.enabled === true) {
+      throw new Error("Computer Use is not supported on this platform.");
+    }
     const settings = this._prefs.setComputerUseSettings(partial);
-    if (settings.enabled === true) this._ensureComputerRuntime();
-    return settings;
+    const effectiveSettings = effectiveComputerUseSettings(settings, { platform: process.platform });
+    if (effectiveSettings.enabled === true) this._ensureComputerRuntime();
+    return effectiveSettings;
   }
   approveComputerUseApp(approval) { return this._prefs.approveComputerUseApp(approval); }
   revokeComputerUseApp(approval) { return this._prefs.revokeComputerUseApp(approval); }

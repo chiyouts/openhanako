@@ -74,6 +74,7 @@ export interface SettingsState {
 
   // ui
   activeTab: string;
+  platformName: string | null;
   ready: boolean;
 
   // pins
@@ -127,6 +128,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
 
   // ui
   activeTab: 'agent',
+  platformName: null,
   ready: false,
 
   // pins

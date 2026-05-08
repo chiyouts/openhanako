@@ -38,7 +38,18 @@ function titleToLabel(title: PluginSettingsTab['title']): string {
   return title[locale] || title[locale.split('-')[0]] || title.zh || title.en || Object.values(title)[0] || '';
 }
 
-function buildNavItems(pluginSettingsTabs: PluginSettingsTab[]) {
+function supportsComputerUseTab(platformName: string | null | undefined) {
+  return platformName !== 'linux';
+}
+
+function nativeTabItemsForPlatform(platformName: string | null | undefined) {
+  return supportsComputerUseTab(platformName)
+    ? TAB_ITEMS
+    : TAB_ITEMS.filter(item => item.id !== 'computer');
+}
+
+function buildNavItems(pluginSettingsTabs: PluginSettingsTab[], platformName?: string | null) {
+  const tabItems = nativeTabItemsForPlatform(platformName);
   const nativeTabs = pluginSettingsTabs
     .filter(tab => getNativeSettingsTabComponent(tab.nativeComponent))
     .map(tab => ({
@@ -46,9 +57,9 @@ function buildNavItems(pluginSettingsTabs: PluginSettingsTab[]) {
       label: titleToLabel(tab.title),
       d: tab.icon || FALLBACK_PLUGIN_ICON,
     }));
-  if (nativeTabs.length === 0) return TAB_ITEMS.map(item => ({ ...item, label: t(item.key) }));
+  if (nativeTabs.length === 0) return tabItems.map(item => ({ ...item, label: t(item.key) }));
 
-  const items = TAB_ITEMS.map(item => ({ ...item, label: t(item.key) }));
+  const items = tabItems.map(item => ({ ...item, label: t(item.key) }));
   const skillIndex = items.findIndex(item => item.id === 'skills');
   const insertAt = skillIndex === -1 ? items.length : skillIndex + 1;
   return [
@@ -59,8 +70,8 @@ function buildNavItems(pluginSettingsTabs: PluginSettingsTab[]) {
 }
 
 export function SettingsNav({ onTabChange }: SettingsNavProps) {
-  const { activeTab, pluginSettingsTabs, set } = useSettingsStore();
-  const navItems = buildNavItems(pluginSettingsTabs || []);
+  const { activeTab, platformName, pluginSettingsTabs, set } = useSettingsStore();
+  const navItems = buildNavItems(pluginSettingsTabs || [], platformName);
 
   return (
     <nav className={styles['settings-nav']}>

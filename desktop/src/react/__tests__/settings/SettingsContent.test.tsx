@@ -137,6 +137,16 @@ describe('SettingsContent title placement', () => {
     expect(onActiveTabChange).toHaveBeenCalledWith('computer');
   });
 
+  it('hides the Computer Use tab on Linux and redirects stale computer tabs', async () => {
+    mockState.activeTab = 'computer';
+    mockState.platformName = 'linux';
+    const { SettingsContent } = await import('../../settings/SettingsContent');
+    render(<SettingsContent variant="modal" onClose={() => {}} />);
+
+    expect(screen.queryByRole('button', { name: 'settings.tabs.computer' })).not.toBeInTheDocument();
+    expect(mockState.set).toHaveBeenCalledWith({ activeTab: 'agent' });
+  });
+
   it('keeps activeServerConnection in sync when the settings window hears server restart', async () => {
     let restartHandler: ((data: { port: number }) => void) | null = null;
     window.platform = {

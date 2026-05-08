@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { createPreferencesRoute } from "../server/routes/preferences.js";
 
-function makeApp(engine) {
+function makeApp(engine, options = {}) {
   const app = new Hono();
-  app.route("/api", createPreferencesRoute(engine));
+  app.route("/api", createPreferencesRoute(engine, options));
   return app;
 }
 
@@ -125,6 +125,37 @@ describe("Computer Use preference routes", () => {
     expect(res.status).toBe(200);
     expect(body.result.providerId).toBe("mock");
     expect(engine.computerHost.requestPermissions).toHaveBeenCalledWith({}, "mock");
+  });
+
+  it("keeps Computer Use unavailable on Linux even if stored settings were enabled", async () => {
+    const engine = makeEngine();
+    const app = makeApp(engine, { platform: "linux" });
+
+    const res = await app.request("/api/preferences/computer-use");
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(engine.getComputerHost).not.toHaveBeenCalled();
+    expect(body.settings.enabled).toBe(false);
+    expect(body.status).toMatchObject({
+      enabled: false,
+      platform: "linux",
+      supported: false,
+      providers: [],
+      activeLease: null,
+    });
+    expect(body.selectedProviderId).toBeNull();
+
+    const put = await app.request("/api/preferences/computer-use", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    const putBody = await put.json();
+
+    expect(put.status).toBe(400);
+    expect(putBody.error).toMatch(/not supported/i);
+    expect(engine.setComputerUseSettings).not.toHaveBeenCalled();
   });
 
 });

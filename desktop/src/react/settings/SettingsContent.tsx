@@ -65,6 +65,10 @@ const TAB_TITLES: Record<string, string> = {
   about: '关于',
 };
 
+function normalizeNativeTabForPlatform(tab: string, platformName: string | null | undefined): string {
+  return platformName === 'linux' && tab === 'computer' ? 'agent' : tab;
+}
+
 function titleToLabel(title: string | Record<string, string> | undefined): string {
   if (!title) return '';
   if (typeof title === 'string') return title;
@@ -85,7 +89,7 @@ export function SettingsContent({
   onActiveTabChange,
   listenToWindowTabSwitch = false,
 }: SettingsContentProps) {
-  const { activeTab, pluginSettingsTabs, set, ready } = useSettingsStore();
+  const { activeTab, platformName, pluginSettingsTabs, set, ready } = useSettingsStore();
 
   useEffect(() => {
     initSettings();
@@ -96,10 +100,16 @@ export function SettingsContent({
     const platform = window.platform;
     if (!platform?.onSwitchTab) return;
     const unsubscribe = platform.onSwitchTab((tab: string) => {
-      set({ activeTab: tab });
+      const nextTab = normalizeNativeTabForPlatform(tab, useSettingsStore.getState().platformName);
+      set({ activeTab: nextTab });
     });
     return typeof unsubscribe === 'function' ? unsubscribe : undefined;
   }, [listenToWindowTabSwitch, set]);
+
+  useEffect(() => {
+    const nextTab = normalizeNativeTabForPlatform(activeTab, platformName);
+    if (nextTab !== activeTab) set({ activeTab: nextTab });
+  }, [activeTab, platformName, set]);
 
   // Server 重启后用新端口重新加载数据
   useEffect(() => {
@@ -122,12 +132,13 @@ export function SettingsContent({
   }, []);
 
   const availablePluginSettingsTabs = pluginSettingsTabs || [];
-  const dynamicTab = availablePluginSettingsTabs.find(tab => tab.id === activeTab);
-  const ActiveTab = TAB_COMPONENTS[activeTab]
+  const effectiveActiveTab = normalizeNativeTabForPlatform(activeTab, platformName);
+  const dynamicTab = availablePluginSettingsTabs.find(tab => tab.id === effectiveActiveTab);
+  const ActiveTab = TAB_COMPONENTS[effectiveActiveTab]
     || (dynamicTab ? getNativeSettingsTabComponent(dynamicTab.nativeComponent) : null)
     || AgentTab;
   const isModal = variant === 'modal';
-  const activeTabTitle = TAB_TITLES[activeTab] || titleToLabel(dynamicTab?.title);
+  const activeTabTitle = TAB_TITLES[effectiveActiveTab] || titleToLabel(dynamicTab?.title);
 
   return (
     <ErrorBoundary region="settings">
@@ -161,7 +172,7 @@ export function SettingsContent({
             {!isModal && (
               <h1 className={styles['settings-tab-title']}>{activeTabTitle}</h1>
             )}
-            <ErrorBoundary region={activeTab}>
+            <ErrorBoundary region={effectiveActiveTab}>
               <ActiveTab />
             </ErrorBoundary>
           </div>
@@ -206,9 +217,16 @@ async function initSettings() {
   try {
     const serverPort = Number(await platform.getServerPort());
     const serverToken = await platform.getServerToken();
+    let platformName: string | null = null;
+    try {
+      platformName = typeof platform.getPlatform === 'function' ? await platform.getPlatform() : null;
+    } catch {
+      platformName = null;
+    }
     store.set({
       serverPort,
       serverToken,
+      platformName,
       activeServerConnection: createLocalServerConnection({ serverPort, serverToken }),
     });
 

@@ -21,22 +21,28 @@ import {
   sharedModelsPatchRequiresModelSync,
 } from "../../core/config-coordinator.js";
 import { modelSupportsImage } from "../../core/message-sanitizer.js";
+import {
+  effectiveComputerUseSettings,
+  isComputerUsePlatformSupported,
+  selectedComputerProviderId,
+} from "../../core/computer-use/platform-support.js";
 
-function selectedComputerProviderIdFromSettings(settings) {
-  return settings?.provider_by_platform?.[process.platform] || null;
+function selectedComputerProviderIdFromSettings(settings, platform = process.platform) {
+  return selectedComputerProviderId(settings, { platform });
 }
 
-function disabledComputerUseStatus(settings) {
+function disabledComputerUseStatus(settings, { platform = process.platform } = {}) {
   return {
     enabled: false,
-    platform: process.platform,
-    selectedProviderId: selectedComputerProviderIdFromSettings(settings),
+    platform,
+    supported: isComputerUsePlatformSupported(platform),
+    selectedProviderId: selectedComputerProviderIdFromSettings(settings, platform),
     providers: [],
     activeLease: null,
   };
 }
 
-export function createPreferencesRoute(engine) {
+export function createPreferencesRoute(engine, { platform = process.platform } = {}) {
   const route = new Hono();
 
   // 读取全局模型 + 搜索配置
@@ -157,9 +163,9 @@ export function createPreferencesRoute(engine) {
 
   route.get("/preferences/computer-use", async (c) => {
     try {
-      const settings = engine.getComputerUseSettings();
+      const settings = effectiveComputerUseSettings(engine.getComputerUseSettings(), { platform });
       if (settings?.enabled !== true) {
-        const status = disabledComputerUseStatus(settings);
+        const status = disabledComputerUseStatus(settings, { platform });
         return c.json({
           settings,
           status,
@@ -170,7 +176,7 @@ export function createPreferencesRoute(engine) {
       return c.json({
         settings,
         status,
-        selectedProviderId: status?.selectedProviderId || selectedComputerProviderIdFromSettings(settings),
+        selectedProviderId: status?.selectedProviderId || selectedComputerProviderIdFromSettings(settings, platform),
       });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -179,13 +185,16 @@ export function createPreferencesRoute(engine) {
 
   route.put("/preferences/computer-use", async (c) => {
     try {
+      if (!isComputerUsePlatformSupported(platform)) {
+        return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
+      }
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
         return c.json({ error: "invalid JSON body" }, 400);
       }
       const settings = engine.setComputerUseSettings(body.settings && typeof body.settings === "object" ? body.settings : body);
       debugLog()?.log("api", "PUT /api/preferences/computer-use");
-      emitAppEvent(engine, "computer-use-settings-changed", { selectedProviderId: settings.provider_by_platform?.[process.platform] || null });
+      emitAppEvent(engine, "computer-use-settings-changed", { selectedProviderId: selectedComputerProviderIdFromSettings(settings, platform) });
       return c.json({ ok: true, settings });
     } catch (err) {
       return c.json({ error: err.message }, 400);
@@ -194,6 +203,9 @@ export function createPreferencesRoute(engine) {
 
   route.post("/preferences/computer-use/request-permissions", async (c) => {
     try {
+      if (!isComputerUsePlatformSupported(platform)) {
+        return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
+      }
       const body = await safeJson(c);
       const providerId = body && typeof body === "object" ? body.providerId || null : null;
       const result = await engine.getComputerHost?.()?.requestPermissions?.({}, providerId);
@@ -206,6 +218,9 @@ export function createPreferencesRoute(engine) {
 
   route.post("/preferences/computer-use/approvals", async (c) => {
     try {
+      if (!isComputerUsePlatformSupported(platform)) {
+        return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
+      }
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
         return c.json({ error: "invalid JSON body" }, 400);
@@ -220,6 +235,9 @@ export function createPreferencesRoute(engine) {
 
   route.delete("/preferences/computer-use/approvals", async (c) => {
     try {
+      if (!isComputerUsePlatformSupported(platform)) {
+        return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
+      }
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
         return c.json({ error: "invalid JSON body" }, 400);
