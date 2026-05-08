@@ -125,7 +125,7 @@ Pi SDK 的 `streamSimple` 会在调用方未传 `maxTokens` 时，把 `min(model
 | 文件 | 处理 provider | 删除条件 |
 |---|---|---|
 | [`deepseek.js`](deepseek.js) | DeepSeek 思考模式协议（含 reasoning_content 恢复/校验） | DeepSeek 不再要求回传 reasoning_content；或 pi-ai 直接处理 reasoning_content 字段不再走 thinkingSignature 路标 |
-| [`qwen.js`](qwen.js) | Qwen-style 思考模型 `enable_thinking` quirk（utility mode 关思考；覆盖 dashscope / dashscope-coding / siliconflow / modelscope / infini） | quirks 系统重构 / Qwen-style 协议改成 reasoning_effort |
+| [`qwen.js`](qwen.js) | Qwen-style 思考模型 `enable_thinking` quirk；DashScope 视频输入 `video_url` 兼容 | quirks 系统重构 / Qwen-style 协议改成 reasoning_effort；DashScope 和 Pi SDK 原生支持 video_url |
 
 子模块的对外 API 仅有 `matches` 和 `apply` 两个 export。其它 export（如 `deepseek.js` 的 `extractReasoningFromContent`、`ensureReasoningContentForToolCalls`）属于实现细节、仅供同文件和单元测试访问，**不构成对外契约**。升级 SDK 想删 helper 时不需顾虑外部依赖。
 

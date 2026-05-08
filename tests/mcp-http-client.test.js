@@ -86,6 +86,45 @@ describe("MCP HTTP clients", () => {
     expect(headerValue(requests[2].init.headers, "MCP-Session-Id")).toBe("session-a");
   });
 
+  it("sends custom connector headers while preserving protocol headers", async () => {
+    const requests = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      const body = requestBody(init);
+      requests.push({ url: String(url), init, body });
+      if (body?.method === "initialize") {
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {} },
+        });
+      }
+      if (body?.method === "notifications/initialized") return emptyResponse();
+      return jsonResponse({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { tools: [] },
+      });
+    });
+
+    const client = new McpStreamableHttpClient({
+      id: "private",
+      url: "https://mcp.example.com/mcp",
+      headers: {
+        Accept: "text/plain",
+        "X-API-Key": "key-123",
+        Authorization: "Bearer header-token",
+      },
+    }, { fetchImpl });
+
+    await client.start();
+    await client.listTools();
+
+    expect(headerValue(requests[0].init.headers, "Accept")).toBe("application/json, text/event-stream");
+    expect(headerValue(requests[0].init.headers, "Content-Type")).toBe("application/json");
+    expect(headerValue(requests[0].init.headers, "X-API-Key")).toBe("key-123");
+    expect(headerValue(requests[0].init.headers, "Authorization")).toBe("Bearer header-token");
+  });
+
   it("reinitializes once when a Streamable HTTP session expires", async () => {
     const requests = [];
     let initializeCount = 0;

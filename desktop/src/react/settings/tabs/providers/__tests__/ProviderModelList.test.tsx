@@ -111,12 +111,13 @@ describe('ProviderModelList', () => {
     });
   });
 
-  it('shows image and reasoning capability icons after the added model id', () => {
+  it('shows image, video and reasoning capability icons after the added model id', () => {
     mocks.lookupModelMeta.mockImplementation((id: unknown, provider: unknown) => {
       if (id === 'doubao-seed-2-0-lite-260428' && provider === 'volcengine') {
         return {
           name: 'Doubao Seed 2.0 Lite',
           image: true,
+          video: true,
           reasoning: true,
           context: 256000,
         };
@@ -147,6 +148,7 @@ describe('ProviderModelList', () => {
 
     const id = screen.getByText('doubao-seed-2-0-lite-260428');
     expect(id.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.image');
-    expect(id.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.reasoning');
+    expect(id.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.video');
+    expect(id.nextElementSibling?.nextElementSibling?.nextElementSibling).toHaveAttribute('title', 'settings.api.capability.reasoning');
   });
 });

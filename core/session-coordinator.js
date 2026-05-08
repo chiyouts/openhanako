@@ -48,6 +48,28 @@ function getSteerPrefix() {
   const isZh = getLocale().startsWith("zh");
   return isZh ? "（插话，无需 MOOD）\n" : "(Interjection, no MOOD needed)\n";
 }
+
+function assertVideoInputSupported(model, videos) {
+  if (!videos?.length) return;
+  const input = model?.input;
+  if (!Array.isArray(input) || !input.includes("video")) {
+    throw new Error("current model does not support video input");
+  }
+}
+
+function buildPromptMediaOptions(opts) {
+  const media = [
+    ...(opts?.images || []),
+    ...(opts?.videos || []),
+  ];
+  if (!media.length) return undefined;
+  return {
+    images: media,
+    ...(opts.imageAttachmentPaths?.length ? { imageAttachmentPaths: opts.imageAttachmentPaths } : {}),
+    ...(opts.videoAttachmentPaths?.length ? { videoAttachmentPaths: opts.videoAttachmentPaths } : {}),
+  };
+}
+
 const MAX_CACHED_SESSIONS = 20;
 const SESSION_PROMPT_SNAPSHOT_VERSION = 1;
 
@@ -813,7 +835,8 @@ export class SessionCoordinator {
       text = prepared.text;
       opts = { ...opts, images: prepared.images };
     }
-    const promptOpts = opts?.images?.length ? { images: opts.images } : undefined;
+    assertVideoInputSupported(this._session.model, opts?.videos);
+    const promptOpts = buildPromptMediaOptions(opts);
     await this._session.prompt(text, promptOpts);
     if (sp) {
       const entry = this._sessions.get(sp);
@@ -876,7 +899,8 @@ export class SessionCoordinator {
       text = prepared.text;
       opts = { ...opts, images: prepared.images };
     }
-    const promptOpts = opts?.images?.length ? { images: opts.images } : undefined;
+    assertVideoInputSupported(entry.session.model, opts?.videos);
+    const promptOpts = buildPromptMediaOptions(opts);
     await entry.session.prompt(text, promptOpts);
     const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
     agent?._memoryTicker?.notifyTurn(sessionPath);

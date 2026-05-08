@@ -163,7 +163,7 @@ export class ProviderRegistry {
    */
   migrateOverridesToAddedModels(agentsDir, log = () => {}) {
     // 能力字段白名单：image 是新标准名；vision 是旧名，读到时转写为 image
-    const CAPABILITY_KEYS = ["context", "maxOutput", "image", "reasoning"];
+    const CAPABILITY_KEYS = ["context", "maxOutput", "image", "video", "reasoning"];
     const userConfig = this._loadAddedModels();
     let changed = false;
 
@@ -611,7 +611,7 @@ export class ProviderRegistry {
    * 裸字符串条目会被升级为对象
    * @param {string} providerId
    * @param {string} modelId
-   * @param {{ name?: string, context?: number, maxOutput?: number, image?: boolean, reasoning?: boolean }} meta
+   * @param {{ name?: string, context?: number, maxOutput?: number, image?: boolean, video?: boolean, reasoning?: boolean }} meta
    */
   updateModelEntry(providerId, modelId, meta) {
     const userConfig = this._loadAddedModels();
@@ -627,7 +627,7 @@ export class ProviderRegistry {
     }
 
     // 白名单：只允许模型能力字段（image 是标准名，vision 为旧名不写入）
-    const ALLOWED = ["name", "context", "maxOutput", "image", "reasoning", "type"];
+    const ALLOWED = ["name", "context", "maxOutput", "image", "video", "reasoning", "type"];
     const safe = {};
     for (const key of ALLOWED) {
       if (meta[key] !== undefined) safe[key] = meta[key];

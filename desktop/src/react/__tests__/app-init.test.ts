@@ -168,6 +168,17 @@ describe('initApp bridge indicator', () => {
     const { initApp } = await import('../app-init');
     await initApp();
 
+    expect(mockState.activeServerConnection).toEqual({
+      serverId: 'local',
+      spaceId: 'local',
+      label: 'Local Hana',
+      baseUrl: 'http://127.0.0.1:62950',
+      wsUrl: 'ws://127.0.0.1:62950',
+      token: 'token',
+      authState: 'paired',
+      trustState: 'local',
+      capabilities: ['chat', 'resources', 'tools'],
+    });
     expect(mockState.bridgeDotConnected).toBe(true);
   });
 

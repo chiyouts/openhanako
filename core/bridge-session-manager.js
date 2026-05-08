@@ -25,6 +25,27 @@ function getSteerPrefix() {
   return isZh ? "（插话，无需 MOOD）\n" : "(Interjection, no MOOD needed)\n";
 }
 
+function assertVideoInputSupported(model, videos) {
+  if (!videos?.length) return;
+  const input = model?.input;
+  if (!Array.isArray(input) || !input.includes("video")) {
+    throw new Error("current model does not support video input");
+  }
+}
+
+function buildPromptMediaOptions(opts) {
+  const media = [
+    ...(opts?.images || []),
+    ...(opts?.videos || []),
+  ];
+  if (!media.length) return undefined;
+  return {
+    images: media,
+    ...(opts.imageAttachmentPaths?.length ? { imageAttachmentPaths: opts.imageAttachmentPaths } : {}),
+    ...(opts.videoAttachmentPaths?.length ? { videoAttachmentPaths: opts.videoAttachmentPaths } : {}),
+  };
+}
+
 function withVisionExtension(resourceLoader, getBridge, getSessionPath, isEnabled, warn, resolveSessionFile) {
   return Object.create(resourceLoader, {
     getExtensions: {
@@ -409,9 +430,8 @@ export class BridgeSessionManager {
           promptText = prepared.text;
           opts = { ...opts, images: prepared.images };
         }
-        const promptOpts = opts.images?.length
-          ? { images: opts.images, ...(opts.imageAttachmentPaths?.length ? { imageAttachmentPaths: opts.imageAttachmentPaths } : {}) }
-          : undefined;
+        assertVideoInputSupported(session.model, opts?.videos);
+        const promptOpts = buildPromptMediaOptions(opts);
         await session.prompt(promptText, promptOpts);
       } finally {
         await teardownSessionResources({

@@ -21,6 +21,7 @@ const { readTextFileSnapshot, writeTextFileIfUnchanged } = require("./file-text-
 const { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 const themeRegistry = require('./src/shared/theme-registry.cjs');
 const { resolveTrashItemPath } = require("./src/shared/trash-item-path.cjs");
+const { redactLogText } = require("../shared/log-redactor.cjs");
 const {
   configureClientSingleInstance,
   focusExistingWindow,
@@ -45,7 +46,7 @@ const APP_USER_MODEL_ID = "com.hanako.app"; // Keep in sync with package.json bu
   if (!fs.existsSync(preloadPath)) {
     const msg = `Missing preload bundle:\n${preloadPath}\n\nBuild is incomplete. Run 'npm run build:preload' or rebuild the installer.`;
     try { dialog.showErrorBox("Hanako failed to start", msg); } catch {}
-    console.error("[desktop] " + msg);
+    console.error("[desktop] " + redactLogText(msg));
     process.exit(1);
   }
 }
@@ -77,7 +78,7 @@ function resolveLoginShellPath() {
 function safeReadJSON(filePath, fallback = null) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf-8')); }
   catch (err) {
-    console.error(`[safeReadJSON] ${filePath}: ${err.message}`);
+    console.error(`[safeReadJSON] ${redactLogText(filePath)}: ${redactLogText(err.message)}`);
     return fallback;
   }
 }
@@ -86,6 +87,10 @@ const hanakoHome = resolveHanakoHome(process.env.HANA_HOME);
 process.env.HANA_HOME = hanakoHome;
 ensureHanaPiSdkDirs(hanakoHome);
 configureProcessPiSdkEnv(hanakoHome);
+
+function redactMainLogText(value) {
+  return redactLogText(value, { homeDir: os.homedir(), extraPaths: [hanakoHome] });
+}
 
 // 按 HANA_HOME 隔离 Electron userData（localStorage / cache / session）
 // 生产: ~/Library/Application Support/Hanako
@@ -653,14 +658,14 @@ async function _spawnServerOnce(serverInfoPath) {
 
   // 捕获 stdout/stderr 到 buffer（打包后 console 不可见，崩溃时需要这些信息）
   serverProcess.stdout?.on("data", (chunk) => {
-    const text = chunk.toString();
+    const text = redactMainLogText(chunk.toString());
     _lastServerProgressAtMs = Date.now();
     try { process.stdout.write(text); } catch {}
     _serverLogs.push(text);
     if (_serverLogs.length > 500) _serverLogs.splice(0, _serverLogs.length - 500);
   });
   serverProcess.stderr?.on("data", (chunk) => {
-    const text = chunk.toString();
+    const text = redactMainLogText(chunk.toString());
     _lastServerProgressAtMs = Date.now();
     try { process.stderr.write(text); } catch {}
     _serverLogs.push("[stderr] " + text);
@@ -837,7 +842,7 @@ function writeCrashLog(errorMessage) {
   const timestamp = new Date().toISOString();
   const diagnostics = buildServerCrashDiagnostics();
 
-  const content = [
+  const content = redactMainLogText([
     `=== Hanako Crash Log ===`,
     `Hanako: v${app?.getVersion?.() || "unknown"}`,
     `Time: ${timestamp}`,
@@ -850,7 +855,7 @@ function writeCrashLog(errorMessage) {
     logs || "(no output captured)",
     diagnostics,
     ``,
-  ].join("\n");
+  ].join("\n"));
 
   // 写入文件（best effort）
   try {
@@ -1920,7 +1925,7 @@ async function handleBrowserCommand(cmd, params) {
       if (!params.expression || params.expression.length > 10000) {
         throw new Error("Expression too long (max 10000 chars)");
       }
-      console.log(`[browser:evaluate] ${params.expression.slice(0, 200)}${params.expression.length > 200 ? "..." : ""}`);
+      console.log(`[browser:evaluate] expressionLength=${params.expression.length}`);
       return await _withLiveWebContents(params.sessionPath, async (wc) => {
         const result = await wc.executeJavaScript(params.expression);
         const serialized = typeof result === "string" ? result : JSON.stringify(result, null, 2);
@@ -2010,11 +2015,12 @@ function setupBrowserCommands() {
       try { msg = JSON.parse(data); } catch { return; }
       if (msg?.type !== "browser-cmd") return;
       const { id, cmd, params } = msg;
-      const _bLog = (line) => { try { require("fs").appendFileSync(require("path").join(hanakoHome, "browser-cmd.log"), `${new Date().toISOString()} ${line}\n`); } catch {} };
+      const _bLog = (line) => { try { require("fs").appendFileSync(require("path").join(hanakoHome, "browser-cmd.log"), `${new Date().toISOString()} ${redactMainLogText(line)}\n`); } catch {} };
       _bLog(`→ received cmd=${cmd} id=${id}`);
       try {
         const result = await handleBrowserCommand(cmd, params || {});
-        _bLog(`✓ cmd=${cmd} result=${JSON.stringify(result).slice(0, 200)} wsReady=${ws.readyState}`);
+        const resultLength = JSON.stringify(result).length;
+        _bLog(`✓ cmd=${cmd} resultLength=${resultLength} wsReady=${ws.readyState}`);
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: "browser-result", id, result }));
           _bLog(`✓ sent result`);
@@ -3191,13 +3197,13 @@ app.on("before-quit", async (event) => {
 process.on('uncaughtException', (err) => {
   if (err.code === 'EPIPE' || err.code === 'ERR_IPC_CHANNEL_CLOSED') return;
   const traceId = Math.random().toString(16).slice(2, 10);
-  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] uncaughtException: ${err.message}`);
-  console.error(`[ErrorBus][${traceId}] ${err.stack || err.message}`);
+  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] uncaughtException: ${redactMainLogText(err.message)}`);
+  console.error(`[ErrorBus][${traceId}] ${redactMainLogText(err.stack || err.message)}`);
 });
 
 process.on('unhandledRejection', (reason) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
   const traceId = Math.random().toString(16).slice(2, 10);
-  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] unhandledRejection: ${err.message}`);
-  console.error(`[ErrorBus][${traceId}] ${err.stack || err.message}`);
+  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] unhandledRejection: ${redactMainLogText(err.message)}`);
+  console.error(`[ErrorBus][${traceId}] ${redactMainLogText(err.stack || err.message)}`);
 });

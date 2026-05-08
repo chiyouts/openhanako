@@ -415,6 +415,62 @@ describe("normalizeProviderPayload — 通用层", () => {
     expect(result.max_tokens).toBe(65536);
     expect(result.thinking).toEqual({ type: "enabled" });
   });
+
+  it("DashScope Qwen video models convert SDK image_url data:video blocks to video_url", () => {
+    const payload = {
+      model: "qwen3-vl-plus",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "看一下这段视频" },
+          { type: "image_url", image_url: { url: "data:video/mp4;base64,AAAA" } },
+          { type: "image_url", image_url: { url: "data:image/png;base64,BBBB" } },
+        ],
+      }],
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "qwen3-vl-plus",
+      provider: "dashscope",
+      api: "openai-completions",
+      input: ["text", "image", "video"],
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    }, { mode: "chat" });
+
+    expect(result).not.toBe(payload);
+    expect(result.messages[0].content).toEqual([
+      { type: "text", text: "看一下这段视频" },
+      { type: "video_url", video_url: { url: "data:video/mp4;base64,AAAA" } },
+      { type: "image_url", image_url: { url: "data:image/png;base64,BBBB" } },
+    ]);
+    expect(payload.messages[0].content[1].type).toBe("image_url");
+  });
+
+  it("DashScope Qwen video conversion composes with utility enable_thinking=false", () => {
+    const payload = {
+      model: "qwen3-vl-plus",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: "data:video/webm;base64,AAAA" } },
+        ],
+      }],
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "qwen3-vl-plus",
+      provider: "dashscope",
+      api: "openai-completions",
+      input: ["text", "image", "video"],
+      quirks: ["enable_thinking"],
+    }, { mode: "utility" });
+
+    expect(result.enable_thinking).toBe(false);
+    expect(result.messages[0].content[0]).toEqual({
+      type: "video_url",
+      video_url: { url: "data:video/webm;base64,AAAA" },
+    });
+  });
 });
 
 describe("normalizeProviderPayload — DeepSeek Anthropic 模式", () => {

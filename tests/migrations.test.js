@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 15;
+const LATEST_DATA_VERSION = 16;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -1391,6 +1391,86 @@ describe("migration #15: repair legacy session sidecar thinking levels", () => {
     const backupPath = path.join(agentsDir, "hana", "sessions", "session-meta.json.pre-v15.bak");
     expect(JSON.parse(fs.readFileSync(backupPath, "utf-8"))).toEqual(originalMeta);
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #16: video capability projection", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration16(prefs) {
+    prefs.savePreferences({ _dataVersion: 15 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({
+        dashscope: { models: [{ id: "qwen3-vl-plus" }] },
+      }),
+      log: () => {},
+    });
+  }
+
+  it("repairs stale models.json input arrays for known video-capable models", () => {
+    const prefs = makePrefs(userDir);
+    const modelsJsonPath = path.join(tmpDir, "models.json");
+    fs.writeFileSync(modelsJsonPath, JSON.stringify({
+      providers: {
+        dashscope: {
+          models: [
+            { id: "qwen3-vl-plus", input: ["text", "image"] },
+            { id: "qwen-plus", input: ["text"] },
+          ],
+        },
+      },
+    }, null, 2) + "\n", "utf-8");
+
+    runMigration16(prefs);
+
+    const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(raw.providers.dashscope.models[0].input).toEqual(["text", "image", "video"]);
+    expect(raw.providers.dashscope.models[0]).not.toHaveProperty("video");
+    expect(raw.providers.dashscope.models[1].input).toEqual(["text"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("promotes legacy agent model override video flags into added-models.yaml", () => {
+    const prefs = makePrefs(userDir);
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump({
+        providers: {
+          dashscope: {
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            api_key: "sk-x",
+            models: ["qwen3-vl-plus"],
+          },
+        },
+      }, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+      "utf-8",
+    );
+    writeAgentConfig(agentsDir, "hana", {
+      models: {
+        overrides: {
+          "qwen3-vl-plus": { video: true, displayName: "Qwen VL" },
+        },
+      },
+    });
+
+    runMigration16(prefs);
+
+    const raw = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+    expect(raw.providers.dashscope.models[0]).toEqual({ id: "qwen3-vl-plus", video: true });
+    const cfg = readAgentConfig(agentsDir, "hana");
+    expect(cfg.models.overrides["qwen3-vl-plus"]).toEqual({ displayName: "Qwen VL" });
   });
 });
 

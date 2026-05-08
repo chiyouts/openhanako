@@ -24,6 +24,7 @@ import {
 import { AppError } from "../../shared/errors.js";
 import { errorBus } from "../../shared/error-bus.js";
 import { MAX_CHAT_IMAGE_BASE64_CHARS, isAllowedChatImageMime, isChatImageBase64WithinLimit } from "../../shared/image-mime.js";
+import { isAllowedChatVideoMime, isChatVideoBase64WithinLimit } from "../../shared/video-mime.js";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -776,7 +777,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               return;
             }
 
-            if (msg.type === "prompt" && (msg.text || msg.images?.length)) {
+            if (msg.type === "prompt" && (msg.text || msg.images?.length || msg.videos?.length)) {
               // 图片校验：最多 10 张，单张 ≤ 20MB，仅允许常见图片 MIME
               if (msg.images?.length) {
                 const MAX_IMAGES = 10;
@@ -795,6 +796,23 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                   }
                 }
               }
+              if (msg.videos?.length) {
+                const MAX_VIDEOS = 3;
+                if (msg.videos.length > MAX_VIDEOS) {
+                  wsSend(ws, { type: "error", message: t("error.maxVideos", { max: MAX_VIDEOS }), sessionPath: msg.sessionPath });
+                  return;
+                }
+                for (const video of msg.videos) {
+                  if (!video?.mimeType || !isAllowedChatVideoMime(video.mimeType)) {
+                    wsSend(ws, { type: "error", message: t("error.unsupportedVideoFormat", { mime: video?.mimeType || "unknown" }), sessionPath: msg.sessionPath });
+                    return;
+                  }
+                  if (video.data && !isChatVideoBase64WithinLimit(video.data)) {
+                    wsSend(ws, { type: "error", message: t("error.videoTooLarge"), sessionPath: msg.sessionPath });
+                    return;
+                  }
+                }
+              }
               // 图片持久化 + [attached_image] 标记 + image 模态 check 统一在 hub.send() 和下游 handler 处理
               let promptText = msg.text || "";
               // Skill invocation tags
@@ -802,10 +820,11 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 const skillNote = msg.skills.map(s => `[Use skill: ${s}]`).join('\n');
                 promptText = `${skillNote}\n${promptText}`;
               }
-              if (!promptText.trim() && msg.images?.length) {
-                promptText = t("error.viewImage");
+              if (!promptText.trim()) {
+                if (msg.images?.length) promptText = t("error.viewImage");
+                else if (msg.videos?.length) promptText = t("error.viewVideo");
               }
-              debugLog()?.log("ws", `user message (${promptText.length} chars, ${msg.images?.length || 0} images)`);
+              debugLog()?.log("ws", `user message (${promptText.length} chars, ${msg.images?.length || 0} images, ${msg.videos?.length || 0} videos)`);
               // Phase 2: 客户端可指定 sessionPath，否则用焦点 session
               const promptSessionPath = requireSessionPath(msg, ws); if (!promptSessionPath) return;
               if (engine.isSessionStreaming(promptSessionPath)) {
@@ -821,6 +840,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 await hub.send(promptText, {
                   sessionPath: promptSessionPath,
                   images: msg.images,
+                  videos: msg.videos,
                   uiContext: msg.uiContext ?? null,
                   displayMessage: msg.displayMessage,
                 });

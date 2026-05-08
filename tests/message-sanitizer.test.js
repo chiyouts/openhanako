@@ -13,9 +13,11 @@ import { describe, it, expect } from "vitest";
 import {
   sanitizeMessagesForModel,
   modelSupportsImage,
+  modelSupportsVideo,
 } from "../core/message-sanitizer.js";
 
 const IMG_BLOCK = { type: "image", data: "BASE64DATA", mimeType: "image/png" };
+const VIDEO_BLOCK = { type: "video", data: "BASE64VIDEO", mimeType: "video/mp4" };
 const TEXT_BLOCK = (text) => ({ type: "text", text });
 
 describe("modelSupportsImage", () => {
@@ -35,9 +37,20 @@ describe("modelSupportsImage", () => {
   });
 });
 
+describe("modelSupportsVideo", () => {
+  it("input 含 video → true", () => {
+    expect(modelSupportsVideo({ input: ["text", "video"] })).toBe(true);
+  });
+  it("input 缺失或只有 image → false", () => {
+    expect(modelSupportsVideo({ input: ["text", "image"] })).toBe(false);
+    expect(modelSupportsVideo({})).toBe(false);
+  });
+});
+
 describe("sanitizeMessagesForModel", () => {
   const textOnlyModel = { input: ["text"] };
   const imageModel = { input: ["text", "image"] };
+  const videoModel = { input: ["text", "video"] };
 
   it("支持 image 的模型：放行不改", () => {
     const messages = [
@@ -61,6 +74,34 @@ describe("sanitizeMessagesForModel", () => {
     ]);
     // 原数组不变（纯函数）
     expect(messages[0].content).toEqual([TEXT_BLOCK("what is this?"), IMG_BLOCK]);
+  });
+
+  it("不支持 video 的模型：user 消息里的 video block 换占位并单独计数", () => {
+    const messages = [
+      { role: "user", content: [TEXT_BLOCK("what is this?"), VIDEO_BLOCK] },
+    ];
+    const res = sanitizeMessagesForModel(messages, textOnlyModel);
+    expect(res.stripped).toBe(1);
+    expect(res.strippedVideos).toBe(1);
+    expect(res.messages[0].content).toEqual([
+      TEXT_BLOCK("what is this?"),
+      { type: "text", text: "[视频已省略：当前模型不支持视频输入]" },
+    ]);
+    expect(messages[0].content).toEqual([TEXT_BLOCK("what is this?"), VIDEO_BLOCK]);
+  });
+
+  it("支持 video 但不支持 image 的模型只剥 image", () => {
+    const messages = [
+      { role: "user", content: [IMG_BLOCK, VIDEO_BLOCK] },
+    ];
+    const res = sanitizeMessagesForModel(messages, videoModel);
+    expect(res.stripped).toBe(1);
+    expect(res.strippedImages).toBe(1);
+    expect(res.strippedVideos).toBe(0);
+    expect(res.messages[0].content).toEqual([
+      { type: "text", text: "[图片已省略：当前模型不支持图像输入]" },
+      VIDEO_BLOCK,
+    ]);
   });
 
   it("不支持 image 的模型：toolResult 里的 image block 换占位", () => {
@@ -115,8 +156,8 @@ describe("sanitizeMessagesForModel", () => {
   });
 
   it("messages 非数组或 null：防御式放行", () => {
-    expect(sanitizeMessagesForModel(null, textOnlyModel)).toEqual({ messages: null, stripped: 0 });
-    expect(sanitizeMessagesForModel(undefined, textOnlyModel)).toEqual({ messages: undefined, stripped: 0 });
+    expect(sanitizeMessagesForModel(null, textOnlyModel)).toEqual({ messages: null, stripped: 0, strippedImages: 0, strippedVideos: 0 });
+    expect(sanitizeMessagesForModel(undefined, textOnlyModel)).toEqual({ messages: undefined, stripped: 0, strippedImages: 0, strippedVideos: 0 });
     expect(sanitizeMessagesForModel("oops", textOnlyModel).stripped).toBe(0);
   });
 

@@ -39,10 +39,14 @@ export function parseCSV(text: string): string[][] {
 
 // 扩展名识别统一走 file-kind 中心表；禁止维护私有 IMAGE_EXTS 表。
 // 保留此 helper 纯粹是 API 形式（传 name，返回 boolean），内部委托给中心表。
-import { isImageOrSvgExt, extOfName } from './file-kind';
+import { inferKindByExt, isImageOrSvgExt, extOfName } from './file-kind';
 
 export function isImageFile(name: string): boolean {
   return isImageOrSvgExt(extOfName(name));
+}
+
+export function isVideoFile(name: string): boolean {
+  return inferKindByExt(extOfName(name)) === 'video';
 }
 
 export function formatSessionDate(isoStr: string): string {

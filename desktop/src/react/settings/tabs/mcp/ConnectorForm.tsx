@@ -1,27 +1,42 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { t } from '../../helpers';
 import styles from '../../Settings.module.css';
-import type { McpAuthType, McpConnectorInput, McpTransport } from './types';
+import { parseKeyValueLines, serializeKeyValueLines } from './mcp-config';
+import type { McpAuthType, McpConnector, McpConnectorInput, McpTransport } from './types';
 
 type FormMode = 'local' | 'remote';
 
 interface ConnectorFormProps {
   disabled?: boolean;
+  editingConnector?: McpConnector | null;
   onAdd: (input: McpConnectorInput) => Promise<void>;
+  onUpdate?: (connectorId: string, input: McpConnectorInput) => Promise<void>;
+  onCancelEdit?: () => void;
 }
 
 function parseArgs(value: string): string[] {
-  return value.trim() ? value.trim().split(/\s+/) : [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.includes('\n')) {
+    return trimmed.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+  }
+  return trimmed.split(/\s+/);
 }
 
 const INITIAL_FORM = {
   mode: 'remote' as FormMode,
   name: '',
+  description: '',
   url: '',
   transport: 'remote' as McpTransport,
   command: '',
   args: '',
   cwd: '',
+  env: '',
+  headers: '',
+  registryUrl: '',
+  timeout: '',
+  autoStart: false,
   authType: 'none' as McpAuthType,
   authorizationToken: '',
   oauthClientId: '',
@@ -29,33 +44,76 @@ const INITIAL_FORM = {
 };
 
 const fieldHalfClass = `${styles['settings-form-field']} ${styles['settings-form-field-half']}`;
+const fieldFullClass = styles['settings-form-field'];
 
-export function ConnectorForm({ disabled, onAdd }: ConnectorFormProps) {
+export function ConnectorForm({
+  disabled,
+  editingConnector,
+  onAdd,
+  onUpdate,
+  onCancelEdit,
+}: ConnectorFormProps) {
   const [form, setForm] = useState(INITIAL_FORM);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setForm(editingConnector ? formFromConnector(editingConnector) : INITIAL_FORM);
+    setError('');
+  }, [editingConnector]);
 
   const canSubmit = form.mode === 'local'
     ? form.command.trim().length > 0
     : form.url.trim().length > 0;
 
   const submit = async () => {
+    setError('');
+    let parseError = '';
+    const parseRecord = (value: string, kind: 'env' | 'headers') => {
+      try {
+        return parseKeyValueLines(value, kind);
+      } catch (err) {
+        parseError = err instanceof Error ? err.message : String(err);
+        return {};
+      }
+    };
+    const timeout = Number(form.timeout);
+    const common = {
+      name: form.name,
+      description: form.description,
+      timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : undefined,
+      autoStart: form.autoStart,
+    };
     const input: McpConnectorInput = form.mode === 'local'
       ? {
+          ...common,
           name: form.name || form.command,
           transport: 'stdio',
           command: form.command,
           args: parseArgs(form.args),
           cwd: form.cwd,
+          env: parseRecord(form.env, 'env'),
+          registryUrl: form.registryUrl,
         }
       : {
+          ...common,
           name: form.name || form.url,
           transport: form.transport,
           url: form.url,
+          headers: parseRecord(form.headers, 'headers'),
           authType: form.authType,
           authorizationToken: form.authType === 'bearer' ? form.authorizationToken : '',
           oauthClientId: form.authType === 'oauth' ? form.oauthClientId : '',
           oauthClientSecret: form.authType === 'oauth' ? form.oauthClientSecret : '',
         };
-    await onAdd(input);
+    if (parseError) {
+      setError(parseError);
+      return;
+    }
+    if (editingConnector && onUpdate) {
+      await onUpdate(editingConnector.id, input);
+    } else {
+      await onAdd(input);
+    }
     setForm(INITIAL_FORM);
   };
 
@@ -82,6 +140,15 @@ export function ConnectorForm({ disabled, onAdd }: ConnectorFormProps) {
             <option value="local">{t('settings.mcp.modeLocal')}</option>
           </select>
         </div>
+      </div>
+      <div className={fieldFullClass}>
+        <label className={styles['settings-form-label']}>{t('settings.mcp.description')}</label>
+        <input
+          className={styles['settings-input']}
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder={t('settings.mcp.descriptionPlaceholder')}
+        />
       </div>
 
       {form.mode === 'remote' ? (
@@ -158,6 +225,16 @@ export function ConnectorForm({ disabled, onAdd }: ConnectorFormProps) {
               </div>
             </div>
           )}
+          <div className={fieldFullClass}>
+            <label className={styles['settings-form-label']}>{t('settings.mcp.headers')}</label>
+            <textarea
+              className={styles['settings-textarea']}
+              value={form.headers}
+              onChange={(e) => setForm({ ...form, headers: e.target.value })}
+              placeholder={'Authorization=Bearer token\nX-API-Key=secret'}
+            />
+            <span className={styles['settings-form-hint']}>{t('settings.mcp.headersHint')}</span>
+          </div>
         </>
       ) : (
         <>
@@ -191,20 +268,96 @@ export function ConnectorForm({ disabled, onAdd }: ConnectorFormProps) {
                 placeholder={t('settings.mcp.cwdPlaceholder')}
               />
             </div>
+            <div className={fieldHalfClass}>
+              <label className={styles['settings-form-label']}>{t('settings.mcp.registryUrl')}</label>
+              <input
+                className={styles['settings-input']}
+                value={form.registryUrl}
+                onChange={(e) => setForm({ ...form, registryUrl: e.target.value })}
+                placeholder="https://registry.npmmirror.com"
+              />
+            </div>
+          </div>
+          <div className={fieldFullClass}>
+            <label className={styles['settings-form-label']}>{t('settings.mcp.env')}</label>
+            <textarea
+              className={styles['settings-textarea']}
+              value={form.env}
+              onChange={(e) => setForm({ ...form, env: e.target.value })}
+              placeholder={'API_KEY=secret\nBASE_URL=https://example.com'}
+            />
+            <span className={styles['settings-form-hint']}>{t('settings.mcp.envHint')}</span>
           </div>
         </>
       )}
 
+      <div className={styles['settings-form-grid']}>
+        <div className={fieldHalfClass}>
+          <label className={styles['settings-form-label']}>{t('settings.mcp.timeout')}</label>
+          <input
+            className={styles['settings-input']}
+            type="number"
+            min={1}
+            value={form.timeout}
+            onChange={(e) => setForm({ ...form, timeout: e.target.value })}
+            placeholder="30"
+          />
+        </div>
+        <label className={`${fieldHalfClass} ${styles['settings-toggle-row']}`}>
+          <input
+            type="checkbox"
+            checked={form.autoStart}
+            onChange={(e) => setForm({ ...form, autoStart: e.target.checked })}
+          />
+          <span className={styles['settings-form-label']}>{t('settings.mcp.autoStart')}</span>
+        </label>
+      </div>
+
+      {error && <p className={styles['settings-muted-note']}>{error}</p>}
+
       <div className={styles['pv-add-form-actions']}>
+        {editingConnector && (
+          <button
+            className={styles['pv-add-form-btn']}
+            type="button"
+            disabled={disabled}
+            onClick={onCancelEdit}
+          >
+            {t('common.cancel')}
+          </button>
+        )}
         <button
           className={`${styles['pv-add-form-btn']} ${styles['primary']}`}
           type="button"
           disabled={disabled || !canSubmit}
           onClick={submit}
         >
-          {t('settings.mcp.addConnector')}
+          {editingConnector ? t('settings.mcp.updateConnector') : t('settings.mcp.addConnector')}
         </button>
       </div>
     </div>
   );
+}
+
+function formFromConnector(connector: McpConnector): typeof INITIAL_FORM {
+  const mode = connector.transport === 'stdio' ? 'local' : 'remote';
+  return {
+    mode,
+    name: connector.name || '',
+    description: connector.description || '',
+    url: connector.url || '',
+    transport: connector.transport === 'stdio' ? 'remote' : connector.transport,
+    command: connector.command || '',
+    args: (connector.args || []).join('\n'),
+    cwd: connector.cwd || '',
+    env: serializeKeyValueLines(connector.env),
+    headers: serializeKeyValueLines(connector.headers),
+    registryUrl: connector.registryUrl || '',
+    timeout: connector.timeout ? String(connector.timeout) : '',
+    autoStart: connector.autoStart === true,
+    authType: connector.authType || 'none',
+    authorizationToken: connector.authorizationToken || '',
+    oauthClientId: connector.oauthClientId || '',
+    oauthClientSecret: connector.oauthClientSecret || '',
+  };
 }

@@ -11,7 +11,7 @@ import type { Editor } from '@tiptap/core';
 import { useStore } from '../stores';
 import { selectPreviewItems, selectActiveTabId } from '../stores/preview-slice';
 import { selectSessionFiles } from '../stores/selectors/file-refs';
-import { isImageFile } from '../utils/format';
+import { isImageFile, isVideoFile } from '../utils/format';
 import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
 import { ensureSession, loadSessions } from '../stores/session-actions';
@@ -39,7 +39,9 @@ import { extractPlainUrlPaste } from '../utils/plain-url-paste';
 import { createInputEditorExtensions } from './input/input-editor-extensions';
 import {
   evaluateChatImageSendPreflight,
+  evaluateChatVideoSendPreflight,
   notifyTextModelImageBlocked,
+  notifyTextModelVideoBlocked,
 } from '../utils/chat-image-send-preflight';
 import { openProviderModelSettings } from '../utils/model-settings-navigation';
 import {
@@ -55,6 +57,19 @@ import type { ChatListItem, SessionConfirmationBlock } from '../stores/chat-type
 
 const EMPTY_TODOS: TodoItem[] = [];
 const EMPTY_FILE_REFS: readonly import('../types/file-ref').FileRef[] = Object.freeze([]);
+
+function chatVideoMimeTypeForName(name: string, fallback?: string): string {
+  if (fallback?.startsWith('video/')) return fallback;
+  const ext = name.toLowerCase().replace(/^.*\./, '');
+  const mimeMap: Record<string, string> = {
+    mp4: 'video/mp4',
+    m4v: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
+    mkv: 'video/x-matroska',
+  };
+  return mimeMap[ext] || 'video/mp4';
+}
 
 interface FileMentionRange {
   from: number;
@@ -639,9 +654,10 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         loadSessions();
       }
 
-      // 分离图片和非图片附件；后端决定原生图片、视觉桥或显式报错。
+      // 分离原生媒体和普通附件；后端决定图片视觉桥、视频原生能力或显式报错。
       const imageFiles = hasFiles ? inputFiles.filter(f => !f.isDirectory && isImageFile(f.name)) : [];
-      const otherFiles = hasFiles ? inputFiles.filter(f => f.isDirectory || !isImageFile(f.name)) : [];
+      const videoFiles = hasFiles ? inputFiles.filter(f => !f.isDirectory && isVideoFile(f.name)) : [];
+      const otherFiles = hasFiles ? inputFiles.filter(f => f.isDirectory || (!isImageFile(f.name) && !isVideoFile(f.name))) : [];
 
       const imagePreflight = await evaluateChatImageSendPreflight({
         attachments: inputFiles,
@@ -650,6 +666,18 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       });
       if (!imagePreflight.ok) {
         notifyTextModelImageBlocked({
+          t,
+          addToast: useStore.getState().addToast,
+          openSettings: () => openProviderModelSettings(currentModelInfo?.provider),
+        });
+        return;
+      }
+      const videoPreflight = await evaluateChatVideoSendPreflight({
+        attachments: inputFiles,
+        model: currentModelInfo,
+      });
+      if (!videoPreflight.ok) {
+        notifyTextModelVideoBlocked({
           t,
           addToast: useStore.getState().addToast,
           openSettings: () => openProviderModelSettings(currentModelInfo?.provider),
@@ -666,7 +694,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       // 图片读 base64
       const hana = window.hana;
       const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
+      const videos: Array<{ type: 'video'; data: string; mimeType: string }> = [];
       const imageBase64Map = new Map<string, { base64Data: string; mimeType: string }>();
+      const videoBase64Map = new Map<string, { base64Data: string; mimeType: string }>();
       for (const img of imageFiles) {
         try {
           if (img.base64Data && img.mimeType) {
@@ -683,6 +713,23 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
           }
         } catch {
           finalText = finalText ? `${finalText}\n\n[附件] ${img.path}` : `[附件] ${img.path}`;
+        }
+      }
+      for (const video of videoFiles) {
+        try {
+          if (video.base64Data && video.mimeType) {
+            const mimeType = chatVideoMimeTypeForName(video.name, video.mimeType);
+            videos.push({ type: 'video', data: video.base64Data, mimeType });
+          } else if (hana?.readFileBase64) {
+            const base64 = await hana.readFileBase64(video.path);
+            if (base64) {
+              const mimeType = chatVideoMimeTypeForName(video.name, video.mimeType);
+              videoBase64Map.set(video.path, { base64Data: base64, mimeType });
+              videos.push({ type: 'video', data: base64, mimeType });
+            }
+          }
+        } catch {
+          finalText = finalText ? `${finalText}\n\n[附件] ${video.path}` : `[附件] ${video.path}`;
         }
       }
 
@@ -722,19 +769,21 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
           quotedText: qs?.text,
           attachments: allFiles.length > 0 ? allFiles.map(f => {
             const cached = imageBase64Map.get(f.path);
+            const cachedVideo = videoBase64Map.get(f.path);
             const imageFile = !f.isDirectory && isImageFile(f.name);
             return {
               fileId: f.fileId,
               path: f.path,
               name: f.name,
               isDir: !!f.isDirectory,
-              mimeType: f.mimeType || cached?.mimeType || undefined,
+              mimeType: f.mimeType || cached?.mimeType || cachedVideo?.mimeType || undefined,
               visionAuxiliary: imageFile && !supportsVision,
             };
           }) : undefined,
         },
       };
       if (images.length > 0) wsMsg.images = images;
+      if (videos.length > 0) wsMsg.videos = videos;
       if (skills.length > 0) wsMsg.skills = skills;
       ws?.send(JSON.stringify(wsMsg));
     } finally {

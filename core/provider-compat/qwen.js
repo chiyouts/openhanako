@@ -1,14 +1,16 @@
 /**
- * Qwen-style 思考模型 provider 兼容层
+ * Qwen-style provider 兼容层
  *
  * 处理 provider:
  *   - 任何 model.quirks 包含 "enable_thinking" 的模型（known-models.json 声明）
- *   - 当前覆盖：dashscope / dashscope-coding / siliconflow / modelscope / infini 共 22 个 Qwen-style 思考模型
+ *   - DashScope OpenAI-compatible 视频模型（input 含 video）
  *
  * 注：dashscope-coding 下托管的 Kimi 系列模型（kimi-k2 / kimi-k2.5）虽然不是 Qwen 模型，
  * 但通过阿里 dashscope 协议暴露，同样使用 enable_thinking 字段控制思考模式，故走本子模块。
  *
  * 解决的协议问题：
+ *   1. DashScope 视觉理解 OpenAI 兼容接口要求视频文件使用 video_url：
+ *      https://help.aliyun.com/zh/model-studio/vision/
  *   Qwen 思考模式由 enable_thinking: bool 控制（非 OpenAI 标准的 reasoning_effort）。
  *   - chat 路径：Pi SDK 自动处理（compat.thinkingFormat="qwen" + reasoningEffort）
  *     见 node_modules/@mariozechner/pi-ai/dist/providers/openai-completions.js:333-334
@@ -16,6 +18,7 @@
  *     省 token（utility 是 50~500 token 短输出，思考链耗光预算）
  *
  * 删除条件：
+ *   - DashScope OpenAI 兼容接口接受 data:video 的 image_url，且 Pi SDK 直接处理 video_url
  *   - Qwen-style 协议改成 reasoning_effort（不再用 enable_thinking 字段）
  *   - 或 hana 的 quirks 系统重构（known-models.json 数据格式变更）
  *
@@ -26,6 +29,13 @@
 
 export function matches(model) {
   if (!model || typeof model !== "object") return false;
+  if (
+    isDashScopeProvider(model)
+    && Array.isArray(model.input)
+    && model.input.includes("video")
+  ) {
+    return true;
+  }
   // 按 quirks 单一字段判断而非 provider 名：quirks 是数据层（known-models.json）声明的
   // 协议特征，model-sync 投影时已做过 provider 判断（只有 Qwen-style 协议的 provider 会标
   // enable_thinking 这个 quirk）。在 matches 里再加 provider 守卫是双层冗余，反而把数据层的
@@ -35,10 +45,50 @@ export function matches(model) {
 }
 
 export function apply(payload, model, options = {}) {
+  let result = normalizeDashScopeVideoPayload(payload, model);
   // chat 路径让 Pi SDK 自己处理（compat.thinkingFormat="qwen" 路径），不动 payload
   // utility 路径强制关思考（短输出不需要思考链 + 省 token）
   if (options?.mode === "utility") {
-    return { ...payload, enable_thinking: false };
+    return { ...result, enable_thinking: false };
   }
-  return payload;
+  return result;
+}
+
+function normalizeDashScopeVideoPayload(payload, model) {
+  if (!isDashScopeVideoModel(model)) return payload;
+  if (!Array.isArray(payload?.messages)) return payload;
+
+  let changed = false;
+  const messages = payload.messages.map((message) => {
+    if (!Array.isArray(message?.content)) return message;
+    let contentChanged = false;
+    const content = message.content.map((part) => {
+      const url = part?.image_url?.url;
+      if (part?.type !== "image_url" || typeof url !== "string" || !url.startsWith("data:video/")) {
+        return part;
+      }
+      contentChanged = true;
+      return {
+        type: "video_url",
+        video_url: { url },
+      };
+    });
+    if (!contentChanged) return message;
+    changed = true;
+    return { ...message, content };
+  });
+
+  return changed ? { ...payload, messages } : payload;
+}
+
+function isDashScopeVideoModel(model) {
+  return isDashScopeProvider(model)
+    && Array.isArray(model.input)
+    && model.input.includes("video");
+}
+
+function isDashScopeProvider(model) {
+  const provider = typeof model?.provider === "string" ? model.provider.toLowerCase() : "";
+  const baseUrl = typeof model?.baseUrl === "string" ? model.baseUrl.toLowerCase() : "";
+  return provider === "dashscope" || baseUrl.includes("dashscope");
 }

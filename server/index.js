@@ -20,6 +20,7 @@ import { errorBus } from "../shared/error-bus.js";
 import { HanaEngine } from "../core/engine.js";
 import { ensureFirstRun } from "../core/first-run.js";
 import { initDebugLog } from "../lib/debug-log.js";
+import { redactLogLabel, redactLogText } from "../lib/log-redactor.js";
 import { safeJson } from "./hono-helpers.js";
 
 // Pi SDK 的 fetch 请求会累积 AbortSignal listener，提高上限避免无害警告
@@ -382,9 +383,11 @@ app.get("/api/health", async (c) => {
 app.post("/api/log", async (c) => {
   const { level, module, message } = await safeJson(c);
   if (!message) return c.json({ ok: false });
-  if (level === "error") dlog.error(module || "desktop", message);
-  else if (level === "warn") dlog.warn(module || "desktop", message);
-  else dlog.log(module || "desktop", message);
+  const safeModule = redactLogLabel(module || "desktop");
+  const safeMessage = redactLogText(message);
+  if (level === "error") dlog.error(safeModule, safeMessage);
+  else if (level === "warn") dlog.warn(safeModule, safeMessage);
+  else dlog.log(safeModule, safeMessage);
   return c.json({ ok: true });
 });
 

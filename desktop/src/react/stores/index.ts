@@ -44,7 +44,7 @@ export type StoreState = ConnectionSlice &
   ComputerOverlaySlice;
 
 export const useStore = create<StoreState>()((set, _get, _api) => ({
-  ...createConnectionSlice(set),
+  ...createConnectionSlice(set, _get),
   ...createSessionSlice(set),
   ...createStreamingSlice(set, _get),
   ...createUiSlice(set),

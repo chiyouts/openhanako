@@ -128,7 +128,7 @@ export interface SessionModel {
   name: string;
   provider: string;
   /** 输入模态数组（Pi SDK 标准字段），镜像后端 /models, /models/switch 响应。 */
-  input?: ("text" | "image")[];
+  input?: ("text" | "image" | "video")[];
   reasoning?: boolean;
   xhigh?: boolean;
   contextWindow?: number;

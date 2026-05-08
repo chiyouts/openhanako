@@ -164,6 +164,33 @@ describe("submitDesktopSessionMessage", () => {
     );
   });
 
+  it("forwards videos to promptSession and records attached video markers", async () => {
+    const session = makeFakeSession();
+    const engine = {
+      ensureSessionLoaded: vi.fn(async () => session),
+      promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+      emitEvent: vi.fn(),
+      setUiContext: vi.fn(),
+    };
+
+    await submitDesktopSessionMessage(engine, {
+      sessionPath: "/tmp/desk.jsonl",
+      text: "see video",
+      videos: [{ type: "video", data: "BASE64", mimeType: "video/mp4" }],
+      videoAttachmentPaths: ["/tmp/upload.mp4"],
+      displayMessage: { text: "see video" },
+    });
+
+    expect(engine.promptSession).toHaveBeenCalledWith(
+      "/tmp/desk.jsonl",
+      "[attached_video: /tmp/upload.mp4]\nsee video",
+      {
+        videos: [{ type: "video", data: "BASE64", mimeType: "video/mp4" }],
+        videoAttachmentPaths: ["/tmp/upload.mp4"],
+      },
+    );
+  });
+
   it("registers desktop display attachments into the session file ledger", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-display-attachment-"));
     try {

@@ -260,9 +260,10 @@ export class HanaEngine {
     this._listeners = new Set();
     this._eventBus = null;
 
-    // 首次剥图通知去重：sessionPath → 已通知。由 context extension handler 维护，
-    // 避免每一轮对话都重复广播 image_stripped_notice 事件。
+    // 首次剥媒体通知去重：sessionPath → 已通知。由 context extension handler 维护，
+    // 避免每一轮对话都重复广播 stripped_notice 事件。
     this._imageStripNotified = new Set();
+    this._videoStripNotified = new Set();
 
     // UI context（用户当前视野）：sessionPath → { currentViewed, activeFile,
     // activePreview, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.js
@@ -936,16 +937,25 @@ export class HanaEngine {
         pi.on("context", (event, ctx) => {
           const model = ctx?.model;
           if (!model) return;
-          const { messages, stripped } = sanitizeMessagesForModel(event.messages, model);
+          const { messages, stripped, strippedImages, strippedVideos } = sanitizeMessagesForModel(event.messages, model);
           if (stripped === 0) return;
           const sessionPath = ctx?.sessionManager?.getSessionFile?.();
-          if (sessionPath && !this._imageStripNotified.has(sessionPath)) {
+          if (sessionPath && strippedImages > 0 && !this._imageStripNotified.has(sessionPath)) {
             this._imageStripNotified.add(sessionPath);
             this._emitEvent({
               type: "image_stripped_notice",
               modelId: model.id,
               modelProvider: model.provider,
-              count: stripped,
+              count: strippedImages,
+            }, sessionPath);
+          }
+          if (sessionPath && strippedVideos > 0 && !this._videoStripNotified.has(sessionPath)) {
+            this._videoStripNotified.add(sessionPath);
+            this._emitEvent({
+              type: "video_stripped_notice",
+              modelId: model.id,
+              modelProvider: model.provider,
+              count: strippedVideos,
             }, sessionPath);
           }
           return { messages };

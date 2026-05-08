@@ -22,6 +22,7 @@ import { openSettingsModal } from './stores/settings-modal-actions';
 import { configureAppEventActions, handleAppEvent, readConfigCwdHistory, readConfigHomeFolder, readConfigMemoryMasterEnabled } from './services/app-event-actions';
 import { configureWsMessageHandler } from './services/ws-message-handler';
 import { applyEditorTypography } from './editor/typography';
+import { createLocalServerConnection } from './services/server-connection';
 // @ts-expect-error — shared JS module
 import { errorBus as _errorBus } from '../../../shared/error-bus.js';
 // @ts-expect-error — shared JS module
@@ -74,9 +75,10 @@ export async function initApp(): Promise<void> {
   // 1. 获取 server 连接信息并存入 Zustand
   const serverPort = await platform.getServerPort();
   const serverToken = await platform.getServerToken();
-  useStore.setState({ serverPort, serverToken });
+  const activeServerConnection = createLocalServerConnection({ serverPort, serverToken });
+  useStore.setState({ serverPort, serverToken, activeServerConnection });
 
-  if (!serverPort) {
+  if (!activeServerConnection) {
     setStatus('status.serverNotReady', false);
     platform.appReady();
     return;

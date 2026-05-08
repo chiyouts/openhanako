@@ -15,7 +15,7 @@ interface DiscoveredModel {
   maxOutput?: number | null;
 }
 
-type CapabilityKind = 'image' | 'reasoning';
+type CapabilityKind = 'image' | 'video' | 'reasoning';
 
 function CapabilityIcon({ kind }: { kind: CapabilityKind }) {
   const label = t(`settings.api.capability.${kind}`);
@@ -26,6 +26,11 @@ function CapabilityIcon({ kind }: { kind: CapabilityKind }) {
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
           <circle cx="8.5" cy="8.5" r="1.5" />
           <path d="M21 15l-5-5L5 21" />
+        </svg>
+      ) : kind === 'video' ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="5" width="13" height="14" rx="2" />
+          <path d="m16 9 5-3v12l-5-3" />
         </svg>
       ) : (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -194,6 +199,7 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
                   <span className={styles['pv-fav-item-name']} title={String(displayName)}>{displayName}</span>
                   {showModelId && <span className={styles['pv-fav-item-id']} title={mid}>{mid}</span>}
                   {meta.image === true && <CapabilityIcon kind="image" />}
+                  {meta.video === true && <CapabilityIcon kind="video" />}
                   {meta.reasoning === true && <CapabilityIcon kind="reasoning" />}
                   {meta.context && <span className={styles['pv-model-ctx']}>{formatContext(meta.context)}</span>}
                   <div className={styles['pv-fav-item-actions']}>

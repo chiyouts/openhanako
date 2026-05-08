@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   evaluateChatImageSendPreflight,
   getModelImageInputMode,
+  getModelVideoInputMode,
   hasChatImageAttachments,
+  hasChatVideoAttachments,
   notifyTextModelImageBlocked,
+  notifyTextModelVideoBlocked,
+  evaluateChatVideoSendPreflight,
 } from '../../utils/chat-image-send-preflight';
 
 describe('chat image send preflight', () => {
@@ -23,6 +27,9 @@ describe('chat image send preflight', () => {
     expect(getModelImageInputMode({ input: ['text'] })).toBe('text-only');
     expect(getModelImageInputMode({ input: ['text', 'image'] })).toBe('native-image');
     expect(getModelImageInputMode({})).toBe('unknown');
+    expect(getModelVideoInputMode({ input: ['text', 'image'] })).toBe('no-native-video');
+    expect(getModelVideoInputMode({ input: ['text', 'video'] })).toBe('native-video');
+    expect(getModelVideoInputMode({})).toBe('unknown');
   });
 
   it('blocks image send for text-only models when auxiliary vision is unavailable', async () => {
@@ -101,6 +108,79 @@ describe('chat image send preflight', () => {
       9000,
       {
         dedupeKey: 'text-model-image-blocked',
+        action: {
+          label: 'i18n:input.openModelSettings',
+          onClick: expect.any(Function),
+        },
+      },
+    );
+
+    addToast.mock.calls[0][3].action.onClick();
+    expect(openSettings).toHaveBeenCalledOnce();
+  });
+
+  it('detects only non-directory video attachments as chat videos', () => {
+    expect(hasChatVideoAttachments([
+      { path: '/tmp/a.mp4', name: 'a.mp4' },
+      { path: '/tmp/folder.mp4', name: 'folder.mp4', isDirectory: true },
+    ])).toBe(true);
+
+    expect(hasChatVideoAttachments([
+      { path: '/tmp/a.png', name: 'a.png' },
+      { path: '/tmp/folder.webm', name: 'folder.webm', isDirectory: true },
+    ])).toBe(false);
+  });
+
+  it('allows video send only when the current model explicitly supports video', async () => {
+    const result = await evaluateChatVideoSendPreflight({
+      attachments: [{ path: '/tmp/a.mp4', name: 'a.mp4' }],
+      model: { id: 'qwen3-vl-plus', provider: 'dashscope', input: ['text', 'image', 'video'] },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      reason: 'native-video',
+      videoInputMode: 'native-video',
+    });
+  });
+
+  it('blocks video send when model capability is unknown or text/image-only', async () => {
+    await expect(evaluateChatVideoSendPreflight({
+      attachments: [{ path: '/tmp/a.mp4', name: 'a.mp4' }],
+      model: { id: 'unknown-model', provider: 'custom' },
+    })).resolves.toEqual({
+      ok: false,
+      reason: 'model-video-unsupported',
+      videoInputMode: 'unknown',
+    });
+
+    await expect(evaluateChatVideoSendPreflight({
+      attachments: [{ path: '/tmp/a.mp4', name: 'a.mp4' }],
+      model: { id: 'gpt-4o', provider: 'openai', input: ['text', 'image'] },
+    })).resolves.toEqual({
+      ok: false,
+      reason: 'model-video-unsupported',
+      videoInputMode: 'no-native-video',
+    });
+  });
+
+  it('builds one actionable warning toast for unsupported video sends', () => {
+    const addToast = vi.fn();
+    const openSettings = vi.fn();
+    const t = (key: string) => `i18n:${key}`;
+
+    notifyTextModelVideoBlocked({
+      t,
+      addToast,
+      openSettings,
+    });
+
+    expect(addToast).toHaveBeenCalledWith(
+      'i18n:input.textModelVideoBlocked',
+      'warning',
+      9000,
+      {
+        dedupeKey: 'text-model-video-blocked',
         action: {
           label: 'i18n:input.openModelSettings',
           onClick: expect.any(Function),

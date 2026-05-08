@@ -40,6 +40,14 @@ function getModelId(modelEntry) {
   return typeof modelEntry === "object" && modelEntry !== null ? modelEntry.id : modelEntry;
 }
 
+function buildInputModalities({ image = false, video = false } = {}) {
+  return [
+    "text",
+    ...(image ? ["image"] : []),
+    ...(video ? ["video"] : []),
+  ];
+}
+
 function getPiBuiltinModel(provider, modelId) {
   if (!PI_BUILTIN_PROVIDER_REUSE.has(provider) || !modelId) return null;
   try {
@@ -63,7 +71,13 @@ function buildModelOverride(modelEntry) {
   if (modelEntry.maxOutput !== undefined) override.maxTokens = modelEntry.maxOutput;
   if (modelEntry.maxTokens !== undefined) override.maxTokens = modelEntry.maxTokens;
   const image = modelEntry.image ?? modelEntry.vision;
-  if (image !== undefined) override.input = image ? ["text", "image"] : ["text"];
+  const video = modelEntry.video;
+  if (image !== undefined || video !== undefined) {
+    override.input = buildInputModalities({
+      image: image === true,
+      video: video === true,
+    });
+  }
   if (modelEntry.reasoning !== undefined) override.reasoning = modelEntry.reasoning;
 
   return Object.keys(override).length > 0 ? override : null;
@@ -80,15 +94,18 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
   const known = lookupKnown(provider, id);
   const piBuiltin = getPiBuiltinModel(provider, id);
 
-  // image modality 能力：用户设置 > known-models 词典 > 默认 false
+  // 输入模态能力：用户设置 > known-models 词典 > 默认 false
   // 兼容读：migration #7 之前的旧数据用 vision 字段；两个版本后移除 vision fallback
   const userImage = isObj ? (modelEntry.image ?? modelEntry.vision) : undefined;
   const knownImage = known?.image ?? known?.vision;
   const image = userImage !== undefined ? userImage : (knownImage === true);
+  const userVideo = isObj ? modelEntry.video : undefined;
+  const knownVideo = known?.video;
+  const video = userVideo !== undefined ? userVideo : (knownVideo === true);
   const entry = {
     id,
     name: (isObj && modelEntry.name) || known?.name || humanizeName(id),
-    input: image ? ["text", "image"] : ["text"],
+    input: buildInputModalities({ image: image === true, video: video === true }),
     contextWindow: (isObj && modelEntry.context) || known?.context || DEFAULT_CONTEXT_WINDOW,
     reasoning: (isObj && modelEntry.reasoning !== undefined) ? modelEntry.reasoning : (known?.reasoning === true),
   };

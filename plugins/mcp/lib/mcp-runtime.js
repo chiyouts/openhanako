@@ -19,6 +19,7 @@ const DEFAULT_CONFIG = {
 
 const TRANSPORTS = new Set(["stdio", "remote", "streamable-http", "sse"]);
 const AUTH_TYPES = new Set(["none", "bearer", "oauth"]);
+const MASKED_SECRET = "********";
 
 function normalizeTool(tool) {
   if (!tool || typeof tool.name !== "string" || !tool.name) return null;
@@ -36,11 +37,8 @@ function normalizeConnector(connector, fallbackId = "") {
   if (!connector || typeof connector !== "object") return null;
   const id = sanitizeId(connector.id || fallbackId);
   if (!id) return null;
-  const env = connector.env && typeof connector.env === "object" && !Array.isArray(connector.env)
-    ? Object.fromEntries(
-        Object.entries(connector.env).filter(([k, v]) => typeof k === "string" && typeof v === "string"),
-      )
-    : {};
+  const env = normalizeStringRecord(connector.env);
+  const headers = normalizeStringRecord(connector.headers);
   const tools = Array.isArray(connector.tools)
     ? connector.tools.map(normalizeTool).filter(Boolean)
     : [];
@@ -52,18 +50,22 @@ function normalizeConnector(connector, fallbackId = "") {
   return {
     id,
     name: stringOrEmpty(connector.name) || id,
+    description: stringOrEmpty(connector.description),
     transport,
-    url: stringOrEmpty(connector.url),
+    url: stringOrEmpty(connector.url || connector.baseUrl),
     command: stringOrEmpty(connector.command),
     args: Array.isArray(connector.args) ? connector.args.filter((arg) => typeof arg === "string") : [],
     cwd: stringOrEmpty(connector.cwd),
     env,
+    headers,
+    registryUrl: stringOrEmpty(connector.registryUrl),
+    timeout: normalizeTimeoutSeconds(connector.timeout),
     authType,
     authorizationToken,
     oauthClientId: stringOrEmpty(connector.oauthClientId || connector.clientId),
     oauthClientSecret: stringOrEmpty(connector.oauthClientSecret || connector.clientSecret),
     oauth,
-    autoStart: connector.autoStart === true,
+    autoStart: connector.autoStart === true || connector.isActive === true,
     tools,
   };
 }
@@ -290,7 +292,8 @@ export class McpRuntime {
     const index = config.connectors.findIndex((s) => s.id === id);
     if (index === -1) throw new Error(`MCP connector "${id}" not found`);
     const existing = config.connectors[index];
-    const next = normalizeConnector({ ...existing, ...patch, id: existing.id, tools: patch?.tools || existing.tools }, existing.id);
+    const unmaskedPatch = unmaskConnectorPatch(existing, patch || {});
+    const next = normalizeConnector({ ...existing, ...unmaskedPatch, id: existing.id, tools: patch?.tools || existing.tools }, existing.id);
     validateConnector(next);
     const changedClient = connectorClientFingerprint(next) !== connectorClientFingerprint(existing);
     config.connectors[index] = next;
@@ -520,10 +523,11 @@ function createDefaultClient(connector, opts) {
 }
 
 function normalizeTransport(connector) {
-  const raw = stringOrEmpty(connector.transport);
+  const raw = stringOrEmpty(connector.transport || connector.type);
   if (raw === "http") return "remote";
+  if (raw === "streamableHttp" || raw === "streamable-http") return "streamable-http";
   if (TRANSPORTS.has(raw)) return raw;
-  if (stringOrEmpty(connector.url)) return "remote";
+  if (stringOrEmpty(connector.url || connector.baseUrl)) return "remote";
   return "stdio";
 }
 
@@ -579,6 +583,9 @@ function connectorClientFingerprint(connector) {
     args: connector.args,
     cwd: connector.cwd,
     env: connector.env,
+    headers: connector.headers,
+    registryUrl: connector.registryUrl,
+    timeout: connector.timeout,
     authType: connector.authType,
     authorizationToken: connector.authorizationToken,
     oauthAccessToken: connector.oauth?.accessToken || "",
@@ -589,6 +596,8 @@ function publicConnector({ connector, status }) {
   return {
     ...connector,
     status,
+    env: redactRecord(connector.env),
+    headers: redactRecord(connector.headers),
     authorizationToken: connector.authorizationToken ? "********" : "",
     oauthClientSecret: connector.oauthClientSecret ? "********" : "",
     oauth: {
@@ -609,6 +618,54 @@ function connectorAuthStatus(connector) {
 
 function stringOrEmpty(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeStringRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([key, val]) => typeof key === "string" && typeof val === "string"),
+  );
+}
+
+function normalizeTimeoutSeconds(value) {
+  if (value === "" || value == null) return 0;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function redactRecord(value) {
+  const record = normalizeStringRecord(value);
+  return Object.fromEntries(
+    Object.entries(record).map(([key, val]) => [key, val ? MASKED_SECRET : ""]),
+  );
+}
+
+function unmaskConnectorPatch(existing, patch) {
+  const next = { ...patch };
+  if (patch.authorizationToken === MASKED_SECRET) {
+    next.authorizationToken = existing.authorizationToken || "";
+  }
+  if (patch.oauthClientSecret === MASKED_SECRET) {
+    next.oauthClientSecret = existing.oauthClientSecret || "";
+  }
+  if (patch.env && typeof patch.env === "object" && !Array.isArray(patch.env)) {
+    next.env = unmaskRecord(existing.env, patch.env);
+  }
+  if (patch.headers && typeof patch.headers === "object" && !Array.isArray(patch.headers)) {
+    next.headers = unmaskRecord(existing.headers, patch.headers);
+  }
+  return next;
+}
+
+function unmaskRecord(existing, patch) {
+  const existingRecord = normalizeStringRecord(existing);
+  const patchRecord = normalizeStringRecord(patch);
+  return Object.fromEntries(
+    Object.entries(patchRecord).map(([key, val]) => [
+      key,
+      val === MASKED_SECRET && Object.hasOwn(existingRecord, key) ? existingRecord[key] : val,
+    ]),
+  );
 }
 
 export function configPathForDataDir(dataDir) {

@@ -22,6 +22,7 @@ import { SessionFileRegistry } from "../lib/session-files/session-file-registry.
 import { persistBrowserScreenshotFileSync } from "../lib/session-files/browser-screenshot-file.js";
 import { getInvalidProviderModelIds } from "../shared/provider-model-validation.js";
 import { normalizeThinkingLevelForModel } from "./session-thinking-level.js";
+import { lookupKnown } from "../shared/known-models.js";
 
 // ── 迁移表 ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,8 @@ const migrations = {
   14: migrateGeminiOpenAICompatToNative,
   // 旧 prompt snapshot 会话里无法证明 xhigh 支持的记录显式降级为 high
   15: repairLegacySessionSidecarThinkingLevels,
+  // 视频能力进入 model.input 后，修补老的模型投影和残留 override
+  16: migrateVideoCapabilityProjection,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -837,7 +840,7 @@ function migrateWorkspaceToPerAgent(ctx) {
  * #7 — 模型能力字段 vision → image 全量重命名
  *
  * 历史包袱：项目早期在 Pi SDK Model 对象上挂了一份自定义的 vision:boolean 字段，
- * 与 Pi SDK 标准字段 input:("text"|"image")[] 重复。本次统一到 Pi SDK 标准，
+ * 与 Pi SDK 标准字段 input 数组重复。本次统一到 Pi SDK 标准，
  * 把用户意图层（added-models.yaml + agent config.yaml）的 vision 重命名为 image，
  * 运行时层只保留 input 数组。
  *
@@ -1278,6 +1281,168 @@ function repairLegacySessionSidecarThinkingLevels(ctx) {
   }
 
   ctx.log?.(`[migrations] #15: legacy session sidecars repaired (files=${filesPatched}, entries=${entriesPatched})`);
+}
+
+/**
+ * #16 — 视频输入能力进入 model.input 后的老数据修补
+ *
+ * 覆盖两类旧状态：
+ *   1. models.json 是投影文件，老版本里已存在的已知视频模型可能只有 ["text","image"]；
+ *   2. 少量手写 agent config.models.overrides 可能已经带 video，需要提升到 added-models.yaml。
+ *
+ * 幂等：只追加缺失的 input 项，未知模型默认不打开 video；运行期模型对象不保留 video 字段。
+ */
+function migrateVideoCapabilityProjection(ctx) {
+  const modelsPatched = repairModelsJsonVideoInputs(ctx);
+  const overridesPatched = promoteAgentVideoOverrides(ctx);
+  ctx.log?.(`[migrations] #16: video capability projected (models=${modelsPatched}, overrides=${overridesPatched})`);
+}
+
+function repairModelsJsonVideoInputs(ctx) {
+  const modelsJsonPath = path.join(ctx.hanakoHome, "models.json");
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+  } catch {
+    return 0;
+  }
+  if (!raw?.providers || typeof raw.providers !== "object") return 0;
+
+  let patched = 0;
+  for (const [providerId, provider] of Object.entries(raw.providers)) {
+    if (!provider || !Array.isArray(provider.models)) continue;
+    for (const model of provider.models) {
+      if (!model || typeof model !== "object" || Array.isArray(model)) continue;
+      const hadRuntimeVideoField = Object.prototype.hasOwnProperty.call(model, "video");
+      const shouldEnableVideo = migrationModelHasVideoCapability(providerId, model);
+      if (shouldEnableVideo && !migrationInputIncludes(model.input, "video")) {
+        model.input = migrationInputWith(model.input, "video");
+        patched++;
+      }
+      if (hadRuntimeVideoField) {
+        delete model.video;
+        patched++;
+      }
+    }
+  }
+
+  if (patched > 0) {
+    const tmp = modelsJsonPath + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(raw, null, 4) + "\n", "utf-8");
+    fs.renameSync(tmp, modelsJsonPath);
+  }
+  return patched;
+}
+
+function migrationModelHasVideoCapability(providerId, model) {
+  if (model?.video === true) return true;
+  if (model?.video === false) return false;
+  const known = lookupKnown(providerId, model?.id);
+  return known?.video === true;
+}
+
+function migrationInputIncludes(input, modality) {
+  return Array.isArray(input) && input.includes(modality);
+}
+
+function migrationInputWith(input, modality) {
+  const next = Array.isArray(input) ? [...input] : ["text"];
+  if (!next.includes("text")) next.unshift("text");
+  if (!next.includes(modality)) next.push(modality);
+  return next;
+}
+
+function promoteAgentVideoOverrides(ctx) {
+  const { hanakoHome, agentsDir } = ctx;
+  const ymlPath = path.join(hanakoHome, "added-models.yaml");
+  const raw = safeReadYAMLSync(ymlPath, null, YAML);
+  if (!raw?.providers || typeof raw.providers !== "object") return 0;
+
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    return 0;
+  }
+
+  let patched = 0;
+  let addedModelsChanged = false;
+  for (const dir of agentDirs) {
+    const cfgPath = path.join(agentsDir, dir.name, "config.yaml");
+    const cfg = safeReadYAMLSync(cfgPath, null, YAML);
+    if (!cfg?.models?.overrides || typeof cfg.models.overrides !== "object") continue;
+
+    let cfgChanged = false;
+    for (const [modelId, override] of Object.entries(cfg.models.overrides)) {
+      if (!override || typeof override !== "object") continue;
+      if (!Object.prototype.hasOwnProperty.call(override, "video")) continue;
+
+      const promoted = promoteVideoOverrideIntoAddedModels(raw.providers, modelId, override.video);
+      if (promoted) {
+        delete override.video;
+        patched++;
+        cfgChanged = true;
+        addedModelsChanged = true;
+      }
+    }
+
+    if (cfgChanged) {
+      for (const [modelId, override] of Object.entries(cfg.models.overrides)) {
+        if (override && typeof override === "object" && Object.keys(override).length === 0) {
+          delete cfg.models.overrides[modelId];
+        }
+      }
+      if (Object.keys(cfg.models.overrides).length === 0) {
+        delete cfg.models.overrides;
+      }
+      const tmp = cfgPath + ".tmp";
+      fs.writeFileSync(
+        tmp,
+        YAML.dump(cfg, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+        "utf-8",
+      );
+      fs.renameSync(tmp, cfgPath);
+    }
+  }
+
+  if (addedModelsChanged) {
+    const header =
+      "# Hanako 供应商配置（全局，跨 agent 共享）\n" +
+      "# 由设置页面管理\n\n";
+    const tmp = ymlPath + ".tmp";
+    fs.writeFileSync(
+      tmp,
+      header + YAML.dump(raw, {
+        indent: 2,
+        lineWidth: -1,
+        sortKeys: false,
+        quotingType: "\"",
+        forceQuotes: false,
+      }),
+      "utf-8",
+    );
+    fs.renameSync(tmp, ymlPath);
+  }
+
+  return patched;
+}
+
+function promoteVideoOverrideIntoAddedModels(providers, modelId, video) {
+  for (const provider of Object.values(providers)) {
+    if (!provider || !Array.isArray(provider.models)) continue;
+    const idx = provider.models.findIndex((entry) => {
+      if (typeof entry === "string") return entry === modelId;
+      return entry && typeof entry === "object" && entry.id === modelId;
+    });
+    if (idx < 0) continue;
+
+    const existing = typeof provider.models[idx] === "object"
+      ? provider.models[idx]
+      : { id: modelId };
+    provider.models[idx] = { ...existing, video };
+    return true;
+  }
+  return false;
 }
 
 function collectAgentSessionMetaPaths(agentsDir) {

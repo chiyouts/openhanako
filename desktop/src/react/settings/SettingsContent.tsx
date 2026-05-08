@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useSettingsStore } from './store';
 import { hanaFetch } from './api';
+import { createLocalServerConnection } from '../services/server-connection';
 import { t } from './helpers';
 import { loadAgents, loadAvatars, loadSettingsConfig, loadPluginSettings } from './actions';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -107,7 +108,13 @@ export function SettingsContent({
     const unsubscribe = platform.onServerRestarted((data: { port: number }) => {
       const store = useSettingsStore.getState();
       console.log('[settings] server restarted, new port:', data.port);
-      store.set({ serverPort: data.port });
+      store.set({
+        serverPort: data.port,
+        activeServerConnection: createLocalServerConnection({
+          serverPort: data.port,
+          serverToken: store.serverToken,
+        }),
+      });
       loadAgents().catch(() => {});
       loadSettingsConfig().catch(() => {});
     });
@@ -199,7 +206,11 @@ async function initSettings() {
   try {
     const serverPort = Number(await platform.getServerPort());
     const serverToken = await platform.getServerToken();
-    store.set({ serverPort, serverToken });
+    store.set({
+      serverPort,
+      serverToken,
+      activeServerConnection: createLocalServerConnection({ serverPort, serverToken }),
+    });
 
     // i18n
     const i18n = window.i18n;

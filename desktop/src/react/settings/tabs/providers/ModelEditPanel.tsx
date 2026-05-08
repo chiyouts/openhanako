@@ -22,6 +22,7 @@ export function ModelEditPanel({ modelId, providerId, anchorEl, onClose, onRefre
   // 兼容读旧 meta.vision（未迁移到新字段的历史配置）；迁移 #7 之后此 fallback 恒不命中。
   const initialImage = meta.image === true || (meta.image === undefined && meta.vision === true);
   const [image, setImage] = useState<boolean>(initialImage);
+  const [video, setVideo] = useState<boolean>(meta.video === true);
   const [reasoning, setReasoning] = useState<boolean>(meta.reasoning === true);
   const panelRef = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<React.CSSProperties>({});
@@ -46,6 +47,7 @@ export function ModelEditPanel({ modelId, providerId, anchorEl, onClose, onRefre
     if (ctx) entry.context = parseInt(ctx);
     if (maxOut) entry.maxOutput = parseInt(maxOut);
     entry.image = image;
+    entry.video = video;
     entry.reasoning = reasoning;
 
     try {
@@ -94,6 +96,10 @@ export function ModelEditPanel({ modelId, providerId, anchorEl, onClose, onRefre
         <div className={styles['pv-model-edit-field']}>
           <label className={styles['pv-model-edit-label']}>{t('settings.api.vision')}</label>
           <Toggle on={image} onChange={setImage} />
+        </div>
+        <div className={styles['pv-model-edit-field']}>
+          <label className={styles['pv-model-edit-label']}>{t('settings.api.video')}</label>
+          <Toggle on={video} onChange={setVideo} />
         </div>
         <div className={styles['pv-model-edit-field']}>
           <label className={styles['pv-model-edit-label']}>{t('settings.api.reasoning')}</label>
