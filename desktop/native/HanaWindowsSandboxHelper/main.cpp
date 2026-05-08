@@ -18,6 +18,7 @@ struct Grant {
     std::wstring path;
     ACCESS_MODE mode;
     DWORD permissions;
+    bool required;
 };
 
 struct Options {
@@ -35,6 +36,14 @@ struct AclRestore {
 
 static void fail(const std::wstring& message) {
     std::wcerr << L"hana-win-sandbox: " << message << std::endl;
+}
+
+static void debug(const std::wstring& message) {
+    wchar_t enabled[8] = {};
+    DWORD n = GetEnvironmentVariableW(L"HANA_WIN32_SANDBOX_DEBUG", enabled, 8);
+    if (n > 0 && enabled[0] != L'\0' && enabled[0] != L'0') {
+        std::wcerr << L"hana-win-sandbox: " << message << std::endl;
+    }
 }
 
 static std::wstring win32Message(DWORD code) {
@@ -76,21 +85,30 @@ static Options parseArgs(int argc, wchar_t** argv) {
             opts.cwd = argv[++i];
             continue;
         }
-        if ((arg == L"--grant-read" || arg == L"--grant-write" || arg == L"--deny-write") && i + 1 < argc) {
+        if ((arg == L"--grant-read" || arg == L"--grant-read-optional" ||
+             arg == L"--grant-write" || arg == L"--grant-write-optional" ||
+             arg == L"--deny-write") && i + 1 < argc) {
             std::wstring target = argv[++i];
-            if (arg == L"--grant-read") {
-                opts.grants.push_back({ target, GRANT_ACCESS, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE });
-            } else if (arg == L"--grant-write") {
+            if (arg == L"--grant-read" || arg == L"--grant-read-optional") {
                 opts.grants.push_back({
                     target,
                     GRANT_ACCESS,
-                    FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE | FILE_DELETE_CHILD
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    arg == L"--grant-read"
+                });
+            } else if (arg == L"--grant-write" || arg == L"--grant-write-optional") {
+                opts.grants.push_back({
+                    target,
+                    GRANT_ACCESS,
+                    FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE | FILE_DELETE_CHILD,
+                    arg == L"--grant-write"
                 });
             } else {
                 opts.grants.push_back({
                     target,
                     DENY_ACCESS,
-                    FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES | DELETE | FILE_DELETE_CHILD
+                    FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES | DELETE | FILE_DELETE_CHILD,
+                    true
                 });
             }
             continue;
@@ -152,7 +170,11 @@ static bool applyGrant(const Grant& grant, PSID sid, std::vector<AclRestore>& re
         &descriptor
     );
     if (rc != ERROR_SUCCESS) {
-        fail(L"cannot read ACL for " + grant.path + L": " + win32Message(rc));
+        if (grant.required) {
+            fail(L"cannot read ACL for " + grant.path + L": " + win32Message(rc));
+        } else {
+            debug(L"skipping optional ACL grant for " + grant.path + L": " + win32Message(rc));
+        }
         return false;
     }
 
@@ -167,7 +189,11 @@ static bool applyGrant(const Grant& grant, PSID sid, std::vector<AclRestore>& re
     PACL newDacl = nullptr;
     rc = SetEntriesInAclW(1, &access, oldDacl, &newDacl);
     if (rc != ERROR_SUCCESS) {
-        fail(L"cannot build ACL for " + grant.path + L": " + win32Message(rc));
+        if (grant.required) {
+            fail(L"cannot build ACL for " + grant.path + L": " + win32Message(rc));
+        } else {
+            debug(L"skipping optional ACL grant for " + grant.path + L": " + win32Message(rc));
+        }
         if (descriptor) LocalFree(descriptor);
         return false;
     }
@@ -183,7 +209,11 @@ static bool applyGrant(const Grant& grant, PSID sid, std::vector<AclRestore>& re
     );
     if (newDacl) LocalFree(newDacl);
     if (rc != ERROR_SUCCESS) {
-        fail(L"cannot apply ACL for " + grant.path + L": " + win32Message(rc));
+        if (grant.required) {
+            fail(L"cannot apply ACL for " + grant.path + L": " + win32Message(rc));
+        } else {
+            debug(L"skipping optional ACL grant for " + grant.path + L": " + win32Message(rc));
+        }
         if (descriptor) LocalFree(descriptor);
         return false;
     }
@@ -355,8 +385,10 @@ int wmain(int argc, wchar_t** argv) {
     bool grantsOk = true;
     for (const auto& grant : opts.grants) {
         if (!applyGrant(grant, appSid, restores)) {
-            grantsOk = false;
-            break;
+            if (grant.required) {
+                grantsOk = false;
+                break;
+            }
         }
     }
 

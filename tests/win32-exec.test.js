@@ -133,7 +133,9 @@ describe("createWin32Exec", () => {
         helperPath: helper,
         grants: {
           readPaths: ["C:\\outside\\reference.md"],
+          optionalReadPaths: ["C:\\Users\\Hana\\.hanako\\agents\\hanako\\config.yaml"],
           writePaths: ["C:\\work"],
+          optionalWritePaths: ["C:\\Users\\Hana\\.hanako\\agents\\hanako\\memory"],
         },
       },
     });
@@ -159,8 +161,12 @@ describe("createWin32Exec", () => {
         "C:\\work",
         "--grant-read",
         "C:\\outside\\reference.md",
+        "--grant-read-optional",
+        "C:\\Users\\Hana\\.hanako\\agents\\hanako\\config.yaml",
         "--grant-write",
         "C:\\work",
+        "--grant-write-optional",
+        "C:\\Users\\Hana\\.hanako\\agents\\hanako\\memory",
         "--",
         bundledShell,
         "-c",

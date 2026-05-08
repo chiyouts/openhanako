@@ -46,7 +46,7 @@ describe("Windows sandbox policy projection", () => {
 
   const real = (p) => fs.realpathSync(p);
 
-  it("projects workspace and Hana writable paths as write grants and read-only policy paths as read grants", () => {
+  it("projects required command grants separately from optional Hana grants", () => {
     const { hanakoHome, agentDir, workspace, externalDir } = makeTree();
     const externalFile = path.join(externalDir, "reference.md");
     const policy = deriveSandboxPolicy({
@@ -63,20 +63,53 @@ describe("Windows sandbox policy projection", () => {
       externalReadPaths: [externalFile],
     });
 
-    expect(grants.writePaths).toEqual(expect.arrayContaining([
+    expect(grants.writePaths).toEqual([real(workspace)]);
+    expect(grants.optionalWritePaths).toEqual(expect.arrayContaining([
       real(path.join(agentDir, "memory")),
       real(path.join(agentDir, "sessions")),
-      real(workspace),
     ]));
     expect(grants.readPaths).toEqual(expect.arrayContaining([
+      real(workspace),
+      real(externalFile),
+    ]));
+    expect(grants.optionalReadPaths).toEqual(expect.arrayContaining([
       real(path.join(agentDir, "config.yaml")),
       real(path.join(agentDir, "learned-skills")),
       real(path.join(hanakoHome, "user")),
-      real(externalFile),
     ]));
     expect(grants.writePaths).not.toContain(real(externalFile));
     expect(grants.denyWritePaths).toContain(real(path.join(workspace, ".git")));
+    expect(grants.denyWritePaths).not.toContain(real(path.join(hanakoHome, "session-files")));
     expect(grants.readPaths).not.toContain(path.join(hanakoHome, "auth.json"));
+  });
+
+  it("keeps Hana prompt files optional so a bad ACL cannot block unrelated commands", () => {
+    const { hanakoHome, agentDir, workspace, externalDir } = makeTree();
+    const externalFile = path.join(externalDir, "reference.md");
+    const optionalPrompt = path.join(agentDir, "config.yaml");
+    const missingLegacyPrompt = path.join(agentDir, "yuan.md");
+    const policy = deriveSandboxPolicy({
+      agentDir,
+      workspace,
+      workspaceFolders: [],
+      hanakoHome,
+      mode: "standard",
+    });
+
+    const grants = buildWin32SandboxGrants({
+      policy,
+      cwd: workspace,
+      externalReadPaths: [externalFile],
+    });
+
+    expect(grants.readPaths).toEqual(expect.arrayContaining([
+      real(workspace),
+      real(externalFile),
+    ]));
+    expect(grants.readPaths).not.toContain(real(optionalPrompt));
+    expect(grants.readPaths).not.toContain(path.resolve(missingLegacyPrompt));
+    expect(grants.optionalReadPaths).toContain(real(optionalPrompt));
+    expect(grants.optionalReadPaths).not.toContain(path.resolve(missingLegacyPrompt));
   });
 
   it("derives read-only external grants from active session files without re-granting workspace or managed-cache files", () => {
