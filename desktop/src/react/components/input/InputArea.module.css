@@ -235,7 +235,8 @@
     overflow: hidden;
     box-shadow: 0 4px 16px var(--shadow);
     z-index: 50;
-    animation: hana-fade-up var(--duration-fast) var(--ease-out);
+    transform-origin: bottom right;
+    animation: hana-popout var(--duration-fast) var(--ease-out);
 }
 
 .thinking-selector.open .thinking-dropdown {
@@ -246,6 +247,7 @@
     left: 0;
     right: auto;
     min-width: 8.5rem;
+    transform-origin: bottom left;
 }
 
 .thinking-option {
@@ -359,7 +361,8 @@
     overflow-y: auto;
     box-shadow: 0 4px 16px var(--shadow);
     z-index: 50;
-    animation: hana-fade-up var(--duration-fast) var(--ease-out);
+    transform-origin: bottom right;
+    animation: hana-popout var(--duration-fast) var(--ease-out);
 }
 
 .model-selector.open .model-dropdown {
@@ -1100,16 +1103,6 @@
     color: var(--text-muted);
 }
 
-/* ── 输入栏按钮统一微交互 ──
-   按下 0.97 缩放，给 4 个按钮（plan/thinking/model/send）触觉反馈 */
-.plan-mode-btn:active:not(:disabled),
-.thinking-pill:active,
-.model-pill:active:not(.model-pill-disabled),
-.send-btn:active:not(:disabled) {
-    transform: scale(0.97);
-    transition-duration: var(--duration-instant);
-}
-
 /* 发送按钮 */
 .send-btn {
     flex-shrink: 0;
@@ -1137,9 +1130,6 @@
 
 .send-enter-icon {
     opacity: 0.85;
-    transform: translateX(2px);
-    transition: opacity var(--duration-fast) var(--ease-out),
-                transform var(--duration-fast) var(--ease-out);
 }
 
 .send-btn:hover:not(:disabled) {
@@ -1148,7 +1138,6 @@
 
 .send-btn:hover:not(:disabled) .send-enter-icon {
     opacity: 1;
-    transform: translateX(0);
 }
 
 .send-btn:disabled {
