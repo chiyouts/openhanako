@@ -35,16 +35,16 @@ function SubBlock({ title, children }: SubBlockProps) {
   );
 }
 
-interface WarningProps {
+interface WarningProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
 }
 
-function Note({ children }: WarningProps) {
-  return <div className={styles.sectionNote}>{children}</div>;
+function Note({ children, className, ...rest }: WarningProps) {
+  return <div className={[styles.sectionNote, className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }
 
-function Warning({ children }: WarningProps) {
-  return <div className={styles.sectionWarning}>{children}</div>;
+function Warning({ children, className, ...rest }: WarningProps) {
+  return <div className={[styles.sectionWarning, className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }
 
 function SettingsSectionBase({ title, context, variant = 'default', children, className }: SettingsSectionProps) {
