@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("hana", {
     return () => ipcRenderer.removeListener("auto-update-state", handler);
   },
   appReady: () => ipcRenderer.invoke("app-ready"),
+  syncWindowTheme: (theme) => ipcRenderer.send("window-theme-changed", theme),
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   selectFiles: () => ipcRenderer.invoke("select-files"),
   selectSkill: () => ipcRenderer.invoke("select-skill"),

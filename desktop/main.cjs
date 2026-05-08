@@ -251,6 +251,40 @@ function titleBarOpts(trafficLight = { x: 16, y: 16 }) {
   return framelessWindowOpts();
 }
 
+function resolveConcreteTheme(rawTheme) {
+  return themeRegistry.resolveSavedTheme(rawTheme || themeRegistry.DEFAULT_THEME, nativeTheme.shouldUseDarkColors).concrete;
+}
+
+function getThemeEntry(rawTheme) {
+  const concrete = resolveConcreteTheme(rawTheme);
+  return themeRegistry.THEMES[concrete] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME];
+}
+
+function getThemeBackgroundColor(rawTheme) {
+  return getThemeEntry(rawTheme).backgroundColor;
+}
+
+function applyWindowThemeColors(win, rawTheme) {
+  if (!win || win.isDestroyed()) return;
+  const backgroundColor = getThemeBackgroundColor(rawTheme);
+
+  try {
+    win.setBackgroundColor(backgroundColor);
+  } catch (err) {
+    console.warn("[desktop] set window background color failed:", redactMainLogText(err.message));
+  }
+
+  // Windows 的 frameless thick frame 仍由 DWM 绘制。这里用主题背景色
+  // 压低 active border 的存在感，而不是使用更醒目的 accent token。
+  if (process.platform === "win32" && typeof win.setAccentColor === "function") {
+    try {
+      win.setAccentColor(backgroundColor);
+    } catch (err) {
+      console.warn("[desktop] set window border color failed:", redactMainLogText(err.message));
+    }
+  }
+}
+
 /**
  * 获取当前 agent ID（不依赖 server）
  * 优先读 user/preferences.json，fallback 扫描 agents/ 第一个有效目录
@@ -931,6 +965,7 @@ function saveWindowState() {
 // ── 创建主窗口 ──
 function createMainWindow() {
   const saved = loadWindowState();
+  const initialTheme = themeRegistry.DEFAULT_THEME;
 
   const opts = {
     width: saved?.width || 960,
@@ -939,7 +974,7 @@ function createMainWindow() {
     minHeight: 500,
     title: "Hanako",
     ...titleBarOpts({ x: 16, y: 16 }),
-    backgroundColor: "#F4F0E4",
+    backgroundColor: getThemeBackgroundColor(initialTheme),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -955,6 +990,7 @@ function createMainWindow() {
   }
 
   mainWindow = new BrowserWindow(opts);
+  applyWindowThemeColors(mainWindow, initialTheme);
 
   // auto-updater 是进程级服务：初始化只做一次，窗口重建时只更新目标 window 引用。
   if (!_autoUpdaterInitialized) {
@@ -1092,6 +1128,8 @@ function createSettingsWindow(tab, theme) {
     }
   }
 
+  const settingsTheme = resolveConcreteTheme(theme || _browserViewerTheme);
+
   settingsWindow = new BrowserWindow({
     width: 720,
     height: 700,
@@ -1100,7 +1138,7 @@ function createSettingsWindow(tab, theme) {
     minHeight: 500,
     title: "Settings",
     ...titleBarOpts({ x: 16, y: 14 }),
-    backgroundColor: (themeRegistry.THEMES[theme || _browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
+    backgroundColor: getThemeBackgroundColor(settingsTheme),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -1108,6 +1146,7 @@ function createSettingsWindow(tab, theme) {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(settingsWindow, settingsTheme);
 
   settingsWindow.once("ready-to-show", () => {
     if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.show();
@@ -1207,7 +1246,7 @@ function createBrowserViewerWindow(opts = {}) {
     minHeight: 360,
     title: "Browser",
     ...framelessWindowOpts(),
-    backgroundColor: (themeRegistry.THEMES[_browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
+    backgroundColor: getThemeBackgroundColor(_browserViewerTheme),
     hasShadow: true,
     show: shouldShow,
     acceptFirstMouse: true, // macOS: 第一次点击不仅激活窗口，还穿透到内容
@@ -1217,6 +1256,7 @@ function createBrowserViewerWindow(opts = {}) {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(browserViewerWindow, _browserViewerTheme);
 
   loadWindowURL(browserViewerWindow, "browser-viewer");
 
@@ -2048,6 +2088,7 @@ function setupBrowserCommands() {
 // ── 创建 Onboarding 窗口 ──
 // query: 可选的 URL 参数，如 { skipToTutorial: "1" } 或 { preview: "1" }
 function createOnboardingWindow(query = {}) {
+  const initialTheme = themeRegistry.DEFAULT_THEME;
   onboardingWindow = new BrowserWindow({
     width: 560,
     height: 780,
@@ -2055,7 +2096,7 @@ function createOnboardingWindow(query = {}) {
     frame: false,
     title: "Hanako",
     ...titleBarOpts({ x: 16, y: 16 }),
-    backgroundColor: "#F4F0E4",
+    backgroundColor: getThemeBackgroundColor(initialTheme),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -2063,6 +2104,7 @@ function createOnboardingWindow(query = {}) {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(onboardingWindow, initialTheme);
 
   loadWindowURL(onboardingWindow, "onboarding", { query });
 
@@ -2422,8 +2464,7 @@ const _viewerWindows = new Map(); // windowId -> BrowserWindow
 wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
   if (!data?.filePath || !path.isAbsolute(data.filePath)) return null;
 
-  const isDark = nativeTheme.shouldUseDarkColors;
-  const { concrete: theme } = themeRegistry.resolveSavedTheme('auto', isDark);
+  const theme = resolveConcreteTheme('auto');
 
   const win = new BrowserWindow({
     width: 720,
@@ -2432,7 +2473,7 @@ wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
     minHeight: 300,
     title: data.title || "Viewer",
     ...framelessWindowOpts(),
-    backgroundColor: (themeRegistry.THEMES[theme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
+    backgroundColor: getThemeBackgroundColor(theme),
     hasShadow: true,
     show: true,
     acceptFirstMouse: true,
@@ -2442,6 +2483,7 @@ wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(win, theme);
 
   const windowId = win.id;
   _viewerWindows.set(windowId, win);
@@ -2468,6 +2510,11 @@ wrapIpcBestEffortHandler("viewer-close", (event) => {
   // 由 viewer 窗口内"关闭"按钮触发；关闭发起窗口自身
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win && !win.isDestroyed()) win.close();
+});
+
+wrapIpcOn("window-theme-changed", (event, theme) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  applyWindowThemeColors(win, theme);
 });
 
 // 设置窗口 → 主窗口的消息转发
