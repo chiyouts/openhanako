@@ -1662,15 +1662,16 @@
 }
 
 /* Select */
-/* Native select：对齐 .settings-input 视觉语言（border + 4px radius，无 shadow）*/
+/* Native select：高度/字号/padding 与 .settings-input + .sdw-trigger 对齐
+   右 padding 留 2rem 给下拉箭头 */
 .settings-select {
     font-family: inherit;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-input, 4px);
-    padding: 4px 2rem 4px 8px;
+    padding: 0.45rem 2rem 0.45rem 0.65rem;
     outline: none;
     cursor: pointer;
     appearance: none;
