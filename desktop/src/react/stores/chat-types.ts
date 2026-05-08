@@ -36,6 +36,26 @@ export interface DeskContext {
   fileCount: number;
 }
 
+export interface SessionRegistryFile {
+  id?: string;
+  fileId?: string;
+  sessionPath?: string;
+  filePath?: string;
+  realPath?: string;
+  label?: string;
+  displayName?: string;
+  filename?: string;
+  ext?: string;
+  mime?: string;
+  kind?: string;
+  status?: 'available' | 'expired' | string;
+  missingAt?: number | null;
+  origin?: string;
+  operations?: string[];
+  createdAt?: number;
+  isDirectory?: boolean;
+}
+
 // ── 内容块 ──
 
 export interface SessionConfirmationBlock {

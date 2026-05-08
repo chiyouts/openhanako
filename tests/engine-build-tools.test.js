@@ -84,4 +84,79 @@ describe("HanaEngine.buildTools", () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(result.details.executed).toBe(true);
   });
+
+  it("registers files created or modified by write and edit tools in the active session", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-build-tools-touch-"));
+    const agentDir = path.join(tmpDir, "agents", "focus");
+    const workspace = path.join(tmpDir, "workspace");
+    const sessionPath = path.join(agentDir, "sessions", "touch.jsonl");
+    fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.writeFileSync(sessionPath, "{}\n");
+
+    const registerSessionFile = vi.fn(({ sessionPath, filePath, label, origin, operation }) => ({
+      id: `sf_${operation}`,
+      sessionPath,
+      filePath,
+      label,
+      origin,
+      operation,
+    }));
+    const engine = Object.create(HanaEngine.prototype);
+    engine.hanakoHome = tmpDir;
+    engine.registerSessionFile = registerSessionFile;
+    engine.getAgent = vi.fn(() => ({ id: "focus", agentDir, tools: [] }));
+    engine._pluginManager = null;
+    engine._prefs = { getFileBackup: () => ({ enabled: false }) };
+    engine._readPreferences = () => ({ sandbox: false });
+    engine._confirmStore = null;
+    engine._emitEvent = vi.fn();
+    engine.getSessionPermissionMode = vi.fn(() => "operate");
+    engine._agentMgr = {
+      agent: {
+        id: "focus",
+        agentDir,
+        tools: [],
+      },
+    };
+
+    const { tools } = engine.buildTools(workspace, [], {
+      agentDir,
+      workspace,
+      getSessionPath: () => sessionPath,
+    });
+    const write = tools.find(tool => tool.name === "write");
+    const edit = tools.find(tool => tool.name === "edit");
+
+    const writeResult = await write.execute("write-1", { path: "draft.md", content: "hello\n" });
+    const editResult = await edit.execute("edit-1", {
+      path: "draft.md",
+      edits: [{ oldText: "hello", newText: "hello Hana" }],
+    });
+
+    expect(registerSessionFile).toHaveBeenCalledWith(expect.objectContaining({
+      sessionPath,
+      filePath: path.join(workspace, "draft.md"),
+      label: "draft.md",
+      origin: "agent_write",
+      operation: "created",
+    }));
+    expect(registerSessionFile).toHaveBeenCalledWith(expect.objectContaining({
+      sessionPath,
+      filePath: path.join(workspace, "draft.md"),
+      label: "draft.md",
+      origin: "agent_edit",
+      operation: "modified",
+    }));
+    expect(writeResult.details.sessionFile).toMatchObject({
+      id: "sf_created",
+      filePath: path.join(workspace, "draft.md"),
+      origin: "agent_write",
+    });
+    expect(editResult.details.sessionFile).toMatchObject({
+      id: "sf_modified",
+      filePath: path.join(workspace, "draft.md"),
+      origin: "agent_edit",
+    });
+  });
 });

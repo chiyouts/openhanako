@@ -54,6 +54,7 @@ function clearSessionRuntimeCaches(path: string): void {
   useStore.getState().clearSession?.(path);
   useStore.setState((s: Record<string, any>) => {
     const { [path]: _attached, ...attachedFilesBySession } = s.attachedFilesBySession || {};
+    const { [path]: _registryFiles, ...sessionRegistryFilesByPath } = s.sessionRegistryFilesByPath || {};
     const { [path]: _draft, ...drafts } = s.drafts || {};
     const { [path]: _streamMeta, ...sessionStreams } = s.sessionStreams || {};
     const { [path]: _browser, ...browserBySession } = s.browserBySession || {};
@@ -63,6 +64,7 @@ function clearSessionRuntimeCaches(path: string): void {
     const { [path]: _todosLive, ...todosLiveVersionBySession } = s.todosLiveVersionBySession || {};
     return {
       attachedFilesBySession,
+      sessionRegistryFilesByPath,
       drafts,
       sessionStreams,
       browserBySession,
@@ -122,6 +124,10 @@ export async function loadMessages(forPath?: string): Promise<void> {
     const rawTodos = data.todos || [];
     const migratedTodos = migrateLegacyTodos({ todos: rawTodos });
     const items = buildItemsFromHistory(data);
+    useStore.getState().setSessionRegistryFiles(
+      targetPath,
+      Array.isArray(data.sessionFiles) ? data.sessionFiles : [],
+    );
     useStore.getState().setSessionTodosForPath(targetPath, migratedTodos);
     if (items.length > 0) {
       useStore.getState().initSession(targetPath, items, data.hasMore ?? false);
@@ -174,6 +180,9 @@ export async function loadMoreMessages(forPath?: string): Promise<void> {
       `/api/sessions/messages?path=${encodeURIComponent(targetPath)}&before=${encodeURIComponent(before)}`,
     );
     const data = await res.json();
+    if (Array.isArray(data.sessionFiles)) {
+      useStore.getState().setSessionRegistryFiles(targetPath, data.sessionFiles);
+    }
     const items = buildItemsFromHistory(data);
     if (items.length > 0) {
       useStore.getState().prependItems(targetPath, items, data.hasMore ?? false);

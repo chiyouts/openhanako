@@ -22,6 +22,7 @@ const initialStateFactory = (): MockState => ({
   pendingNewSession: false,
   sessions: [] as Array<{ path: string }>,
   chatSessions: {} as Record<string, unknown>,
+  sessionRegistryFilesByPath: {} as Record<string, unknown>,
   sessionModelsByPath: {} as Record<string, unknown>,
   _loadMessagesVersion: {} as Record<string, number>,
   scrollPositions: {} as Record<string, number>,
@@ -163,9 +164,19 @@ function installStoreMethods() {
   });
   s.clearSession = vi.fn((path: string) => {
     delete (mockState.chatSessions as Record<string, unknown>)[path];
+    delete (mockState.sessionRegistryFilesByPath as Record<string, unknown>)[path];
     delete (mockState.sessionModelsByPath as Record<string, unknown>)[path];
     delete (mockState._loadMessagesVersion as Record<string, number>)[path];
     delete (mockState.scrollPositions as Record<string, number>)[path];
+  });
+  s.setSessionRegistryFiles = vi.fn((path: string, files: unknown[]) => {
+    const bySession = mockState.sessionRegistryFilesByPath as Record<string, unknown>;
+    bySession[path] = files;
+  });
+  s.upsertSessionRegistryFile = vi.fn((path: string, file: Record<string, unknown>) => {
+    const bySession = mockState.sessionRegistryFilesByPath as Record<string, Record<string, unknown>[]>;
+    const files = bySession[path] || [];
+    bySession[path] = [...files, file];
   });
   s.setSessionTodosForPath = vi.fn((path: string, todos: unknown[]) => {
     const bySession = mockState.todosBySession as Record<string, unknown>;
@@ -408,11 +419,17 @@ describe('session-actions', () => {
 
     it('正常单次调用写入 initSession', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
-        messages: [{ text: 'hello' }], blocks: [], todos: [], hasMore: false,
+        messages: [{ text: 'hello' }],
+        blocks: [],
+        todos: [],
+        sessionFiles: [{ fileId: 'sf_write', filePath: '/workspace/draft.md' }],
+        hasMore: false,
       }));
       await loadMessages('/a');
       const initSession = (mockState as unknown as { initSession: ReturnType<typeof vi.fn> }).initSession;
       expect(initSession).toHaveBeenCalledTimes(1);
+      expect((mockState.sessionRegistryFilesByPath as Record<string, unknown>)['/a'])
+        .toEqual([{ fileId: 'sf_write', filePath: '/workspace/draft.md' }]);
     });
 
     it('mid-flight 收到 live message 更新时，跳过 messages hydrate', async () => {

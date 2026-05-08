@@ -27,6 +27,7 @@ import {
   moveSessionFileSidecarSync,
   sessionFileSidecarPath,
 } from "../../lib/session-files/session-file-registry.js";
+import { serializeSessionFile } from "../../lib/session-files/session-file-response.js";
 import { deleteSessionSkillSnapshotSync } from "../../lib/skills/session-skill-snapshot.js";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.js";
 import { modelSupportsXhigh } from "../../core/session-thinking-level.js";
@@ -330,13 +331,15 @@ export function createSessionsRoute(engine) {
         }
       }
 
-      patchSessionFileLifecycleBlocks(slicedBlocks, engine, queryPath || engine.currentSessionPath || null);
+      const resolvedSessionPath = queryPath || engine.currentSessionPath || null;
+      patchSessionFileLifecycleBlocks(slicedBlocks, engine, resolvedSessionPath);
+      const sessionFiles = listSessionRegistryFiles(engine, resolvedSessionPath);
 
       // 从历史中提取最新 todo 状态：branch-aware，沿当前 leaf 回溯到 root，
       // 只在当前分支路径上找最新合法快照。避免从抛弃的分支取到错误状态。
       const todos = await loadLatestTodosFromSessionFile(queryPath);
 
-      return c.json({ messages, blocks: slicedBlocks, todos, hasMore });
+      return c.json({ messages, blocks: slicedBlocks, todos, hasMore, sessionFiles });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -726,6 +729,11 @@ function patchSessionFileLifecycleBlocks(blocks, engine, sessionPath) {
       block.installedFile = { ...block.installedFile, ...patch };
     }
   }
+}
+
+function listSessionRegistryFiles(engine, sessionPath) {
+  if (!sessionPath || typeof engine?.listSessionFiles !== "function") return [];
+  return engine.listSessionFiles(sessionPath).map(file => serializeSessionFile(file)).filter(Boolean);
 }
 
 function sessionFileLifecycleFields(file) {

@@ -976,16 +976,20 @@ export class Agent {
     );
 
     parts.push(isZh
-      ? "\n## 文件交付\n\n" +
-        "当用户要求你把文件发给他、呈现给他、交付给他，或者你创建、找到、收到一个需要交给用户的本地文件时，使用 stage_files 登记文件。stage 表示把文件归属到当前 session；桌面端可以显示卡片，Bridge 可以按平台能力发送，未来移动端也消费同一份 SessionFile。\n\n" +
+      ? "\n## Session 文件与交付\n\n" +
+        "SessionFile 表示和当前 session 相关的本地文件：用户上传/附加的文件、你通过 write 创建的文件、你通过 edit 修改的文件、插件产物、浏览器截图、安装产物都会进入同一套 session 文件记录。\n\n" +
+        "write/edit 成功后会由工具层自动记录为 session 相关文件；这只表示文件和本次会话有关，不等于已经交付给用户。\n\n" +
+        "当用户要求你把文件发给他、呈现给他、交付给他，或者你创建/修改了一个明确需要用户查看或拿走的文件时，使用 stage_files 标记为已交付。stage 表示把这个 session 相关文件提升为消费端可展示/可发送的文件；桌面端可以显示卡片，Bridge 可以按平台能力发送，未来移动端也消费同一份 SessionFile。\n\n" +
         "- 只传真实存在的本机绝对路径\n" +
-        "- 插件贡献的文件、浏览器截图、安装包、子 Agent 产物也遵守同一规则\n" +
+        "- 已经 stage 过的同一个文件不需要反复 stage；如文件内容后来又被修改，并且用户需要查看最新版本，再 stage 一次\n" +
         "- 不要只在文本里写文件路径\n" +
         "- 不要在 Agent 层判断具体平台怎么展示或发送，消费端会处理"
-      : "\n## File Delivery\n\n" +
-        "When the user asks you to send, present, or hand over a file, or when you create, find, or receive a local file that should reach the user, use stage_files to register it. Staging means assigning the file to the current session; desktop can render a card, Bridge can send according to platform capabilities, and future mobile clients can consume the same SessionFile.\n\n" +
+      : "\n## Session Files and Delivery\n\n" +
+        "SessionFile means a local file related to the current session: files uploaded or attached by the user, files you create with write, files you modify with edit, plugin outputs, browser screenshots, and install outputs all enter the same session file record.\n\n" +
+        "After write/edit succeeds, the tool layer records the file as session-related automatically; this only means the file belongs to this session, not that it has been delivered to the user.\n\n" +
+        "When the user asks you to send, present, or hand over a file, or when you create/modify a file the user clearly needs to see or take away, use stage_files to mark it as delivered. Staging promotes this session-related file to something consumers can display/send; desktop can render a card, Bridge can send according to platform capabilities, and future mobile clients can consume the same SessionFile.\n\n" +
         "- Pass only real local absolute paths\n" +
-        "- Files contributed by plugins, browser screenshots, installers, and sub-agents follow the same rule\n" +
+        "- Do not repeatedly stage the same file once it has already been staged; if the file is modified later and the user needs the latest version, stage it again\n" +
         "- Do not merely write file paths in text\n" +
         "- Do not decide platform-specific display or sending behavior in the Agent layer; consumers handle it"
     );

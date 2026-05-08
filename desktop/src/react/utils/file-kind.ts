@@ -58,6 +58,7 @@ export function extOfName(name: string): string | undefined {
  * 统一构造 FileRef.id。selector 和调用方共用同一算法，避免 id 分叉。
  * - desk：desk:<path>
  * - session-attachment：sess:<sessionPath>:<messageId>:att:<path>
+ * - session-registry：sess:<sessionPath>:registry:<path>
  * - session-block-file：sess:<sessionPath>:<messageId>:block:<blockIdx>:<path>
  * - session-block-legacy-artifact：sess:<sessionPath>:<messageId>:legacy-artifact:<blockIdx>:<path>
  * - session-block-screenshot：sess:<sessionPath>:<messageId>:block:<blockIdx>:screenshot
@@ -74,6 +75,8 @@ export function buildFileRefId(parts: {
       return `desk:${parts.path}`;
     case 'session-attachment':
       return `sess:${parts.sessionPath}:${parts.messageId}:att:${parts.path}`;
+    case 'session-registry':
+      return `sess:${parts.sessionPath}:registry:${parts.path}`;
     case 'session-block-file':
       return `sess:${parts.sessionPath}:${parts.messageId}:block:${parts.blockIdx}:${parts.path}`;
     case 'session-block-legacy-artifact':

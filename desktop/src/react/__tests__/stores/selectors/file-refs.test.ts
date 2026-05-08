@@ -99,12 +99,13 @@ describe('selectDeskFiles', () => {
   });
 });
 
-function sessionState(items: ChatListItem[], path = '/s/1') {
+function sessionState(items: ChatListItem[], path = '/s/1', sessionFiles: unknown[] = []) {
   return {
     deskFiles: [],
     deskBasePath: '',
     deskCurrentPath: '',
     chatSessions: { [path]: { items, hasMore: false, loadingMore: false } },
+    sessionRegistryFilesByPath: sessionFiles.length ? { [path]: sessionFiles } : {},
   } as any;
 }
 
@@ -122,6 +123,55 @@ describe('selectSessionFiles', () => {
     const r2 = selectSessionFiles(sessionState([]), '/nowhere');
     expect(r1).toEqual([]);
     expect(r1).toBe(r2);
+  });
+
+  it('优先从 session registry 抽取相关文件', () => {
+    const refs = selectSessionFiles(sessionState([], '/s/registry', [{
+      fileId: 'sf_write',
+      filePath: '/workspace/draft.md',
+      label: 'draft.md',
+      ext: 'md',
+      mime: 'text/markdown',
+      origin: 'agent_write',
+      operations: ['created', 'modified'],
+      createdAt: 1234,
+      status: 'available',
+    }]), '/s/registry');
+
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({
+      fileId: 'sf_write',
+      source: 'session-registry',
+      name: 'draft.md',
+      path: '/workspace/draft.md',
+      kind: 'markdown',
+      origin: 'agent_write',
+      operations: ['created', 'modified'],
+      timestamp: 1234,
+    });
+  });
+
+  it('registry 与旧 blocks 指向同一 SessionFile 时不重复', () => {
+    const items: ChatListItem[] = [{
+      type: 'message',
+      data: {
+        id: 'm-file', role: 'assistant',
+        blocks: [
+          { type: 'file', fileId: 'sf_same', filePath: '/workspace/out.md', label: 'out.md', ext: 'md' },
+        ],
+      },
+    }];
+    const refs = selectSessionFiles(sessionState(items, '/s/dedupe', [{
+      fileId: 'sf_same',
+      filePath: '/workspace/out.md',
+      label: 'out.md',
+      ext: 'md',
+      origin: 'stage_files',
+      operations: ['staged'],
+    }]), '/s/dedupe');
+
+    expect(refs).toHaveLength(1);
+    expect(refs[0].source).toBe('session-registry');
   });
 
   it('抽取 user attachments（过滤目录）', () => {

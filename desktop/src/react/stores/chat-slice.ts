@@ -2,13 +2,14 @@
  * chat-slice.ts — Per-session 消息数据 + 滚动位置
  */
 
-import type { ChatListItem, ChatMessage, SessionMessages, SessionModel } from './chat-types';
+import type { ChatListItem, ChatMessage, SessionMessages, SessionModel, SessionRegistryFile } from './chat-types';
 import { invalidateSessionCache } from './selectors/file-refs';
 import { invalidateStreamBuffer } from './stream-invalidator';
 import { clearMessageLiveVersion } from './message-live-version';
 
 export interface ChatSlice {
   chatSessions: Record<string, SessionMessages>;
+  sessionRegistryFilesByPath: Record<string, SessionRegistryFile[]>;
   /**
    * Per-session 模型快照。与 chatSessions 解耦：模型可以独立于消息状态存在，
    * 避免 updateSessionModel 在 chatSessions 里写 stub 骗过 hasData 判据（issue #405）。
@@ -28,6 +29,8 @@ export interface ChatSlice {
   updateMessageById: (path: string, messageId: string, updater: (msg: ChatMessage) => ChatMessage) => boolean;
   patchBlockByTaskId: (sessionPath: string, taskId: string, patch: Record<string, any>) => void;
   _pendingBlockPatches: Record<string, Record<string, any>>;
+  setSessionRegistryFiles: (path: string, files: SessionRegistryFile[]) => void;
+  upsertSessionRegistryFile: (path: string, file: SessionRegistryFile) => void;
 
   updateSessionModel: (path: string, model: SessionModel) => void;
   bumpLoadMessagesVersion: (path: string) => number;
@@ -43,12 +46,14 @@ export const createChatSlice = (
   get: () => ChatSlice,
 ): ChatSlice => ({
   chatSessions: {},
+  sessionRegistryFilesByPath: {},
   sessionModelsByPath: {},
   _loadMessagesVersion: {},
   scrollPositions: {},
 
   initSession: (path, items, hasMore) => set((s) => {
     const sessions = { ...s.chatSessions };
+    const registryFiles = { ...s.sessionRegistryFilesByPath };
     const scrollPositions = { ...s.scrollPositions };
     sessions[path] = {
       items,
@@ -64,12 +69,13 @@ export const createChatSlice = (
       const oldest = keys.find(k => k !== path);
       if (oldest) {
         delete sessions[oldest];
+        delete registryFiles[oldest];
         delete scrollPositions[oldest];
         invalidateSessionCache(oldest);
         invalidateStreamBuffer(oldest);
       }
     }
-    return { chatSessions: sessions, scrollPositions };
+    return { chatSessions: sessions, sessionRegistryFilesByPath: registryFiles, scrollPositions };
   }),
 
   prependItems: (path, items, hasMore) => set((s) => {
@@ -153,6 +159,32 @@ export const createChatSlice = (
   // 缓存：block_update 到达时 block 可能还没添加到 store（时序竞争）
   _pendingBlockPatches: {} as Record<string, Record<string, any>>,
 
+  setSessionRegistryFiles: (path, files) => set((s) => {
+    invalidateSessionCache(path);
+    return {
+      sessionRegistryFilesByPath: {
+        ...s.sessionRegistryFilesByPath,
+        [path]: [...files],
+      },
+    };
+  }),
+
+  upsertSessionRegistryFile: (path, file) => set((s) => {
+    const key = registryFileKey(file);
+    if (!key) return {};
+    const files = s.sessionRegistryFilesByPath[path] || [];
+    const idx = files.findIndex(existing => registryFileKey(existing) === key);
+    const next = idx >= 0 ? [...files] : [...files, file];
+    if (idx >= 0) next[idx] = { ...files[idx], ...file };
+    invalidateSessionCache(path);
+    return {
+      sessionRegistryFilesByPath: {
+        ...s.sessionRegistryFilesByPath,
+        [path]: next,
+      },
+    };
+  }),
+
   patchBlockByTaskId: (sessionPath, taskId, patch) => {
     const session = get().chatSessions[sessionPath];
     if (!session) {
@@ -227,6 +259,8 @@ export const createChatSlice = (
   clearSession: (path) => set((s) => {
     const sessions = { ...s.chatSessions };
     delete sessions[path];
+    const registryFiles = { ...s.sessionRegistryFilesByPath };
+    delete registryFiles[path];
     const models = { ...s.sessionModelsByPath };
     delete models[path];
     const versions = { ...s._loadMessagesVersion };
@@ -239,6 +273,7 @@ export const createChatSlice = (
     clearMessageLiveVersion(path);
     return {
       chatSessions: sessions,
+      sessionRegistryFilesByPath: registryFiles,
       sessionModelsByPath: models,
       _loadMessagesVersion: versions,
       scrollPositions,
@@ -249,3 +284,10 @@ export const createChatSlice = (
     scrollPositions: { ...s.scrollPositions, [path]: scrollTop },
   })),
 });
+
+function registryFileKey(file: SessionRegistryFile): string | null {
+  const fileId = file.fileId || file.id;
+  if (fileId) return `id:${fileId}`;
+  const filePath = file.filePath || file.realPath;
+  return filePath ? `path:${filePath}` : null;
+}

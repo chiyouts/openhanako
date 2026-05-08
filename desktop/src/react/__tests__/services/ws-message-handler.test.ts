@@ -189,6 +189,31 @@ describe('ws-message-handler session-scoped desktop events', () => {
     expect(useStore.getState().computerOverlayBySession['/session/a.jsonl']).toBeUndefined();
   });
 
+  it('tool_end 带 sessionFile 时更新 session registry 文件状态', () => {
+    handleServerMessage({
+      type: 'tool_end',
+      sessionPath: '/session/a.jsonl',
+      name: 'write',
+      success: true,
+      details: {
+        sessionFile: {
+          fileId: 'sf_write',
+          filePath: '/workspace/draft.md',
+          label: 'draft.md',
+          operations: ['created'],
+        },
+      },
+    });
+
+    expect(useStore.getState().sessionRegistryFilesByPath['/session/a.jsonl']).toEqual([
+      expect.objectContaining({
+        fileId: 'sf_write',
+        filePath: '/workspace/draft.md',
+        operations: ['created'],
+      }),
+    ]);
+  });
+
   it('bridge_rc_attached / detached 直接补丁 sessions 列表上的接管态', () => {
     handleServerMessage({
       type: 'bridge_rc_attached',

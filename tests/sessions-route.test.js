@@ -421,6 +421,51 @@ describe("sessions route", () => {
     });
   });
 
+  it("returns session registry files alongside restored messages", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+    const sessionPath = "/tmp/agents/hana/sessions/main.jsonl";
+
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      currentSessionPath: sessionPath,
+      deferredResults: null,
+      listSessionFiles: vi.fn((sp) => {
+        expect(sp).toBe(sessionPath);
+        return [{
+          id: "sf_write",
+          sessionPath,
+          filePath: "/workspace/draft.md",
+          label: "draft.md",
+          ext: "md",
+          mime: "text/markdown",
+          kind: "markdown",
+          origin: "agent_write",
+          operations: ["created", "modified"],
+          createdAt: 1234,
+          status: "available",
+        }];
+      }),
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request(`/api/sessions/messages?path=${encodeURIComponent(sessionPath)}`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.sessionFiles).toEqual([expect.objectContaining({
+      fileId: "sf_write",
+      filePath: "/workspace/draft.md",
+      origin: "agent_write",
+      operations: ["created", "modified"],
+      createdAt: 1234,
+    })]);
+  });
+
   it("hydrates legacy file blocks without fileId from the session file sidecar by path", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.js");
     const msgUtils = await import("../core/message-utils.js");

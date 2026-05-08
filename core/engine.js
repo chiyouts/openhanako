@@ -1226,6 +1226,8 @@ export class HanaEngine {
       hanakoHome: this.hanakoHome,
       getSandboxEnabled: () => this._readPreferences().sandbox !== false,
       getExternalReadPaths,
+      getSessionPath,
+      recordFileOperation: (entry) => this.registerSessionFile(entry),
     });
 
     // Checkpoint wrapper (outside sandbox layer)

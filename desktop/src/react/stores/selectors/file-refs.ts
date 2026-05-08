@@ -1,6 +1,6 @@
 import type { FileRef } from '../../types/file-ref';
 import type { DeskFile } from '../../types';
-import type { ChatListItem, ContentBlock } from '../chat-types';
+import type { ChatListItem, ContentBlock, SessionRegistryFile } from '../chat-types';
 import { inferKindByExt, buildFileRefId } from '../../utils/file-kind';
 
 type StateShape = {
@@ -8,6 +8,7 @@ type StateShape = {
   deskBasePath: string;
   deskCurrentPath: string;
   chatSessions?: Record<string, unknown>;
+  sessionRegistryFilesByPath?: Record<string, readonly SessionRegistryFile[] | undefined>;
 };
 
 function joinPath(base: string, sub: string, name: string): string {
@@ -64,8 +65,14 @@ type SessionStateShape = StateShape & {
   chatSessions?: Record<string, { items: ChatListItem[] } | undefined>;
 };
 
-const cachedSession = new Map<string, { items: ChatListItem[]; result: FileRef[] }>();
+const cachedSession = new Map<string, {
+  items: readonly ChatListItem[];
+  registryFiles: readonly SessionRegistryFile[];
+  result: FileRef[];
+}>();
 const EMPTY_SESSION_RESULT: readonly FileRef[] = Object.freeze([]);
+const EMPTY_REGISTRY_FILES: readonly SessionRegistryFile[] = Object.freeze([]);
+const EMPTY_CHAT_ITEMS: readonly ChatListItem[] = Object.freeze([]);
 
 /**
  * 清理 session → FileRef[] 缓存。必须由 session 生命周期持有方（chat-slice）
@@ -83,12 +90,45 @@ export function invalidateSessionCache(sessionPath?: string): void {
 }
 
 export function selectSessionFiles(state: SessionStateShape, sessionPath: string): readonly FileRef[] {
-  const items = state.chatSessions?.[sessionPath]?.items;
-  if (!items) return EMPTY_SESSION_RESULT;
+  const items = state.chatSessions?.[sessionPath]?.items || EMPTY_CHAT_ITEMS;
+  const registryFiles = state.sessionRegistryFilesByPath?.[sessionPath] || EMPTY_REGISTRY_FILES;
+  if (!items.length && !registryFiles.length) return EMPTY_SESSION_RESULT;
   const cached = cachedSession.get(sessionPath);
-  if (cached && cached.items === items) return cached.result;
+  if (cached && cached.items === items && cached.registryFiles === registryFiles) return cached.result;
 
   const result: FileRef[] = [];
+  const seen = new Set<string>();
+
+  for (const file of registryFiles) {
+    if (file.isDirectory) continue;
+    const filePath = file.filePath || file.realPath || '';
+    if (!filePath) continue;
+    const fileId = file.fileId || file.id;
+    const name = file.label || file.displayName || file.filename || basenameOf(filePath);
+    const ext = file.ext || extOf(name) || extOf(filePath);
+    pushUniqueFile(result, seen, {
+      id: buildFileRefId({
+        source: 'session-registry',
+        sessionPath,
+        path: filePath,
+        ...(fileId ? { messageId: fileId } : {}),
+      }),
+      fileId,
+      kind: inferKindByExt(ext),
+      source: 'session-registry',
+      name,
+      path: filePath,
+      ext,
+      mime: file.mime,
+      status: file.status,
+      missingAt: file.missingAt,
+      origin: file.origin,
+      operations: file.operations,
+      createdAt: file.createdAt,
+      timestamp: file.createdAt,
+    });
+  }
+
   for (const item of items) {
     if (item.type !== 'message') continue;
     const msg = item.data;
@@ -98,7 +138,7 @@ export function selectSessionFiles(state: SessionStateShape, sessionPath: string
       for (const att of msg.attachments) {
         if (att.isDir) continue;
         const ext = extOf(att.name);
-        result.push({
+        pushUniqueFile(result, seen, {
           id: buildFileRefId({
             source: 'session-attachment',
             sessionPath, messageId: msg.id, path: att.path,
@@ -126,7 +166,7 @@ export function selectSessionFiles(state: SessionStateShape, sessionPath: string
       for (let i = 0; i < msg.blocks.length; i++) {
         const b: ContentBlock = msg.blocks[i];
         if (b.type === 'file') {
-          result.push({
+          pushUniqueFile(result, seen, {
             id: buildFileRefId({
               source: 'session-block-file',
               sessionPath, messageId: msg.id, blockIdx: i, path: b.filePath,
@@ -146,7 +186,7 @@ export function selectSessionFiles(state: SessionStateShape, sessionPath: string
           });
         } else if (b.type === 'artifact' && b.filePath) {
           const ext = b.ext || extOf(b.filePath);
-          result.push({
+          pushUniqueFile(result, seen, {
             id: buildFileRefId({
               source: 'session-block-legacy-artifact',
               sessionPath, messageId: msg.id, blockIdx: i, path: b.filePath,
@@ -185,6 +225,23 @@ export function selectSessionFiles(state: SessionStateShape, sessionPath: string
     }
   }
 
-  cachedSession.set(sessionPath, { items, result });
+  cachedSession.set(sessionPath, { items, registryFiles, result });
   return result;
+}
+
+function basenameOf(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath;
+}
+
+function fileIdentity(fileId?: string, filePath?: string): string | null {
+  if (fileId) return `id:${fileId}`;
+  if (filePath) return `path:${filePath}`;
+  return null;
+}
+
+function pushUniqueFile(result: FileRef[], seen: Set<string>, ref: FileRef): void {
+  const key = fileIdentity(ref.fileId, ref.path);
+  if (key && seen.has(key)) return;
+  if (key) seen.add(key);
+  result.push(ref);
 }

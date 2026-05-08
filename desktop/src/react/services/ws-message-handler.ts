@@ -213,6 +213,7 @@ export function handleServerMessage(msg: any): void {
       streamBufferManager.handle(msg);
     }
     dispatchStreamKey(msg.sessionPath, msg);
+    applyToolEndSessionFile(msg);
     return;
   }
 
@@ -241,6 +242,9 @@ export function handleServerMessage(msg: any): void {
         // 版本号变了，主动跳过 hydrate 写入，避免覆盖本次 live 状态。
         useStore.getState().bumpTodosLiveVersion(sp);
       }
+    }
+    if (msg.type === 'tool_end') {
+      applyToolEndSessionFile(msg);
     }
     // COMPAT(create_artifact, remove no earlier than v0.133):
     // 旧 artifact block 进入当前 Preview 面板。
@@ -571,4 +575,11 @@ export function handleServerMessage(msg: any): void {
       break;
     }
   }
+}
+
+function applyToolEndSessionFile(msg: any): void {
+  const sp = msg.sessionPath;
+  const sessionFile = msg.details?.sessionFile;
+  if (!sp || !sessionFile) return;
+  useStore.getState().upsertSessionRegistryFile?.(sp, sessionFile);
 }

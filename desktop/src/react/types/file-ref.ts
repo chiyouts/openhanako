@@ -12,6 +12,7 @@ export type FileKind =
 export type FileSource =
   | 'desk'
   | 'session-attachment'
+  | 'session-registry'
   | 'session-block-file'
   | 'session-block-legacy-artifact'
   | 'session-block-screenshot';
@@ -28,6 +29,9 @@ export interface FileRef {
   mime?: string;
   status?: 'available' | 'expired' | string;
   missingAt?: number | null;
+  origin?: string;
+  operations?: string[];
+  createdAt?: number;
   timestamp?: number;
   sessionMessageId?: string;
   sessionBlockIdx?: number;
