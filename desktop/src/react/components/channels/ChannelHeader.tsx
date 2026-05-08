@@ -7,8 +7,7 @@ import { useStore } from '../../stores';
 import { useI18n } from '../../hooks/use-i18n';
 import { toggleJianSidebar } from '../../stores/desk-actions';
 import { deleteChannel } from '../../stores/channel-actions';
-import { ContextMenu } from '../ContextMenu';
-import type { ContextMenuItem } from '../ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui';
 import styles from './Channels.module.css';
 
 function confirmDeleteChannel(channelId: string) {

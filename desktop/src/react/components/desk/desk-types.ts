@@ -2,7 +2,7 @@
  * desk-types — DeskSection 子组件共用的类型、常量、工具函数
  */
 
-import type { ContextMenuItem } from '../ContextMenu';
+import type { ContextMenuItem } from '../../ui';
 import type { DeskFile } from '../../types';
 import { extOfName, inferKindByExt } from '../../utils/file-kind';
 

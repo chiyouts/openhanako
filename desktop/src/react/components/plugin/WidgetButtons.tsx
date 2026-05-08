@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../../stores';
 import { resolvePluginTitle, resolvePluginIcon } from '../../utils/resolve-plugin-title';
 import { openWidget, openDesk, pinWidget, unpinWidget } from '../../stores/plugin-ui-actions';
-import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui';
 import s from './WidgetButtons.module.css';
 
 interface MenuState { items: ContextMenuItem[]; position: { x: number; y: number } }

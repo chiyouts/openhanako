@@ -13,7 +13,7 @@ import { toggleJianSidebar } from '../../stores/desk-actions';
 import { resolvePluginTitle } from '../../utils/resolve-plugin-title';
 import { reorderTabs, hidePluginTab, showPluginTab } from '../../stores/plugin-ui-actions';
 import { PluginTabOverflow } from '../plugin/PluginTabOverflow';
-import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui';
 import styles from './Channels.module.css';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;

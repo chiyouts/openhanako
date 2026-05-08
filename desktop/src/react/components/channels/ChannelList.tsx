@@ -13,9 +13,8 @@ import {
   toggleChannelsEnabled,
 } from '../../stores/channel-actions';
 import { toggleSidebar } from '../SidebarLayout';
-import { ContextMenu } from '../ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui';
 import { ChannelWarningModal } from './ChannelWarningModal';
-import type { ContextMenuItem } from '../ContextMenu';
 import type { Channel, Agent } from '../../types';
 import { yuanFallbackAvatar } from '../../utils/agent-helpers';
 import styles from './Channels.module.css';
