@@ -23,7 +23,7 @@ export function PluginPageView({ pluginId }: Props) {
     return `${fullUrl}${sep}agentId=${encodeURIComponent(agentId || '')}&hana-theme=${encodeURIComponent(theme)}&hana-css=${encodeURIComponent(cssUrl)}`;
   }, [page?.routeUrl, agentId]);
 
-  const { iframeRef, status, postToIframe, retry } = usePluginIframe(iframeSrc);
+  const { iframeRef, status, postToIframe, retry } = usePluginIframe(iframeSrc, { slot: 'page' });
 
   useEffect(() => {
     if (status === 'ready') postToIframe('visibility-changed', { visible: true });

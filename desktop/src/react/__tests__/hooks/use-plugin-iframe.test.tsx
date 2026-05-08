@@ -5,6 +5,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { usePluginIframe } from '../../hooks/use-plugin-iframe';
+import {
+  PLUGIN_UI_CAPABILITY,
+  PLUGIN_UI_PROTOCOL,
+  PLUGIN_UI_PROTOCOL_VERSION,
+} from '@hana/plugin-protocol';
 
 const switchTab = vi.fn();
 
@@ -104,5 +109,43 @@ describe('usePluginIframe', () => {
       }),
       'http://127.0.0.1:3210',
     );
+  });
+
+  it('接受可信 iframe 发来的新版 SDK ready / resize envelope', () => {
+    render(<Harness routeUrl="http://127.0.0.1:3210/api/plugins/demo/page?token=abc" />);
+    const iframe = screen.getByTestId('iframe') as HTMLIFrameElement;
+    const trustedWindow = { postMessage: vi.fn() } as unknown as Window & { postMessage: ReturnType<typeof vi.fn> };
+    attachIframeWindow(iframe, trustedWindow);
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          protocol: PLUGIN_UI_PROTOCOL,
+          version: PLUGIN_UI_PROTOCOL_VERSION,
+          kind: 'event',
+          type: 'hana.ready',
+        },
+        origin: 'http://127.0.0.1:3210',
+        source: trustedWindow,
+      }));
+    });
+
+    expect(screen.getByTestId('status').textContent).toBe('ready');
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          protocol: PLUGIN_UI_PROTOCOL,
+          version: PLUGIN_UI_PROTOCOL_VERSION,
+          kind: 'event',
+          type: PLUGIN_UI_CAPABILITY.UI_RESIZE,
+          payload: { height: 320 },
+        },
+        origin: 'http://127.0.0.1:3210',
+        source: trustedWindow,
+      }));
+    });
+
+    expect(iframe.style.height).toBe('320px');
   });
 });

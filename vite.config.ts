@@ -181,6 +181,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      '@hana/plugin-protocol': path.resolve(__dirname, 'packages/plugin-protocol/src/index.ts'),
+      '@hana/plugin-sdk': path.resolve(__dirname, 'packages/plugin-sdk/src/index.ts'),
       '@': path.resolve(__dirname, 'desktop/src/react'),
     },
   },
