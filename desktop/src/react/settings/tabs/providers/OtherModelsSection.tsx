@@ -207,6 +207,7 @@ export function OtherModelsSection({ providers }: { providers: Record<string, { 
             <ToolModelTestBtn modelRef={globalModelsConfig?.models?.vision || ''} />
           </div>
           <span className={styles['settings-form-hint']}>{t('settings.api.visionModelHint')}</span>
+          <span className={styles['settings-form-hint']}>{t('settings.api.visionModelMissingHint')}</span>
         </div>
       </div>
       <div className={styles['settings-form-grid']}>
