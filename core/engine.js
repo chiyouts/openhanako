@@ -1228,6 +1228,8 @@ export class HanaEngine {
       getExternalReadPaths,
       getSessionPath,
       recordFileOperation: (entry) => this.registerSessionFile(entry),
+      getVisionBridge: () => this.getVisionBridge(),
+      isVisionAuxiliaryEnabled: () => this.isVisionAuxiliaryEnabled(),
     });
 
     // Checkpoint wrapper (outside sandbox layer)
