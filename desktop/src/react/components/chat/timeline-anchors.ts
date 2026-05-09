@@ -2,9 +2,10 @@ import type { ChatListItem, ChatMessage } from '../../stores/chat-types';
 
 export interface TimelineAnchor {
   messageId: string;
-  timestamp: number;
+  timestamp: number | null;
   label: string;
   role: ChatMessage['role'];
+  markerWidthEm: number;
 }
 
 interface TimelineAnchorOptions {
@@ -28,6 +29,32 @@ function parseTimestamp(value: ChatMessage['timestamp']): number | null {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+}
+
+function normalizedPreviewSource(message: ChatMessage): string {
+  const text = message.text?.replace(/\s+/g, ' ').trim();
+  if (text) return text;
+
+  const firstAttachment = message.attachments?.find(attachment => attachment.name?.trim());
+  if (firstAttachment?.name) return firstAttachment.name.trim();
+
+  return message.role === 'user' ? '用户消息' : '助手消息';
+}
+
+export function formatTimelinePromptPreview(text: string, maxChars = 10): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+
+  const chars = Array.from(normalized);
+  if (chars.length <= maxChars) return normalized;
+  return `${chars.slice(0, maxChars).join('')}...`;
+}
+
+export function measureTimelineMarkerWidthEm(promptLength: number): number {
+  if (!Number.isFinite(promptLength) || promptLength <= 2) return 0.5;
+
+  const normalized = Math.min(1, Math.log1p(promptLength - 2) / Math.log1p(80));
+  return Number((0.5 + normalized * 0.5).toFixed(3));
 }
 
 function readDateParts(timestamp: number, timeZone?: string): DateParts {
@@ -86,20 +113,23 @@ export function formatTimelineAnchorLabel(
 
 export function buildTimelineAnchors(
   items: ChatListItem[],
-  options: TimelineAnchorOptions = {},
 ): TimelineAnchor[] {
-  const timestampedMessages = items
+  const messages = items
     .filter((item): item is Extract<ChatListItem, { type: 'message' }> => item.type === 'message')
-    .map((item) => ({ message: item.data, timestamp: parseTimestamp(item.data.timestamp) }))
-    .filter((entry): entry is { message: ChatMessage; timestamp: number } => entry.timestamp !== null);
+    .map(item => item.data);
 
-  const userTurns = timestampedMessages.filter(entry => entry.message.role === 'user');
-  const source = userTurns.length > 0 ? userTurns : timestampedMessages;
+  const userTurns = messages.filter(message => message.role === 'user');
+  const source = userTurns.length > 0 ? userTurns : messages;
 
-  return source.map(({ message, timestamp }) => ({
-    messageId: message.id,
-    timestamp,
-    role: message.role,
-    label: formatTimelineAnchorLabel(timestamp, options),
-  }));
+  return source.map((message) => {
+    const previewSource = normalizedPreviewSource(message);
+    const previewLength = Array.from(previewSource).length;
+    return {
+      messageId: message.id,
+      timestamp: parseTimestamp(message.timestamp),
+      role: message.role,
+      label: formatTimelinePromptPreview(previewSource),
+      markerWidthEm: measureTimelineMarkerWidthEm(previewLength),
+    };
+  });
 }

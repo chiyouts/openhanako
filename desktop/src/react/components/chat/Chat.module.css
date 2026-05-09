@@ -980,26 +980,82 @@
 .timelineNav {
     position: absolute;
     top: 76px;
-    right: 5px;
+    right: 0;
     height: 50%;
-    width: 22px;
+    width: 64px;
     z-index: 4;
+    overflow: visible;
+    --timeline-card-width: min(176px, calc(100vw - 96px));
+    --timeline-marker-right: 8px;
+    --timeline-row-height: 28px;
+    --timeline-card-pad-y: 0.375rem;
+    --timeline-marker-pad-left: 0.75rem;
+    --timeline-marker-pad-right: 0.375rem;
+    --timeline-marker-gap: 0.375rem;
+    --timeline-card-surface-outset-right: 0.25rem;
+}
+
+.timelineCard {
+    position: absolute;
+    top: 50%;
+    right: var(--timeline-marker-right);
+    width: var(--timeline-card-width);
+    height: calc(var(--timeline-visible-rows) * var(--timeline-row-height) + 2 * var(--timeline-card-pad-y));
+    max-height: calc(10 * var(--timeline-row-height) + 2 * var(--timeline-card-pad-y));
+    transform: translateY(-50%);
+    border-radius: var(--radius-card);
+    pointer-events: none;
+    overflow: visible;
+}
+
+.timelineCard::before {
+    content: "";
+    position: absolute;
+    inset: 0 calc(-1 * var(--timeline-card-surface-outset-right)) 0 0;
+    border: 1px solid var(--border);
+    border-radius: inherit;
+    background: var(--bg-card, var(--bg));
+    box-shadow: 0 10px 28px var(--shadow);
+    opacity: 0;
+    transform: scale(0.985);
+    transform-origin: center;
+    transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+    pointer-events: none;
+}
+
+.timelineList {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    padding-block: var(--timeline-card-pad-y);
+    box-sizing: border-box;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+
+.timelineList::-webkit-scrollbar {
+    display: none;
 }
 
 .timelineMarker {
-    position: absolute;
-    right: 0;
-    width: 18px;
-    height: 14px;
-    transform: translateY(-50%);
+    position: relative;
+    width: 100%;
+    height: var(--timeline-row-height);
     border: none;
     background: transparent;
-    color: var(--text-muted);
+    color: rgba(var(--accent-rgb), 0.52);
     cursor: pointer;
-    padding: 0;
+    padding: 0 var(--timeline-marker-pad-right) 0 var(--timeline-marker-pad-left);
     opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.14s ease-out;
+    pointer-events: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 24px;
+    align-items: center;
+    gap: var(--timeline-marker-gap);
+    transition: opacity var(--duration-fast) var(--ease-out), color var(--duration-instant) var(--ease-out);
+    --timeline-marker-width: 0.5em;
 }
 
 .timelineNav:hover .timelineMarker,
@@ -1008,26 +1064,40 @@
     pointer-events: auto;
 }
 
-.timelineDot {
-    position: absolute;
-    top: 50%;
-    right: 6px;
-    width: 2px;
-    height: 2px;
-    transform: translateY(-50%);
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.54;
-    transition: width 0.14s ease-out, height 0.14s ease-out, opacity 0.14s ease-out, right 0.14s ease-out;
+.timelineNavExpanded .timelineCard,
+.timelineNavExpanded .timelineLabel {
+    pointer-events: auto;
 }
 
-.timelineMarker:hover .timelineDot,
-.timelineMarker:focus-visible .timelineDot,
-.timelineMarkerActive .timelineDot {
-    right: 5px;
-    width: 4px;
+.timelineNavExpanded .timelineLabel {
+    opacity: 1;
+}
+
+.timelineNavExpanded .timelineCard::before {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.timelineLine {
+    justify-self: end;
+    width: var(--timeline-marker-width);
+    min-width: 0.5em;
+    max-width: 1em;
     height: 4px;
-    opacity: 0.82;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.74;
+    transition: opacity var(--duration-instant) var(--ease-out);
+}
+
+.timelineMarker:hover .timelineLine,
+.timelineMarker:focus-visible .timelineLine,
+.timelineMarkerActive .timelineLine {
+    opacity: 1;
+}
+
+.timelineMarkerActive {
+    color: var(--accent);
 }
 
 .timelineMarker:focus-visible {
@@ -1035,29 +1105,24 @@
 }
 
 .timelineLabel {
-    position: absolute;
-    top: 50%;
-    right: 18px;
-    transform: translateY(-50%) translateX(4px);
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
     opacity: 0;
     pointer-events: none;
-    white-space: nowrap;
-    padding: calc(var(--space-xs) / 2) var(--space-xs);
-    border: 1px solid var(--overlay-light);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-    color: var(--text-muted);
-    font-family: var(--font-serif);
+    color: var(--text-light);
+    font-family: var(--font-ui);
     font-size: 0.7rem;
-    line-height: 1.2;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-    transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+    line-height: 1.4;
+    transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.timelineMarker:hover .timelineLabel,
-.timelineMarker:focus-visible .timelineLabel {
-    opacity: 1;
-    transform: translateY(-50%) translateX(0);
+.timelineMarkerActive .timelineLabel {
+    color: var(--accent);
 }
 
 .loadMoreHint {
