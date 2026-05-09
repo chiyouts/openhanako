@@ -49,6 +49,21 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<div style=');
   });
 
+  it('marks mermaid fenced code blocks as renderable diagram placeholders', () => {
+    const html = renderMarkdown([
+      '```mermaid',
+      'graph TD',
+      '  A-->B',
+      '```',
+    ].join('\n'));
+
+    expect(html).toContain('class="mermaid-diagram"');
+    expect(html).toContain('class="mermaid-source"');
+    expect(html).toContain('class="mermaid-rendered"');
+    expect(html).toContain('graph TD');
+    expect(html).not.toContain('<code class="language-mermaid"');
+  });
+
   it('renders filtered HTML in markdown preview mode', () => {
     const html = renderMarkdownPreview([
       '<div style="background: #f0f7ff; border: 1px solid #bee1e6; border-radius: 8px; padding: 16px; margin: 12px 0;">',
@@ -99,5 +114,55 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('url(');
     expect(html).not.toContain('position');
     expect(html).not.toContain('fixed');
+  });
+
+  it('preserves generated mermaid placeholder classes in markdown preview mode', () => {
+    const html = renderMarkdownPreview([
+      '```mermaid',
+      'sequenceDiagram',
+      '  A->>B: hello',
+      '```',
+    ].join('\n'));
+
+    expect(html).toContain('class="mermaid-diagram"');
+    expect(html).toContain('class="mermaid-source"');
+    expect(html).toContain('class="mermaid-rendered"');
+    expect(html).toContain('sequenceDiagram');
+  });
+
+  it('renders Obsidian callouts from blockquote syntax', () => {
+    const html = renderMarkdown([
+      '> [!warning] 小心一点',
+      '> 第一段 **内容**。',
+    ].join('\n'));
+
+    expect(html).toContain('class="markdown-callout markdown-callout-warning"');
+    expect(html).toContain('<div class="markdown-callout-title">小心一点</div>');
+    expect(html).toContain('<strong>内容</strong>');
+    expect(html).not.toContain('[!warning]');
+    expect(html).not.toContain('<blockquote>');
+  });
+
+  it('normalizes Obsidian callout aliases and supports fold markers', () => {
+    const html = renderMarkdown([
+      '> [!faq]- 能折叠吗',
+      '> 可以。',
+    ].join('\n'));
+
+    expect(html).toContain('<details class="markdown-callout markdown-callout-question">');
+    expect(html).toContain('<summary class="markdown-callout-title">能折叠吗</summary>');
+    expect(html).toContain('<p>可以。</p>');
+  });
+
+  it('preserves callout classes in markdown preview mode', () => {
+    const html = renderMarkdownPreview([
+      '> [!tip]',
+      '> preview callout',
+    ].join('\n'));
+
+    expect(html).toContain('class="markdown-callout markdown-callout-tip"');
+    expect(html).toContain('<div class="markdown-callout-title">Tip</div>');
+    expect(html).toContain('preview callout');
+    expect(html).not.toContain('[!tip]');
   });
 });

@@ -199,6 +199,65 @@ describe("SessionFileRegistry", () => {
     expect(registry.list(sessionPath)).toEqual([first]);
   });
 
+  it("keeps one session file per path and records file relationship operations", () => {
+    const filePath = makeTempFile("draft.md", "first\n");
+    const sessionPath = makeSessionPath("relationships.jsonl");
+    let now = 1000;
+    const registry = new SessionFileRegistry({ now: () => now });
+
+    const created = registry.registerFile({
+      sessionPath,
+      filePath,
+      label: "draft.md",
+      origin: "agent_write",
+      operation: "created",
+    });
+
+    now = 2000;
+    fs.writeFileSync(filePath, "second version\n");
+    const modified = registry.registerFile({
+      sessionPath,
+      filePath,
+      label: "draft.md",
+      origin: "agent_edit",
+      operation: "modified",
+    });
+
+    now = 3000;
+    const staged = registry.registerFile({
+      sessionPath,
+      filePath,
+      label: "draft.md",
+      origin: "stage_files",
+      operation: "staged",
+    });
+
+    now = 4000;
+    registry.registerFile({
+      sessionPath,
+      filePath,
+      label: "draft.md",
+      origin: "stage_files",
+      operation: "staged",
+    });
+
+    expect(modified.id).toBe(created.id);
+    expect(staged.id).toBe(created.id);
+    expect(registry.list(sessionPath)).toEqual([
+      expect.objectContaining({
+        id: created.id,
+        origin: "stage_files",
+        operations: ["created", "modified", "staged"],
+        size: Buffer.byteLength("second version\n"),
+      }),
+    ]);
+
+    const raw = readSidecar(sessionPath);
+    expect(Object.keys(raw.files)).toEqual([created.id]);
+    expect(raw.refs.map(ref => ref.operation)).toEqual(["created", "modified", "staged"]);
+    expect(raw.refs.map(ref => ref.origin)).toEqual(["agent_write", "agent_edit", "stage_files"]);
+  });
+
   it("rejects registration without an explicit sessionPath", () => {
     const filePath = makeTempFile("a.txt", "a");
     const registry = new SessionFileRegistry();

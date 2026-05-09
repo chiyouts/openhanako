@@ -9,7 +9,8 @@
 .messageGroup {
     display: flex;
     flex-direction: column;
-    animation: msgIn 0.3s var(--ease-out);
+    --slide-y: 8px;
+    animation: hana-fade-up var(--duration-slow) var(--ease-out);
 }
 
 .messageGroup:first-child .avatarRow {
@@ -77,11 +78,6 @@
 
 .message + .message {
     margin-top: var(--space-xs);
-}
-
-@keyframes msgIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
 }
 
 /* 用户消息 */
@@ -177,7 +173,7 @@
     border-radius: 4px;
     padding: 2px;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity var(--duration-fast);
     z-index: 2;
 }
 
@@ -204,7 +200,7 @@
     cursor: pointer;
     color: var(--hana-text-muted);
     line-height: 1;
-    transition: color 0.12s, background 0.12s;
+    transition: color var(--duration-instant), background var(--duration-instant);
 }
 
 .msgActionBtn:hover {
@@ -278,7 +274,7 @@
     display: inline-block;
     font-style: normal;
     font-size: 0.75rem;
-    transition: transform 0.15s ease;
+    transition: transform var(--duration-fast) ease;
 }
 
 .moodArrowOpen {
@@ -343,7 +339,7 @@
     font-size: 0.75rem;
     font-family: inherit;
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: opacity var(--duration-fast);
 }
 
 .cronConfirmBtn:hover { opacity: 0.85; }
@@ -436,7 +432,7 @@
     border: none;
     border-bottom: 1px solid var(--overlay-light, rgba(0,0,0,0.06));
     text-align: left;
-    transition: background 0.1s;
+    transition: background var(--duration-instant);
 }
 
 .settingsConfirmOption:last-child {
@@ -485,7 +481,7 @@
     font-size: 0.82rem;
     font-family: inherit;
     cursor: pointer;
-    transition: opacity 0.15s, box-shadow 0.15s;
+    transition: opacity var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .settingsConfirmBtn:hover { opacity: 0.9; }
@@ -516,82 +512,6 @@
 }
 
 .settingsConfirmStatusConfirmed { color: var(--accent); }
-
-/* ── Xing 反省卡片 ── */
-
-.xingCard {
-    margin: var(--space-sm) auto;
-    padding: var(--space-md) var(--space-lg);
-    background: var(--bg-card, #fff);
-    border-radius: var(--radius-md);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
-    width: 600px;
-    max-width: 100%;
-    font-family: var(--font-serif);
-}
-
-.xingCardTitle {
-    text-align: center;
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--text);
-    margin-bottom: var(--space-sm);
-}
-
-.xingCardDivider {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: var(--space-sm) 0;
-}
-
-.xingCardStatus {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.82rem;
-    font-style: italic;
-    padding: var(--space-md) 0;
-}
-
-.xingCardStatus .thinkingDots {
-    display: inline-block;
-    margin-left: 4px;
-    vertical-align: baseline;
-    font-family: var(--font-serif);
-    font-weight: 700;
-    letter-spacing: 0.1em;
-}
-
-.xingCardStatus .thinkingDots::after {
-    content: '';
-    animation: typewriterDots 1.4s steps(1, end) infinite;
-}
-
-.xingCardBody {
-    font-size: 0.85rem;
-    line-height: 1.65;
-}
-
-.xingCardCopy {
-    display: block;
-    margin: var(--space-sm) auto 0;
-    padding: 4px 16px;
-    font-size: 0.75rem;
-    font-family: inherit;
-    color: var(--text-muted);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
-}
-
-.xingCardCopy:hover {
-    color: var(--accent);
-    border-color: var(--accent);
-}
-
-.xingCardLoading .xingCardCopy { display: none; }
-
 
 /* ── 工具调用折叠组 ── */
 
@@ -687,7 +607,7 @@
 
 .toolDetailLink {
     cursor: pointer;
-    transition: color 0.15s;
+    transition: color var(--duration-fast);
 }
 
 .toolDetailLink:hover {
@@ -716,7 +636,7 @@
 
 .toolDots::after {
     content: '';
-    animation: typewriterDots 1.4s steps(1, end) infinite;
+    animation: hana-typewriter-dots 1.4s steps(1, end) infinite;
 }
 
 .toolStatus {
@@ -765,14 +685,14 @@
 
 .thinkingBlockSummary .thinkingDots::after {
     content: '';
-    animation: typewriterDots 1.4s steps(1, end) infinite;
+    animation: hana-typewriter-dots 1.4s steps(1, end) infinite;
 }
 
 .thinkingBlockArrow {
     display: inline-block;
     font-style: normal;
     font-size: 0.75rem;
-    transition: transform 0.15s ease;
+    transition: transform var(--duration-fast) ease;
 }
 
 .thinkingBlockArrowOpen {
@@ -806,7 +726,7 @@
     border-radius: var(--radius-lg);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
     overflow: hidden;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background var(--duration-fast), border-color var(--duration-fast);
 }
 
 .fileOutputPreviewable:hover {
@@ -867,7 +787,7 @@
     border: 1px solid var(--border, rgba(0,0,0,0.1));
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    transition: color var(--duration-fast), background var(--duration-fast), border-color var(--duration-fast);
 }
 
 .fileOutputOpen:hover {
@@ -888,7 +808,7 @@
     border: 0.5px solid var(--border, rgba(0,0,0,0.08));
     border-radius: var(--radius-lg);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-    transition: border-color 0.15s;
+    transition: border-color var(--duration-fast);
 }
 
 .imageOutputCard:hover {
@@ -926,7 +846,7 @@
     border-radius: var(--radius-md);
     max-width: 100%;
     cursor: pointer;
-    transition: background 0.15s, box-shadow 0.15s;
+    transition: background var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .legacyArtifactCard:hover {
@@ -986,7 +906,7 @@
     border-radius: 8px;
     border: 1px solid var(--border);
     cursor: pointer;
-    transition: opacity 0.2s;
+    transition: opacity var(--duration-fast);
 }
 
 .browserScreenshot img:hover {
@@ -1006,7 +926,7 @@
     border-radius: var(--radius-md);
     max-width: 100%;
     cursor: pointer;
-    transition: background 0.15s, box-shadow 0.15s;
+    transition: background var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .skillCard:hover {
@@ -1016,13 +936,19 @@
 
 /* ── Session Panel ── */
 
-.sessionPanel {
+.sessionShell {
     --chat-scrollbar-bottom-inset: calc(var(--input-card-h, 0px) / 2);
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
     bottom: calc(var(--input-card-h, 0px) / 2 + var(--space-lg));
+    overflow: hidden;
+}
+
+.sessionPanel {
+    position: absolute;
+    inset: 0;
     overflow-y: auto;
     padding: 76px var(--space-lg) 0;
 }
@@ -1035,7 +961,7 @@
 
 .sessionPanel::-webkit-scrollbar-thumb {
     background: transparent;
-    transition: background 0.25s ease-out;
+    transition: background var(--duration-slow) ease-out;
 }
 
 .sessionPanel:hover::-webkit-scrollbar-thumb,
@@ -1049,6 +975,89 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
+}
+
+.timelineNav {
+    position: absolute;
+    top: 76px;
+    right: 5px;
+    height: 50%;
+    width: 22px;
+    z-index: 4;
+}
+
+.timelineMarker {
+    position: absolute;
+    right: 0;
+    width: 18px;
+    height: 14px;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s ease-out;
+}
+
+.timelineNav:hover .timelineMarker,
+.timelineNav:focus-within .timelineMarker {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.timelineDot {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    width: 2px;
+    height: 2px;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.54;
+    transition: width 0.14s ease-out, height 0.14s ease-out, opacity 0.14s ease-out, right 0.14s ease-out;
+}
+
+.timelineMarker:hover .timelineDot,
+.timelineMarker:focus-visible .timelineDot,
+.timelineMarkerActive .timelineDot {
+    right: 5px;
+    width: 4px;
+    height: 4px;
+    opacity: 0.82;
+}
+
+.timelineMarker:focus-visible {
+    outline: none;
+}
+
+.timelineLabel {
+    position: absolute;
+    top: 50%;
+    right: 18px;
+    transform: translateY(-50%) translateX(4px);
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    padding: calc(var(--space-xs) / 2) var(--space-xs);
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-family: var(--font-serif);
+    font-size: 0.7rem;
+    line-height: 1.2;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+}
+
+.timelineMarker:hover .timelineLabel,
+.timelineMarker:focus-visible .timelineLabel {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
 }
 
 .loadMoreHint {
@@ -1076,19 +1085,13 @@
     line-height: 0.6;
     letter-spacing: 0.08em;
     color: var(--accent);
-    animation: msgIn 0.3s var(--ease-out);
+    --slide-y: 8px;
+    animation: hana-fade-up var(--duration-slow) var(--ease-out);
 }
 
 .typingIndicator::after {
     content: '';
-    animation: typewriterDots 1.4s steps(1, end) infinite;
-}
-
-@keyframes typewriterDots {
-    0%, 100% { content: '\00a0'; }
-    25%  { content: '.'; }
-    50%  { content: '..'; }
-    75%  { content: '...'; }
+    animation: hana-typewriter-dots 1.4s steps(1, end) infinite;
 }
 
 /* ── Scroll to bottom FAB ── */
@@ -1110,7 +1113,7 @@
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
-    transition: opacity 0.2s, box-shadow 0.2s;
+    transition: opacity var(--duration-fast), box-shadow var(--duration-fast);
     opacity: 0.85;
 }
 
@@ -1140,7 +1143,7 @@
 .subagentCardHeader {
     display: flex;
     align-items: stretch;
-    transition: background 0.15s ease;
+    transition: background var(--duration-fast) ease;
 }
 
 .subagentCardHeader:hover {
@@ -1168,7 +1171,9 @@
 }
 
 .subagent-running .subagentAvatar {
-    animation: subagentPulse 2s ease-in-out infinite;
+    --pulse-lo: 1;
+    --pulse-hi: 0.6;
+    animation: hana-pulse 2s ease-in-out infinite;
 }
 
 .subagentStatus {
@@ -1198,7 +1203,7 @@
     border-radius: 4px;
     flex-shrink: 0;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity var(--duration-fast);
 }
 
 .subagentCardHeader:hover .subagentAbortBtn {
@@ -1212,11 +1217,6 @@
 
 .subagent-aborted .subagentStatus {
     color: var(--text-muted);
-}
-
-@keyframes subagentPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
 }
 
 .subagentAvatar {
@@ -1251,7 +1251,7 @@
 .subagentPreviewWrap {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 200ms cubic-bezier(0.33, 1, 0.68, 1);
+    transition: max-height var(--duration-fast) cubic-bezier(0.33, 1, 0.68, 1);
     border-top: 1px solid transparent;
 }
 
@@ -1271,7 +1271,7 @@
     padding: 0 12px 0;
     opacity: 0;
     transform: translateY(-6px);
-    transition: padding 200ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease, transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+    transition: padding var(--duration-fast) cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease, transform var(--duration-fast) cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 .subagentPreviewWrapOpen .subagentPreviewScroll,

@@ -28,6 +28,7 @@ import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
+import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
 import {
   normalizeSessionThinkingLevel,
   normalizeThinkingLevelForModel,
@@ -47,6 +48,28 @@ function getSteerPrefix() {
   const isZh = getLocale().startsWith("zh");
   return isZh ? "（插话，无需 MOOD）\n" : "(Interjection, no MOOD needed)\n";
 }
+
+function assertVideoInputSupported(model, videos) {
+  if (!videos?.length) return;
+  const input = model?.input;
+  if (!Array.isArray(input) || !input.includes("video")) {
+    throw new Error("current model does not support video input");
+  }
+}
+
+function buildPromptMediaOptions(opts) {
+  const media = [
+    ...(opts?.images || []),
+    ...(opts?.videos || []),
+  ];
+  if (!media.length) return undefined;
+  return {
+    images: media,
+    ...(opts.imageAttachmentPaths?.length ? { imageAttachmentPaths: opts.imageAttachmentPaths } : {}),
+    ...(opts.videoAttachmentPaths?.length ? { videoAttachmentPaths: opts.videoAttachmentPaths } : {}),
+  };
+}
+
 const MAX_CACHED_SESSIONS = 20;
 const SESSION_PROMPT_SNAPSHOT_VERSION = 1;
 
@@ -419,9 +442,23 @@ export class SessionCoordinator {
                 const bridge = engine?.getVisionBridge?.();
                 if (!bridge) return undefined;
                 const sp = ctx.sessionManager?.getSessionFile?.();
-                const { messages, injected } = bridge.injectNotes(event.messages, sp);
-                if (!injected) return undefined;
-                return { messages };
+                const adapted = await adaptVisualContextMessages({
+                  messages: event.messages,
+                  sessionPath: sp,
+                  targetModel: ctx?.model,
+                  visionBridge: bridge,
+                  isVisionAuxiliaryEnabled: () => engine.isVisionAuxiliaryEnabled?.() === true,
+                  resolveSessionFile: ({ fileId, filePath, sessionPath }) => {
+                    const lookupSessionPath = sessionPath || sp || null;
+                    if (fileId) return engine.getSessionFile?.(fileId, { sessionPath: lookupSessionPath });
+                    if (filePath) return engine.getSessionFileByPath?.(filePath, { sessionPath: lookupSessionPath });
+                    return null;
+                  },
+                  warn: (msg) => log.warn(msg),
+                });
+                const injectedNotes = bridge.injectNotes(adapted.messages, sp);
+                if (!adapted.injected && !injectedNotes.injected) return undefined;
+                return { messages: injectedNotes.messages };
               } catch (err) {
                 log.warn(`vision context injection failed: ${err?.message || err}`);
                 return undefined;
@@ -446,7 +483,7 @@ export class SessionCoordinator {
           const base = baseResourceLoader.getExtensions?.() ?? { extensions: [], errors: [] };
           return {
             ...base,
-            extensions: [...(base.extensions || []), visionAuxiliaryExtension],
+            extensions: [visionAuxiliaryExtension, ...(base.extensions || [])],
           };
         },
       },
@@ -798,7 +835,8 @@ export class SessionCoordinator {
       text = prepared.text;
       opts = { ...opts, images: prepared.images };
     }
-    const promptOpts = opts?.images?.length ? { images: opts.images } : undefined;
+    assertVideoInputSupported(this._session.model, opts?.videos);
+    const promptOpts = buildPromptMediaOptions(opts);
     await this._session.prompt(text, promptOpts);
     if (sp) {
       const entry = this._sessions.get(sp);
@@ -861,7 +899,8 @@ export class SessionCoordinator {
       text = prepared.text;
       opts = { ...opts, images: prepared.images };
     }
-    const promptOpts = opts?.images?.length ? { images: opts.images } : undefined;
+    assertVideoInputSupported(entry.session.model, opts?.videos);
+    const promptOpts = buildPromptMediaOptions(opts);
     await entry.session.prompt(text, promptOpts);
     const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
     agent?._memoryTicker?.notifyTurn(sessionPath);
@@ -1501,6 +1540,10 @@ export class SessionCoordinator {
     return !!this.getSessionByPath(sessionPath)?.isStreaming;
   }
 
+  isSessionSwitching(sessionPath) {
+    return !!this._sessions.get(sessionPath)?._switching;
+  }
+
   async abortSessionByPath(sessionPath) {
     return this.abortSession(sessionPath);
   }
@@ -1903,6 +1946,7 @@ export class SessionCoordinator {
    * opts:
    *   agentId, cwd, model, persist (string 目录路径 | falsy),
    *   toolFilter, builtinFilter, signal,
+   *   fileReadSessionPaths (string[] = parent session SessionFile scopes inherited as read-only),
    *   subagentContext (true = 走 subagent 专用 prompt：跳过记忆三段和团队名单),
    *   emitEvents (true 时将 session 事件转发到 EventBus),
    *   onSessionReady (sessionPath => void) 回调，session 创建后、prompt 执行前触发
@@ -1940,6 +1984,9 @@ export class SessionCoordinator {
         primaryCwd: execCwd,
         workspaceFolders: inheritedWorkspaceFolders,
       });
+      const fileReadSessionPaths = Array.isArray(opts.fileReadSessionPaths)
+        ? opts.fileReadSessionPaths.filter((sp) => typeof sp === "string" && sp.trim())
+        : [];
       const models = this._d.getModels();
       // migration #5 之后 models.chat 必为 {id, provider}；旧裸字符串/缺 provider 对象视为未配置
       const agentPreferredRef = targetAgent.config?.models?.chat;
@@ -1980,6 +2027,9 @@ export class SessionCoordinator {
           agentDir: targetAgent.agentDir,
           workspace: execCwd,
           workspaceFolders: execWorkspaceScope.workspaceFolders,
+          getSessionPath: () => tempSessionMgr?.getSessionFile?.() || null,
+          fileReadSessionPaths,
+          getPermissionMode: () => SESSION_PERMISSION_MODES.OPERATE,
         },
       );
 

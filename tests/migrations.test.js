@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 12;
+const LATEST_DATA_VERSION = 17;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -44,6 +44,7 @@ function makeRegistryWithModels(providers) {
   return {
     get(id) { return set.has(id) ? { id } : null; },
     getAllProvidersRaw() { return providers; },
+    getDefaultModels(id) { return providers?.[id]?.defaultModels || []; },
   };
 }
 
@@ -278,6 +279,119 @@ describe("migration #12: backfill legacy session files into sidecars", () => {
     ]);
     expect(files[0].filePath).toContain(path.join(tmpDir, "session-files"));
     expect(fs.existsSync(files[0].filePath)).toBe(true);
+  });
+});
+
+describe("migration #13: normalize recent legacy compatibility state", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = path.join(tmpDir, "user");
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration13() {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 12 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({
+        deepseek: {
+          models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+          defaultModels: ["deepseek-v4-pro", "deepseek-v4-flash"],
+        },
+      }),
+      log: () => {},
+    });
+    return prefs;
+  }
+
+  function writeAddedModelsYaml(providers) {
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump({ providers }, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+      "utf-8",
+    );
+  }
+
+  function readAddedModelsYaml() {
+    return YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+  }
+
+  it("removes the reserved official DeepSeek provider id from legacy model lists", () => {
+    writeAddedModelsYaml({
+      deepseek: {
+        base_url: "https://api.deepseek.com/v1",
+        api_key: "sk-test",
+        models: ["deepseek", "deepseek-v4-pro", { id: "deepseek-v4-flash", reasoning: true }],
+      },
+      openrouter: {
+        base_url: "https://openrouter.ai/api/v1",
+        api_key: "sk-test",
+        models: ["deepseek"],
+      },
+    });
+
+    const prefs = runMigration13();
+
+    const raw = readAddedModelsYaml();
+    expect(raw.providers.deepseek.models).toEqual([
+      "deepseek-v4-pro",
+      { id: "deepseek-v4-flash", reasoning: true },
+    ]);
+    expect(raw.providers.openrouter.models).toEqual(["deepseek"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("seeds DeepSeek defaults when the reserved model id was the only legacy entry", () => {
+    writeAddedModelsYaml({
+      "deepseek-official-proxy": {
+        base_url: "https://api.deepseek.com/v1",
+        api_key: "sk-test",
+        models: [{ id: "deepseek" }],
+      },
+    });
+
+    runMigration13();
+
+    const raw = readAddedModelsYaml();
+    expect(raw.providers["deepseek-official-proxy"].models).toEqual([
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+    ]);
+  });
+
+  it("makes legacy implicit memory master defaults explicit without overriding user choices", () => {
+    writeAgentConfig(agentsDir, "legacy", {
+      agent: { name: "Legacy" },
+      memory: { token_budget: 2500 },
+    });
+    writeAgentConfig(agentsDir, "explicit-off", {
+      agent: { name: "Explicit Off" },
+      memory: { enabled: false, token_budget: 1000 },
+    });
+    writeAgentConfig(agentsDir, "explicit-on", {
+      agent: { name: "Explicit On" },
+      memory: { enabled: true },
+    });
+
+    runMigration13();
+
+    expect(readAgentConfig(agentsDir, "legacy").memory).toEqual({
+      token_budget: 2500,
+      enabled: true,
+    });
+    expect(readAgentConfig(agentsDir, "explicit-off").memory).toEqual({
+      enabled: false,
+      token_budget: 1000,
+    });
+    expect(readAgentConfig(agentsDir, "explicit-on").memory).toEqual({ enabled: true });
   });
 });
 
@@ -1101,6 +1215,265 @@ describe("#7 migrateVisionToImage", () => {
   });
 });
 
+describe("migration #14: migrate Gemini OpenAI compatibility configs to native Google API", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration14(prefs) {
+    prefs.savePreferences({ _dataVersion: 13 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+  }
+
+  function writeAddedModelsYaml(providers) {
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump({ providers }, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+      "utf-8",
+    );
+  }
+
+  function readAddedModelsYaml() {
+    return YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+  }
+
+  it("rewrites official Gemini OpenAI endpoint configs to the native Google API", () => {
+    const prefs = makePrefs(userDir);
+    writeAddedModelsYaml({
+      gemini: {
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gemini-3.1-pro-preview"],
+      },
+    });
+
+    runMigration14(prefs);
+
+    const raw = readAddedModelsYaml();
+    expect(raw.providers.gemini.base_url).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(raw.providers.gemini.api).toBe("google-generative-ai");
+    expect(raw.providers.gemini.models).toEqual(["gemini-3.1-pro-preview"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("also repairs custom aliases that point directly at the official Gemini OpenAI endpoint", () => {
+    const prefs = makePrefs(userDir);
+    writeAddedModelsYaml({
+      "my-gemini": {
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        api_key: "sk-test",
+        models: ["gemini-3-flash-preview"],
+      },
+      "proxy-gemini": {
+        base_url: "https://proxy.example.com/v1/openai",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["gemini-3-flash-preview"],
+      },
+    });
+
+    runMigration14(prefs);
+
+    const raw = readAddedModelsYaml();
+    expect(raw.providers["my-gemini"].base_url).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(raw.providers["my-gemini"].api).toBe("google-generative-ai");
+    expect(raw.providers["proxy-gemini"].base_url).toBe("https://proxy.example.com/v1/openai");
+    expect(raw.providers["proxy-gemini"].api).toBe("openai-completions");
+  });
+});
+
+describe("migration #15: repair legacy session sidecar thinking levels", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration15(prefs) {
+    prefs.savePreferences({ _dataVersion: 14 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+  }
+
+  function writeSessionMeta(agentId, meta) {
+    const sessionDir = path.join(agentsDir, agentId, "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, "session-meta.json"),
+      JSON.stringify(meta, null, 2) + "\n",
+      "utf-8",
+    );
+  }
+
+  function readSessionMeta(agentId) {
+    return JSON.parse(fs.readFileSync(path.join(agentsDir, agentId, "sessions", "session-meta.json"), "utf-8"));
+  }
+
+  it("downgrades prompt-snapshotted xhigh entries when xhigh support cannot be proven", () => {
+    const prefs = makePrefs(userDir);
+    const originalMeta = {
+      "legacy-xhigh.jsonl": {
+        thinkingLevel: "xhigh",
+        memoryEnabled: true,
+        workspaceFolders: ["/tmp/project"],
+        promptSnapshot: {
+          version: 1,
+          systemPrompt: "frozen prompt",
+          appendSystemPrompt: [],
+          skillsResult: { skills: [], diagnostics: [] },
+          agentsFilesResult: { agentsFiles: [] },
+        },
+      },
+      "known-xhigh-model.jsonl": {
+        thinkingLevel: "xhigh",
+        model: { id: "gpt-5.4-thinking", provider: "openai" },
+        promptSnapshot: {
+          version: 1,
+          systemPrompt: "frozen prompt",
+          appendSystemPrompt: [],
+          skillsResult: { skills: [], diagnostics: [] },
+          agentsFilesResult: { agentsFiles: [] },
+        },
+      },
+      "live-session.jsonl": {
+        thinkingLevel: "xhigh",
+      },
+      "already-high.jsonl": {
+        thinkingLevel: "high",
+        promptSnapshot: {
+          version: 1,
+          systemPrompt: "frozen prompt",
+          appendSystemPrompt: [],
+          skillsResult: { skills: [], diagnostics: [] },
+          agentsFilesResult: { agentsFiles: [] },
+        },
+      },
+    };
+    writeSessionMeta("hana", originalMeta);
+
+    runMigration15(prefs);
+
+    const meta = readSessionMeta("hana");
+    expect(meta["legacy-xhigh.jsonl"]).toMatchObject({
+      thinkingLevel: "high",
+      memoryEnabled: true,
+      workspaceFolders: ["/tmp/project"],
+    });
+    expect(meta["legacy-xhigh.jsonl"].promptSnapshot.systemPrompt).toBe("frozen prompt");
+    expect(meta["known-xhigh-model.jsonl"].thinkingLevel).toBe("xhigh");
+    expect(meta["live-session.jsonl"].thinkingLevel).toBe("xhigh");
+    expect(meta["already-high.jsonl"].thinkingLevel).toBe("high");
+
+    const backupPath = path.join(agentsDir, "hana", "sessions", "session-meta.json.pre-v15.bak");
+    expect(JSON.parse(fs.readFileSync(backupPath, "utf-8"))).toEqual(originalMeta);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #16: video capability projection", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration16(prefs) {
+    prefs.savePreferences({ _dataVersion: 15 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({
+        dashscope: { models: [{ id: "qwen3-vl-plus" }] },
+      }),
+      log: () => {},
+    });
+  }
+
+  it("repairs stale models.json input arrays for known video-capable models", () => {
+    const prefs = makePrefs(userDir);
+    const modelsJsonPath = path.join(tmpDir, "models.json");
+    fs.writeFileSync(modelsJsonPath, JSON.stringify({
+      providers: {
+        dashscope: {
+          models: [
+            { id: "qwen3-vl-plus", input: ["text", "image"] },
+            { id: "qwen-plus", input: ["text"] },
+          ],
+        },
+      },
+    }, null, 2) + "\n", "utf-8");
+
+    runMigration16(prefs);
+
+    const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(raw.providers.dashscope.models[0].input).toEqual(["text", "image", "video"]);
+    expect(raw.providers.dashscope.models[0]).not.toHaveProperty("video");
+    expect(raw.providers.dashscope.models[1].input).toEqual(["text"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("promotes legacy agent model override video flags into added-models.yaml", () => {
+    const prefs = makePrefs(userDir);
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump({
+        providers: {
+          dashscope: {
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            api_key: "sk-x",
+            models: ["qwen3-vl-plus"],
+          },
+        },
+      }, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+      "utf-8",
+    );
+    writeAgentConfig(agentsDir, "hana", {
+      models: {
+        overrides: {
+          "qwen3-vl-plus": { video: true, displayName: "Qwen VL" },
+        },
+      },
+    });
+
+    runMigration16(prefs);
+
+    const raw = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+    expect(raw.providers.dashscope.models[0]).toEqual({ id: "qwen3-vl-plus", video: true });
+    const cfg = readAgentConfig(agentsDir, "hana");
+    expect(cfg.models.overrides["qwen3-vl-plus"]).toEqual({ displayName: "Qwen VL" });
+  });
+});
+
 describe("migration #8 — repairPostMigrationModelRefs", () => {
   let tmpDir, userDir, agentsDir;
 
@@ -1219,5 +1592,109 @@ describe("migration #10 — cleanupSummarizerCompilerRemnants", () => {
     });
 
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #17 — migrateBridgeSessionKeysToAgentScoped", () => {
+  let tmpDir, userDir, agentsDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    userDir = path.join(tmpDir, "user");
+    agentsDir = path.join(tmpDir, "agents");
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeBridgeIndex(agentId, index) {
+    const bridgeDir = path.join(agentsDir, agentId, "sessions", "bridge");
+    fs.mkdirSync(bridgeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(bridgeDir, "bridge-sessions.json"),
+      JSON.stringify(index, null, 2) + "\n",
+      "utf-8",
+    );
+  }
+
+  function readBridgeIndex(agentId) {
+    return JSON.parse(fs.readFileSync(
+      path.join(agentsDir, agentId, "sessions", "bridge", "bridge-sessions.json"),
+      "utf-8",
+    ));
+  }
+
+  it("adds the owning agent suffix to legacy bridge session keys", () => {
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+    writeBridgeIndex("hana", {
+      "wx_dm_wx-user": { file: "owner/wx.jsonl", userId: "wx-user", name: "Alice" },
+      "tg_dm_12345": "owner/tg.jsonl",
+      "wx_dm_someone@openim": { file: "owner/openim.jsonl", userId: "someone@openim" },
+      "wx_dm_existing@hana": { file: "owner/current.jsonl", userId: "existing" },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 16 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const index = readBridgeIndex("hana");
+    expect(index["wx_dm_wx-user"]).toBeUndefined();
+    expect(index["tg_dm_12345"]).toBeUndefined();
+    expect(index["wx_dm_someone@openim"]).toBeUndefined();
+    expect(index["wx_dm_wx-user@hana"]).toEqual({ file: "owner/wx.jsonl", userId: "wx-user", name: "Alice" });
+    expect(index["tg_dm_12345@hana"]).toBe("owner/tg.jsonl");
+    expect(index["wx_dm_someone@openim@hana"]).toEqual({ file: "owner/openim.jsonl", userId: "someone@openim" });
+    expect(index["wx_dm_existing@hana"]).toEqual({ file: "owner/current.jsonl", userId: "existing" });
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("fills an existing scoped metadata entry from legacy history", () => {
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+    writeBridgeIndex("hana", {
+      "wx_dm_user": { file: "owner/legacy.jsonl", userId: "user", name: "Old" },
+      "wx_dm_user@hana": { name: "Current", chatId: "user" },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 16 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const index = readBridgeIndex("hana");
+    expect(index["wx_dm_user"]).toBeUndefined();
+    expect(index["wx_dm_user@hana"]).toEqual({
+      file: "owner/legacy.jsonl",
+      userId: "user",
+      name: "Current",
+      chatId: "user",
+    });
+  });
+
+  it("keeps legacy history when the scoped key already has history", () => {
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+    writeBridgeIndex("hana", {
+      "wx_dm_user": { file: "owner/legacy.jsonl", userId: "user", name: "Old" },
+      "wx_dm_user@hana": { file: "owner/current.jsonl", userId: "user", name: "Current" },
+    });
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 16 });
+
+    runMigrations({
+      hanakoHome: tmpDir, agentsDir, prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const index = readBridgeIndex("hana");
+    expect(index["wx_dm_user"]).toEqual({ file: "owner/legacy.jsonl", userId: "user", name: "Old" });
+    expect(index["wx_dm_user@hana"]).toEqual({ file: "owner/current.jsonl", userId: "user", name: "Current" });
   });
 });

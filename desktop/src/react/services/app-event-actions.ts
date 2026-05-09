@@ -1,7 +1,7 @@
 import { useStore } from '../stores';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import { applyAgentIdentity, loadAgents } from '../stores/agent-actions';
-import { loadSessions } from '../stores/session-actions';
+import { loadSessions, switchSession } from '../stores/session-actions';
 import { loadModels } from '../utils/ui-helpers';
 import { activateWorkspaceDesk } from '../stores/desk-actions';
 import { loadChannels } from '../stores/channel-actions';
@@ -87,6 +87,26 @@ export function handleAppEvent(type: string, data: any = {}): void {
         agentName: data.agentName,
         agentId: data.agentId,
       });
+      const homeFolder = normalizeWorkspacePath(data.homeFolder);
+      const cwd = normalizeWorkspacePath(data.cwd) || homeFolder;
+      useStore.setState({
+        homeFolder,
+        selectedFolder: homeFolder || cwd,
+        workspaceFolders: Array.isArray(data.workspaceFolders)
+          ? data.workspaceFolders.filter((p: unknown): p is string => typeof p === 'string' && !!p.trim())
+          : [],
+        ...(Array.isArray(data.cwdHistory)
+          ? { cwdHistory: mergeWorkspaceHistory(data.cwdHistory, []) }
+          : {}),
+        ...(typeof data.memoryMasterEnabled === 'boolean'
+          ? { memoryMasterEnabled: data.memoryMasterEnabled }
+          : {}),
+      });
+      if (data.sessionPath) {
+        void switchSession(data.sessionPath);
+      } else {
+        void activateWorkspaceDesk(cwd);
+      }
       loadSessions();
 
       // Reset channel state for new agent
@@ -105,21 +125,6 @@ export function handleAppEvent(type: string, data: any = {}): void {
       // Reload models and reset thinking level
       loadModels();
       useStore.setState({ thinkingLevel: 'auto' });
-
-      // Reload workspace defaults and activate the new agent workspace through the
-      // same path used by session switching and the welcome picker.
-      hanaFetch('/api/config').then(r => r.json()).then((cfg: any) => {
-        if (myVersion !== _agentSwitchVersion) return; // stale
-        const homeFolder = readConfigHomeFolder(cfg);
-        useStore.setState({
-          homeFolder,
-          selectedFolder: homeFolder,
-          workspaceFolders: [],
-          cwdHistory: readConfigCwdHistory(cfg),
-          memoryMasterEnabled: readConfigMemoryMasterEnabled(cfg),
-        });
-        void activateWorkspaceDesk(homeFolder);
-      }).catch(() => {});
 
       // Reload automation count and clear activities
       hanaFetch('/api/desk/cron').then(r => r.json()).then((d: any) => {

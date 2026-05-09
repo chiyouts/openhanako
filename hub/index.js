@@ -123,13 +123,15 @@ export class Hub {
       onDelta,
       images,
       imageAttachmentPaths,
+      videos,
+      videoAttachmentPaths,
       inboundFiles,
       sessionPath,
       agentId,
       uiContext,
       displayMessage,
     } = opts;
-    const o = { sessionKey, role, ephemeral, meta, isGroup, cwd, model, persist, from, to, onDelta, images, imageAttachmentPaths, inboundFiles, sessionPath, agentId, uiContext, displayMessage };
+    const o = { sessionKey, role, ephemeral, meta, isGroup, cwd, model, persist, from, to, onDelta, images, imageAttachmentPaths, videos, videoAttachmentPaths, inboundFiles, sessionPath, agentId, uiContext, displayMessage };
 
     // ── 图片预处理：持久化到磁盘 + 插入 [attached_image] 标记 ──
     // 在路由之前统一处理，所有消息路径（WS / Bridge DM / Bridge Group）共享
@@ -157,6 +159,30 @@ export class Hub {
         o.imageAttachmentPaths = savedPaths;
       }
     }
+    if (
+      o.videos?.length
+      && this._engine.hanakoHome
+      && !o.inboundFiles?.length
+      && !hasDisplayVideoAttachments(o.displayMessage)
+    ) {
+      const attachDir = path.join(this._engine.hanakoHome, "attachments");
+      await fs.promises.mkdir(attachDir, { recursive: true });
+      const savedPaths = [];
+      for (const video of o.videos) {
+        const ext = extensionForVideoMime(video.mimeType);
+        const hash = crypto.createHash("md5").update((video.data || "").slice(0, 1024)).digest("hex").slice(0, 8);
+        const filePath = path.join(attachDir, `upload-${Date.now()}-${hash}${ext}`);
+        try {
+          await fs.promises.writeFile(filePath, Buffer.from(video.data, "base64"));
+          savedPaths.push(filePath);
+        } catch { /* best-effort; prompt still goes through */ }
+      }
+      if (savedPaths.length) {
+        const pathNote = savedPaths.map(p => `[attached_video: ${p}]`).join("\n");
+        text = `${pathNote}\n${text}`;
+        o.videoAttachmentPaths = savedPaths;
+      }
+    }
 
     // 路由表：按顺序匹配，第一条命中即执行。
     // 优先级通过位置保证，新增路由在此处显式插入，不依赖散落在各处的 if 顺序。
@@ -169,20 +195,22 @@ export class Hub {
             text,
             images: o.images,
             imageAttachmentPaths: o.imageAttachmentPaths,
+            videos: o.videos,
+            videoAttachmentPaths: o.videoAttachmentPaths,
             inboundFiles: o.inboundFiles,
             onDelta: o.onDelta,
             uiContext: o.uiContext,
             displayMessage: o.displayMessage,
           })
-          : this._engine.prompt(text, { images: o.images }),
+          : this._engine.prompt(text, { images: o.images, videos: o.videos }),
       },
       { // Bridge guest
         match: o => o.sessionKey && o.role === "guest",
-        handle: () => this._guestHandler.handle(text, o.sessionKey, o.meta, { isGroup: o.isGroup, agentId: o.agentId, onDelta: o.onDelta, images: o.images, imageAttachmentPaths: o.imageAttachmentPaths, inboundFiles: o.inboundFiles }),
+        handle: () => this._guestHandler.handle(text, o.sessionKey, o.meta, { isGroup: o.isGroup, agentId: o.agentId, onDelta: o.onDelta, images: o.images, imageAttachmentPaths: o.imageAttachmentPaths, videos: o.videos, videoAttachmentPaths: o.videoAttachmentPaths, inboundFiles: o.inboundFiles }),
       },
       { // Bridge owner
         match: o => o.sessionKey && !o.ephemeral,
-        handle: () => this._engine.executeExternalMessage(text, o.sessionKey, o.meta, { guest: false, agentId: o.agentId, onDelta: o.onDelta, images: o.images, imageAttachmentPaths: o.imageAttachmentPaths, inboundFiles: o.inboundFiles }),
+        handle: () => this._engine.executeExternalMessage(text, o.sessionKey, o.meta, { guest: false, agentId: o.agentId, onDelta: o.onDelta, images: o.images, imageAttachmentPaths: o.imageAttachmentPaths, videos: o.videos, videoAttachmentPaths: o.videoAttachmentPaths, inboundFiles: o.inboundFiles }),
       },
       { // 隔离执行（cron/heartbeat/channel）
         match: o => o.ephemeral,
@@ -366,7 +394,12 @@ export class Hub {
     this._sessionHandlerCleanups.push(bus.handle("provider:credentials", async ({ providerId }) => {
       const creds = engine.providerRegistry.getCredentials(providerId);
       if (!creds?.apiKey) return { error: "no_credentials" };
-      return { apiKey: creds.apiKey, baseUrl: creds.baseUrl, api: creds.api };
+      return {
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
+        api: creds.api,
+        ...(creds.accountId ? { accountId: creds.accountId } : {}),
+      };
     }));
 
     this._sessionHandlerCleanups.push(bus.handle("provider:entry", async ({ providerId }) => {
@@ -470,4 +503,24 @@ function hasDisplayImageAttachments(displayMessage) {
       isDirectory: false,
     }) === "image";
   });
+}
+
+function hasDisplayVideoAttachments(displayMessage) {
+  const attachments = displayMessage?.attachments;
+  if (!Array.isArray(attachments)) return false;
+  return attachments.some((attachment) => {
+    if (!attachment?.path || attachment.isDir) return false;
+    return inferFileKind({
+      mime: attachment.mimeType,
+      ext: extOfName(attachment.name || attachment.path),
+      isDirectory: false,
+    }) === "video";
+  });
+}
+
+function extensionForVideoMime(mimeType) {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized === "video/webm") return ".webm";
+  if (normalized === "video/quicktime") return ".mov";
+  return ".mp4";
 }

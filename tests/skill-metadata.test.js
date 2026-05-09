@@ -41,6 +41,7 @@ describe("parseSkillMetadata", () => {
       name: "safe-skill",
       description: "Summarize PDFs for the user. Keep the answer concise.",
       disableModelInvocation: true,
+      defaultEnabled: true,
     });
   });
 
@@ -58,6 +59,23 @@ describe("parseSkillMetadata", () => {
     expect(meta.name).toBe("long-skill");
     expect(meta.description).toHaveLength(1024);
     expect(meta.disableModelInvocation).toBe(false);
+    expect(meta.defaultEnabled).toBe(true);
+  });
+
+  it("reads default-enabled from frontmatter metadata", () => {
+    const content = [
+      "---",
+      "name: default-off-skill",
+      "description: Skill that starts disabled for new agents.",
+      "metadata:",
+      "  default-enabled: false",
+      "---",
+      "",
+    ].join("\n");
+
+    const meta = parseSkillMetadata(content, "fallback-skill");
+    expect(meta.name).toBe("default-off-skill");
+    expect(meta.defaultEnabled).toBe(false);
   });
 });
 
@@ -121,6 +139,7 @@ describe("SkillManager metadata scanning", () => {
     expect(learnedSkills[0].name).toBe("learned-skill");
     expect(learnedSkills[0].description).toBe("Learned skill description.");
     expect(learnedSkills[0].disableModelInvocation).toBe(false);
+    expect(learnedSkills[0].defaultEnabled).toBe(true);
     expect(learnedSkills[0].sourceIdentity).toMatchObject({
       kind: "skill_source",
       owner: "learned",
@@ -130,6 +149,35 @@ describe("SkillManager metadata scanning", () => {
       editable: true,
       readonly: false,
     });
+  });
+
+  it("resource-loader skills can opt out of default enablement through SKILL.md metadata", () => {
+    const root = makeTmpRoot();
+    const skillDir = path.join(root, "skills", "hana-plugin-creator");
+    const skillFile = path.join(skillDir, "SKILL.md");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(skillFile, [
+      "---",
+      "name: hana-plugin-creator",
+      "description: Create Hana plugins.",
+      "metadata:",
+      "  default-enabled: false",
+      "---",
+      "",
+    ].join("\n"), "utf-8");
+
+    const manager = new SkillManager({ skillsDir: path.join(root, "skills") });
+    manager.init(
+      { getSkills: () => ({ skills: [{ name: "hana-plugin-creator", source: "user", filePath: skillFile }], diagnostics: [] }) },
+      new Map(),
+      new Set(),
+    );
+
+    expect(manager.allSkills[0]).toMatchObject({
+      name: "hana-plugin-creator",
+      defaultEnabled: false,
+    });
+    expect(manager.computeDefaultEnabledForNewAgent()).toEqual([]);
   });
 
   it("workspace skills 参与 runtime skill 集，但不污染 agent 全局技能列表", () => {

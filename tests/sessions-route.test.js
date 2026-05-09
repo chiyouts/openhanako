@@ -71,9 +71,8 @@ describe("sessions route", () => {
       })),
       getAgent: vi.fn(() => ({ agentName: "Hana" })),
       agentIdFromSessionPath: vi.fn((sp) => {
-        const p = require("path");
-        const rel = p.relative("/tmp/agents", sp);
-        return rel.split(p.sep)[0] || null;
+        const rel = path.relative("/tmp/agents", sp);
+        return rel.split(path.sep)[0] || null;
       }),
     };
 
@@ -228,6 +227,69 @@ describe("sessions route", () => {
     expect(fs.existsSync(path.join(path.dirname(sessionPath), "archived", path.basename(sessionPath)))).toBe(true);
   });
 
+  it("marks current todos completed and removed through an explicit session route", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const { SessionManager } = await import("../lib/pi-sdk/index.js");
+    const { loadLatestTodosFromSessionFile, loadLatestTodoSnapshotFromSessionFile } = await import("../lib/tools/todo-compat.js");
+    const app = new Hono();
+    const agentsDir = path.join(tmpDir, "agents");
+    const sessionDir = path.join(agentsDir, "hana", "sessions");
+    const manager = SessionManager.create("/tmp/workspace", sessionDir);
+    const sessionPath = manager.getSessionFile();
+    manager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "working" }],
+      api: "test",
+      provider: "test",
+      model: "test",
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    });
+    manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "todo-1",
+      toolName: "todo_write",
+      content: [{ type: "text", text: "1/2" }],
+      isError: false,
+      timestamp: Date.now(),
+      details: {
+        todos: [
+          { content: "read", activeForm: "reading", status: "completed" },
+          { content: "write", activeForm: "writing", status: "in_progress" },
+        ],
+      },
+    });
+
+    const engine = {
+      agentsDir,
+      isSessionStreaming: vi.fn(() => false),
+      getSessionByPath: vi.fn(() => ({ sessionManager: manager })),
+      emitEvent: vi.fn(),
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions/todos/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: sessionPath }),
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toEqual({ ok: true, todos: [] });
+    expect(await loadLatestTodosFromSessionFile(sessionPath)).toEqual([]);
+    expect(await loadLatestTodoSnapshotFromSessionFile(sessionPath)).toMatchObject({
+      removed: true,
+      source: "user",
+      todos: [
+        { content: "read", activeForm: "reading", status: "completed" },
+        { content: "write", activeForm: "writing", status: "completed" },
+      ],
+    });
+    expect(engine.emitEvent).toHaveBeenCalledWith({ type: "todo_update", todos: [] }, sessionPath);
+  });
+
   it("infers subagent agent identity from child sessionPath when history details are missing", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.js");
     const msgUtils = await import("../core/message-utils.js");
@@ -253,9 +315,8 @@ describe("sessions route", () => {
       agentsDir: "/tmp/agents",
       deferredResults: null,
       agentIdFromSessionPath: vi.fn((sp) => {
-        const p = require("path");
-        const rel = p.relative("/tmp/agents", sp);
-        return rel.split(p.sep)[0] || null;
+        const rel = path.relative("/tmp/agents", sp);
+        return rel.split(path.sep)[0] || null;
       }),
       getAgent: vi.fn((id) => (id === "hanako" ? { agentName: "Hanako" } : null)),
     };
@@ -273,6 +334,46 @@ describe("sessions route", () => {
       agentName: "Hanako",
       streamKey: "/tmp/agents/hanako/subagent-sessions/child.jsonl",
     });
+  });
+
+  it("includes session entry timestamps on displayable history messages", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "hello", images: [], thinking: "", toolUses: [] })
+      .mockReturnValueOnce({ text: "hi back", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "user", content: "hello", timestamp: "2026-05-07T05:42:00.000Z" },
+      { role: "assistant", content: "hi back", timestamp: "2026-05-07T05:43:00.000Z" },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions/messages");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toEqual([
+      {
+        id: "0",
+        role: "user",
+        content: "hello",
+        timestamp: "2026-05-07T05:42:00.000Z",
+      },
+      {
+        id: "1",
+        role: "assistant",
+        content: "hi back",
+        timestamp: "2026-05-07T05:43:00.000Z",
+      },
+    ]);
   });
 
   it("refreshes session file lifecycle metadata when rebuilding history blocks", async () => {
@@ -379,6 +480,51 @@ describe("sessions route", () => {
       mime: "text/markdown",
       kind: "markdown",
     });
+  });
+
+  it("returns session registry files alongside restored messages", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+    const sessionPath = "/tmp/agents/hana/sessions/main.jsonl";
+
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      currentSessionPath: sessionPath,
+      deferredResults: null,
+      listSessionFiles: vi.fn((sp) => {
+        expect(sp).toBe(sessionPath);
+        return [{
+          id: "sf_write",
+          sessionPath,
+          filePath: "/workspace/draft.md",
+          label: "draft.md",
+          ext: "md",
+          mime: "text/markdown",
+          kind: "markdown",
+          origin: "agent_write",
+          operations: ["created", "modified"],
+          createdAt: 1234,
+          status: "available",
+        }];
+      }),
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request(`/api/sessions/messages?path=${encodeURIComponent(sessionPath)}`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.sessionFiles).toEqual([expect.objectContaining({
+      fileId: "sf_write",
+      filePath: "/workspace/draft.md",
+      origin: "agent_write",
+      operations: ["created", "modified"],
+      createdAt: 1234,
+    })]);
   });
 
   it("hydrates legacy file blocks without fileId from the session file sidecar by path", async () => {

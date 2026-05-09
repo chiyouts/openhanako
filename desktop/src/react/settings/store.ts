@@ -3,6 +3,7 @@
  * 独立于主窗口 store，设置窗口有自己的 BrowserWindow + JS context
  */
 import { create } from 'zustand';
+import type { ServerConnection } from '../services/server-connection';
 
 export interface Agent {
   id: string;
@@ -54,6 +55,7 @@ export interface SettingsState {
   // connection
   serverPort: number | null;
   serverToken: string | null;
+  activeServerConnection: ServerConnection | null;
 
   // agents
   agents: Agent[];
@@ -72,6 +74,7 @@ export interface SettingsState {
 
   // ui
   activeTab: string;
+  platformName: string | null;
   ready: boolean;
 
   // pins
@@ -106,6 +109,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
   // connection
   serverPort: null,
   serverToken: null,
+  activeServerConnection: null,
 
   // agents
   agents: [],
@@ -124,6 +128,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
 
   // ui
   activeTab: 'agent',
+  platformName: null,
   ready: false,
 
   // pins

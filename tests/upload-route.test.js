@@ -277,6 +277,58 @@ describe("upload route", () => {
     expect(up.dest.startsWith(path.join(hanakoHome, "uploads"))).toBe(true);
   });
 
+  it("upload-blob takes the basename from Windows-style paths before sanitizing", async () => {
+    tmpDir = mktemp();
+    const app = new Hono();
+    app.route("/api", createUploadRoute({ hanakoHome: path.join(tmpDir, "hana-home") }));
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      "base64",
+    );
+
+    const res = await app.request("/api/upload-blob", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "C:\\Users\\hana\\evil?.exe",
+        base64Data: png.toString("base64"),
+        mimeType: "image/png",
+      }),
+    });
+    const data = await res.json();
+
+    expect(data.uploads[0].error).toBeUndefined();
+    expect(data.uploads[0].name).toBe("evil.png");
+    expect(path.basename(data.uploads[0].dest)).toMatch(/^evil_[a-z0-9]+_[a-f0-9]{8}\.png$/);
+  });
+
+  it("upload-blob avoids Windows reserved device filenames", async () => {
+    tmpDir = mktemp();
+    const app = new Hono();
+    app.route("/api", createUploadRoute({ hanakoHome: path.join(tmpDir, "hana-home") }));
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      "base64",
+    );
+
+    const res = await app.request("/api/upload-blob", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "CON. ",
+        base64Data: png.toString("base64"),
+        mimeType: "image/png",
+      }),
+    });
+    const data = await res.json();
+
+    expect(data.uploads[0].error).toBeUndefined();
+    expect(data.uploads[0].name).toBe("file-CON.png");
+    expect(path.basename(data.uploads[0].dest)).toMatch(/^file-CON_[a-z0-9]+_[a-f0-9]{8}\.png$/);
+  });
+
   it("upload-blob rejects oversized blob", async () => {
     tmpDir = mktemp();
     const app = new Hono();

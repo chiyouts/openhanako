@@ -3,6 +3,7 @@ import { TaskStore } from "./lib/task-store.js";
 import { Poller } from "./lib/poller.js";
 import { volcengineImageAdapter } from "./adapters/volcengine.js";
 import { openaiImageAdapter } from "./adapters/openai.js";
+import { openaiCodexImageAdapter } from "./adapters/openai-codex.js";
 import {
   ensureWritableGeneratedDir,
   removeGeneratedFiles,
@@ -27,6 +28,7 @@ export default class ImageGenPlugin {
     registry.register(volcengineImageAdapter);
     registry.register({ ...volcengineImageAdapter, id: "volcengine-coding" });
     registry.register(openaiImageAdapter);
+    registry.register(openaiCodexImageAdapter);
 
     const getGeneratedDir = () => resolveGeneratedDir(this.ctx);
     const getWritableGeneratedDir = (options) => ensureWritableGeneratedDir(this.ctx, options);

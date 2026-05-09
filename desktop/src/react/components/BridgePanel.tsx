@@ -6,6 +6,7 @@ import { formatSessionDate, parseMoodFromContent } from '../utils/format';
 import { renderMarkdown } from '../utils/markdown';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import { openSettingsModal } from '../stores/settings-modal-actions';
+import { useMermaidDiagrams } from '../hooks/use-mermaid-diagrams';
 import fp from './FloatingPanels.module.css';
 
 interface BridgeSession {
@@ -428,6 +429,19 @@ function formatBubbleTime(ts?: string | null): string {
   } catch { return ''; }
 }
 
+function BridgeMarkdownBubble({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useMermaidDiagrams(ref, [html]);
+
+  return (
+    <div
+      ref={ref}
+      className={`${fp.bridgeBubble} md-content`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 function ChatBubble({ message: m }: { message: BridgeMessage }) {
   const time = formatBubbleTime(m.ts);
   if (m.role === 'assistant') {
@@ -435,7 +449,7 @@ function ChatBubble({ message: m }: { message: BridgeMessage }) {
     const cleaned = (text || m.content).replace(/<tool_code>[\s\S]*?<\/tool_code>\s*/g, '');
     return (
       <div className={`${fp.bridgeBubbleWrap} ${fp.bridgeBubbleIn}`}>
-        <div className={`${fp.bridgeBubble} md-content`} dangerouslySetInnerHTML={{ __html: renderMarkdown(cleaned) }} />
+        <BridgeMarkdownBubble html={renderMarkdown(cleaned)} />
         {time && <span className={fp.bridgeBubbleTime}>{time}</span>}
       </div>
     );

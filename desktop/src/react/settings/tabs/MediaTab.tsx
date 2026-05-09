@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useState } from 'react';
 import { useSettingsStore } from '../store';
 import { hanaFetch } from '../api';
 import { t } from '../helpers';
 import { MediaProviderDetail } from './media/MediaProviderDetail';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
+import { SelectWidget } from '@/ui';
 import styles from '../Settings.module.css';
 
 interface MediaProvider {
@@ -163,12 +164,10 @@ export function MediaTab() {
       <SettingsSection title={t('settings.media.globalDefault')}>
         <SettingsRow
           label={t('settings.media.defaultModel')}
-          control={(
-            <select
-              className={styles['settings-select']}
+          control={
+            <SelectWidget
               value={config.defaultImageModel ? `${config.defaultImageModel.provider}/${config.defaultImageModel.id}` : ''}
-              onChange={(e) => {
-                const value = e.target.value;
+              onChange={(value) => {
                 if (!value) {
                   saveConfig({ defaultImageModel: undefined });
                   return;
@@ -176,15 +175,15 @@ export function MediaTab() {
                 const [provider, ...rest] = value.split('/');
                 saveConfig({ defaultImageModel: { id: rest.join('/'), provider } });
               }}
-            >
-              <option value="">-</option>
-              {allImageModels.map((model) => (
-                <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
-                  {model.provider} / {model.name || model.id}
-                </option>
-              ))}
-            </select>
-          )}
+              options={[
+                { value: '', label: '-' },
+                ...allImageModels.map((model) => ({
+                  value: `${model.provider}/${model.id}`,
+                  label: `${model.provider} / ${model.name || model.id}`,
+                })),
+              ]}
+            />
+          }
         />
 
         <SettingsRow

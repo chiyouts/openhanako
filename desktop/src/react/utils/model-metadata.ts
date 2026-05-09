@@ -8,6 +8,7 @@ export interface ModelReferenceMeta {
   maxOutput?: number;
   image?: boolean;
   vision?: boolean;
+  video?: boolean;
   reasoning?: boolean;
   xhigh?: boolean;
   _source?: 'reference';

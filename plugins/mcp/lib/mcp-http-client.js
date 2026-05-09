@@ -45,6 +45,13 @@ function stringOrEmpty(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function connectorHeaders(server) {
+  if (!server?.headers || typeof server.headers !== "object" || Array.isArray(server.headers)) return {};
+  return Object.fromEntries(
+    Object.entries(server.headers).filter(([key, value]) => typeof key === "string" && typeof value === "string"),
+  );
+}
+
 function responseHeader(response, name) {
   return response?.headers?.get?.(name) || response?.headers?.get?.(name.toLowerCase()) || "";
 }
@@ -70,6 +77,26 @@ function methodErrorMessage(status, body) {
 
 function resolveEndpoint(endpoint, baseUrl) {
   return new URL(endpoint, baseUrl).href;
+}
+
+async function fetchWithTimeout(fetchImpl, url, init, timeoutMs) {
+  if (!timeoutMs) return fetchImpl(url, init);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const originalSignal = init?.signal;
+  const abortFromOriginal = () => controller.abort();
+  originalSignal?.addEventListener?.("abort", abortFromOriginal, { once: true });
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    originalSignal?.removeEventListener?.("abort", abortFromOriginal);
+  }
+}
+
+function requestTimeoutMs(server) {
+  const timeout = Number(server?.timeout || 0);
+  return Number.isFinite(timeout) && timeout > 0 ? timeout * 1000 : 30_000;
 }
 
 export class McpStreamableHttpClient {
@@ -182,6 +209,7 @@ export class McpStreamableHttpClient {
 
   _headers({ sessionId = this.sessionId, includeJson = true, initializing = false } = {}) {
     const headers = {
+      ...connectorHeaders(this.server),
       Accept: STREAMABLE_ACCEPT,
       "MCP-Protocol-Version": this.protocolVersion || MCP_PROTOCOL_VERSION,
     };
@@ -193,11 +221,11 @@ export class McpStreamableHttpClient {
   }
 
   async _postJsonRpc(payload, { initializing = false } = {}) {
-    const response = await this.fetchImpl(this.endpoint, {
+    const response = await fetchWithTimeout(this.fetchImpl, this.endpoint, {
       method: "POST",
       headers: this._headers({ initializing }),
       body: JSON.stringify(payload),
-    });
+    }, requestTimeoutMs(this.server));
     if (initializing) {
       const sessionId = responseHeader(response, "MCP-Session-Id");
       if (sessionId) this.sessionId = sessionId;
@@ -363,7 +391,7 @@ export class McpLegacySseClient {
         this._pending.clear();
       }
     });
-    await withTimeout(endpointPromise, 30_000, "MCP legacy SSE endpoint event timed out");
+    await withTimeout(endpointPromise, requestTimeoutMs(this.server), "MCP legacy SSE endpoint event timed out");
   }
 
   async _readSse(body) {
@@ -422,11 +450,11 @@ export class McpLegacySseClient {
   }
 
   async _postMessage(payload) {
-    const response = await this.fetchImpl(this.messageEndpoint, {
+    const response = await fetchWithTimeout(this.fetchImpl, this.messageEndpoint, {
       method: "POST",
       headers: this._headers({ accept: "application/json", includeJson: true }),
       body: JSON.stringify(payload),
-    });
+    }, requestTimeoutMs(this.server));
     if (!response.ok) {
       const body = await responseText(response);
       throw new McpHttpError(methodErrorMessage(response.status, body), {
@@ -438,7 +466,7 @@ export class McpLegacySseClient {
   }
 
   _headers({ accept, includeJson }) {
-    const headers = { Accept: accept };
+    const headers = { ...connectorHeaders(this.server), Accept: accept };
     if (includeJson) headers["Content-Type"] = "application/json";
     const token = authToken(this.server);
     if (token) headers.Authorization = `Bearer ${token}`;

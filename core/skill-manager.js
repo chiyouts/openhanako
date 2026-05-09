@@ -22,6 +22,27 @@ function createRelativeDotIgnore(rootDir) {
   };
 }
 
+function readSkillFileMetadata(skill) {
+  if (!skill?.filePath) return null;
+  try {
+    const content = fs.readFileSync(skill.filePath, "utf-8");
+    return parseSkillMetadata(content, skill.name || "");
+  } catch {
+    return null;
+  }
+}
+
+function decorateLoadedSkill(skill, hiddenSkills) {
+  const meta = readSkillFileMetadata(skill);
+  skill.defaultEnabled = meta?.defaultEnabled ?? (skill.defaultEnabled !== false);
+  if (meta) {
+    skill.disableModelInvocation = meta.disableModelInvocation;
+  }
+  skill._hidden = hiddenSkills.has(skill.name);
+  skill.sourceIdentity = sourceIdentityForSkill(skill);
+  return skill;
+}
+
 export class SkillManager {
   /**
    * @param {object} opts
@@ -52,8 +73,7 @@ export class SkillManager {
     this._hiddenSkills = hiddenSkills;
     this._allSkills = resourceLoader.getSkills().skills;
     for (const s of this._allSkills) {
-      s._hidden = hiddenSkills.has(s.name);
-      s.sourceIdentity = sourceIdentityForSkill(s);
+      decorateLoadedSkill(s, hiddenSkills);
     }
     for (const [, ag] of agents) {
       this._allSkills.push(...this.scanLearnedSkills(ag.agentDir));
@@ -126,7 +146,7 @@ export class SkillManager {
    */
   computeDefaultEnabledForNewAgent() {
     return this._allSkills
-      .filter(s => s.source !== "learned" && s.source !== "external")
+      .filter(s => s.source !== "learned" && s.source !== "external" && s.defaultEnabled !== false)
       .map(s => s.name);
   }
 
@@ -142,8 +162,7 @@ export class SkillManager {
 
     this._allSkills = resourceLoader.getSkills().skills;
     for (const s of this._allSkills) {
-      s._hidden = this._hiddenSkills.has(s.name);
-      s.sourceIdentity = sourceIdentityForSkill(s);
+      decorateLoadedSkill(s, this._hiddenSkills);
     }
     for (const [, ag] of agents) {
       this._allSkills.push(...this.scanLearnedSkills(ag.agentDir));
@@ -241,6 +260,7 @@ export class SkillManager {
               baseDir,
               source: "external",
               disableModelInvocation: meta.disableModelInvocation,
+              defaultEnabled: meta.defaultEnabled,
               _agentId: null,
               _hidden: false,
               _externalLabel: label,
@@ -345,6 +365,7 @@ export class SkillManager {
           baseDir,
           source: "learned",
           disableModelInvocation: meta.disableModelInvocation,
+          defaultEnabled: meta.defaultEnabled,
           _agentId: agentId,
           _hidden: false,
           sourceIdentity: sourceIdentityForSkill({

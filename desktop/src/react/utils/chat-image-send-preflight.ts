@@ -1,4 +1,4 @@
-import { isImageFile } from './format';
+import { isImageFile, isVideoFile } from './format';
 
 export interface ChatImageAttachment {
   path: string;
@@ -18,6 +18,7 @@ export interface VisionAuxiliaryConfig {
 }
 
 export type ModelImageInputMode = 'native-image' | 'text-only' | 'unknown';
+export type ModelVideoInputMode = 'native-video' | 'no-native-video' | 'unknown';
 
 export type ChatImageSendPreflightResult =
   | {
@@ -44,14 +45,36 @@ export type ChatImageBlockedToast = (
   },
 ) => void;
 
+export type ChatVideoSendPreflightResult =
+  | {
+    ok: true;
+    reason: 'no-videos' | 'native-video';
+    videoInputMode: ModelVideoInputMode;
+  }
+  | {
+    ok: false;
+    reason: 'model-video-unsupported';
+    videoInputMode: 'no-native-video' | 'unknown';
+  };
+
 export function hasChatImageAttachments(attachments: readonly ChatImageAttachment[]): boolean {
   return attachments.some((file) => !file.isDirectory && isImageFile(file.name));
+}
+
+export function hasChatVideoAttachments(attachments: readonly ChatImageAttachment[]): boolean {
+  return attachments.some((file) => !file.isDirectory && isVideoFile(file.name));
 }
 
 export function getModelImageInputMode(model: ChatImageModel | null | undefined): ModelImageInputMode {
   const input = model?.input;
   if (!Array.isArray(input)) return 'unknown';
   return input.includes('image') ? 'native-image' : 'text-only';
+}
+
+export function getModelVideoInputMode(model: ChatImageModel | null | undefined): ModelVideoInputMode {
+  const input = model?.input;
+  if (!Array.isArray(input)) return 'unknown';
+  return input.includes('video') ? 'native-video' : 'no-native-video';
 }
 
 function canUseVisionAuxiliary(config: VisionAuxiliaryConfig | null | undefined): boolean {
@@ -94,6 +117,27 @@ export async function evaluateChatImageSendPreflight({
   };
 }
 
+export async function evaluateChatVideoSendPreflight({
+  attachments,
+  model,
+}: {
+  attachments: readonly ChatImageAttachment[];
+  model: ChatImageModel | null | undefined;
+}): Promise<ChatVideoSendPreflightResult> {
+  const videoInputMode = getModelVideoInputMode(model);
+  if (!hasChatVideoAttachments(attachments)) {
+    return { ok: true, reason: 'no-videos', videoInputMode };
+  }
+  if (videoInputMode === 'native-video') {
+    return { ok: true, reason: 'native-video', videoInputMode };
+  }
+  return {
+    ok: false,
+    reason: 'model-video-unsupported',
+    videoInputMode,
+  };
+}
+
 export function notifyTextModelImageBlocked({
   t,
   addToast,
@@ -109,6 +153,29 @@ export function notifyTextModelImageBlocked({
     9000,
     {
       dedupeKey: 'text-model-image-blocked',
+      action: {
+        label: t('input.openModelSettings'),
+        onClick: openSettings,
+      },
+    },
+  );
+}
+
+export function notifyTextModelVideoBlocked({
+  t,
+  addToast,
+  openSettings,
+}: {
+  t: (key: string) => string;
+  addToast: ChatImageBlockedToast;
+  openSettings: () => void;
+}): void {
+  addToast(
+    t('input.textModelVideoBlocked'),
+    'warning',
+    9000,
+    {
+      dedupeKey: 'text-model-video-blocked',
       action: {
         label: t('input.openModelSettings'),
         onClick: openSettings,

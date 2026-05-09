@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -135,5 +135,49 @@ describe('SettingsContent title placement', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.tabs.computer' }));
 
     expect(onActiveTabChange).toHaveBeenCalledWith('computer');
+  });
+
+  it('hides the Computer Use tab on Linux and redirects stale computer tabs', async () => {
+    mockState.activeTab = 'computer';
+    mockState.platformName = 'linux';
+    const { SettingsContent } = await import('../../settings/SettingsContent');
+    render(<SettingsContent variant="modal" onClose={() => {}} />);
+
+    expect(screen.queryByRole('button', { name: 'settings.tabs.computer' })).not.toBeInTheDocument();
+    expect(mockState.set).toHaveBeenCalledWith({ activeTab: 'agent' });
+  });
+
+  it('keeps activeServerConnection in sync when the settings window hears server restart', async () => {
+    let restartHandler: ((data: { port: number }) => void) | null = null;
+    window.platform = {
+      getServerPort: vi.fn(async () => 62950),
+      getServerToken: vi.fn(async () => 'token'),
+      onServerRestarted: vi.fn((handler: (data: { port: number }) => void) => {
+        restartHandler = handler;
+        return vi.fn();
+      }),
+    } as unknown as typeof window.platform;
+
+    const { SettingsContent } = await import('../../settings/SettingsContent');
+    render(<SettingsContent variant="window" listenToWindowTabSwitch />);
+
+    await waitFor(() => {
+      expect(mockState.activeServerConnection).toEqual(expect.objectContaining({
+        baseUrl: 'http://127.0.0.1:62950',
+        token: 'token',
+      }));
+    });
+
+    const handler = restartHandler;
+    expect(handler).toBeTypeOf('function');
+    if (!handler) throw new Error('server restart handler was not registered');
+    (handler as unknown as (data: { port: number }) => void)({ port: 63000 });
+
+    expect(mockState.serverPort).toBe(63000);
+    expect(mockState.activeServerConnection).toEqual(expect.objectContaining({
+      baseUrl: 'http://127.0.0.1:63000',
+      wsUrl: 'ws://127.0.0.1:63000',
+      token: 'token',
+    }));
   });
 });

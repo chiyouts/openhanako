@@ -971,6 +971,64 @@ describe("model sync related routes", () => {
     ]);
   });
 
+  it("google-generative-ai hits native Gemini /models with x-goog-api-key and normalizes fields", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [
+          {
+            name: "models/gemini-3.1-pro-preview",
+            baseModelId: "gemini-3.1-pro-preview",
+            displayName: "Gemini 3.1 Pro Preview",
+            inputTokenLimit: 1048576,
+            outputTokenLimit: 65536,
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => ({
+          apiKey: "gemini-key",
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+          api: "google-generative-ai",
+        }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "gemini" }),
+    });
+
+    expect(res.status).toBe(200);
+    const fetchCall = fetchMock.mock.calls[0];
+    expect(fetchCall[0]).toBe("https://generativelanguage.googleapis.com/v1beta/models");
+    expect(fetchCall[1].headers["x-goog-api-key"]).toBe("gemini-key");
+    expect(fetchCall[1].headers.Authorization).toBeUndefined();
+
+    const data = await res.json();
+    expect(data.models).toEqual([
+      {
+        id: "gemini-3.1-pro-preview",
+        name: "Gemini 3.1 Pro Preview",
+        context: 1048576,
+        maxOutput: 65536,
+      },
+    ]);
+  });
+
   it("anthropic-messages falls back to defaults when remote 404s", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();

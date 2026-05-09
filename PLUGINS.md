@@ -149,12 +149,35 @@ export async function execute(input, toolCtx) {  // 必须
 
 - 自动加命名空间前缀：`pluginId_name`（如 `my-plugin_search`）
 - restricted 插件的 `toolCtx.bus` 只有 `emit/subscribe/request`，没有 `handle`
+- 新插件可以使用 `@hana/plugin-runtime` 的 `defineTool()` 获得类型和默认参数；当前静态 `tools/*.js` loader 仍读取命名导出。
+
+```js
+import { defineTool } from '@hana/plugin-runtime';
+
+const tool = defineTool({
+  name: "search",
+  description: "Search project data",
+  parameters: {
+    type: "object",
+    properties: { query: { type: "string" } },
+    required: ["query"]
+  },
+  async execute(input, ctx) {
+    ctx.log.info("search", input.query);
+    return `results for ${input.query}`;
+  }
+});
+
+export const { name, description, parameters, execute } = tool;
+```
 
 #### 媒体交付
 
 工具需要交付文件时，使用 `toolCtx.stageFile()` 把本地文件登记成当前 session 的 `SessionFile`，并直接复用它返回的 `mediaItem`：
 
 ```js
+import { createMediaDetails } from "@hana/plugin-runtime";
+
 const staged = toolCtx.stageFile({
   sessionPath: toolCtx.sessionPath,
   filePath: "/path/to/image.png",
@@ -163,11 +186,7 @@ const staged = toolCtx.stageFile({
 
 return {
   content: [{ type: "text", text: "已生成图片" }],
-  details: {
-    media: {
-      items: [staged.mediaItem],
-    },
-  },
+  details: createMediaDetails([staged]),
 };
 ```
 
@@ -380,17 +399,66 @@ export const defaultApi = "openai-completions";
 - 悬停 tab 时显示插件全名（tooltip）
 - Tab 超过 5 个时自动折叠到 overflow 下拉菜单，用户可拖拽排序
 
-插件页面通过 iframe 渲染，需要在加载完成后发送握手信号：
+插件页面通过 iframe 渲染。新插件建议使用 `@hana/plugin-sdk` 发送握手和宿主请求：
+
+```js
+import { hana } from '@hana/plugin-sdk';
+
+hana.ready();
+hana.ui.resize({ height: 320 });
+await hana.toast.show({ message: '已刷新', type: 'success' });
+await hana.external.open('https://example.com');
+await hana.clipboard.writeText('复制内容');
+```
+
+底层仍保留 `hana.host.request(type, payload)`，用于未来 capability 或实验能力；稳定能力优先使用 typed helper。
+
+为兼容旧插件，宿主仍接受原始握手消息：
 
 ```js
 window.parent.postMessage({ type: 'ready' }, '*');
 ```
+
+宿主只接受来自当前 iframe window 且 origin 匹配的消息。SDK 请求会经过 capability registry；当前内置能力包括 `toast.show`（无需授权）、`external.open`（需要授权）和 `clipboard.writeText`（需要授权）。
+
+需要授权的 iframe 宿主能力必须在 manifest 中声明：
+
+```json
+{
+  "manifestVersion": 1,
+  "ui": {
+    "hostCapabilities": ["external.open", "clipboard.writeText"]
+  }
+}
+```
+
+未声明的敏感能力会返回 `CAPABILITY_DENIED`。未知能力名会在加载时被忽略；`toast.show` 不需要声明。
 
 宿主会在 iframe URL 上附加 `hana-theme` 和 `hana-css` 参数，插件可选择引用主题 CSS 以保持视觉一致：
 
 ```html
 <link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
 ```
+
+React 插件 UI 建议使用 `@hana/plugin-components`，它提供和 Hana 当前控件接近的 Button、IconButton、TextInput、Textarea、Select、Switch、SettingRow、CardShell、List、EmptyState 等基础组件：
+
+```tsx
+import { Button, CardShell, HanaThemeProvider, SettingRow, Switch } from "@hana/plugin-components";
+import "@hana/plugin-components/styles.css";
+
+export function PluginPanel() {
+  return (
+    <HanaThemeProvider mode="inherit">
+      <CardShell title="同步">
+        <SettingRow label="启用" control={<Switch checked label="开启" />} />
+        <Button variant="primary">运行</Button>
+      </CardShell>
+    </HanaThemeProvider>
+  );
+}
+```
+
+`HanaThemeProvider` 支持三种模式：`inherit` 读取宿主 CSS 变量并走 SDK fallback；`hana` 固定使用某个 Hana 主题 token；`custom` 只覆盖插件显式传入的 token，未传字段继续 fallback。组件只依赖 `hana-plugin-*` class 和 CSS 变量，不导入 renderer 内部组件。
 
 ### Widget（侧栏组件）⚡ full-access
 
@@ -440,17 +508,22 @@ Widget 同样通过 iframe 渲染，需要发送 `ready` 握手信号。
 大多数 plugin 不需要 manifest。只有以下场景需要：
 
 - 声明 `trust: "full-access"` 获取完整权限
+- 声明 iframe UI 需要的宿主能力（`ui.hostCapabilities`）
 - Configuration schema（JSON Schema 声明）
 - Plugin 元信息（名称、版本、描述，给管理 UI 展示）
 - 软依赖声明
 
 ```json
 {
+  "manifestVersion": 1,
   "id": "my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
   "description": "What this plugin does",
   "trust": "full-access",
+  "ui": {
+    "hostCapabilities": ["external.open"]
+  },
   "contributes": {
     "configuration": { ... }
   },
@@ -466,7 +539,25 @@ Widget 同样通过 iframe 渲染，需要发送 `ready` 握手信号。
 
 如果 plugin 需要持久连接、定时任务或 bus handler，创建 `index.js`：
 
+新插件建议使用 `@hana/plugin-runtime` 的 `definePlugin()`。它会返回兼容当前 PluginManager 的 class：
+
 ```js
+import { definePlugin } from '@hana/plugin-runtime';
+
+export default definePlugin({
+  async onload(ctx, { register }) {
+    register(ctx.bus.handle("bridge:send", async (payload) => {
+      return { sent: true, payload };
+    }));
+  },
+});
+```
+
+也可以继续使用传统 class 形式：
+
+```js
+import { HANA_BUS_SKIP } from "@hana/plugin-runtime";
+
 export default class MyPlugin {
   async onload() {
     // ctx 由 PluginManager 注入：
@@ -481,7 +572,7 @@ export default class MyPlugin {
     // register() 注册的资源在卸载时自动清理（逆序）
     this.register(
       this.ctx.bus.handle("bridge:send", async (payload) => {
-        if (payload.platform !== "feishu") return EventBus.SKIP;
+        if (payload.platform !== "feishu") return HANA_BUS_SKIP;
         await this.sendToFeishu(payload);
         return { sent: true };
       })
@@ -500,36 +591,41 @@ export default class MyPlugin {
 
 ## 总线通信（bus.request / bus.handle）
 
-Plugin 间通信通过 EventBus 的请求-响应机制。`bus.handle` 需要 full-access 权限，`bus.request` 所有插件都可以用。
+Plugin 间通信通过 EventBus 的请求-响应机制。`bus.handle` 需要 full-access 权限，`bus.request` 所有插件都可以用。新插件建议用 `@hana/plugin-runtime` 的 `defineBusHandler()`、`requestBus()` 和 `HANA_BUS_SKIP`，这样 handler 类型、请求参数和链式跳过语义都来自 SDK，而不是手写约定。
 
 ```js
+import { defineBusHandler, HANA_BUS_SKIP, requestBus } from "@hana/plugin-runtime";
+
 // Plugin A（full-access）: 注册能力
-this.register(
-  this.ctx.bus.handle("bridge:send", async (payload) => {
-    if (payload.platform !== "telegram") return EventBus.SKIP;
+const bridgeSend = defineBusHandler({
+  type: "bridge:send",
+  async handle(payload) {
+    if (payload.platform !== "telegram") return HANA_BUS_SKIP;
     await telegramBot.send(payload.chatId, payload.text);
     return { sent: true };
-  })
-);
+  },
+});
+
+this.register(this.ctx.bus.handle(bridgeSend.type, (payload) => bridgeSend.handle(payload, this.ctx)));
 
 // Plugin B（任意权限）: 调用能力
 if (this.ctx.bus.hasHandler("bridge:send")) {
-  const result = await this.ctx.bus.request("bridge:send", {
+  const result = await requestBus(this.ctx, "bridge:send", {
     platform: "telegram",
     chatId: "123",
     text: "Hello",
-  });
+  }, { timeout: 5000 });
 }
 ```
 
 **命名规范**：`领域:动作`，冒号分隔。如 `bridge:send`、`memory:query`、`timer:schedule`。
 
-**SKIP 链**：同一事件类型可以注册多个 handler。系统按注册顺序调用，直到某个 handler 返回非 `EventBus.SKIP` 的值。返回 `EventBus.SKIP` 表示"我不处理，交给下一个"：
+**SKIP 链**：同一事件类型可以注册多个 handler。系统按注册顺序调用，直到某个 handler 返回非 `HANA_BUS_SKIP` 的值。返回 `HANA_BUS_SKIP` 表示"我不处理，交给下一个"：
 
 ```js
 this.register(
   this.ctx.bus.handle("bridge:send", async (payload) => {
-    if (payload.platform !== "telegram") return EventBus.SKIP;
+    if (payload.platform !== "telegram") return HANA_BUS_SKIP;
     await telegramBot.send(payload.chatId, payload.text);
     return { sent: true };
   })

@@ -16,6 +16,29 @@ const REMOVE_WITH_CONTENT = new Set([
 ]);
 
 const GLOBAL_ATTRS = new Set(['title', 'style']);
+const ALLOWED_CLASS_NAMES = new Set([
+  'markdown-callout',
+  'markdown-callout-title',
+  'markdown-callout-note',
+  'markdown-callout-abstract',
+  'markdown-callout-info',
+  'markdown-callout-todo',
+  'markdown-callout-tip',
+  'markdown-callout-success',
+  'markdown-callout-question',
+  'markdown-callout-warning',
+  'markdown-callout-failure',
+  'markdown-callout-danger',
+  'markdown-callout-bug',
+  'markdown-callout-example',
+  'markdown-callout-quote',
+  'mermaid-diagram',
+  'mermaid-source',
+  'mermaid-rendered',
+  'language-mermaid',
+  'is-rendered',
+  'is-error',
+]);
 
 const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 const EXPLICIT_PROTOCOL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
@@ -117,6 +140,14 @@ function sanitizeStyle(raw: string): string {
   return kept.join('; ');
 }
 
+function sanitizeClass(raw: string): string {
+  return raw
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => ALLOWED_CLASS_NAMES.has(token))
+    .join(' ');
+}
+
 function sanitizeAttributes(element: Element, tagName: string): void {
   for (const attr of Array.from(element.attributes)) {
     const name = attr.name.toLowerCase();
@@ -134,6 +165,18 @@ function sanitizeAttributes(element: Element, tagName: string): void {
       } else {
         element.removeAttribute(attr.name);
       }
+      continue;
+    }
+
+    if (name === 'class') {
+      const className = sanitizeClass(attr.value);
+      if (className) element.setAttribute('class', className);
+      else element.removeAttribute(attr.name);
+      continue;
+    }
+
+    if (tagName === 'details' && name === 'open') {
+      element.setAttribute('open', 'open');
       continue;
     }
 

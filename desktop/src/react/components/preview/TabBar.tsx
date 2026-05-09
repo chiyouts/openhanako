@@ -3,8 +3,7 @@ import { useStore } from '../../stores';
 import { selectPreviewItems, selectOpenTabs, selectActiveTabId } from '../../stores/preview-slice';
 import { closeTab, closePreview, setActiveTab, canSpawnViewer, spawnViewer } from '../../stores/preview-actions';
 import type { PreviewItem } from '../../types';
-import { ContextMenu } from '../ContextMenu';
-import type { ContextMenuItem } from '../ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui';
 import styles from './TabBar.module.css';
 
 interface TabContextMenuState {

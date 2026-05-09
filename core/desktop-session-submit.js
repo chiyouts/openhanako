@@ -10,6 +10,8 @@
  * @param {string} opts.text
  * @param {Array<{type:'image', data:string, mimeType:string}>} [opts.images]
  * @param {string[]} [opts.imageAttachmentPaths]
+ * @param {Array<{type:'video', data:string, mimeType:string}>} [opts.videos]
+ * @param {string[]} [opts.videoAttachmentPaths]
  * @param {Array<{type:string, filename?:string, mimeType?:string, buffer:Buffer|Uint8Array|string}>} [opts.inboundFiles]
  * @param {(delta: string, accumulated: string) => void} [opts.onDelta]
  * @param {object} [opts.displayMessage]
@@ -28,6 +30,8 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
     text,
     images,
     imageAttachmentPaths,
+    videos,
+    videoAttachmentPaths,
     inboundFiles,
     onDelta,
     displayMessage,
@@ -38,7 +42,7 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
     throw new Error("desktop-session-submit: engine session API unavailable");
   }
   if (!sessionPath) throw new Error("desktop-session-submit: sessionPath is required");
-  if (!text && !images?.length) throw new Error("desktop-session-submit: text or images required");
+  if (!text && !images?.length && !videos?.length) throw new Error("desktop-session-submit: text, images, or videos required");
   if (typeof engine.isSessionStreaming === "function" && engine.isSessionStreaming(sessionPath)) {
     throw new Error("session_busy");
   }
@@ -51,6 +55,7 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
   }
 
   let promptImageAttachmentPaths = imageAttachmentPaths || [];
+  let promptVideoAttachmentPaths = videoAttachmentPaths || [];
   let displayAttachments = displayMessage?.attachments;
   let promptText = text || "";
 
@@ -65,6 +70,10 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
     promptImageAttachmentPaths = uniquePaths([
       ...promptImageAttachmentPaths,
       ...registeredDisplay.imageAttachmentPaths,
+    ]);
+    promptVideoAttachmentPaths = uniquePaths([
+      ...promptVideoAttachmentPaths,
+      ...registeredDisplay.videoAttachmentPaths,
     ]);
   }
 
@@ -91,6 +100,7 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
     type: "session_user_message",
     message: {
       text: displayMessage?.text ?? text ?? "",
+      timestamp: Date.now(),
       attachments: displayAttachments,
       quotedText: displayMessage?.quotedText,
       skills: displayMessage?.skills,
@@ -101,6 +111,7 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
   }, sessionPath);
 
   promptText = addAttachedImageMarkers(promptText, promptImageAttachmentPaths);
+  promptText = addAttachedVideoMarkers(promptText, promptVideoAttachmentPaths);
 
   let captured = "";
   const toolMedia = [];
@@ -122,8 +133,13 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
   });
 
   try {
-    const promptOpts = images?.length
-      ? { images, ...(promptImageAttachmentPaths.length ? { imageAttachmentPaths: promptImageAttachmentPaths } : {}) }
+    const promptOpts = images?.length || videos?.length
+      ? {
+        ...(images?.length ? { images } : {}),
+        ...(videos?.length ? { videos } : {}),
+        ...(promptImageAttachmentPaths.length ? { imageAttachmentPaths: promptImageAttachmentPaths } : {}),
+        ...(promptVideoAttachmentPaths.length ? { videoAttachmentPaths: promptVideoAttachmentPaths } : {}),
+      }
       : undefined;
     await engine.promptSession(sessionPath, promptText, promptOpts);
   } finally {
@@ -140,6 +156,7 @@ export async function submitDesktopSessionMessage(engine, opts = {}) {
 function registerDisplayAttachments({ hanakoHome, sessionPath, attachments, registerSessionFile }) {
   const nextAttachments = [];
   const imageAttachmentPaths = [];
+  const videoAttachmentPaths = [];
 
   for (const attachment of attachments || []) {
     let next = { ...attachment };
@@ -178,11 +195,17 @@ function registerDisplayAttachments({ hanakoHome, sessionPath, attachments, regi
     });
     if (!next.isDir && next.path && kind === "image") {
       imageAttachmentPaths.push(next.path);
+    } else if (!next.isDir && next.path && kind === "video") {
+      videoAttachmentPaths.push(next.path);
     }
     nextAttachments.push(next);
   }
 
-  return { attachments: nextAttachments, imageAttachmentPaths: uniquePaths(imageAttachmentPaths) };
+  return {
+    attachments: nextAttachments,
+    imageAttachmentPaths: uniquePaths(imageAttachmentPaths),
+    videoAttachmentPaths: uniquePaths(videoAttachmentPaths),
+  };
 }
 
 function displayAttachmentStorageKind(hanakoHome, filePath) {
@@ -202,6 +225,15 @@ function addAttachedImageMarkers(text, imageAttachmentPaths) {
     .filter((filePath) => filePath && !promptText.includes(`[attached_image: ${filePath}]`));
   if (!missing.length) return promptText;
   const markerText = missing.map((filePath) => `[attached_image: ${filePath}]`).join("\n");
+  return promptText ? `${markerText}\n${promptText}` : markerText;
+}
+
+function addAttachedVideoMarkers(text, videoAttachmentPaths) {
+  let promptText = text || "";
+  const missing = uniquePaths(videoAttachmentPaths)
+    .filter((filePath) => filePath && !promptText.includes(`[attached_video: ${filePath}]`));
+  if (!missing.length) return promptText;
+  const markerText = missing.map((filePath) => `[attached_video: ${filePath}]`).join("\n");
   return promptText ? `${markerText}\n${promptText}` : markerText;
 }
 

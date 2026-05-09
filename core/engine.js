@@ -77,9 +77,11 @@ import {
 } from "./llm-utils.js";
 import { debugLog } from "../lib/debug-log.js";
 import { createSandboxedTools } from "../lib/sandbox/index.js";
+import { externalReadPathsFromSessionFiles } from "../lib/sandbox/win32-policy.js";
 import { t } from "../server/i18n.js";
 import { CheckpointStore } from "../lib/checkpoint-store.js";
 import { assertAllToolsCategorized } from "../shared/tool-categories.js";
+import { workspaceRootsForSandbox } from "../shared/workspace-scope.js";
 import { wrapWithCheckpoint } from "../lib/checkpoint-wrapper.js";
 import { wrapWithSessionPermission } from "../lib/tools/session-permission-wrapper.js";
 import { TaskRegistry } from "../lib/task-registry.js";
@@ -88,6 +90,10 @@ import { ComputerProviderRegistry } from "./computer-use/provider-registry.js";
 import { createMockComputerProvider } from "./computer-use/providers/mock-provider.js";
 import { createMacosCuaProvider } from "./computer-use/providers/macos-cua-provider.js";
 import { createWindowsUiaProvider } from "./computer-use/providers/windows-uia-provider.js";
+import {
+  effectiveComputerUseSettings,
+  isComputerUsePlatformSupported,
+} from "./computer-use/platform-support.js";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.js";
 import {
   getSkillNameTranslationCachePath,
@@ -213,6 +219,8 @@ export class HanaEngine {
       isVisionAuxiliaryEnabled: () => this.isVisionAuxiliaryEnabled(),
       getHanakoHome: () => this.hanakoHome,
       registerSessionFile: (entry) => this.registerSessionFile(entry),
+      getSessionFile: (fileId, options) => this.getSessionFile(fileId, options),
+      getSessionFileByPath: (filePath, options) => this.getSessionFileByPath(filePath, options),
     });
 
     // ── Slash Command System ──
@@ -256,9 +264,10 @@ export class HanaEngine {
     this._listeners = new Set();
     this._eventBus = null;
 
-    // 首次剥图通知去重：sessionPath → 已通知。由 context extension handler 维护，
-    // 避免每一轮对话都重复广播 image_stripped_notice 事件。
+    // 首次剥媒体通知去重：sessionPath → 已通知。由 context extension handler 维护，
+    // 避免每一轮对话都重复广播 stripped_notice 事件。
     this._imageStripNotified = new Set();
+    this._videoStripNotified = new Set();
 
     // UI context（用户当前视野）：sessionPath → { currentViewed, activeFile,
     // activePreview, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.js
@@ -429,6 +438,7 @@ export class HanaEngine {
   /** 确保桌面 session 已加载进 cache 但不改 UI 焦点（Phase 2-C：/rc 接管态用） */
   async ensureSessionLoaded(p) { return this._sessionCoord.ensureSessionLoaded(p); }
   isSessionStreaming(p) { return this._sessionCoord.isSessionStreaming(p); }
+  isSessionSwitching(p) { return this._sessionCoord.isSessionSwitching(p); }
   async abortSessionByPath(p) { return this._sessionCoord.abortSessionByPath(p); }
   async listSessions() { return this._sessionCoord.listSessions(); }
   async listArchivedSessions() { return this._sessionCoord.listArchivedSessions(); }
@@ -459,10 +469,14 @@ export class HanaEngine {
   get memoryModelUnavailableReason() { return this.agent.memoryModelUnavailableReason; }
   get planMode() { return this._sessionCoord.getPlanMode(); }
   getPrimaryAgentId() { return this._prefs.getPrimaryAgent(); }
-  get homeCwd() { return this._configCoord.getHomeFolder(this._readPrimaryAgent()) || null; }
+  get homeCwd() { return this.getHomeCwd(this.currentAgentId); }
 
   getHomeCwd(agentId) {
-    return this._configCoord.getHomeFolder(agentId) || null;
+    return this._configCoord.getHomeFolder(agentId || this.currentAgentId) || null;
+  }
+
+  getExplicitHomeCwd(agentId) {
+    return this._configCoord.getExplicitHomeFolder(agentId || this.currentAgentId) || null;
   }
   _createResourceLoaderOptions(skillsDir) {
     const cwd = resolveHanaPiProjectDir(this.hanakoHome);
@@ -514,6 +528,9 @@ export class HanaEngine {
   isVisionAuxiliaryEnabled() { return this.getSharedModels()?.vision_enabled === true; }
   getVisionBridge() { return this._visionBridge; }
   _ensureComputerRuntime() {
+    if (!this.isComputerUseSupported()) {
+      throw new Error("Computer Use is not supported on this platform.");
+    }
     if (!this._computerProviders || !this._computerHost) {
       this._computerProviders = new ComputerProviderRegistry();
       this._computerProviders.register(createMockComputerProvider({ providerId: "mock" }));
@@ -531,11 +548,18 @@ export class HanaEngine {
   }
   getComputerHost() { return this._ensureComputerRuntime().host; }
   getComputerProviders() { return this._ensureComputerRuntime().providers; }
-  getComputerUseSettings() { return this._prefs.getComputerUseSettings(); }
+  isComputerUseSupported(platform = process.platform) { return isComputerUsePlatformSupported(platform); }
+  getComputerUseSettings() {
+    return effectiveComputerUseSettings(this._prefs.getComputerUseSettings(), { platform: process.platform });
+  }
   setComputerUseSettings(partial) {
+    if (!this.isComputerUseSupported() && partial?.enabled === true) {
+      throw new Error("Computer Use is not supported on this platform.");
+    }
     const settings = this._prefs.setComputerUseSettings(partial);
-    if (settings.enabled === true) this._ensureComputerRuntime();
-    return settings;
+    const effectiveSettings = effectiveComputerUseSettings(settings, { platform: process.platform });
+    if (effectiveSettings.enabled === true) this._ensureComputerRuntime();
+    return effectiveSettings;
   }
   approveComputerUseApp(approval) { return this._prefs.approveComputerUseApp(approval); }
   revokeComputerUseApp(approval) { return this._prefs.revokeComputerUseApp(approval); }
@@ -759,7 +783,10 @@ export class HanaEngine {
   _getResolvedExternalSkillPaths(cwd) {
     const pluginPaths = this._pluginManager?.getSkillPaths?.() || [];
     const workspacePaths = this._getWorkspaceExternalSkillPaths(cwd);
-    return this._mergeExternalPaths(this._prefs.getExternalSkillPaths(), [
+    const configuredPaths = typeof this._prefs?.getExternalSkillPaths === "function"
+      ? this._prefs.getExternalSkillPaths()
+      : [];
+    return this._mergeExternalPaths(configuredPaths, [
       ...pluginPaths,
       ...workspacePaths,
     ]);
@@ -927,16 +954,25 @@ export class HanaEngine {
         pi.on("context", (event, ctx) => {
           const model = ctx?.model;
           if (!model) return;
-          const { messages, stripped } = sanitizeMessagesForModel(event.messages, model);
+          const { messages, stripped, strippedImages, strippedVideos } = sanitizeMessagesForModel(event.messages, model);
           if (stripped === 0) return;
           const sessionPath = ctx?.sessionManager?.getSessionFile?.();
-          if (sessionPath && !this._imageStripNotified.has(sessionPath)) {
+          if (sessionPath && strippedImages > 0 && !this._imageStripNotified.has(sessionPath)) {
             this._imageStripNotified.add(sessionPath);
             this._emitEvent({
               type: "image_stripped_notice",
               modelId: model.id,
               modelProvider: model.provider,
-              count: stripped,
+              count: strippedImages,
+            }, sessionPath);
+          }
+          if (sessionPath && strippedVideos > 0 && !this._videoStripNotified.has(sessionPath)) {
+            this._videoStripNotified.add(sessionPath);
+            this._emitEvent({
+              type: "video_stripped_notice",
+              modelId: model.id,
+              modelProvider: model.provider,
+              count: strippedVideos,
             }, sessionPath);
           }
           return { messages };
@@ -1163,20 +1199,48 @@ export class HanaEngine {
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;
     const extraReadOnlyPaths = this._getResolvedExternalSkillPaths(effectiveWorkspace)
       .map((entry) => entry.dirPath);
+    const workspaceFolders = opts.workspaceFolders || [];
+    const getSessionPath = opts.getSessionPath || (() => null);
+    const fileReadSessionPaths = Array.isArray(opts.fileReadSessionPaths)
+      ? opts.fileReadSessionPaths.filter((sp) => typeof sp === "string" && sp.trim())
+      : [];
+    const getExternalReadPaths = () => {
+      const sessionPaths = [];
+      const seenSessionPaths = new Set();
+      const addSessionPath = (sp) => {
+        if (!sp || seenSessionPaths.has(sp)) return;
+        seenSessionPaths.add(sp);
+        sessionPaths.push(sp);
+      };
+      addSessionPath(getSessionPath());
+      for (const sp of fileReadSessionPaths) addSessionPath(sp);
+      if (!sessionPaths.length) return [];
+      const files = typeof this.listSessionFiles === "function"
+        ? sessionPaths.flatMap((sp) => this.listSessionFiles(sp))
+        : [];
+      return externalReadPathsFromSessionFiles(files, {
+        workspaceRoots: workspaceRootsForSandbox(effectiveWorkspace, workspaceFolders),
+        hanakoHome: this.hanakoHome,
+      });
+    };
 
     let result = createSandboxedTools(cwd, allTools, {
       agentDir: effectiveAgentDir,
       workspace: effectiveWorkspace,
-      workspaceFolders: opts.workspaceFolders || [],
+      workspaceFolders,
       hanakoHome: this.hanakoHome,
       extraReadOnlyPaths,
       getSandboxEnabled: () => this._readPreferences().sandbox !== false,
+      getExternalReadPaths,
+      getSessionPath,
+      recordFileOperation: (entry) => this.registerSessionFile(entry),
+      getVisionBridge: () => this.getVisionBridge(),
+      isVisionAuxiliaryEnabled: () => this.isVisionAuxiliaryEnabled(),
     });
 
     // Checkpoint wrapper (outside sandbox layer)
     const backupCfg = this._prefs.getFileBackup();
     if (backupCfg.enabled) {
-      const getSessionPath = opts.getSessionPath || (() => null);
       result = {
         ...result,
         tools: wrapWithCheckpoint(result.tools, {
@@ -1188,18 +1252,20 @@ export class HanaEngine {
       };
     }
 
-    const getSessionPath = opts.getSessionPath || (() => null);
+    const getPermissionMode = typeof opts.getPermissionMode === "function"
+      ? opts.getPermissionMode
+      : (sessionPath) => this.getSessionPermissionMode(sessionPath);
     result = {
       ...result,
       tools: wrapWithSessionPermission(result.tools, {
         getSessionPath,
-        getPermissionMode: (sessionPath) => this.getSessionPermissionMode(sessionPath),
+        getPermissionMode,
         getConfirmStore: () => this._confirmStore,
         emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
       }),
       customTools: wrapWithSessionPermission(result.customTools, {
         getSessionPath,
-        getPermissionMode: (sessionPath) => this.getSessionPermissionMode(sessionPath),
+        getPermissionMode,
         getConfirmStore: () => this._confirmStore,
         emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
       }),
@@ -1289,7 +1355,7 @@ export class HanaEngine {
     const resolvedModel = this._models.resolveModelWithCredentials(diaryModelId);
     // 写日记是用户主动触发的「读历史」功能，必须参考记忆，
     // 跟「在对话中潜移默化带入记忆」的 master 开关无关。所以不查 memoryMasterEnabled。
-    // 但 per-session 开关要尊重：关了记忆开关的对话不进日记。
+    // per-session 开关只决定缺摘要时是否写回 summaries；关闭时仍可为本次日记临时压缩。
     const agent = this.agent;
     return writeDiary({
       summaryManager: agent.summaryManager,
@@ -1302,10 +1368,19 @@ export class HanaEngine {
       agentName: agent.agentName,
       cwd: this.homeCwd || process.cwd(),
       activityStore: this.activityStore,
-      todayMdPath: agent.todayMdPath,
-      isSessionMemoryEnabled: (sessionId) => {
-        const sessionPath = path.join(agent.sessionDir, `${sessionId}.jsonl`);
+      sessionDir: agent.sessionDir,
+      isSessionMemoryEnabledForPath: (sessionPath) => {
         return agent.isSessionMemoryEnabledFor(sessionPath);
+      },
+      getCompactionAuth: async (model) => {
+        const auth = await this._models.modelRegistry.getApiKeyAndHeaders(model);
+        if (!auth.ok) {
+          throw new Error(`Auth failed for model ${model.id}: ${auth.error}`);
+        }
+        if (!auth.apiKey) {
+          throw new Error(`No API key for provider ${model.provider}`);
+        }
+        return { apiKey: auth.apiKey, headers: auth.headers };
       },
     });
   }

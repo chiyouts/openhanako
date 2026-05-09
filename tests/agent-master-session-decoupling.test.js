@@ -187,4 +187,26 @@ describe("agent.systemPrompt: master / per-session 解耦", () => {
 
     await agent.dispose();
   });
+
+  it("Computer Use 在不支持的平台上不进入工具快照和 system prompt", async () => {
+    const agent = makeAgent(agentsDir, tmpDir);
+    agent.setCallbacks({
+      getEngine: () => ({
+        getComputerUseSettings: () => ({ enabled: true }),
+        getPrimaryAgentId: () => "test-agent",
+        isComputerUseSupported: () => false,
+      }),
+      getLearnSkills: () => ({}),
+      isChannelsEnabled: () => false,
+    });
+    await agent.init(() => {});
+
+    const toolNames = agent.getToolsSnapshot({ forceMemoryEnabled: false }).map((tool) => tool.name);
+    const prompt = agent.buildSystemPrompt({ forceMemoryEnabled: false });
+
+    expect(toolNames).not.toContain("computer");
+    expect(prompt).not.toContain("Desktop App Control");
+
+    await agent.dispose();
+  });
 });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useI18n } from '../hooks/use-i18n';
+import { Overlay } from '../ui';
 import {
   listArchivedSessions,
   restoreSession,
@@ -46,8 +46,6 @@ export function ArchivedSessionsModal({ open, onClose }: Props) {
     if (open) refresh();
   }, [open, refresh]);
 
-  if (!open) return null;
-
   const totalSize = list.reduce((s, x) => s + x.sizeBytes, 0);
 
   const handleRestore = async (p: string) => {
@@ -92,9 +90,15 @@ export function ArchivedSessionsModal({ open, onClose }: Props) {
     await refresh();
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+  return (
+    <Overlay
+      open={open}
+      onClose={onClose}
+      backdrop="blur"
+      zIndex={1000}
+      className={styles.modal}
+      disableContainerAnimation
+    >
         <div className={styles.header}>
           <h2 className={styles.title}>{t('session.archived.title')}</h2>
           <button className={styles.closeBtn} onClick={onClose} aria-label="Close">
@@ -158,8 +162,6 @@ export function ArchivedSessionsModal({ open, onClose }: Props) {
             </div>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body,
+    </Overlay>
   );
 }

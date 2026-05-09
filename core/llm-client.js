@@ -20,7 +20,7 @@ import { logLlmUsage, normalizeLlmUsage } from '../lib/llm/usage-observer.js';
  */
 
 function toDataUrl(block) {
-  const mime = block?.mimeType || "image/png";
+  const mime = block?.mimeType || (block?.type === "video" ? "video/mp4" : "image/png");
   const data = block?.data || "";
   return `data:${mime};base64,${data}`;
 }
@@ -65,7 +65,7 @@ function convertContentForApi(content, api) {
 
   return content.map((block) => {
     if (block?.type === "text") return { type: "text", text: block.text || "" };
-    if (block?.type === "image") return { type: "image_url", image_url: { url: toDataUrl(block) } };
+    if (block?.type === "image" || block?.type === "video") return { type: "image_url", image_url: { url: toDataUrl(block) } };
     return { type: "text", text: JSON.stringify(block) };
   });
 }

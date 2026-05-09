@@ -18,9 +18,11 @@ const deskActionMocks = vi.hoisted(() => ({
 const mockState: MockState = {};
 const initialStateFactory = (): MockState => ({
   currentSessionPath: null,
+  pendingSessionSwitchPath: null,
   pendingNewSession: false,
   sessions: [] as Array<{ path: string }>,
   chatSessions: {} as Record<string, unknown>,
+  sessionRegistryFilesByPath: {} as Record<string, unknown>,
   sessionModelsByPath: {} as Record<string, unknown>,
   _loadMessagesVersion: {} as Record<string, number>,
   scrollPositions: {} as Record<string, number>,
@@ -162,9 +164,19 @@ function installStoreMethods() {
   });
   s.clearSession = vi.fn((path: string) => {
     delete (mockState.chatSessions as Record<string, unknown>)[path];
+    delete (mockState.sessionRegistryFilesByPath as Record<string, unknown>)[path];
     delete (mockState.sessionModelsByPath as Record<string, unknown>)[path];
     delete (mockState._loadMessagesVersion as Record<string, number>)[path];
     delete (mockState.scrollPositions as Record<string, number>)[path];
+  });
+  s.setSessionRegistryFiles = vi.fn((path: string, files: unknown[]) => {
+    const bySession = mockState.sessionRegistryFilesByPath as Record<string, unknown>;
+    bySession[path] = files;
+  });
+  s.upsertSessionRegistryFile = vi.fn((path: string, file: Record<string, unknown>) => {
+    const bySession = mockState.sessionRegistryFilesByPath as Record<string, Record<string, unknown>[]>;
+    const files = bySession[path] || [];
+    bySession[path] = [...files, file];
   });
   s.setSessionTodosForPath = vi.fn((path: string, todos: unknown[]) => {
     const bySession = mockState.todosBySession as Record<string, unknown>;
@@ -192,7 +204,7 @@ import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { clearChat } from '../../stores/agent-actions';
 import { loadDeskFiles } from '../../stores/desk-actions';
 import { bumpMessageLiveVersion, clearMessageLiveVersion } from '../../stores/message-live-version';
-import { archiveSession, createNewSession, ensureSession, loadMessages, pinSession, switchSession } from '../../stores/session-actions';
+import { archiveSession, createNewSession, ensureSession, loadMessages, loadSessions, pinSession, switchSession } from '../../stores/session-actions';
 import { snapshotStreamBuffer } from '../../stores/stream-invalidator';
 
 const mockFetch = vi.mocked(hanaFetch);
@@ -270,6 +282,20 @@ describe('session-actions', () => {
       expect(mockState.deskFiles).toEqual([]);
       expect(mockState.deskJianContent).toBeNull();
       expect(mockLoadDeskFiles).toHaveBeenCalledWith('', '/workspace/AgentHome');
+    });
+
+    it('uses the current session cwd for a new session when the agent has no explicit home folder', async () => {
+      (mockState as Record<string, unknown>).homeFolder = null;
+      (mockState as Record<string, unknown>).deskBasePath = '/workspace/current-session';
+      (mockState as Record<string, unknown>).deskCurrentPath = 'notes';
+      (mockState as Record<string, unknown>).deskFiles = [{ name: 'stale.md' }];
+
+      await createNewSession();
+
+      expect(mockState.selectedFolder).toBe('/workspace/current-session');
+      expect(mockState.deskBasePath).toBe('/workspace/current-session');
+      expect(mockState.deskCurrentPath).toBe('notes');
+      expect(mockLoadDeskFiles).toHaveBeenCalledWith('notes', '/workspace/current-session');
     });
 
     it('invalidates an in-flight session switch so the new-session desk stays on the agent home folder', async () => {
@@ -393,11 +419,17 @@ describe('session-actions', () => {
 
     it('正常单次调用写入 initSession', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
-        messages: [{ text: 'hello' }], blocks: [], todos: [], hasMore: false,
+        messages: [{ text: 'hello' }],
+        blocks: [],
+        todos: [],
+        sessionFiles: [{ fileId: 'sf_write', filePath: '/workspace/draft.md' }],
+        hasMore: false,
       }));
       await loadMessages('/a');
       const initSession = (mockState as unknown as { initSession: ReturnType<typeof vi.fn> }).initSession;
       expect(initSession).toHaveBeenCalledTimes(1);
+      expect((mockState.sessionRegistryFilesByPath as Record<string, unknown>)['/a'])
+        .toEqual([{ fileId: 'sf_write', filePath: '/workspace/draft.md' }]);
     });
 
     it('mid-flight 收到 live message 更新时，跳过 messages hydrate', async () => {
@@ -502,7 +534,63 @@ describe('session-actions', () => {
     });
   });
 
+  describe('loadSessions 首次自动切换', () => {
+    it('已有 pending session 导航意图时，不用列表第一项覆盖它', async () => {
+      Object.assign(mockState, {
+        currentSessionPath: null,
+        pendingSessionSwitchPath: '/b',
+        pendingNewSession: false,
+      });
+      mockFetch.mockResolvedValueOnce(jsonResponse([
+        { path: '/a' },
+        { path: '/b' },
+      ]));
+
+      await loadSessions();
+
+      expect(mockState.sessions).toEqual([
+        { path: '/a' },
+        { path: '/b' },
+      ]);
+      expect(mockState.currentSessionPath).toBeNull();
+      expect(mockState.pendingSessionSwitchPath).toBe('/b');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('switchSession 的 hasData 语义（#405 直接回归）', () => {
+    it('点回已提交的当前 session 会取消在途切换，旧响应不能把焦点切走', async () => {
+      Object.assign(mockState, {
+        currentSessionPath: '/a',
+        chatSessions: {
+          '/b': { items: [{ type: 'message', data: { id: 'cached-b' } }], hasMore: false },
+        },
+      });
+
+      let resolveSwitchToB!: (r: Response) => void;
+      const switchToB = new Promise<Response>(resolve => { resolveSwitchToB = resolve; });
+      mockFetch.mockImplementationOnce(() => switchToB);
+
+      const pendingSwitch = switchSession('/b');
+      expect(mockState.pendingSessionSwitchPath).toBe('/b');
+
+      await switchSession('/a');
+      expect(mockState.pendingSessionSwitchPath).toBeNull();
+
+      resolveSwitchToB(jsonResponse({
+        ok: true,
+        agentId: null,
+        cwd: '/workspace-b',
+        currentModelId: null,
+        currentModelName: null,
+        currentModelProvider: null,
+      }));
+      await pendingSwitch;
+
+      expect(mockState.currentSessionPath).toBe('/a');
+      expect(deskActionMocks.activateWorkspaceDesk).not.toHaveBeenCalledWith('/workspace-b');
+    });
+
     it('surfaces the server error when switching to an old session fails', async () => {
       (globalThis.window as unknown as { t: (key: string) => string }).t = (key: string) =>
         key === 'session.switchFailed' ? 'Switch session failed' : key;

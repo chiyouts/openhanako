@@ -3,6 +3,11 @@ import type { DecoRange } from '../md-decorations';
 
 const codeBlockLineDeco = Decoration.line({ class: 'cm-codeblock-line' });
 
+function fenceLanguage(line: string): string {
+  const match = line.match(/^(?: {0,3})(`{3,}|~{3,})[ \t]*([^\s`~]*)?/);
+  return match?.[2]?.toLowerCase() || '';
+}
+
 export class CodeLangWidget extends WidgetType {
   constructor(readonly lang: string) { super(); }
   eq(other: CodeLangWidget) { return this.lang === other.lang; }
@@ -28,6 +33,10 @@ export function handleCodeBlock(ctx: {
   let blockActive = false;
   for (let i = startLine.number; i <= endLine.number; i++) {
     if (activeLines.has(i)) { blockActive = true; break; }
+  }
+
+  if (!blockActive && fenceLanguage(startLine.text) === 'mermaid') {
+    return;
   }
 
   // Add background to every line in the code block

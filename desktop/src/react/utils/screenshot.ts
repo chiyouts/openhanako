@@ -3,6 +3,11 @@ import { useStore } from '../stores';
 import { selectSelectedIdsBySession } from '../stores/session-selectors';
 import { extractScreenshotPayload, buildThemeName } from './screenshot-extract';
 import type { ChatMessage } from '../stores/chat-types';
+import {
+  appendConnectionAuth,
+  buildConnectionUrl,
+  createLocalServerConnection,
+} from '../services/server-connection';
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -145,13 +150,16 @@ async function fetchImageAsDataUrl(filePath: string): Promise<string> {
 async function fetchAvatarAsDataUrl(role: string, agentId: string | null): Promise<string | null> {
   const port = await (window as any).hana?.getServerPort?.();
   const token = await (window as any).hana?.getServerToken?.();
-  if (!port || !token) return null;
+  const connection = createLocalServerConnection({ serverPort: port, serverToken: token });
+  if (!connection || !connection.token) return null;
 
-  const url = role === 'user'
-    ? `http://127.0.0.1:${port}/api/avatar/user`
-    : `http://127.0.0.1:${port}/api/agents/${agentId}/avatar`;
+  const path = role === 'user'
+    ? '/api/avatar/user'
+    : `/api/agents/${agentId}/avatar`;
 
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const resp = await fetch(buildConnectionUrl(connection, path), {
+    headers: appendConnectionAuth(connection),
+  });
   if (!resp.ok) return null;
   const blob = await resp.blob();
   return new Promise((resolve) => {

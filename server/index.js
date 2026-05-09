@@ -20,6 +20,7 @@ import { errorBus } from "../shared/error-bus.js";
 import { HanaEngine } from "../core/engine.js";
 import { ensureFirstRun } from "../core/first-run.js";
 import { initDebugLog } from "../lib/debug-log.js";
+import { redactLogLabel, redactLogText } from "../lib/log-redactor.js";
 import { safeJson } from "./hono-helpers.js";
 import { installOpenAIRelayFetchSanitizer } from "./openai-relay-fetch.js";
 
@@ -54,6 +55,7 @@ import { configureProcessPiSdkEnv, ensureHanaPiSdkDirs, resolveHanakoHome } from
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
 import { ConfirmStore } from "../lib/confirm-store.js";
 import { DeferredResultStore } from "../lib/deferred-result-store.js";
+import { normalizeDeferredResolveResult } from "../lib/deferred-result-payload.js";
 import { createDeferredResultExtension } from "../lib/extensions/deferred-result-ext.js";
 import { createCompactionGuardExtension } from "../lib/extensions/compaction-guard-ext.js";
 import { Hub } from "../hub/index.js";
@@ -194,8 +196,8 @@ hub.eventBus.handle("deferred:register", ({ taskId, sessionPath, meta }) => {
   deferredResultStore.defer(taskId, sessionPath, meta);
   return { ok: true, sessionPath };
 });
-hub.eventBus.handle("deferred:resolve", ({ taskId, result, files }) => {
-  deferredResultStore.resolve(taskId, result ?? files);
+hub.eventBus.handle("deferred:resolve", ({ taskId, result, files, sessionFiles }) => {
+  deferredResultStore.resolve(taskId, normalizeDeferredResolveResult({ result, files, sessionFiles }));
   return { ok: true };
 });
 hub.eventBus.handle("deferred:fail", ({ taskId, reason, error }) => {
@@ -383,9 +385,11 @@ app.get("/api/health", async (c) => {
 app.post("/api/log", async (c) => {
   const { level, module, message } = await safeJson(c);
   if (!message) return c.json({ ok: false });
-  if (level === "error") dlog.error(module || "desktop", message);
-  else if (level === "warn") dlog.warn(module || "desktop", message);
-  else dlog.log(module || "desktop", message);
+  const safeModule = redactLogLabel(module || "desktop");
+  const safeMessage = redactLogText(message);
+  if (level === "error") dlog.error(safeModule, safeMessage);
+  else if (level === "warn") dlog.warn(safeModule, safeMessage);
+  else dlog.log(safeModule, safeMessage);
   return c.json({ ok: true });
 });
 

@@ -31,12 +31,15 @@ contextBridge.exposeInMainWorld("hana", {
   autoUpdateInstall: () => ipcRenderer.invoke("auto-update-install"),
   autoUpdateState: () => ipcRenderer.invoke("auto-update-state"),
   autoUpdateSetChannel: (ch) => ipcRenderer.invoke("auto-update-set-channel", ch),
+  getAutoLaunchStatus: () => ipcRenderer.invoke("get-auto-launch-status"),
+  setAutoLaunchEnabled: (enabled) => ipcRenderer.invoke("set-auto-launch-enabled", enabled),
   onAutoUpdateState: (cb) => {
     const handler = (_, state) => cb(state);
     ipcRenderer.on("auto-update-state", handler);
     return () => ipcRenderer.removeListener("auto-update-state", handler);
   },
   appReady: () => ipcRenderer.invoke("app-ready"),
+  syncWindowTheme: (theme) => ipcRenderer.send("window-theme-changed", theme),
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   saveFileAs: (options) => ipcRenderer.invoke("save-file-as", options),
   selectFiles: () => ipcRenderer.invoke("select-files"),

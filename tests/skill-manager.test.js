@@ -34,6 +34,14 @@ describe("SkillManager.computeDefaultEnabledForNewAgent", () => {
     expect(sm.computeDefaultEnabledForNewAgent()).toEqual(["pdf"]);
   });
 
+  it("excludes skills that opt out of default enablement", () => {
+    sm._allSkills = [
+      { name: "pdf", source: "user" },
+      { name: "hana-plugin-creator", source: "user", defaultEnabled: false },
+    ];
+    expect(sm.computeDefaultEnabledForNewAgent()).toEqual(["pdf"]);
+  });
+
   it("returns empty array when _allSkills is empty", () => {
     sm._allSkills = [];
     expect(sm.computeDefaultEnabledForNewAgent()).toEqual([]);

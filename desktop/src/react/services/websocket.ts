@@ -10,6 +10,11 @@ import { handleServerMessage, applyStreamingStatus } from './ws-message-handler'
 import { requestStreamResume, injectHandlers } from './stream-resume';
 import { useStore } from '../stores';
 import { setStatus } from '../utils/ui-helpers';
+import {
+  buildConnectionWsUrl,
+  createLocalServerConnection,
+  resolveServerConnection,
+} from './server-connection';
 // @ts-expect-error -- shared JS module, no type declarations
 import { AppError } from '../../../../shared/errors.js';
 // @ts-expect-error -- shared JS module, no type declarations
@@ -38,18 +43,21 @@ export function getWebSocket(): WebSocket | null {
 export function connectWebSocket(port?: string, token?: string): void {
   // 如果没有传参，从 Zustand store 获取
   const storeState = useStore.getState();
-  const serverPort = port || storeState.serverPort;
-  const serverToken = token || storeState.serverToken;
+  const connection = port !== undefined || token !== undefined
+    ? createLocalServerConnection({
+        serverPort: port || storeState.serverPort,
+        serverToken: token ?? storeState.serverToken,
+      })
+    : resolveServerConnection(storeState);
 
-  if (!serverPort) return;
+  if (!connection) return;
 
   if (_wsRetryTimer) { clearTimeout(_wsRetryTimer); _wsRetryTimer = null; }
   if (_ws) {
     try { _ws.onclose = null; _ws.close(); } catch { /* silent */ }
   }
 
-  const tokenParam = serverToken ? `?token=${serverToken}` : '';
-  const url = `ws://127.0.0.1:${serverPort}/ws${tokenParam}`;
+  const url = buildConnectionWsUrl(connection, '/ws');
   _ws = new WebSocket(url);
 
   _ws.onopen = () => {
@@ -94,7 +102,7 @@ export function connectWebSocket(port?: string, token?: string): void {
 
     if (_wsRetryCount <= WS_MAX_RETRIES) {
       useStore.setState({ wsState: 'reconnecting', wsReconnectAttempt: _wsRetryCount });
-      _wsRetryTimer = setTimeout(() => connectWebSocket(serverPort, serverToken ?? undefined), _wsRetryDelay);
+      _wsRetryTimer = setTimeout(() => connectWebSocket(), _wsRetryDelay);
       _wsRetryDelay = Math.min(_wsRetryDelay * 2, WS_RETRY_MAX);
     } else {
       useStore.setState({ wsState: 'disconnected' });

@@ -17,15 +17,24 @@ export interface McpOAuthState {
 export interface McpConnector {
   id: string;
   name: string;
+  description?: string;
   transport: McpTransport;
   url?: string;
   command?: string;
   args?: string[];
   cwd?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  registryUrl?: string;
+  timeout?: number;
+  autoStart?: boolean;
   status: McpConnectorStatus;
   tools: McpTool[];
   authType?: McpAuthType;
   authStatus?: string;
+  authorizationToken?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
   oauth?: McpOAuthState;
 }
 
@@ -51,6 +60,12 @@ export interface McpConnectorInput {
   command?: string;
   args?: string[];
   cwd?: string;
+  description?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  registryUrl?: string;
+  timeout?: number;
+  autoStart?: boolean;
   authType?: McpAuthType;
   authorizationToken?: string;
   oauthClientId?: string;

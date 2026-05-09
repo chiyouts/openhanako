@@ -90,6 +90,58 @@ describe("MCP runtime policy", () => {
     expect(config.servers).toEqual(config.connectors);
   });
 
+  it("normalizes Cherry-style MCP server fields into Hana connectors", () => {
+    const config = normalizeMcpConfig({
+      enabled: true,
+      connectors: [
+        {
+          id: "cherry-http",
+          name: "Cherry HTTP",
+          type: "streamableHttp",
+          baseUrl: "https://mcp.example.com/mcp",
+          description: "Remote MCP server",
+          headers: {
+            Authorization: "Bearer header-token",
+            "X-API-Key": "key-123",
+          },
+          timeout: "45",
+          isActive: true,
+        },
+        {
+          id: "cherry-stdio",
+          name: "Cherry Stdio",
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "mcp-server-example"],
+          env: { API_KEY: "secret" },
+          registryUrl: "https://registry.npmmirror.com",
+          autoStart: true,
+        },
+      ],
+    });
+
+    expect(config.connectors[0]).toMatchObject({
+      id: "cherry-http",
+      transport: "streamable-http",
+      url: "https://mcp.example.com/mcp",
+      description: "Remote MCP server",
+      headers: {
+        Authorization: "Bearer header-token",
+        "X-API-Key": "key-123",
+      },
+      timeout: 45,
+      autoStart: true,
+    });
+    expect(config.connectors[1]).toMatchObject({
+      id: "cherry-stdio",
+      transport: "stdio",
+      command: "npx",
+      env: { API_KEY: "secret" },
+      registryUrl: "https://registry.npmmirror.com",
+      autoStart: true,
+    });
+  });
+
   it("migrates the earlier local server config into connectors", () => {
     const config = normalizeMcpConfig({
       servers: [
@@ -155,6 +207,52 @@ describe("MCP runtime policy", () => {
         github: { enabled: true, tools: { search: true } },
       },
     });
+  });
+
+  it("redacts connector secrets from public state without dropping their keys", () => {
+    const stored = {
+      enabled: true,
+      connectors: [
+        {
+          id: "private",
+          name: "Private",
+          command: "npx",
+          env: {
+            BASE_URL: "https://internal.example.com",
+            API_KEY: "secret",
+          },
+          headers: {
+            Authorization: "Bearer secret",
+            "X-Trace": "trace-id",
+          },
+          authorizationToken: "token-123",
+          oauthClientSecret: "client-secret",
+        },
+      ],
+    };
+    const runtime = new McpRuntime({
+      dataDir: "/tmp/mcp-test",
+      config: {
+        get: vi.fn(() => stored),
+        set: vi.fn(),
+      },
+      registerTool: vi.fn(() => () => {}),
+      bus: { request: vi.fn() },
+      log: console,
+    });
+
+    const [connector] = runtime.getState().connectors;
+
+    expect(connector.env).toEqual({
+      BASE_URL: "********",
+      API_KEY: "********",
+    });
+    expect(connector.headers).toEqual({
+      Authorization: "********",
+      "X-Trace": "********",
+    });
+    expect(connector.authorizationToken).toBe("********");
+    expect(connector.oauthClientSecret).toBe("********");
   });
 
   it("returns an explicit tool error when MCP is globally disabled at call time", async () => {

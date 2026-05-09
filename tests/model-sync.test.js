@@ -34,6 +34,7 @@ const KNOWN_MODELS = {
       context: 262144,
       maxOutput: 32768,
       image: true,
+      video: true,
       reasoning: true,
       visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "qwen", groundingMode: "native" },
     },
@@ -377,7 +378,7 @@ describe("syncModels", () => {
         base_url: "https://api.kimi.com/coding/",
         api: "anthropic-messages",
         api_key: "sk-test",
-        models: [{ id: "kimi-for-coding", name: "Kimi 自定义显示名", maxOutput: 16000, image: false }],
+        models: [{ id: "kimi-for-coding", name: "Kimi 自定义显示名", maxOutput: 16000, image: true, video: true }],
       },
     };
 
@@ -388,7 +389,7 @@ describe("syncModels", () => {
     expect(result.providers["kimi-coding"].modelOverrides["kimi-for-coding"]).toEqual({
       name: "Kimi 自定义显示名",
       maxTokens: 16000,
-      input: ["text"],
+      input: ["text", "image", "video"],
     });
   });
 
@@ -504,6 +505,50 @@ describe("syncModels", () => {
     expect(model.vision).toBeUndefined();
     expect(model.reasoning).toBe(false);
     expect(model.input).toEqual(["text"]);
+  });
+
+  it("projects explicit video capability into model.input and keeps unknown models video-off by default", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      custom: {
+        base_url: "https://custom.api.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: [
+          { id: "custom-video", video: true },
+          { id: "custom-multimodal", image: true, video: true },
+          "custom-unknown",
+        ],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.custom.models.map((m) => [m.id, m.input])).toEqual([
+      ["custom-video", ["text", "video"]],
+      ["custom-multimodal", ["text", "image", "video"]],
+      ["custom-unknown", ["text"]],
+    ]);
+  });
+
+  it("projects known video-capable models into model.input", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      dashscope: {
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["qwen3-vl-plus"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.dashscope.models[0].input).toEqual(["text", "image", "video"]);
   });
 
   it("rejects the official DeepSeek provider id before writing models.json", async () => {
@@ -744,7 +789,29 @@ describe("syncModels", () => {
     expect(result.providers.deepseek.models[0].name).toBe("DeepSeek Chat");
   });
 
-  it("sets compat.supportsStore=false for gemini provider (avoid 400 from /v1beta/openai)", async () => {
+  it("projects Gemini native API without OpenAI-chat store compatibility flags", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      gemini: {
+        base_url: "https://generativelanguage.googleapis.com/v1beta",
+        api: "google-generative-ai",
+        api_key: "sk-test",
+        models: ["gemini-3-flash-preview"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.gemini.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(result.providers.gemini.api).toBe("google-generative-ai");
+    expect(result.providers.gemini.models[0].compat).toEqual({
+      supportsDeveloperRole: false,
+    });
+  });
+
+  it("sets compat.supportsStore=false for Gemini OpenAI compatibility configs (avoid 400 from /v1beta/openai)", async () => {
     const syncModels = await loadSync();
 
     const providers = {

@@ -25,6 +25,7 @@ function applyConcreteTheme(concrete: string): void {
   if (!entry) return;
   document.documentElement.setAttribute('data-theme', concrete);
   if (themeSheet) themeSheet.href = entry.cssPath;
+  (window as unknown as { hana?: { syncWindowTheme?: (theme: string) => void } }).hana?.syncWindowTheme?.(concrete);
 }
 
 let systemThemeListener: ((e: MediaQueryListEvent) => void) | null = null;

@@ -6,7 +6,18 @@ import globals from 'globals';
 export default [
   // Global ignores — must be a standalone config object with only `ignores`
   {
-    ignores: ['node_modules/', 'dist/', 'dist-renderer/', '**/*.cjs'],
+    ignores: [
+      'node_modules/',
+      '**/dist/**',
+      'dist-server/**',
+      'dist-server-bundle/**',
+      'dist-computer-use/**',
+      'dist-sandbox/**',
+      'desktop/dist-renderer/**',
+      'desktop/native/**/.build/**',
+      '.cache/**',
+      '**/*.cjs',
+    ],
   },
 
   js.configs.recommended,
@@ -32,9 +43,19 @@ export default [
     },
   },
 
-  // Server-side JS files
+  // Node-side JS files
   {
-    files: ['server/**/*.js'],
+    files: [
+      'core/**/*.js',
+      'hub/**/*.js',
+      'index.js',
+      'lib/**/*.js',
+      'plugins/**/*.js',
+      'scripts/**/*.{js,mjs}',
+      'server/**/*.js',
+      'shared/**/*.js',
+      'tests/**/*.{js,ts,tsx}',
+    ],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -44,14 +65,56 @@ export default [
     },
   },
 
+  // Vitest files mix Node helpers with jsdom/browser primitives.
+  {
+    files: ['tests/**/*.{js,ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.browser,
+      },
+    },
+  },
+
+  // Browser package TypeScript files
+  {
+    files: [
+      'packages/plugin-sdk/src/**/*.ts',
+      'packages/plugin-components/src/**/*.{ts,tsx}',
+    ],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+    },
+  },
+
   // TypeScript/React frontend files
   {
-    files: ['desktop/src/**/*.{ts,tsx}'],
+    files: [
+      'desktop/src/**/*.{ts,tsx}',
+      'packages/plugin-components/src/**/*.{ts,tsx}',
+    ],
     plugins: {
       'react-hooks': reactHooks,
     },
     rules: {
-      // Prevent document.createElement in React components
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
+
+  // React components should render with JSX. DOM utilities, CodeMirror widgets,
+  // and tests may create DOM nodes directly.
+  {
+    files: ['desktop/src/react/**/*.tsx'],
+    ignores: [
+      'desktop/src/react/**/__tests__/**',
+      'desktop/src/react/**/*.test.tsx',
+    ],
+    rules: {
       'no-restricted-syntax': [
         'error',
         {
@@ -61,10 +124,6 @@ export default [
             'React 组件中不要用 document.createElement，用 JSX。如确需操作 DOM（canvas/resize），加 eslint-disable 注释说明原因。',
         },
       ],
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
 
@@ -74,6 +133,7 @@ export default [
       'no-empty': 'warn',
       'prefer-const': 'warn',
       'no-useless-escape': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },

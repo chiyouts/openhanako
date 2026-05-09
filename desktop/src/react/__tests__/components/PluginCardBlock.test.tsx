@@ -1,9 +1,14 @@
-/**
+﻿/**
  * @vitest-environment jsdom
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
+import {
+  PLUGIN_UI_CAPABILITY,
+  PLUGIN_UI_PROTOCOL,
+  PLUGIN_UI_PROTOCOL_VERSION,
+} from '@hana/plugin-protocol';
 import { PluginCardBlock } from '../../components/chat/PluginCardBlock';
 import { useStore } from '../../stores';
 
@@ -18,24 +23,27 @@ function attachIframeWindow(iframe: HTMLIFrameElement, contentWindow: Window) {
   });
 }
 
+function renderCard() {
+  const rendered = render(
+    <PluginCardBlock
+      card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
+      agentId="butter"
+    />,
+  );
+  const iframe = rendered.container.querySelector('iframe') as HTMLIFrameElement;
+  const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
+  attachIframeWindow(iframe, trustedWindow);
+  return { ...rendered, iframe, trustedWindow };
+}
+
 describe('PluginCardBlock', () => {
   afterEach(() => {
     cleanup();
     useStore.getState().closeMediaViewer();
   });
 
-  it('只接受来�?iframe 自身�?origin 正确�?ready / resize 消息', () => {
-    const { container } = render(
-      <PluginCardBlock
-        card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
-        agentId="butter"
-      />,
-    );
-    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
-    expect(iframe).toBeTruthy();
-
-    const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
-    attachIframeWindow(iframe, trustedWindow);
+  it('only accepts ready / resize messages from the iframe window and expected origin', () => {
+    const { iframe, trustedWindow } = renderCard();
 
     expect(iframe.style.opacity).toBe('0.3');
     expect(iframe.style.width).toBe('400px');
@@ -76,16 +84,40 @@ describe('PluginCardBlock', () => {
     expect(iframe.style.height).toBe('220px');
   });
 
+  it('accepts SDK envelope ready / resize messages', () => {
+    const { iframe, trustedWindow } = renderCard();
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          protocol: PLUGIN_UI_PROTOCOL,
+          version: PLUGIN_UI_PROTOCOL_VERSION,
+          kind: 'event',
+          type: 'hana.ready',
+        },
+        origin: 'http://127.0.0.1:3210',
+        source: trustedWindow,
+      }));
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          protocol: PLUGIN_UI_PROTOCOL,
+          version: PLUGIN_UI_PROTOCOL_VERSION,
+          kind: 'event',
+          type: PLUGIN_UI_CAPABILITY.UI_RESIZE,
+          payload: { width: 260, height: 210 },
+        },
+        origin: 'http://127.0.0.1:3210',
+        source: trustedWindow,
+      }));
+    });
+
+    expect(iframe.style.opacity).toBe('1');
+    expect(iframe.style.width).toBe('260px');
+    expect(iframe.style.height).toBe('210px');
+  });
+
   it('accepts trusted open-media-viewer messages and opens the parent MediaViewer state', () => {
-    const { container } = render(
-      <PluginCardBlock
-        card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
-        agentId="butter"
-      />,
-    );
-    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
-    const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
-    attachIframeWindow(iframe, trustedWindow);
+    const { trustedWindow } = renderCard();
 
     act(() => {
       window.dispatchEvent(new MessageEvent('message', {
@@ -107,16 +139,9 @@ describe('PluginCardBlock', () => {
     expect(viewer?.currentId).toContain('plugin-card:demo:');
     expect(viewer?.files[0].remoteUrl).toContain('/api/plugins/image-gen/media/cat.png');
   });
+
   it('normalizes relative plugin media URLs to absolute URLs before opening the MediaViewer state', () => {
-    const { container } = render(
-      <PluginCardBlock
-        card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
-        agentId="butter"
-      />,
-    );
-    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
-    const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
-    attachIframeWindow(iframe, trustedWindow);
+    const { trustedWindow } = renderCard();
 
     act(() => {
       window.dispatchEvent(new MessageEvent('message', {

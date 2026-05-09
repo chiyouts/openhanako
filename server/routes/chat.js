@@ -24,6 +24,7 @@ import {
 import { AppError } from "../../shared/errors.js";
 import { errorBus } from "../../shared/error-bus.js";
 import { MAX_CHAT_IMAGE_BASE64_CHARS, isAllowedChatImageMime, isChatImageBase64WithinLimit } from "../../shared/image-mime.js";
+import { isAllowedChatVideoMime, isChatVideoBase64WithinLimit } from "../../shared/video-mime.js";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -159,11 +160,21 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       const browser = BrowserManager.instance();
       if (!browser.hasAnyRunning) { stopBrowserThumbPoll(); return; }
       await Promise.all(browser.runningSessions.map(async (sp) => {
+        const wasRunning = browser.isRunning(sp);
         const thumbnail = await browser.thumbnail(sp);
         if (thumbnail) {
           broadcast({ type: "browser_status", running: true, url: browser.currentUrl(sp), thumbnail, sessionPath: sp });
+        } else if (wasRunning && !browser.isRunning(sp)) {
+          broadcast({
+            type: "browser_status",
+            running: false,
+            url: browser.currentUrl(sp),
+            error: browser.sessionUnavailableReason?.(sp) || null,
+            sessionPath: sp,
+          });
         }
       }));
+      if (!browser.hasAnyRunning) stopBrowserThumbPoll();
     }, 30_000);
   }
   function stopBrowserThumbPoll() {
@@ -425,6 +436,12 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         patch: event.patch,
         sessionPath,
       });
+    } else if (event.type === "todo_update") {
+      broadcast({
+        type: "todo_update",
+        todos: Array.isArray(event.todos) ? event.todos : [],
+        sessionPath,
+      });
     } else if (event.type === "activity_update") {
       broadcast({ type: "activity_update", activity: event.activity });
     } else if (event.type === "bridge_message") {
@@ -475,7 +492,12 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     } else if (event.type === "notification") {
       broadcast({ type: "notification", title: event.title, body: event.body });
     } else if (event.type === "channel_new_message") {
-      broadcast({ type: "channel_new_message", channelName: event.channelName, sender: event.sender });
+      broadcast({
+        type: "channel_new_message",
+        channelName: event.channelName,
+        sender: event.sender,
+        message: event.message || null,
+      });
     } else if (event.type === "dm_new_message") {
       broadcast({ type: "dm_new_message", from: event.from, to: event.to });
     } else if (event.type === "message_end") {
@@ -761,7 +783,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               return;
             }
 
-            if (msg.type === "prompt" && (msg.text || msg.images?.length)) {
+            if (msg.type === "prompt" && (msg.text || msg.images?.length || msg.videos?.length)) {
               // 图片校验：最多 10 张，单张 ≤ 20MB，仅允许常见图片 MIME
               if (msg.images?.length) {
                 const MAX_IMAGES = 10;
@@ -780,6 +802,23 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                   }
                 }
               }
+              if (msg.videos?.length) {
+                const MAX_VIDEOS = 3;
+                if (msg.videos.length > MAX_VIDEOS) {
+                  wsSend(ws, { type: "error", message: t("error.maxVideos", { max: MAX_VIDEOS }), sessionPath: msg.sessionPath });
+                  return;
+                }
+                for (const video of msg.videos) {
+                  if (!video?.mimeType || !isAllowedChatVideoMime(video.mimeType)) {
+                    wsSend(ws, { type: "error", message: t("error.unsupportedVideoFormat", { mime: video?.mimeType || "unknown" }), sessionPath: msg.sessionPath });
+                    return;
+                  }
+                  if (video.data && !isChatVideoBase64WithinLimit(video.data)) {
+                    wsSend(ws, { type: "error", message: t("error.videoTooLarge"), sessionPath: msg.sessionPath });
+                    return;
+                  }
+                }
+              }
               // 图片持久化 + [attached_image] 标记 + image 模态 check 统一在 hub.send() 和下游 handler 处理
               let promptText = msg.text || "";
               // Skill invocation tags
@@ -787,10 +826,11 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 const skillNote = msg.skills.map(s => `[Use skill: ${s}]`).join('\n');
                 promptText = `${skillNote}\n${promptText}`;
               }
-              if (!promptText.trim() && msg.images?.length) {
-                promptText = t("error.viewImage");
+              if (!promptText.trim()) {
+                if (msg.images?.length) promptText = t("error.viewImage");
+                else if (msg.videos?.length) promptText = t("error.viewVideo");
               }
-              debugLog()?.log("ws", `user message (${promptText.length} chars, ${msg.images?.length || 0} images)`);
+              debugLog()?.log("ws", `user message (${promptText.length} chars, ${msg.images?.length || 0} images, ${msg.videos?.length || 0} videos)`);
               // Phase 2: 客户端可指定 sessionPath，否则用焦点 session
               const promptSessionPath = requireSessionPath(msg, ws); if (!promptSessionPath) return;
               if (engine.isSessionStreaming(promptSessionPath)) {
@@ -798,8 +838,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 return;
               }
               // Reject prompt while model switch is in progress
-              const switchingEntry = engine._sessionCoord?.sessions?.get(promptSessionPath);
-              if (switchingEntry?._switching) {
+              if (engine.isSessionSwitching(promptSessionPath)) {
                 wsSend(ws, { type: "error", message: "正在切换模型，请稍候", sessionPath: promptSessionPath });
                 return;
               }
@@ -807,6 +846,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 await hub.send(promptText, {
                   sessionPath: promptSessionPath,
                   images: msg.images,
+                  videos: msg.videos,
                   uiContext: msg.uiContext ?? null,
                   displayMessage: msg.displayMessage,
                 });

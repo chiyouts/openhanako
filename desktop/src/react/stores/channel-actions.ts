@@ -8,7 +8,7 @@
 
 import { useStore } from './index';
 import { hanaFetch } from '../hooks/use-hana-fetch';
-import type { Channel } from '../types';
+import type { Channel, ChannelMessage } from '../types';
 
 // ══════════════════════════════════════════════════════
 // 加载频道列表
@@ -128,6 +128,85 @@ export async function openChannel(channelId: string, isDM?: boolean): Promise<vo
     }
   } catch (err) {
     console.error('[channels] open failed:', err);
+  }
+}
+
+function sameChannelMessage(a: ChannelMessage, b: ChannelMessage): boolean {
+  return a.sender === b.sender && a.timestamp === b.timestamp && a.body === b.body;
+}
+
+function sortChannelsByRecent(channels: Channel[]): Channel[] {
+  return [...channels].sort((a, b) =>
+    (b.lastTimestamp || '').localeCompare(a.lastTimestamp || ''),
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// 增量追加频道消息
+// ══════════════════════════════════════════════════════
+
+export function appendChannelMessage(channelId: string, message: ChannelMessage): void {
+  if (
+    !channelId
+    || typeof message?.sender !== 'string'
+    || typeof message.timestamp !== 'string'
+    || typeof message.body !== 'string'
+  ) return;
+
+  const state = useStore.getState();
+  const isCurrentChannel = state.currentChannel === channelId;
+  const alreadyInCurrent = isCurrentChannel
+    ? state.channelMessages.some((m: ChannelMessage) => sameChannelMessage(m, message))
+    : false;
+
+  let unreadDelta = 0;
+  let readDelta = 0;
+  const updatedChannels = state.channels.map((channel: Channel) => {
+    if (channel.id !== channelId) return channel;
+
+    const isDuplicatePreview =
+      channel.lastSender === message.sender
+      && channel.lastTimestamp === message.timestamp
+      && channel.lastMessage === message.body.slice(0, 60);
+
+    const previousUnread = channel.newMessageCount || 0;
+    const nextUnread = isCurrentChannel
+      ? 0
+      : previousUnread + (isDuplicatePreview ? 0 : 1);
+
+    if (isCurrentChannel) {
+      readDelta = previousUnread;
+    } else {
+      unreadDelta += nextUnread - previousUnread;
+    }
+
+    return {
+      ...channel,
+      lastMessage: message.body.slice(0, 60),
+      lastSender: message.sender,
+      lastTimestamp: message.timestamp,
+      messageCount: (channel.messageCount || 0) + (isDuplicatePreview ? 0 : 1),
+      newMessageCount: nextUnread,
+    };
+  });
+
+  const patch: Partial<ReturnType<typeof useStore.getState>> = {
+    channels: sortChannelsByRecent(updatedChannels),
+    channelTotalUnread: Math.max(0, state.channelTotalUnread + unreadDelta - readDelta),
+  };
+
+  if (isCurrentChannel && !alreadyInCurrent) {
+    patch.channelMessages = [...state.channelMessages, message];
+  }
+
+  useStore.setState(patch);
+
+  if (isCurrentChannel) {
+    Promise.resolve(hanaFetch(`/api/channels/${encodeURIComponent(channelId)}/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timestamp: message.timestamp }),
+    })).catch((err: unknown) => console.warn('[channel-actions] mark-as-read failed', err));
   }
 }
 

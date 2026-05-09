@@ -20,6 +20,10 @@ import {
 } from "../lib/subagent-executor-metadata.js";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.js";
 import { persistBrowserScreenshotFileSync } from "../lib/session-files/browser-screenshot-file.js";
+import { getInvalidProviderModelIds } from "../shared/provider-model-validation.js";
+import { normalizeThinkingLevelForModel } from "./session-thinking-level.js";
+import { lookupKnown } from "../shared/known-models.js";
+import { SESSION_PREFIX_MAP } from "../lib/bridge/session-key.js";
 
 // ── 迁移表 ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +55,16 @@ const migrations = {
   11: repairCronJobModelRefs,
   // 老 session 的文件引用补齐到 session file sidecar；作为最后一步，不重写历史 JSONL
   12: backfillLegacySessionFiles,
+  // 最近版本把默认值和 provider 校验收紧后，对旧磁盘数据做一次显式化修补
+  13: normalizeRecentLegacyCompatibilityState,
+  // Gemini 3 工具调用需要 native Google 协议保留 thoughtSignature
+  14: migrateGeminiOpenAICompatToNative,
+  // 旧 prompt snapshot 会话里无法证明 xhigh 支持的记录显式降级为 high
+  15: repairLegacySessionSidecarThinkingLevels,
+  // 视频能力进入 model.input 后，修补老的模型投影和残留 override
+  16: migrateVideoCapabilityProjection,
+  // bridge sessionKey 引入 @agentId 后，修补旧 index 中无 agent 维度的 key
+  17: migrateBridgeSessionKeysToAgentScoped,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -829,7 +843,7 @@ function migrateWorkspaceToPerAgent(ctx) {
  * #7 — 模型能力字段 vision → image 全量重命名
  *
  * 历史包袱：项目早期在 Pi SDK Model 对象上挂了一份自定义的 vision:boolean 字段，
- * 与 Pi SDK 标准字段 input:("text"|"image")[] 重复。本次统一到 Pi SDK 标准，
+ * 与 Pi SDK 标准字段 input 数组重复。本次统一到 Pi SDK 标准，
  * 把用户意图层（added-models.yaml + agent config.yaml）的 vision 重命名为 image，
  * 运行时层只保留 input 数组。
  *
@@ -1148,6 +1162,621 @@ function backfillLegacySessionFiles(ctx) {
   }
 
   log(`[migrations] #12: session file sidecars backfilled (files=${registered}, screenshots=${materialized}, skipped=${skipped})`);
+}
+
+/**
+ * #13 — 最近兼容状态显式化
+ *
+ * v0.142.x 连续收紧了两个运行时契约：
+ *   1. 官方 DeepSeek provider 不能把 provider id "deepseek" 当作模型 id；
+ *   2. 新建 agent 的 memory.enabled 默认关闭。
+ *
+ * 老数据里这两处都可能靠“隐式旧语义”存活：DeepSeek 旧列表可能含非法 id；
+ * 老 agent 缺 memory.enabled 时，旧运行时一直按开启处理。迁移只修磁盘真相源，
+ * 不把兼容判断散落到同步模型、Agent 初始化或前端读配置路径里。
+ */
+function normalizeRecentLegacyCompatibilityState(ctx) {
+  const deepseekPatched = repairLegacyDeepSeekProviderModelIds(ctx);
+  const memoryPatched = normalizeLegacyMemoryMasterDefaults(ctx);
+  ctx.log?.(`[migrations] #13: recent compatibility normalized (deepseek=${deepseekPatched}, memory=${memoryPatched})`);
+}
+
+const GEMINI_NATIVE_API = "google-generative-ai";
+const GEMINI_OPENAI_COMPAT_API = "openai-completions";
+const GEMINI_NATIVE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+
+function classifyOfficialGeminiBaseUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.hostname.toLowerCase() !== "generativelanguage.googleapis.com") return null;
+    const pathname = url.pathname.replace(/\/+$/, "");
+    if (pathname === "/v1beta/openai") return "openai";
+    if (pathname === "/v1beta") return "native";
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function migrateGeminiOpenAICompatToNative(ctx) {
+  const { hanakoHome, log } = ctx;
+  const ymlPath = path.join(hanakoHome, "added-models.yaml");
+  const raw = safeReadYAMLSync(ymlPath, null, YAML);
+  if (!raw?.providers || typeof raw.providers !== "object") {
+    log?.("[migrations] #14: Gemini native API migration skipped (no providers)");
+    return;
+  }
+
+  let patched = 0;
+  for (const [providerId, provider] of Object.entries(raw.providers)) {
+    if (!provider || typeof provider !== "object") continue;
+
+    const baseKind = classifyOfficialGeminiBaseUrl(provider.base_url);
+    const api = typeof provider.api === "string" ? provider.api : "";
+    const apiIsOpenAIOrMissing = !api || api === GEMINI_OPENAI_COMPAT_API;
+    const apiIsNative = api === GEMINI_NATIVE_API;
+    const hasBaseUrl = typeof provider.base_url === "string" && provider.base_url.trim().length > 0;
+
+    let changed = false;
+
+    if (baseKind === "openai" && (apiIsOpenAIOrMissing || apiIsNative)) {
+      if (provider.base_url !== GEMINI_NATIVE_BASE_URL) {
+        provider.base_url = GEMINI_NATIVE_BASE_URL;
+        changed = true;
+      }
+      if (provider.api !== GEMINI_NATIVE_API) {
+        provider.api = GEMINI_NATIVE_API;
+        changed = true;
+      }
+    } else if (baseKind === "native" && apiIsOpenAIOrMissing) {
+      if (provider.base_url !== GEMINI_NATIVE_BASE_URL) {
+        provider.base_url = GEMINI_NATIVE_BASE_URL;
+        changed = true;
+      }
+      if (provider.api !== GEMINI_NATIVE_API) {
+        provider.api = GEMINI_NATIVE_API;
+        changed = true;
+      }
+    } else if (providerId === "gemini" && !hasBaseUrl && apiIsOpenAIOrMissing) {
+      provider.base_url = GEMINI_NATIVE_BASE_URL;
+      provider.api = GEMINI_NATIVE_API;
+      changed = true;
+    }
+
+    if (changed) patched++;
+  }
+
+  if (patched > 0) {
+    const header =
+      "# Hanako 供应商配置（全局，跨 agent 共享）\n" +
+      "# 由设置页面管理\n\n";
+    const yamlStr = header + YAML.dump(raw, {
+      indent: 2,
+      lineWidth: -1,
+      sortKeys: false,
+      quotingType: "\"",
+      forceQuotes: false,
+    });
+    const tmp = ymlPath + ".tmp";
+    fs.writeFileSync(tmp, yamlStr, "utf-8");
+    fs.renameSync(tmp, ymlPath);
+    if (ctx.providerRegistry) {
+      ctx.providerRegistry._addedModelsCache = null;
+      ctx.providerRegistry._addedModelsMtime = 0;
+    }
+  }
+
+  log?.(`[migrations] #14: Gemini OpenAI compatibility configs migrated to native API (${patched})`);
+}
+
+function repairLegacySessionSidecarThinkingLevels(ctx) {
+  const metaPaths = collectAgentSessionMetaPaths(ctx.agentsDir);
+  let filesPatched = 0;
+  let entriesPatched = 0;
+
+  for (const metaPath of metaPaths) {
+    const patched = repairSessionMetaThinkingLevels(metaPath, ctx.log);
+    if (patched > 0) {
+      filesPatched++;
+      entriesPatched += patched;
+    }
+  }
+
+  ctx.log?.(`[migrations] #15: legacy session sidecars repaired (files=${filesPatched}, entries=${entriesPatched})`);
+}
+
+/**
+ * #16 — 视频输入能力进入 model.input 后的老数据修补
+ *
+ * 覆盖两类旧状态：
+ *   1. models.json 是投影文件，老版本里已存在的已知视频模型可能只有 ["text","image"]；
+ *   2. 少量手写 agent config.models.overrides 可能已经带 video，需要提升到 added-models.yaml。
+ *
+ * 幂等：只追加缺失的 input 项，未知模型默认不打开 video；运行期模型对象不保留 video 字段。
+ */
+function migrateVideoCapabilityProjection(ctx) {
+  const modelsPatched = repairModelsJsonVideoInputs(ctx);
+  const overridesPatched = promoteAgentVideoOverrides(ctx);
+  ctx.log?.(`[migrations] #16: video capability projected (models=${modelsPatched}, overrides=${overridesPatched})`);
+}
+
+/**
+ * #17 — bridge sessionKey 补齐 agent 维度
+ *
+ * 旧格式：wx_dm_user / tg_dm_user
+ * 新格式：wx_dm_user@hana / tg_dm_user@hana
+ *
+ * index 文件本身已经位于 per-agent 目录下，因此 agentId 的权威来源是目录名。
+ * 微信 userId 可能自带 @（例如 openim），不能用 "包含 @" 判断是否已迁移，
+ * 只能判断 key 是否以当前 owner agent 的 @agentId 结尾。
+ */
+function migrateBridgeSessionKeysToAgentScoped(ctx) {
+  const { agentsDir, log } = ctx;
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    return;
+  }
+
+  let migrated = 0;
+  let merged = 0;
+  let collisions = 0;
+
+  for (const dir of agentDirs) {
+    const agentId = dir.name;
+    const cfgPath = path.join(agentsDir, agentId, "config.yaml");
+    if (!fs.existsSync(cfgPath)) continue;
+
+    const indexPath = path.join(agentsDir, agentId, "sessions", "bridge", "bridge-sessions.json");
+    const result = migrateOneBridgeSessionIndex(indexPath, agentId, log);
+    migrated += result.migrated;
+    merged += result.merged;
+    collisions += result.collisions;
+  }
+
+  log?.(`[migrations] #17: bridge session keys scoped (migrated=${migrated}, merged=${merged}, collisions=${collisions})`);
+}
+
+function migrateOneBridgeSessionIndex(indexPath, agentId, log) {
+  let raw;
+  try {
+    raw = fs.readFileSync(indexPath, "utf-8");
+  } catch {
+    return { migrated: 0, merged: 0, collisions: 0 };
+  }
+
+  let index;
+  try {
+    index = JSON.parse(raw);
+  } catch (err) {
+    log?.(`[migrations] #17: skipped unreadable bridge index ${indexPath}: ${err.message}`);
+    return { migrated: 0, merged: 0, collisions: 0 };
+  }
+  if (!index || typeof index !== "object" || Array.isArray(index)) {
+    return { migrated: 0, merged: 0, collisions: 0 };
+  }
+
+  let changed = false;
+  let migrated = 0;
+  let merged = 0;
+  let collisions = 0;
+
+  for (const oldKey of Object.keys(index)) {
+    const newKey = scopedBridgeSessionKey(oldKey, agentId);
+    if (!newKey || newKey === oldKey) continue;
+
+    const oldRaw = index[oldKey];
+    const targetRaw = index[newKey];
+    if (targetRaw === undefined) {
+      index[newKey] = oldRaw;
+      delete index[oldKey];
+      migrated++;
+      changed = true;
+      continue;
+    }
+
+    const oldEntry = normalizeBridgeIndexEntryForMigration(oldRaw);
+    const targetEntry = normalizeBridgeIndexEntryForMigration(targetRaw);
+    if (oldEntry.file && targetEntry.file) {
+      collisions++;
+      continue;
+    }
+
+    index[newKey] = serializeBridgeIndexEntryForMigration(targetRaw, {
+      ...oldEntry,
+      ...targetEntry,
+      file: targetEntry.file || oldEntry.file,
+    });
+    delete index[oldKey];
+    merged++;
+    changed = true;
+  }
+
+  if (changed) {
+    const tmp = indexPath + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(index, null, 2) + "\n", "utf-8");
+    fs.renameSync(tmp, indexPath);
+  }
+
+  return { migrated, merged, collisions };
+}
+
+function scopedBridgeSessionKey(key, agentId) {
+  if (!key || !agentId || String(key).endsWith(`@${agentId}`)) return null;
+  if (!SESSION_PREFIX_MAP.some(([prefix]) => String(key).startsWith(prefix))) return null;
+  return `${key}@${agentId}`;
+}
+
+function normalizeBridgeIndexEntryForMigration(raw) {
+  if (!raw) return {};
+  return typeof raw === "string" ? { file: raw } : { ...raw };
+}
+
+function serializeBridgeIndexEntryForMigration(previousRaw, entry) {
+  if (typeof previousRaw === "string" && Object.keys(entry).length === 1 && typeof entry.file === "string") {
+    return entry.file;
+  }
+  return entry;
+}
+
+function repairModelsJsonVideoInputs(ctx) {
+  const modelsJsonPath = path.join(ctx.hanakoHome, "models.json");
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+  } catch {
+    return 0;
+  }
+  if (!raw?.providers || typeof raw.providers !== "object") return 0;
+
+  let patched = 0;
+  for (const [providerId, provider] of Object.entries(raw.providers)) {
+    if (!provider || !Array.isArray(provider.models)) continue;
+    for (const model of provider.models) {
+      if (!model || typeof model !== "object" || Array.isArray(model)) continue;
+      const hadRuntimeVideoField = Object.prototype.hasOwnProperty.call(model, "video");
+      const shouldEnableVideo = migrationModelHasVideoCapability(providerId, model);
+      if (shouldEnableVideo && !migrationInputIncludes(model.input, "video")) {
+        model.input = migrationInputWith(model.input, "video");
+        patched++;
+      }
+      if (hadRuntimeVideoField) {
+        delete model.video;
+        patched++;
+      }
+    }
+  }
+
+  if (patched > 0) {
+    const tmp = modelsJsonPath + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(raw, null, 4) + "\n", "utf-8");
+    fs.renameSync(tmp, modelsJsonPath);
+  }
+  return patched;
+}
+
+function migrationModelHasVideoCapability(providerId, model) {
+  if (model?.video === true) return true;
+  if (model?.video === false) return false;
+  const known = lookupKnown(providerId, model?.id);
+  return known?.video === true;
+}
+
+function migrationInputIncludes(input, modality) {
+  return Array.isArray(input) && input.includes(modality);
+}
+
+function migrationInputWith(input, modality) {
+  const next = Array.isArray(input) ? [...input] : ["text"];
+  if (!next.includes("text")) next.unshift("text");
+  if (!next.includes(modality)) next.push(modality);
+  return next;
+}
+
+function promoteAgentVideoOverrides(ctx) {
+  const { hanakoHome, agentsDir } = ctx;
+  const ymlPath = path.join(hanakoHome, "added-models.yaml");
+  const raw = safeReadYAMLSync(ymlPath, null, YAML);
+  if (!raw?.providers || typeof raw.providers !== "object") return 0;
+
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    return 0;
+  }
+
+  let patched = 0;
+  let addedModelsChanged = false;
+  for (const dir of agentDirs) {
+    const cfgPath = path.join(agentsDir, dir.name, "config.yaml");
+    const cfg = safeReadYAMLSync(cfgPath, null, YAML);
+    if (!cfg?.models?.overrides || typeof cfg.models.overrides !== "object") continue;
+
+    let cfgChanged = false;
+    for (const [modelId, override] of Object.entries(cfg.models.overrides)) {
+      if (!override || typeof override !== "object") continue;
+      if (!Object.prototype.hasOwnProperty.call(override, "video")) continue;
+
+      const promoted = promoteVideoOverrideIntoAddedModels(raw.providers, modelId, override.video);
+      if (promoted) {
+        delete override.video;
+        patched++;
+        cfgChanged = true;
+        addedModelsChanged = true;
+      }
+    }
+
+    if (cfgChanged) {
+      for (const [modelId, override] of Object.entries(cfg.models.overrides)) {
+        if (override && typeof override === "object" && Object.keys(override).length === 0) {
+          delete cfg.models.overrides[modelId];
+        }
+      }
+      if (Object.keys(cfg.models.overrides).length === 0) {
+        delete cfg.models.overrides;
+      }
+      const tmp = cfgPath + ".tmp";
+      fs.writeFileSync(
+        tmp,
+        YAML.dump(cfg, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+        "utf-8",
+      );
+      fs.renameSync(tmp, cfgPath);
+    }
+  }
+
+  if (addedModelsChanged) {
+    const header =
+      "# Hanako 供应商配置（全局，跨 agent 共享）\n" +
+      "# 由设置页面管理\n\n";
+    const tmp = ymlPath + ".tmp";
+    fs.writeFileSync(
+      tmp,
+      header + YAML.dump(raw, {
+        indent: 2,
+        lineWidth: -1,
+        sortKeys: false,
+        quotingType: "\"",
+        forceQuotes: false,
+      }),
+      "utf-8",
+    );
+    fs.renameSync(tmp, ymlPath);
+  }
+
+  return patched;
+}
+
+function promoteVideoOverrideIntoAddedModels(providers, modelId, video) {
+  for (const provider of Object.values(providers)) {
+    if (!provider || !Array.isArray(provider.models)) continue;
+    const idx = provider.models.findIndex((entry) => {
+      if (typeof entry === "string") return entry === modelId;
+      return entry && typeof entry === "object" && entry.id === modelId;
+    });
+    if (idx < 0) continue;
+
+    const existing = typeof provider.models[idx] === "object"
+      ? provider.models[idx]
+      : { id: modelId };
+    provider.models[idx] = { ...existing, video };
+    return true;
+  }
+  return false;
+}
+
+function collectAgentSessionMetaPaths(agentsDir) {
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    return [];
+  }
+
+  const out = [];
+  for (const dir of agentDirs) {
+    const metaPath = path.join(agentsDir, dir.name, "sessions", "session-meta.json");
+    try {
+      if (fs.statSync(metaPath).isFile()) out.push(metaPath);
+    } catch {
+      // Most agents will not have a sidecar before their first persisted session.
+    }
+  }
+  return out;
+}
+
+function repairSessionMetaThinkingLevels(metaPath, log) {
+  let raw;
+  try {
+    raw = fs.readFileSync(metaPath, "utf-8");
+  } catch {
+    return 0;
+  }
+
+  let meta;
+  try {
+    meta = JSON.parse(raw);
+  } catch (err) {
+    log?.(`[migrations] #15: skipped unreadable session-meta ${metaPath}: ${err.message}`);
+    return 0;
+  }
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return 0;
+
+  let patched = 0;
+  for (const [sessionFile, entry] of Object.entries(meta)) {
+    if (!shouldRepairLegacyPromptSnapshotThinkingLevel(entry)) continue;
+    const nextThinkingLevel = normalizeThinkingLevelForModel(entry.thinkingLevel, legacySessionMetaModelRef(entry));
+    if (nextThinkingLevel === entry.thinkingLevel) continue;
+    meta[sessionFile] = {
+      ...entry,
+      thinkingLevel: nextThinkingLevel,
+    };
+    patched++;
+  }
+
+  if (patched === 0) return 0;
+
+  backupSessionMetaBeforeV15(metaPath, raw, log);
+  const tmp = metaPath + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(meta, null, 2) + "\n", "utf-8");
+  fs.renameSync(tmp, metaPath);
+  return patched;
+}
+
+function shouldRepairLegacyPromptSnapshotThinkingLevel(entry) {
+  return entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && entry.thinkingLevel === "xhigh"
+    && entry.promptSnapshot
+    && typeof entry.promptSnapshot === "object"
+    && !Array.isArray(entry.promptSnapshot);
+}
+
+function legacySessionMetaModelRef(entry) {
+  const legacyModel = entry?.model;
+  if (legacyModel && typeof legacyModel === "object" && !Array.isArray(legacyModel)) {
+    const id = typeof legacyModel.id === "string" ? legacyModel.id : "";
+    if (id) {
+      return {
+        id,
+        provider: typeof legacyModel.provider === "string" ? legacyModel.provider : undefined,
+        xhigh: legacyModel.xhigh === true,
+      };
+    }
+  }
+  if (typeof legacyModel === "string" && legacyModel.trim()) {
+    const raw = legacyModel.trim();
+    const slash = raw.indexOf("/");
+    if (slash > 0 && slash < raw.length - 1) {
+      return { provider: raw.slice(0, slash), id: raw.slice(slash + 1) };
+    }
+    return { id: raw };
+  }
+
+  const id = typeof entry?.modelId === "string" ? entry.modelId : "";
+  if (!id) return null;
+  return {
+    id,
+    provider: typeof entry.modelProvider === "string" ? entry.modelProvider : undefined,
+  };
+}
+
+function backupSessionMetaBeforeV15(metaPath, raw, log) {
+  const backupPath = `${metaPath}.pre-v15.bak`;
+  try {
+    fs.writeFileSync(backupPath, raw, { encoding: "utf-8", flag: "wx" });
+  } catch (err) {
+    if (err.code === "EEXIST") return;
+    log?.(`[migrations] #15: failed to write session-meta backup ${backupPath}: ${err.message}`);
+    throw err;
+  }
+}
+
+function modelIdOfMigrationEntry(entry) {
+  if (typeof entry === "object" && entry !== null) return typeof entry.id === "string" ? entry.id : "";
+  return typeof entry === "string" ? entry : "";
+}
+
+function defaultDeepSeekModelsForMigration(ctx, providerId) {
+  const direct = ctx.providerRegistry?.getDefaultModels?.(providerId);
+  if (Array.isArray(direct) && direct.length > 0) return [...direct];
+  const official = ctx.providerRegistry?.getDefaultModels?.("deepseek");
+  if (Array.isArray(official) && official.length > 0) return [...official];
+  return ["deepseek-v4-pro", "deepseek-v4-flash"];
+}
+
+function repairLegacyDeepSeekProviderModelIds(ctx) {
+  const { hanakoHome, log } = ctx;
+  const ymlPath = path.join(hanakoHome, "added-models.yaml");
+  const raw = safeReadYAMLSync(ymlPath, null, YAML);
+  if (!raw?.providers || typeof raw.providers !== "object") return 0;
+
+  let patched = 0;
+  for (const [providerId, provider] of Object.entries(raw.providers)) {
+    if (!provider || !Array.isArray(provider.models)) continue;
+
+    const invalid = new Set(
+      getInvalidProviderModelIds(providerId, provider.models, { baseUrl: provider.base_url })
+        .map((id) => String(id).trim().toLowerCase()),
+    );
+    if (invalid.size === 0) continue;
+
+    const nextModels = provider.models.filter((entry) => {
+      const id = modelIdOfMigrationEntry(entry).trim().toLowerCase();
+      return id && !invalid.has(id);
+    });
+
+    // TODO(remove after v0.150.0): 兼容 v0.142.3 及更早版本可能把
+    // DeepSeek provider id "deepseek" 误写进 models[] 的旧数据。
+    provider.models = nextModels.length > 0
+      ? nextModels
+      : defaultDeepSeekModelsForMigration(ctx, providerId);
+    patched++;
+    log?.(`[migrations] #13 ${providerId}: removed reserved DeepSeek model id(s) ${[...invalid].join(", ")}`);
+  }
+
+  if (patched > 0) {
+    const header =
+      "# Hanako 供应商配置（全局，跨 agent 共享）\n" +
+      "# 由设置页面管理\n\n";
+    const tmp = ymlPath + ".tmp";
+    fs.writeFileSync(
+      tmp,
+      header + YAML.dump(raw, {
+        indent: 2,
+        lineWidth: -1,
+        sortKeys: false,
+        quotingType: "\"",
+        forceQuotes: false,
+      }),
+      "utf-8",
+    );
+    fs.renameSync(tmp, ymlPath);
+  }
+
+  return patched;
+}
+
+function normalizeLegacyMemoryMasterDefaults(ctx) {
+  const { agentsDir, log } = ctx;
+  let agentDirs;
+  try {
+    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  } catch {
+    return 0;
+  }
+
+  let patched = 0;
+  for (const dir of agentDirs) {
+    const cfgPath = path.join(agentsDir, dir.name, "config.yaml");
+    const cfg = safeReadYAMLSync(cfgPath, null, YAML);
+    if (!cfg || typeof cfg !== "object") continue;
+
+    const memoryIsObject = cfg.memory && typeof cfg.memory === "object" && !Array.isArray(cfg.memory);
+    if (memoryIsObject && Object.prototype.hasOwnProperty.call(cfg.memory, "enabled")) continue;
+
+    // TODO(remove after v0.150.0): 兼容 v0.142.3 及更早版本的老 agent。
+    // 当时缺 memory.enabled 的运行时语义是开启，这里把隐式旧语义写成显式值。
+    cfg.memory = memoryIsObject
+      ? { ...cfg.memory, enabled: true }
+      : { enabled: true };
+
+    const tmp = cfgPath + ".tmp";
+    fs.writeFileSync(
+      tmp,
+      YAML.dump(cfg, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: "\"" }),
+      "utf-8",
+    );
+    fs.renameSync(tmp, cfgPath);
+    patched++;
+    log?.(`[migrations] #13 ${dir.name}: memory.enabled set to true for legacy implicit default`);
+  }
+
+  return patched;
 }
 
 function collectLegacySessionJsonlPaths(agentsDir) {

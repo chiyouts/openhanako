@@ -1,5 +1,5 @@
 {
-  "_comment": "模型参考词典。provider + model 为唯一键。model-sync.js 对表时查询。image/reasoning 缺省为 false，quirks 缺省为 []。image 映射到 Pi SDK Model.input 数组。",
+  "_comment": "模型参考词典。provider + model 为唯一键。model-sync.js 对表时查询。image/video/reasoning 缺省为 false，quirks 缺省为 []。image/video 映射到 Pi SDK Model.input 数组。",
   "dashscope": {
     "qwen3.5-plus": {
       "name": "Qwen 3.5 Plus",
@@ -329,6 +329,7 @@
       "context": 131072,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -344,6 +345,7 @@
       "context": 131072,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -360,6 +362,7 @@
       "context": 131072,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -375,6 +378,7 @@
       "context": 131072,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -391,6 +395,7 @@
       "context": 260096,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -414,6 +419,7 @@
       "context": 262144,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "reasoning": true
     },
     "qwen3.5-omni-flash": {
@@ -421,6 +427,7 @@
       "context": 262144,
       "maxOutput": 32768,
       "image": true,
+      "video": true,
       "reasoning": true
     },
     "qwen3.5-omni-light": {
@@ -428,6 +435,7 @@
       "context": 131072,
       "maxOutput": 16384,
       "image": true,
+      "video": true,
       "reasoning": true
     },
     "qwen3.6-plus-preview": {
@@ -442,6 +450,7 @@
       "context": 128000,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -457,6 +466,7 @@
       "context": 128000,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -1608,6 +1618,10 @@
       "context": 128000,
       "maxOutput": 4096
     },
+    "gpt-image-2": {
+      "name": "GPT Image 2",
+      "type": "image"
+    },
     "gpt-image-1": {
       "name": "GPT Image 1",
       "type": "image"
@@ -1985,6 +1999,7 @@
       "context": 1048576,
       "maxOutput": 65536,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2001,6 +2016,7 @@
       "context": 1048576,
       "maxOutput": 65536,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2017,6 +2033,7 @@
       "context": 1048576,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2048,6 +2065,7 @@
       "context": 1048576,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2063,6 +2081,7 @@
       "context": 1048576,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2078,6 +2097,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2094,6 +2114,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2110,6 +2131,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2126,6 +2148,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2142,6 +2165,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2158,6 +2182,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2174,6 +2199,7 @@
       "context": 128000,
       "maxOutput": 64000,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2189,6 +2215,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2205,6 +2232,7 @@
       "context": 1048576,
       "maxOutput": 65536,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2221,6 +2249,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2237,6 +2266,7 @@
       "context": 1048576,
       "maxOutput": 65536,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2253,6 +2283,7 @@
       "context": 1048576,
       "maxOutput": 65536,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2269,6 +2300,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2284,6 +2316,7 @@
       "context": 1048576,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2299,6 +2332,7 @@
       "context": 2097152,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2356,6 +2390,7 @@
       "context": 1048576,
       "maxOutput": 8192,
       "image": true,
+      "video": true,
       "visionCapabilities": {
         "grounding": true,
         "boxes": true,
@@ -2386,6 +2421,7 @@
       "context": 1048576,
       "maxOutput": 65535,
       "image": true,
+      "video": true,
       "reasoning": true,
       "visionCapabilities": {
         "grounding": true,
@@ -2781,6 +2817,13 @@
       "reasoning": true
     },
     "doubao-seed-2-0-lite-260215": {
+      "name": "Doubao Seed 2.0 Lite",
+      "context": 256000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true
+    },
+    "doubao-seed-2-0-lite-260428": {
       "name": "Doubao Seed 2.0 Lite",
       "context": 256000,
       "maxOutput": 128000,
@@ -6199,6 +6242,10 @@
     }
   },
   "openai-codex-oauth": {
+    "gpt-image-2": {
+      "name": "GPT Image 2",
+      "type": "image"
+    },
     "gpt-4o": {
       "name": "GPT-4o",
       "context": 128000,
@@ -6313,6 +6360,13 @@
       "reasoning": true
     },
     "doubao-seed-2-0-lite-260215": {
+      "name": "Doubao Seed 2.0 Lite",
+      "context": 256000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true
+    },
+    "doubao-seed-2-0-lite-260428": {
       "name": "Doubao Seed 2.0 Lite",
       "context": 256000,
       "maxOutput": 128000,

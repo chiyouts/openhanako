@@ -22,32 +22,55 @@ function buildUnavailableResult(text) {
   return { content: [{ type: "text", text }] };
 }
 
+async function adapterIsAvailable(adapter, submitCtx) {
+  if (typeof adapter?.checkAuth !== "function") return true;
+  try {
+    const result = await adapter.checkAuth(submitCtx);
+    return result?.ok !== false;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveImageAdapter(input, registry, resolved, submitCtx) {
+  const explicitAdapter = typeof input.provider === "string" ? registry.get(input.provider) : null;
+  if (explicitAdapter) return explicitAdapter;
+
+  if (resolved?.adapterId) {
+    const adapter = registry.get(resolved.adapterId);
+    if (adapter && await adapterIsAvailable(adapter, submitCtx)) return adapter;
+  }
+
+  const adapters = registry.getByType("image");
+  for (let i = adapters.length - 1; i >= 0; i--) {
+    const adapter = adapters[i];
+    if (await adapterIsAvailable(adapter, submitCtx)) return adapter;
+  }
+  return adapters.at(-1) || null;
+}
+
 export async function execute(input, ctx) {
   const { registry, store, poller, getWritableGeneratedDir } = ctx._mediaGen || {};
   if (!registry || !store || !poller || typeof getWritableGeneratedDir !== "function") {
     return buildUnavailableResult("Image generation plugin is not initialized.");
   }
 
-  const resolved = await resolveImageProviderSelection(input, ctx);
-  const explicitAdapter = typeof input.provider === "string" ? registry.get(input.provider) : null;
-  const adapter = explicitAdapter
-    || (resolved?.adapterId ? registry.get(resolved.adapterId) : null)
-    || registry.getByType("image").at(-1)
-    || null;
-
-  if (!adapter) {
-    return buildUnavailableResult("No image generation provider is available.");
-  }
-
   const generatedDir = await getWritableGeneratedDir({ agentId: ctx.agentId });
+  const resolved = await resolveImageProviderSelection(input, ctx);
   const submitCtx = {
     dataDir: ctx.dataDir,
     bus: ctx.bus,
     log: ctx.log,
     generatedDir,
     config: ctx.config,
-    providerId: resolved?.providerId || input.provider || adapter.id,
+    providerId: resolved?.providerId || input.provider,
   };
+
+  const adapter = await resolveImageAdapter(input, registry, resolved, submitCtx);
+  if (!adapter) {
+    return buildUnavailableResult("No image generation provider is available.");
+  }
+  submitCtx.providerId ||= adapter.id;
 
   const count = Math.min(Math.max(input.count || 1, 1), 9);
   const batchId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

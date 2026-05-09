@@ -8,6 +8,7 @@ const mockHanaFetch = vi.fn();
 const mockApplyAgentIdentity = vi.fn(async () => {});
 const mockLoadAgents = vi.fn(async () => {});
 const mockLoadSessions = vi.fn(async () => {});
+const mockSwitchSession = vi.fn(async () => {});
 const mockLoadModels = vi.fn(async () => {});
 const mockActivateWorkspaceDesk = vi.fn(async () => {});
 const mockLoadChannels = vi.fn(async () => {});
@@ -34,6 +35,7 @@ vi.mock('../../stores/agent-actions', () => ({
 
 vi.mock('../../stores/session-actions', () => ({
   loadSessions: mockLoadSessions,
+  switchSession: mockSwitchSession,
 }));
 
 vi.mock('../../utils/ui-helpers', () => ({
@@ -68,6 +70,7 @@ describe('handleAppEvent', () => {
     mockApplyAgentIdentity.mockReset();
     mockLoadAgents.mockReset();
     mockLoadSessions.mockReset();
+    mockSwitchSession.mockReset();
     mockLoadModels.mockReset();
     mockActivateWorkspaceDesk.mockReset();
     mockLoadChannels.mockReset();
@@ -92,10 +95,6 @@ describe('handleAppEvent', () => {
 
   it('agent-switched applies agent identity, reloads dependent data, and resets agent-scoped UI state', async () => {
     mockHanaFetch
-      .mockResolvedValueOnce(jsonResponse({
-        desk: { home_folder: '/agent-home' },
-        cwd_history: ['/recent'],
-      }))
       .mockResolvedValueOnce(jsonResponse({ jobs: [{ id: 'job-1' }] }));
     Object.assign(mockState, {
       currentChannel: { id: 'old' },
@@ -105,7 +104,16 @@ describe('handleAppEvent', () => {
     });
 
     const { handleAppEvent } = await import('../../services/app-event-actions');
-    handleAppEvent('agent-switched', { agentName: 'Hana', agentId: 'agent-a' });
+    handleAppEvent('agent-switched', {
+      agentName: 'Hana',
+      agentId: 'agent-a',
+      sessionPath: '/sessions/agent-a.jsonl',
+      cwd: '/agent-cwd',
+      homeFolder: '/agent-home',
+      workspaceFolders: ['/reference'],
+      cwdHistory: ['/agent-cwd', '/recent'],
+      memoryMasterEnabled: false,
+    });
     await flushPromises();
 
     expect(mockApplyAgentIdentity).toHaveBeenCalledWith({
@@ -113,6 +121,7 @@ describe('handleAppEvent', () => {
       agentId: 'agent-a',
     });
     expect(mockLoadSessions).toHaveBeenCalledTimes(1);
+    expect(mockSwitchSession).toHaveBeenCalledWith('/sessions/agent-a.jsonl');
     expect(mockLoadChannels).toHaveBeenCalledTimes(1);
     expect(mockLoadModels).toHaveBeenCalledTimes(1);
     expect(mockState.currentChannel).toBeNull();
@@ -125,6 +134,10 @@ describe('handleAppEvent', () => {
     expect(mockState.channelIsDM).toBe(false);
     expect(mockState.thinkingLevel).toBe('auto');
     expect(mockState.activities).toEqual([]);
+    expect(mockState.homeFolder).toBe('/agent-home');
+    expect(mockState.workspaceFolders).toEqual(['/reference']);
+    expect(mockState.cwdHistory).toEqual(['/agent-cwd', '/recent']);
+    expect(mockState.memoryMasterEnabled).toBe(false);
   });
 
   it('models-changed reloads models', async () => {
@@ -200,21 +213,24 @@ describe('handleAppEvent', () => {
 
   it('agent-switched reads the next agent memory gate from config', async () => {
     mockHanaFetch
-      .mockResolvedValueOnce(jsonResponse({
-        memory: { enabled: false },
-        desk: { home_folder: '/agent-home' },
-        cwd_history: ['/recent'],
-      }))
       .mockResolvedValueOnce(jsonResponse({ jobs: [] }));
     Object.assign(mockState, { currentAgentId: 'agent-a', memoryMasterEnabled: true });
     const { handleAppEvent } = await import('../../services/app-event-actions');
 
-    handleAppEvent('agent-switched', { agentName: 'Other', agentId: 'agent-b' });
+    handleAppEvent('agent-switched', {
+      agentName: 'Other',
+      agentId: 'agent-b',
+      sessionPath: '/sessions/agent-b.jsonl',
+      cwd: '/agent-home',
+      homeFolder: '/agent-home',
+      cwdHistory: ['/recent'],
+      memoryMasterEnabled: false,
+    });
     await vi.waitFor(() => {
       expect(mockState.memoryMasterEnabled).toBe(false);
     });
 
-    expect(mockHanaFetch).toHaveBeenCalledWith('/api/config');
+    expect(mockHanaFetch).not.toHaveBeenCalledWith('/api/config');
   });
 
   it('theme-changed applies the selected theme', async () => {

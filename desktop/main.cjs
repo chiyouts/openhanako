@@ -8,18 +8,24 @@
  * 4. 关闭 splash，显示主窗口
  * 5. 优雅关闭
  */
-const { app, BrowserWindow, WebContentsView, globalShortcut, ipcMain, dialog, session, shell, nativeTheme, Tray, Menu, nativeImage, systemPreferences, Notification, webContents } = require("electron");
+const { app, BrowserWindow, WebContentsView, globalShortcut, ipcMain, dialog, session, shell, nativeTheme, Tray, Menu, nativeImage, systemPreferences, Notification, webContents, screen } = require("electron");
 const os = require("os");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
+const { PNG } = require("pngjs");
 const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, installDownloadedUpdate } = require("./auto-updater.cjs");
+const {
+  getAutoLaunchStatus,
+  setAutoLaunchEnabled,
+} = require("./login-item-settings.cjs");
 const { createFileWatchRegistry } = require("./file-watch-registry.cjs");
 const { readTextFileSnapshot, writeTextFileIfUnchanged } = require("./file-text-io.cjs");
 const { wrapIpcHandler, wrapIpcBestEffortHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 const themeRegistry = require('./src/shared/theme-registry.cjs');
 const { resolveTrashItemPath } = require("./src/shared/trash-item-path.cjs");
+const { redactLogText } = require("../shared/log-redactor.cjs");
 const {
   configureClientSingleInstance,
   focusExistingWindow,
@@ -44,7 +50,7 @@ const APP_USER_MODEL_ID = "com.hanako.app"; // Keep in sync with package.json bu
   if (!fs.existsSync(preloadPath)) {
     const msg = `Missing preload bundle:\n${preloadPath}\n\nBuild is incomplete. Run 'npm run build:preload' or rebuild the installer.`;
     try { dialog.showErrorBox("Hanako failed to start", msg); } catch {}
-    console.error("[desktop] " + msg);
+    console.error("[desktop] " + redactLogText(msg));
     process.exit(1);
   }
 }
@@ -76,7 +82,7 @@ function resolveLoginShellPath() {
 function safeReadJSON(filePath, fallback = null) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf-8')); }
   catch (err) {
-    console.error(`[safeReadJSON] ${filePath}: ${err.message}`);
+    console.error(`[safeReadJSON] ${redactLogText(filePath)}: ${redactLogText(err.message)}`);
     return fallback;
   }
 }
@@ -85,6 +91,10 @@ const hanakoHome = resolveHanakoHome(process.env.HANA_HOME);
 process.env.HANA_HOME = hanakoHome;
 ensureHanaPiSdkDirs(hanakoHome);
 configureProcessPiSdkEnv(hanakoHome);
+
+function redactMainLogText(value) {
+  return redactLogText(value, { homeDir: os.homedir(), extraPaths: [hanakoHome] });
+}
 
 // 按 HANA_HOME 隔离 Electron userData（localStorage / cache / session）
 // 生产: ~/Library/Application Support/Hanako
@@ -152,6 +162,7 @@ let isExitingServer = false; // 只有托盘"退出"时才 kill server，其余�
 let _isUpdating = false;  // auto-updater 正在执行 quitAndInstall，before-quit 跳过 server 清理
 let _autoUpdaterInitialized = false;
 let forceQuitApp = false;   // 启动失败等场景需要真正退出，绕过"隐藏保持运行"拦截
+let _startHiddenAtLogin = false; // 登录项启动时不抢前台，只在托盘常驻
 const SERVER_SHUTDOWN_GRACE_MS = 17000; // server gracefulShutdown 内部 15s force timer + 余量
 const SERVER_FORCE_KILL_WAIT_MS = 5000;
 const SERVER_SHUTDOWN_POLL_MS = 200;
@@ -243,6 +254,40 @@ function titleBarOpts(trafficLight = { x: 16, y: 16 }) {
   }
   // Windows/Linux：无框窗口 + 前端自绘 window controls
   return framelessWindowOpts();
+}
+
+function resolveConcreteTheme(rawTheme) {
+  return themeRegistry.resolveSavedTheme(rawTheme || themeRegistry.DEFAULT_THEME, nativeTheme.shouldUseDarkColors).concrete;
+}
+
+function getThemeEntry(rawTheme) {
+  const concrete = resolveConcreteTheme(rawTheme);
+  return themeRegistry.THEMES[concrete] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME];
+}
+
+function getThemeBackgroundColor(rawTheme) {
+  return getThemeEntry(rawTheme).backgroundColor;
+}
+
+function applyWindowThemeColors(win, rawTheme) {
+  if (!win || win.isDestroyed()) return;
+  const backgroundColor = getThemeBackgroundColor(rawTheme);
+
+  try {
+    win.setBackgroundColor(backgroundColor);
+  } catch (err) {
+    console.warn("[desktop] set window background color failed:", redactMainLogText(err.message));
+  }
+
+  // Windows 的 frameless thick frame 仍由 DWM 绘制。这里用主题背景色
+  // 压低 active border 的存在感，而不是使用更醒目的 accent token。
+  if (process.platform === "win32" && typeof win.setAccentColor === "function") {
+    try {
+      win.setAccentColor(backgroundColor);
+    } catch (err) {
+      console.warn("[desktop] set window border color failed:", redactMainLogText(err.message));
+    }
+  }
 }
 
 /**
@@ -341,6 +386,7 @@ function migrateSetupComplete() {
 // 收集 server 的 stdout/stderr 用于崩溃诊断
 let _serverLogs = [];
 let _lastServerSpawn = null;
+let _lastServerProgressAtMs = null;
 
 function isPidAliveForDiagnostics(pid) {
   if (!pid) return false;
@@ -385,14 +431,22 @@ async function waitForProcessExit(proc, pid, timeoutMs) {
 const {
   ensureServerFilesReady,
   isModuleResolutionError,
+  SERVER_INFO_FIRST_WAIT_MS,
+  shouldKeepWaitingForServerInfo,
 } = require("./src/shared/server-readiness.cjs");
 
 /**
  * 轮询 server-info.json 等待 server 就绪
  */
-function pollServerInfo(infoPath, { timeout = 60000, interval = 200, process: proc } = {}) {
+function pollServerInfo(infoPath, {
+  timeout = SERVER_INFO_FIRST_WAIT_MS,
+  interval = 200,
+  process: proc,
+  getLastProgressAtMs = () => null,
+} = {}) {
   return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeout;
+    const startedAtMs = Date.now();
+    const deadline = startedAtMs + timeout;
     let exited = false;
 
     if (proc) {
@@ -412,8 +466,18 @@ function pollServerInfo(infoPath, { timeout = 60000, interval = 200, process: pr
 
     const check = async () => {
       if (exited) return;
-      if (Date.now() > deadline) {
-        reject(new Error(mt("dialog.serverStartTimeout", null, "Server start timed out (60s)")));
+      const nowMs = Date.now();
+      const childAlive = proc
+        ? !hasChildExitObserved(proc) && isPidAliveForDiagnostics(proc.pid)
+        : false;
+      if (!shouldKeepWaitingForServerInfo({
+        nowMs,
+        startedAtMs,
+        firstDeadlineMs: deadline,
+        lastProgressAtMs: getLastProgressAtMs(),
+        childAlive,
+      })) {
+        reject(new Error(mt("dialog.serverStartTimeout", null, "Server start timed out")));
         return;
       }
       try {
@@ -543,6 +607,7 @@ async function startServer() {
  */
 async function _spawnServerOnce(serverInfoPath) {
   _serverLogs = [];
+  _lastServerProgressAtMs = null;
 
   const serverEnv = { ...withHanaPiSdkEnv(process.env, hanakoHome), HANA_HOME: hanakoHome };
 
@@ -632,13 +697,15 @@ async function _spawnServerOnce(serverInfoPath) {
 
   // 捕获 stdout/stderr 到 buffer（打包后 console 不可见，崩溃时需要这些信息）
   serverProcess.stdout?.on("data", (chunk) => {
-    const text = chunk.toString();
+    const text = redactMainLogText(chunk.toString());
+    _lastServerProgressAtMs = Date.now();
     try { process.stdout.write(text); } catch {}
     _serverLogs.push(text);
     if (_serverLogs.length > 500) _serverLogs.splice(0, _serverLogs.length - 500);
   });
   serverProcess.stderr?.on("data", (chunk) => {
-    const text = chunk.toString();
+    const text = redactMainLogText(chunk.toString());
+    _lastServerProgressAtMs = Date.now();
     try { process.stderr.write(text); } catch {}
     _serverLogs.push("[stderr] " + text);
     if (_serverLogs.length > 500) _serverLogs.splice(0, _serverLogs.length - 500);
@@ -646,8 +713,8 @@ async function _spawnServerOnce(serverInfoPath) {
 
   // 等待 server ready（通过轮询 server-info.json）
   const info = await pollServerInfo(serverInfoPath, {
-    timeout: 60000,
     process: serverProcess,
+    getLastProgressAtMs: () => _lastServerProgressAtMs,
   });
   serverPort = info.port;
   serverToken = info.token;
@@ -814,7 +881,7 @@ function writeCrashLog(errorMessage) {
   const timestamp = new Date().toISOString();
   const diagnostics = buildServerCrashDiagnostics();
 
-  const content = [
+  const content = redactMainLogText([
     `=== Hanako Crash Log ===`,
     `Hanako: v${app?.getVersion?.() || "unknown"}`,
     `Time: ${timestamp}`,
@@ -827,7 +894,7 @@ function writeCrashLog(errorMessage) {
     logs || "(no output captured)",
     diagnostics,
     ``,
-  ].join("\n");
+  ].join("\n"));
 
   // 写入文件（best effort）
   try {
@@ -903,6 +970,7 @@ function saveWindowState() {
 // ── 创建主窗口 ──
 function createMainWindow() {
   const saved = loadWindowState();
+  const initialTheme = themeRegistry.DEFAULT_THEME;
 
   const opts = {
     width: saved?.width || 960,
@@ -911,7 +979,7 @@ function createMainWindow() {
     minHeight: 500,
     title: "Hanako",
     ...titleBarOpts({ x: 16, y: 16 }),
-    backgroundColor: "#F4F0E4",
+    backgroundColor: getThemeBackgroundColor(initialTheme),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -927,6 +995,7 @@ function createMainWindow() {
   }
 
   mainWindow = new BrowserWindow(opts);
+  applyWindowThemeColors(mainWindow, initialTheme);
 
   // auto-updater 是进程级服务：初始化只做一次，窗口重建时只更新目标 window 引用。
   if (!_autoUpdaterInitialized) {
@@ -947,6 +1016,7 @@ function createMainWindow() {
 
   // 前端初始化超时保护：30 秒内没收到 app-ready 就强制显示（防止用户卡在空白）
   const initTimeout = setTimeout(() => {
+    if (_startHiddenAtLogin) return;
     console.warn("[desktop] ⚠ 主窗口初始化超时（30s），强制显示");
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
@@ -1043,6 +1113,7 @@ function createMainWindow() {
 // ── 创建设置窗口 ──
 function createSettingsWindow(tab, theme) {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isCrashed()) {
+    if (process.platform === "darwin") app.dock.show();
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
@@ -1064,6 +1135,8 @@ function createSettingsWindow(tab, theme) {
     }
   }
 
+  const settingsTheme = resolveConcreteTheme(theme || _browserViewerTheme);
+
   settingsWindow = new BrowserWindow({
     width: 720,
     height: 700,
@@ -1072,7 +1145,7 @@ function createSettingsWindow(tab, theme) {
     minHeight: 500,
     title: "Settings",
     ...titleBarOpts({ x: 16, y: 14 }),
-    backgroundColor: (themeRegistry.THEMES[theme || _browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
+    backgroundColor: getThemeBackgroundColor(settingsTheme),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -1080,6 +1153,7 @@ function createSettingsWindow(tab, theme) {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(settingsWindow, settingsTheme);
 
   settingsWindow.once("ready-to-show", () => {
     if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.show();
@@ -1179,7 +1253,7 @@ function createBrowserViewerWindow(opts = {}) {
     minHeight: 360,
     title: "Browser",
     ...framelessWindowOpts(),
-    backgroundColor: (themeRegistry.THEMES[_browserViewerTheme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
+    backgroundColor: getThemeBackgroundColor(_browserViewerTheme),
     hasShadow: true,
     show: shouldShow,
     acceptFirstMouse: true, // macOS: 第一次点击不仅激活窗口，还穿透到内容
@@ -1189,6 +1263,7 @@ function createBrowserViewerWindow(opts = {}) {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(browserViewerWindow, _browserViewerTheme);
 
   loadWindowURL(browserViewerWindow, "browser-viewer");
 
@@ -1415,7 +1490,16 @@ const SNAPSHOT_SCRIPT = `(function() {
 /** 按 sessionPath 查找 view，fallback 到当前活跃 view（兼容旧调用） */
 function _getViewForSession(sessionPath) {
   if (sessionPath && _browserViews.has(sessionPath)) {
-    return _browserViews.get(sessionPath);
+    const view = _browserViews.get(sessionPath);
+    if (_isBrowserViewDestroyed(view)) {
+      _forgetBrowserView(view, "destroyed");
+      return null;
+    }
+    return view;
+  }
+  if (_browserWebView && _isBrowserViewDestroyed(_browserWebView)) {
+    _forgetBrowserView(_browserWebView, "destroyed");
+    return null;
   }
   return _browserWebView;
 }
@@ -1429,6 +1513,81 @@ function _ensureBrowserForSession(sessionPath) {
 
 function _ensureBrowser() {
   return _ensureBrowserForSession(null);
+}
+
+const FATAL_BROWSER_HOST_ERROR_PATTERNS = [
+  /current display surface not available/i,
+  /display surface .*not available/i,
+  /object has been destroyed/i,
+  /no browser instance/i,
+  /render process gone/i,
+  /webcontents?.*destroy/i,
+  /web contents?.*destroy/i,
+  /target closed/i,
+];
+
+function _isFatalBrowserHostError(err) {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  return FATAL_BROWSER_HOST_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
+}
+
+function _isBrowserViewDestroyed(view) {
+  try {
+    return !view || !view.webContents || view.webContents.isDestroyed();
+  } catch {
+    return true;
+  }
+}
+
+function _forgetBrowserView(view, reason) {
+  if (!view) return;
+  const wasActive = view === _browserWebView;
+  if (wasActive && browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+    try { browserViewerWindow.contentView.removeChildView(view); } catch {}
+  }
+  for (const [sp, candidate] of _browserViews) {
+    if (candidate === view) _browserViews.delete(sp);
+  }
+  try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
+  if (wasActive) {
+    _browserWebView = null;
+    _currentBrowserSession = null;
+    if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+      browserViewerWindow.webContents.send("browser-update", { running: false, reason });
+    }
+  }
+}
+
+function _bindBrowserViewLifecycle(view, sessionPath) {
+  const forget = (reason) => _forgetBrowserView(view, reason);
+  try {
+    view.webContents.once("destroyed", () => forget("destroyed"));
+    view.webContents.on("render-process-gone", (_event, details) => {
+      forget(`render-process-gone: ${details?.reason || "unknown"}`);
+    });
+  } catch {}
+  if (sessionPath && _isBrowserViewDestroyed(view)) forget("destroyed");
+}
+
+function _ensureLiveWebContents(view, sessionPath) {
+  if (_isBrowserViewDestroyed(view)) {
+    _forgetBrowserView(view, "destroyed");
+    throw new Error("Object has been destroyed" + (sessionPath ? ` for session ${sessionPath}` : ""));
+  }
+  return view.webContents;
+}
+
+async function _withLiveWebContents(sessionPath, fn) {
+  const view = _ensureBrowserForSession(sessionPath);
+  const wc = _ensureLiveWebContents(view, sessionPath);
+  try {
+    return await fn(wc, view);
+  } catch (err) {
+    if (_isFatalBrowserHostError(err)) {
+      _forgetBrowserView(view, err.message);
+    }
+    throw err;
+  }
 }
 
 function _delay(ms) {
@@ -1527,9 +1686,12 @@ async function handleBrowserCommand(cmd, params) {
     case "launch": {
       const sp = params.sessionPath || null;
       // 该 session 已有 view → 直接返回
-      if (sp && _browserViews.has(sp)) return {};
+      if (sp && _browserViews.has(sp)) {
+        const existingView = _getViewForSession(sp);
+        if (existingView) return {};
+      }
       // 无 sessionPath 且已有活跃 view → 直接返回（兼容旧调用）
-      if (!sp && _browserWebView) return {};
+      if (!sp && _browserWebView && !_isBrowserViewDestroyed(_browserWebView)) return {};
 
       const ses = session.fromPartition("persist:hana-browser");
       const view = new WebContentsView({
@@ -1567,6 +1729,7 @@ async function handleBrowserCommand(cmd, params) {
 
       // 卡片圆角
       view.setBorderRadius(10);
+      _bindBrowserViewLifecycle(view, sp);
 
       // 存入 Map
       if (sp) _browserViews.set(sp, view);
@@ -1598,7 +1761,7 @@ async function handleBrowserCommand(cmd, params) {
     // ── close ──（真正销毁指定 session 的浏览器实例）
     case "close": {
       const sp = params.sessionPath;
-      const view = sp ? _browserViews.get(sp) : _browserWebView;
+      const view = sp ? _getViewForSession(sp) : _browserWebView;
       if (view) {
         // 如果是当前活跃 view，从窗口移除
         if (view === _browserWebView) {
@@ -1608,7 +1771,7 @@ async function handleBrowserCommand(cmd, params) {
           _browserWebView = null;
           _currentBrowserSession = null;
         }
-        view.webContents.close();
+        try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
         if (sp) _browserViews.delete(sp);
       }
       // 通知浮窗状态变化，但不自动隐藏（让用户自己决定关不关）
@@ -1621,7 +1784,7 @@ async function handleBrowserCommand(cmd, params) {
     // ── suspend ──（从窗口摘下来，但不销毁，页面状态完全保留）
     case "suspend": {
       const sp = params.sessionPath;
-      const view = sp ? _browserViews.get(sp) : _browserWebView;
+      const view = sp ? _getViewForSession(sp) : _browserWebView;
       if (view && view === _browserWebView) {
         // 只有当前活跃 view 需要从窗口摘下
         if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
@@ -1643,7 +1806,8 @@ async function handleBrowserCommand(cmd, params) {
       if (!sp || !_browserViews.has(sp)) {
         return { found: false };
       }
-      const view = _browserViews.get(sp);
+      const view = _getViewForSession(sp);
+      if (!view) return { found: false };
       _browserWebView = view;
       _currentBrowserSession = sp;
 
@@ -1666,137 +1830,141 @@ async function handleBrowserCommand(cmd, params) {
       if (!isAllowedBrowserUrl(params.url)) {
         throw new Error("Only http/https URLs are allowed");
       }
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const wc = view.webContents;
-      const NAV_TIMEOUT = 30000;
-      await Promise.race([
-        wc.loadURL(params.url),
-        new Promise((_, reject) => setTimeout(() => {
-          try { wc.stop(); } catch {}
-          reject(new Error(`Navigation timed out after ${NAV_TIMEOUT / 1000}s: ${params.url}`));
-        }, NAV_TIMEOUT)),
-      ]);
-      await _delay(500);
-      const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { url: snap.currentUrl, title: snap.title, snapshot: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const NAV_TIMEOUT = 30000;
+        await Promise.race([
+          wc.loadURL(params.url),
+          new Promise((_, reject) => setTimeout(() => {
+            try { wc.stop(); } catch {}
+            reject(new Error(`Navigation timed out after ${NAV_TIMEOUT / 1000}s: ${params.url}`));
+          }, NAV_TIMEOUT)),
+        ]);
+        await _delay(500);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { url: snap.currentUrl, title: snap.title, snapshot: snap.text };
+      });
     }
 
     // ── snapshot ──
     case "snapshot": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const snap = await view.webContents.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── screenshot ──
     case "screenshot": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const img = await view.webContents.capturePage();
-      const jpeg = img.toJPEG(75);
-      return { base64: jpeg.toString("base64") };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const img = await wc.capturePage();
+        const jpeg = img.toJPEG(75);
+        return { base64: jpeg.toString("base64") };
+      });
     }
 
     // ── thumbnail ──
     case "thumbnail": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const img = await view.webContents.capturePage();
-      const resized = img.resize({ width: 400 });
-      const jpeg = resized.toJPEG(60);
-      return { base64: jpeg.toString("base64") };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const img = await wc.capturePage();
+        const resized = img.resize({ width: 400 });
+        const jpeg = resized.toJPEG(60);
+        return { base64: jpeg.toString("base64") };
+      });
     }
 
     // ── click ──
     case "click": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const wc = view.webContents;
-      const clickRef = Number(params.ref);
-      await wc.executeJavaScript(
-        "(function(){ var el = document.querySelector('[data-hana-ref=\"" + clickRef + "\"]');" +
-        " if (!el) throw new Error('Element [" + clickRef + "] not found');" +
-        " el.scrollIntoView({block:'center'}); el.click(); })()"
-      );
-      await _delay(800);
-      const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const clickRef = Number(params.ref);
+        await wc.executeJavaScript(
+          "(function(){ var el = document.querySelector('[data-hana-ref=\"" + clickRef + "\"]');" +
+          " if (!el) throw new Error('Element [" + clickRef + "] not found');" +
+          " el.scrollIntoView({block:'center'}); el.click(); })()"
+        );
+        await _delay(800);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── type ──
     case "type": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const wc = view.webContents;
-      if (params.ref != null) {
-        const typeRef = Number(params.ref);
-        await wc.executeJavaScript(
-          "(function(){ var el = document.querySelector('[data-hana-ref=\"" + typeRef + "\"]');" +
-          " if (!el) throw new Error('Element [" + typeRef + "] not found');" +
-          " el.scrollIntoView({block:'center'}); el.focus();" +
-          " if (el.select) el.select(); })()"
-        );
-        await _delay(100);
-      }
-      await wc.insertText(params.text);
-      if (params.pressEnter) {
-        await _delay(100);
-        wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
-        wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
-        await _delay(800);
-      }
-      await _delay(300);
-      const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        if (params.ref != null) {
+          const typeRef = Number(params.ref);
+          await wc.executeJavaScript(
+            "(function(){ var el = document.querySelector('[data-hana-ref=\"" + typeRef + "\"]');" +
+            " if (!el) throw new Error('Element [" + typeRef + "] not found');" +
+            " el.scrollIntoView({block:'center'}); el.focus();" +
+            " if (el.select) el.select(); })()"
+          );
+          await _delay(100);
+        }
+        await wc.insertText(params.text);
+        if (params.pressEnter) {
+          await _delay(100);
+          wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+          wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+          await _delay(800);
+        }
+        await _delay(300);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── scroll ──
     case "scroll": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const wc = view.webContents;
-      const delta = (params.direction === "up" ? -1 : 1) * (params.amount || 3) * 300;
-      await wc.executeJavaScript("window.scrollBy({top:" + delta + ",behavior:'smooth'})");
-      await _delay(500);
-      const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const delta = (params.direction === "up" ? -1 : 1) * (params.amount || 3) * 300;
+        await wc.executeJavaScript("window.scrollBy({top:" + delta + ",behavior:'smooth'})");
+        await _delay(500);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── select ──
     case "select": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const wc = view.webContents;
-      const selRef = Number(params.ref);
-      const safeValue = JSON.stringify(params.value);
-      await wc.executeJavaScript(
-        "(function(){ var el = document.querySelector('[data-hana-ref=\"" + selRef + "\"]');" +
-        " if (!el) throw new Error('Element [" + selRef + "] not found');" +
-        " el.value = " + safeValue + ";" +
-        " el.dispatchEvent(new Event('change',{bubbles:true})); })()"
-      );
-      await _delay(300);
-      const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const selRef = Number(params.ref);
+        const safeValue = JSON.stringify(params.value);
+        await wc.executeJavaScript(
+          "(function(){ var el = document.querySelector('[data-hana-ref=\"" + selRef + "\"]');" +
+          " if (!el) throw new Error('Element [" + selRef + "] not found');" +
+          " el.value = " + safeValue + ";" +
+          " el.dispatchEvent(new Event('change',{bubbles:true})); })()"
+        );
+        await _delay(300);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── pressKey ──
     case "pressKey": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const wc = view.webContents;
-      const parts = params.key.split("+");
-      const keyCode = parts[parts.length - 1];
-      const modifiers = parts.slice(0, -1).map(function(m) { return m.toLowerCase(); });
-      const keyMap = { Enter: "Return", Escape: "Escape", Tab: "Tab", Backspace: "Backspace", Delete: "Delete", Space: "Space" };
-      const mappedKey = keyMap[keyCode] || keyCode;
-      wc.sendInputEvent({ type: "keyDown", keyCode: mappedKey, modifiers });
-      wc.sendInputEvent({ type: "keyUp", keyCode: mappedKey, modifiers });
-      await _delay(300);
-      const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const parts = params.key.split("+");
+        const keyCode = parts[parts.length - 1];
+        const modifiers = parts.slice(0, -1).map(function(m) { return m.toLowerCase(); });
+        const keyMap = { Enter: "Return", Escape: "Escape", Tab: "Tab", Backspace: "Backspace", Delete: "Delete", Space: "Space" };
+        const mappedKey = keyMap[keyCode] || keyCode;
+        wc.sendInputEvent({ type: "keyDown", keyCode: mappedKey, modifiers });
+        wc.sendInputEvent({ type: "keyUp", keyCode: mappedKey, modifiers });
+        await _delay(300);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── wait ──
     case "wait": {
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const timeout = Math.min(params.timeout || 5000, 10000);
-      await _delay(timeout);
-      const snap = await view.webContents.executeJavaScript(SNAPSHOT_SCRIPT);
-      return { currentUrl: snap.currentUrl, text: snap.text };
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const timeout = Math.min(params.timeout || 5000, 10000);
+        await _delay(timeout);
+        const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
+        return { currentUrl: snap.currentUrl, text: snap.text };
+      });
     }
 
     // ── evaluate ──
@@ -1804,17 +1972,18 @@ async function handleBrowserCommand(cmd, params) {
       if (!params.expression || params.expression.length > 10000) {
         throw new Error("Expression too long (max 10000 chars)");
       }
-      console.log(`[browser:evaluate] ${params.expression.slice(0, 200)}${params.expression.length > 200 ? "..." : ""}`);
-      const view = _ensureBrowserForSession(params.sessionPath);
-      const result = await view.webContents.executeJavaScript(params.expression);
-      const serialized = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      return { value: serialized || "undefined" };
+      console.log(`[browser:evaluate] expressionLength=${params.expression.length}`);
+      return await _withLiveWebContents(params.sessionPath, async (wc) => {
+        const result = await wc.executeJavaScript(params.expression);
+        const serialized = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+        return { value: serialized || "undefined" };
+      });
     }
 
     // ── show ──（按 sessionPath 切换显示的 view 并弹出窗口）
     case "show": {
       const sp = params.sessionPath;
-      const view = sp ? _browserViews.get(sp) : _browserWebView;
+      const view = sp ? _getViewForSession(sp) : _browserWebView;
       if (!view) return {};
 
       // 如果不是当前活跃 view，先切换
@@ -1851,7 +2020,8 @@ async function handleBrowserCommand(cmd, params) {
     case "destroyView": {
       const sp = params.sessionPath;
       if (sp && _browserViews.has(sp)) {
-        const view = _browserViews.get(sp);
+        const view = _getViewForSession(sp);
+        if (!view) return {};
         if (view === _browserWebView) {
           if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
             try { browserViewerWindow.contentView.removeChildView(view); } catch {}
@@ -1863,7 +2033,7 @@ async function handleBrowserCommand(cmd, params) {
             browserViewerWindow.hide();
           }
         }
-        view.webContents.close();
+        try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
         _browserViews.delete(sp);
       }
       return {};
@@ -1892,11 +2062,12 @@ function setupBrowserCommands() {
       try { msg = JSON.parse(data); } catch { return; }
       if (msg?.type !== "browser-cmd") return;
       const { id, cmd, params } = msg;
-      const _bLog = (line) => { try { require("fs").appendFileSync(require("path").join(hanakoHome, "browser-cmd.log"), `${new Date().toISOString()} ${line}\n`); } catch {} };
+      const _bLog = (line) => { try { require("fs").appendFileSync(require("path").join(hanakoHome, "browser-cmd.log"), `${new Date().toISOString()} ${redactMainLogText(line)}\n`); } catch {} };
       _bLog(`→ received cmd=${cmd} id=${id}`);
       try {
         const result = await handleBrowserCommand(cmd, params || {});
-        _bLog(`✓ cmd=${cmd} result=${JSON.stringify(result).slice(0, 200)} wsReady=${ws.readyState}`);
+        const resultLength = JSON.stringify(result).length;
+        _bLog(`✓ cmd=${cmd} resultLength=${resultLength} wsReady=${ws.readyState}`);
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: "browser-result", id, result }));
           _bLog(`✓ sent result`);
@@ -1924,6 +2095,7 @@ function setupBrowserCommands() {
 // ── 创建 Onboarding 窗口 ──
 // query: 可选的 URL 参数，如 { skipToTutorial: "1" } 或 { preview: "1" }
 function createOnboardingWindow(query = {}) {
+  const initialTheme = themeRegistry.DEFAULT_THEME;
   onboardingWindow = new BrowserWindow({
     width: 560,
     height: 780,
@@ -1931,7 +2103,7 @@ function createOnboardingWindow(query = {}) {
     frame: false,
     title: "Hanako",
     ...titleBarOpts({ x: 16, y: 16 }),
-    backgroundColor: "#F4F0E4",
+    backgroundColor: getThemeBackgroundColor(initialTheme),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.cjs"),
@@ -1939,6 +2111,7 @@ function createOnboardingWindow(query = {}) {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(onboardingWindow, initialTheme);
 
   loadWindowURL(onboardingWindow, "onboarding", { query });
 
@@ -1971,7 +2144,51 @@ const SCREENSHOT_THEMES = {
   "sakura-light-desktop":    { width: 880, backgroundColor: "#8ABDCE" },
 };
 
+const SCREENSHOT_CAPTURE_SCALE = 2;
 const SCREENSHOT_MAX_SEGMENT = 4000;
+const SCREENSHOT_SEGMENT_SCREEN_MARGIN = 96;
+
+function resolveScreenshotMaxSegmentHeight(screenApi) {
+  let workAreaHeight = null;
+  try {
+    const display = screenApi?.getPrimaryDisplay?.();
+    const height = display?.workArea?.height || display?.bounds?.height;
+    if (Number.isFinite(height) && height > 0) {
+      workAreaHeight = Math.floor(height);
+    }
+  } catch { /* keep default cap */ }
+
+  if (!workAreaHeight) return SCREENSHOT_MAX_SEGMENT;
+
+  const stableHeight = workAreaHeight - SCREENSHOT_SEGMENT_SCREEN_MARGIN;
+  const cappedHeight = stableHeight > 0 ? stableHeight : workAreaHeight;
+  return Math.max(1, Math.min(SCREENSHOT_MAX_SEGMENT, cappedHeight));
+}
+
+function stitchScreenshotSegments(segments, scale) {
+  const parts = segments.map((seg) => PNG.sync.read(seg.toPNG({ scaleFactor: scale })));
+  if (parts.length === 0) {
+    throw new Error("No screenshot segments captured");
+  }
+
+  const width = parts[0].width;
+  let height = 0;
+  for (const part of parts) {
+    if (part.width !== width) {
+      throw new Error(`Screenshot segment width changed during capture: expected ${width}px, got ${part.width}px`);
+    }
+    height += part.height;
+  }
+
+  const full = new PNG({ width, height });
+  let yOffset = 0;
+  for (const part of parts) {
+    part.data.copy(full.data, yOffset * width * 4);
+    yOffset += part.height;
+  }
+
+  return PNG.sync.write(full);
+}
 
 let _screenshotWin = null;
 
@@ -2138,7 +2355,7 @@ function buildScreenshotHTML(payload) {
 
 async function screenshotCapture(htmlContent, width) {
   const offscreen = getScreenshotWindow();
-  const scale = 2;
+  const scale = SCREENSHOT_CAPTURE_SCALE;
 
   offscreen.setSize(width, 100);
 
@@ -2164,8 +2381,9 @@ async function screenshotCapture(htmlContent, width) {
     `);
 
     let pngBuffer;
+    const maxSegmentHeight = resolveScreenshotMaxSegmentHeight(screen);
 
-    if (totalHeight <= SCREENSHOT_MAX_SEGMENT) {
+    if (totalHeight <= maxSegmentHeight) {
       offscreen.setSize(width, totalHeight);
       await new Promise(r => setTimeout(r, 200));
       const image = await offscreen.webContents.capturePage({ x: 0, y: 0, width, height: totalHeight }, { stayHidden: true });
@@ -2174,7 +2392,7 @@ async function screenshotCapture(htmlContent, width) {
       const segments = [];
       let captured = 0;
       while (captured < totalHeight) {
-        const segH = Math.min(SCREENSHOT_MAX_SEGMENT, totalHeight - captured);
+        const segH = Math.min(maxSegmentHeight, totalHeight - captured);
         offscreen.setSize(width, segH);
         await offscreen.webContents.executeJavaScript(`window.scrollTo(0, ${captured})`);
         await new Promise(r => setTimeout(r, 300));
@@ -2183,35 +2401,7 @@ async function screenshotCapture(htmlContent, width) {
         captured += segH;
       }
 
-      const actualWidth = width * scale;
-      const actualTotalHeight = totalHeight * scale;
-      const fullBitmap = Buffer.alloc(actualWidth * actualTotalHeight * 4);
-      let yOffset = 0;
-
-      for (const seg of segments) {
-        const bitmap = seg.toBitmap({ scaleFactor: scale });
-        const partRowBytes = actualWidth * 4;
-        if (bitmap.length % partRowBytes !== 0) {
-          throw new Error(`Unexpected screenshot segment bitmap size: ${bitmap.length} bytes for row ${partRowBytes}`);
-        }
-        const partHeight = bitmap.length / partRowBytes;
-        const rowsToCopy = Math.min(partHeight, actualTotalHeight - yOffset);
-        for (let row = 0; row < rowsToCopy; row++) {
-          bitmap.copy(
-            fullBitmap,
-            (yOffset + row) * partRowBytes,
-            row * partRowBytes,
-            row * partRowBytes + partRowBytes
-          );
-        }
-        yOffset += rowsToCopy;
-      }
-
-      const fullImage = nativeImage.createFromBitmap(fullBitmap, {
-        width: actualWidth,
-        height: actualTotalHeight,
-      });
-      pngBuffer = fullImage.toPNG();
+      pngBuffer = stitchScreenshotSegments(segments, scale);
     }
 
     return pngBuffer;
@@ -2240,6 +2430,8 @@ wrapIpcHandler("check-update", () => {
   }
   return null;
 });
+wrapIpcHandler("get-auto-launch-status", () => getAutoLaunchStatus({ app }));
+wrapIpcHandler("set-auto-launch-enabled", (_event, enabled) => setAutoLaunchEnabled({ app, enabled: enabled === true }));
 
 wrapIpcBestEffortHandler("open-settings", (_event, tab, theme) => createSettingsWindow(tab, theme));
 
@@ -2281,8 +2473,7 @@ const _viewerWindows = new Map(); // windowId -> BrowserWindow
 wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
   if (!data?.filePath || !path.isAbsolute(data.filePath)) return null;
 
-  const isDark = nativeTheme.shouldUseDarkColors;
-  const { concrete: theme } = themeRegistry.resolveSavedTheme('auto', isDark);
+  const theme = resolveConcreteTheme('auto');
 
   const win = new BrowserWindow({
     width: 720,
@@ -2291,7 +2482,7 @@ wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
     minHeight: 300,
     title: data.title || "Viewer",
     ...framelessWindowOpts(),
-    backgroundColor: (themeRegistry.THEMES[theme] || themeRegistry.THEMES[themeRegistry.DEFAULT_THEME]).backgroundColor,
+    backgroundColor: getThemeBackgroundColor(theme),
     hasShadow: true,
     show: true,
     acceptFirstMouse: true,
@@ -2301,6 +2492,7 @@ wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
       nodeIntegration: false,
     },
   });
+  applyWindowThemeColors(win, theme);
 
   const windowId = win.id;
   _viewerWindows.set(windowId, win);
@@ -2327,6 +2519,11 @@ wrapIpcBestEffortHandler("viewer-close", (event) => {
   // 由 viewer 窗口内"关闭"按钮触发；关闭发起窗口自身
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win && !win.isDestroyed()) win.close();
+});
+
+wrapIpcOn("window-theme-changed", (event, theme) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  applyWindowThemeColors(win, theme);
 });
 
 // 设置窗口 → 主窗口的消息转发
@@ -2419,12 +2616,12 @@ wrapIpcBestEffortHandler("save-file-as", async (event, options = {}) => {
   return result.filePath;
 });
 
-// 选择附件文件（多选，支持文件和文件夹）
+// Select attachment files (multi-file; Windows/Linux do not support selecting files and folders in one dialog)
 wrapIpcBestEffortHandler("select-files", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return [];
   const result = await dialog.showOpenDialog(win, {
-    properties: ["openFile", "openDirectory", "multiSelections"],
+    properties: ["openFile", "multiSelections"],
     title: mt("dialog.selectFiles", null, "Select Files"),
   });
   if (result.canceled || !result.filePaths.length) return [];
@@ -2853,12 +3050,12 @@ wrapIpcHandler("window-is-maximized", (event) => {
 
 // 前端初始化完成后调用，关闭 splash / onboarding，显示主窗口
 wrapIpcBestEffortHandler("app-ready", () => {
-  if (mainWindow) {
+  if (mainWindow && !_startHiddenAtLogin) {
     mainWindow.show();
   }
 
   // 首次启动时请求通知权限（macOS）
-  if (process.platform === "darwin" && Notification.isSupported()) {
+  if (!_startHiddenAtLogin && process.platform === "darwin" && Notification.isSupported()) {
     const settings = systemPreferences.getNotificationSettings?.();
     const status = settings?.authorizationStatus;
     if (settings && status === "not-determined") {
@@ -2881,8 +3078,13 @@ wrapIpcBestEffortHandler("app-ready", () => {
 // ── App 生命周期 ──
 app.whenReady().then(async () => {
   try {
-    // 1. 立刻显示启动窗口，同时异步获取 login shell PATH
-    createSplashWindow();
+    migrateSetupComplete();
+    _startHiddenAtLogin = getAutoLaunchStatus({ app }).openedAtLogin === true && isSetupComplete();
+
+    // 1. 立刻显示启动窗口，同时异步获取 login shell PATH。登录项后台启动时跳过 splash。
+    if (!_startHiddenAtLogin) {
+      createSplashWindow();
+    }
     const splashShownAt = Date.now();
     await resolveLoginShellPath();
 
@@ -2893,16 +3095,18 @@ app.whenReady().then(async () => {
     monitorServer();
     setupBrowserCommands();
     createTray();
+    if (_startHiddenAtLogin && process.platform === "darwin") {
+      app.dock.hide();
+    }
 
-    // 3. 确保 splash 至少显示 3 秒
+    // 3. 确保 splash 至少显示 3 秒；登录项后台启动没有 splash，也不需要等待
     const elapsed = Date.now() - splashShownAt;
     const minSplashMs = 3000;
-    if (elapsed < minSplashMs) {
+    if (splashWindow && elapsed < minSplashMs) {
       await new Promise(r => setTimeout(r, minSplashMs - elapsed));
     }
 
     // 4. 检测是否需要 onboarding
-    migrateSetupComplete();
     if (isSetupComplete()) {
       // 已完成配置：直接创建主窗口
       createMainWindow();
@@ -3068,13 +3272,13 @@ app.on("before-quit", async (event) => {
 process.on('uncaughtException', (err) => {
   if (err.code === 'EPIPE' || err.code === 'ERR_IPC_CHANNEL_CLOSED') return;
   const traceId = Math.random().toString(16).slice(2, 10);
-  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] uncaughtException: ${err.message}`);
-  console.error(`[ErrorBus][${traceId}] ${err.stack || err.message}`);
+  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] uncaughtException: ${redactMainLogText(err.message)}`);
+  console.error(`[ErrorBus][${traceId}] ${redactMainLogText(err.stack || err.message)}`);
 });
 
 process.on('unhandledRejection', (reason) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
   const traceId = Math.random().toString(16).slice(2, 10);
-  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] unhandledRejection: ${err.message}`);
-  console.error(`[ErrorBus][${traceId}] ${err.stack || err.message}`);
+  console.error(`[ErrorBus][${err.code || 'UNKNOWN'}][${traceId}] unhandledRejection: ${redactMainLogText(err.message)}`);
+  console.error(`[ErrorBus][${traceId}] ${redactMainLogText(err.stack || err.message)}`);
 });

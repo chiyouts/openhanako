@@ -5,13 +5,15 @@
  * 不用 Virtuoso，不用 Activity，不用快照，不用任何花活。
  */
 
-import { memo, useRef, useEffect, useState, useCallback } from 'react';
+import { memo, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useStore } from '../../stores';
 import { loadMoreMessages } from '../../stores/session-actions';
 
 const EMPTY_ITEMS: ChatListItem[] = [];
 import type { ChatListItem } from '../../stores/chat-types';
 import { ChatTranscript } from './ChatTranscript';
+import { ChatTimelineNavigator } from './ChatTimelineNavigator';
+import { buildTimelineAnchors } from './timeline-anchors';
 import styles from './Chat.module.css';
 
 const MAX_ALIVE = 5;
@@ -76,7 +78,16 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
   const sessionAgentId = useStore(s => s.sessions.find(se => se.path === path)?.agentId ?? null);
   const ref = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const messageElementsRef = useRef(new Map<string, HTMLDivElement>());
   const isAtBottom = useRef(true);
+  const timelineAnchors = useMemo(() => buildTimelineAnchors(items), [items]);
+  const registerMessageElement = useCallback((messageId: string, element: HTMLDivElement | null) => {
+    if (element) {
+      messageElementsRef.current.set(messageId, element);
+    } else {
+      messageElementsRef.current.delete(messageId);
+    }
+  }, []);
 
   // 判断是否在底部
   const checkAtBottom = () => {
@@ -180,33 +191,46 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
 
   return (
     <div
-      ref={ref}
-      className={styles.sessionPanel}
+      className={styles.sessionShell}
       style={{
         visibility: active ? 'visible' : 'hidden',
         zIndex: active ? 1 : 0,
         pointerEvents: active ? 'auto' : 'none',
       }}
     >
-      <div ref={contentRef} className={styles.sessionMessages}>
-        {hasMore && (
-          <div className={styles.loadMoreHint}>
-            {loadingMore ? '...' : ''}
-          </div>
-        )}
-        <ChatTranscript items={items} sessionPath={path} agentId={sessionAgentId} />
-        {isSessionStreaming && (
-          <div className={styles.typingIndicator} />
-        )}
-        <div className={styles.sessionFooter} />
+      <div ref={ref} className={styles.sessionPanel}>
+        <div ref={contentRef} className={styles.sessionMessages}>
+          {hasMore && (
+            <div className={styles.loadMoreHint}>
+              {loadingMore ? '...' : ''}
+            </div>
+          )}
+          <ChatTranscript
+            items={items}
+            sessionPath={path}
+            agentId={sessionAgentId}
+            registerMessageElement={registerMessageElement}
+          />
+          {isSessionStreaming && (
+            <div className={styles.typingIndicator} />
+          )}
+          <div className={styles.sessionFooter} />
+        </div>
       </div>
+      <ChatTimelineNavigator
+        anchors={timelineAnchors}
+        scrollRef={ref}
+        contentRef={contentRef}
+        messageElementsRef={messageElementsRef}
+        active={active}
+      />
     </div>
   );
 });
 
 // ── ScrollToBottom 按钮 ──
 
-let _scrollBtn = { el: null as HTMLElement | null, visible: false, listeners: [] as (() => void)[] };
+const _scrollBtn = { el: null as HTMLElement | null, visible: false, listeners: [] as (() => void)[] };
 
 function ScrollToBottomBtn() {
   const [visible, setVisible] = useState(false);

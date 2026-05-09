@@ -1,10 +1,10 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+﻿import { useState, useMemo } from 'react';
 import { hanaUrl } from '../../hooks/use-hana-fetch';
-import type { PluginCardDetails } from '../../types';
+import { usePluginIframe } from '../../hooks/use-plugin-iframe';
 import { useStore } from '../../stores';
+import type { PluginCardDetails } from '../../types';
 import s from './PluginCardBlock.module.css';
 import { DEFAULT_THEME } from '../../../shared/theme-registry.cjs';
-import { getPluginIframeOrigin, isTrustedPluginIframeMessage } from '../../utils/plugin-iframe-security';
 
 interface Props {
   card: PluginCardDetails;
@@ -13,6 +13,7 @@ interface Props {
 
 const MAX_W = 400;
 const MAX_H = 600;
+const EMPTY_CAPABILITY_GRANTS: readonly string[] = [];
 
 function parseRatio(raw?: string): number {
   if (!raw) return 0;
@@ -21,19 +22,14 @@ function parseRatio(raw?: string): number {
 }
 
 export function PluginCardBlock({ card, agentId }: Props) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
-  const setMediaViewer = useStore((state) => state.setMediaViewer);
+  const capabilityGrants = useStore(st => st.pluginUiHostCapabilities[card.pluginId] ?? EMPTY_CAPABILITY_GRANTS);
 
-  // Compute initial size from aspectRatio hint; 0 means unknown
   const ratio = parseRatio(card.aspectRatio);
   const defaultW = MAX_W;
   const defaultH = ratio > 0
     ? Math.min(Math.round(defaultW / ratio), MAX_H)
-    : Math.round(defaultW * 0.75); // 4:3 fallback for old cards
-
-  const [size, setSize] = useState({ w: defaultW, h: defaultH });
+    : Math.round(defaultW * 0.75);
 
   const isIframe = !card.type || card.type === 'iframe';
 
@@ -45,46 +41,16 @@ export function PluginCardBlock({ card, agentId }: Props) {
     const sep = base.includes('?') ? '&' : '?';
     return `${base}${sep}agentId=${encodeURIComponent(agentId || '')}&hana-theme=${encodeURIComponent(theme)}&hana-css=${encodeURIComponent(cssUrl)}`;
   }, [card.pluginId, card.route, isIframe, agentId]);
-  const expectedOrigin = useMemo(() => getPluginIframeOrigin(src), [src]);
 
-  useEffect(() => {
-    if (!isIframe) return;
-    setReady(false);
-    setError(false);
-    const onMessage = (e: MessageEvent) => {
-      if (!isTrustedPluginIframeMessage(e, iframeRef.current?.contentWindow, expectedOrigin)) return;
-      if (e.data?.type === 'ready') setReady(true);
-      if (e.data?.type === 'resize-request') {
-        const { width, height } = e.data.payload || {};
-        setSize(prev => ({
-          w: typeof width === 'number' && width >= 50 ? Math.min(width, MAX_W) : prev.w,
-          h: typeof height === 'number' && height >= 30 ? Math.min(height, MAX_H) : prev.h,
-        }));
-      }
-      if (e.data?.type === 'open-media-viewer') {
-        const payload = e.data.payload || {};
-        if (!payload.url || !payload.name || !payload.kind) return;
-        const normalizedUrl = new URL(String(payload.url), src || window.location.href).toString();
-        const fileId = `plugin-card:${card.pluginId}:${normalizedUrl}`;
-        setMediaViewer({
-          files: [{
-            id: fileId,
-            kind: payload.kind as 'image' | 'svg' | 'video',
-            source: 'desk',
-            name: payload.name,
-            path: '',
-            remoteUrl: normalizedUrl,
-            ext: payload.ext,
-          }],
-          currentId: fileId,
-          origin: 'desk',
-        });
-      }
-    };
-    window.addEventListener('message', onMessage);
-    const timeout = setTimeout(() => setReady(true), 5000);
-    return () => { window.removeEventListener('message', onMessage); clearTimeout(timeout); };
-  }, [isIframe, expectedOrigin, src, card.pluginId, setMediaViewer]);
+  const { iframeRef, status, size } = usePluginIframe(isIframe ? src : null, {
+    pluginId: card.pluginId,
+    agentId,
+    slot: 'card',
+    capabilityGrants,
+    initialSize: { width: defaultW, height: defaultH },
+    readyOnTimeout: true,
+  });
+  const ready = status === 'ready';
 
   if (!isIframe || error) {
     if (!card.description) return null;
@@ -103,7 +69,11 @@ export function PluginCardBlock({ card, agentId }: Props) {
         className={s.iframe}
         src={src}
         sandbox="allow-scripts allow-same-origin"
-        style={{ width: size.w, height: size.h, opacity: ready ? 1 : 0.3 }}
+        style={{
+          width: size.width ?? defaultW,
+          height: size.height ?? defaultH,
+          opacity: ready ? 1 : 0.3,
+        }}
         onError={() => setError(true)}
       />
     </div>

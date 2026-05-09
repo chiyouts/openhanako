@@ -6,6 +6,17 @@ vi.mock('../../stores', () => ({
     getState: () => ({
       serverPort: '3210',
       serverToken: 'test-token-123',
+      activeServerConnection: {
+        serverId: 'local',
+        spaceId: 'local',
+        label: 'Local Hana',
+        baseUrl: 'http://127.0.0.1:3210',
+        wsUrl: 'ws://127.0.0.1:3210',
+        token: 'test-token-123',
+        authState: 'paired',
+        trustState: 'local',
+        capabilities: ['chat', 'resources', 'tools'],
+      },
     }),
   },
 }));

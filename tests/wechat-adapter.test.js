@@ -4,6 +4,10 @@ vi.mock("../lib/debug-log.js", () => ({
   debugLog: () => null,
 }));
 
+import {
+  decodeIlinkMediaAesKey,
+  encodeIlinkMediaAesKey,
+} from "../lib/bridge/wechat-ilink-media-crypto.js";
 import { createWechatAdapter } from "../lib/bridge/wechat-adapter.js";
 
 function jsonResponse(body) {
@@ -71,7 +75,7 @@ describe("createWechatAdapter", () => {
   it.each([
     ["image/png", "image.png", 2, "image_item"],
     ["text/plain", "note.txt", 4, "file_item"],
-  ])("uploads %s buffers and sends the matching iLink message item", async (mime, filename, itemType, itemKey) => {
+  ])("uploads %s buffers and sends the matching OpenClaw-compatible iLink message item", async (mime, filename, itemType, itemKey) => {
     let getUpdatesCount = 0;
     const fetchMock = vi.fn(async (url, options = {}) => {
       const requestUrl = String(url);
@@ -123,10 +127,24 @@ describe("createWechatAdapter", () => {
     expect(payload.msg.context_token).toBe("ctx-1");
     expect(item.type).toBe(itemType);
     expect(item[itemKey]).toBeTruthy();
+    const media = item[itemKey].media;
+    expect(Buffer.from(media.aes_key, "base64").toString("ascii")).toMatch(/^[0-9a-f]{32}$/);
+    expect(decodeIlinkMediaAesKey(media.aes_key)).toHaveLength(16);
     if (itemKey === "file_item") {
       expect(item.file_item.file_name).toBe(filename);
     }
 
     adapter.stop();
+  });
+
+  it("encodes outbound media aes keys as base64 hex strings and still decodes legacy raw-key base64", () => {
+    const aesKeyHex = "00112233445566778899aabbccddeeff";
+    const wireKey = encodeIlinkMediaAesKey(aesKeyHex);
+
+    expect(Buffer.from(wireKey, "base64").toString("ascii")).toBe(aesKeyHex);
+    expect(decodeIlinkMediaAesKey(wireKey).toString("hex")).toBe(aesKeyHex);
+
+    const legacyRawWireKey = Buffer.from(aesKeyHex, "hex").toString("base64");
+    expect(decodeIlinkMediaAesKey(legacyRawWireKey).toString("hex")).toBe(aesKeyHex);
   });
 });

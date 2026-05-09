@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let execute;
 let name;
@@ -95,8 +95,45 @@ describe("generate-image tool adapter resolution", () => {
     expect(registry.get).toHaveBeenCalledWith("fake-provider");
   });
 
+  it("uses last registered adapter when no provider is specified", async () => {
+    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen();
+    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+
+    await execute({ prompt: "a cat" }, ctx);
+    expect(registry.getByType).toHaveBeenCalledWith("image");
+  });
+
+  it("falls back to the newest credentialed image adapter when a later adapter is unavailable", async () => {
+    const openaiAdapter = makeAdapter({
+      id: "openai",
+      submit: vi.fn(async () => ({ taskId: "task-openai", files: ["img.png"] })),
+    });
+    const codexAdapter = makeAdapter({
+      id: "openai-codex-oauth",
+      checkAuth: vi.fn(async () => ({ ok: false, message: "no_credentials" })),
+      submit: vi.fn(async () => {
+        throw new Error("not logged in");
+      }),
+    });
+    const registry = {
+      get: vi.fn(),
+      getByType: vi.fn(() => [openaiAdapter, codexAdapter]),
+    };
+    const store = { add: vi.fn(), update: vi.fn() };
+    const poller = { add: vi.fn() };
+    const getWritableGeneratedDir = vi.fn(async () => "/tmp/generated");
+    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+
+    const result = await execute({ prompt: "a desk lamp" }, ctx);
+
+    expect(openaiAdapter.submit).toHaveBeenCalledOnce();
+    expect(codexAdapter.submit).not.toHaveBeenCalled();
+    expect(result.details.card.type).toBe("iframe");
+  });
+
   it("maps a custom OpenAI-compatible provider to the OpenAI adapter", async () => {
     const mediaGen = makeMediaGen({
+      id: "openai",
       submit: vi.fn(async () => ({ taskId: "custom-1" })),
     });
     mediaGen.registry.get.mockImplementation((id) => (id === "openai" ? mediaGen.adapter : undefined));
@@ -120,6 +157,7 @@ describe("generate-image tool adapter resolution", () => {
 
   it("infers provider from the configured default image model", async () => {
     const mediaGen = makeMediaGen({
+      id: "openai",
       submit: vi.fn(async () => ({ taskId: "default-1" })),
     });
     mediaGen.registry.get.mockImplementation((id) => (id === "openai" ? mediaGen.adapter : undefined));

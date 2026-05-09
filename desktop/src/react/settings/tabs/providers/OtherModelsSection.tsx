@@ -5,7 +5,7 @@ import {
   t, lookupModelMeta, formatContext, autoSaveGlobalModels,
 } from '../../helpers';
 import { loadSettingsConfig } from '../../actions';
-import { SelectWidget } from '../../widgets/SelectWidget';
+import { SelectWidget } from '@/ui';
 import { ModelWidget } from '../../widgets/ModelWidget';
 import { KeyInput } from '../../widgets/KeyInput';
 import { Toggle } from '../../widgets/Toggle';
@@ -207,6 +207,7 @@ export function OtherModelsSection({ providers }: { providers: Record<string, { 
             <ToolModelTestBtn modelRef={globalModelsConfig?.models?.vision || ''} />
           </div>
           <span className={styles['settings-form-hint']}>{t('settings.api.visionModelHint')}</span>
+          <span className={styles['settings-form-hint']}>{t('settings.api.visionModelMissingHint')}</span>
         </div>
       </div>
       <div className={styles['settings-form-grid']}>

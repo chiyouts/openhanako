@@ -21,6 +21,7 @@ export interface HistoryApiResponse {
     thinking?: string;
     toolCalls?: Array<{ name: string; args?: Record<string, unknown> }>;
     images?: Array<{ data: string; mimeType: string }>;
+    timestamp?: number | string | null;
   }>;
   blocks?: Array<any>;
   // COMPAT(v0.98/v0.127, remove no earlier than v0.133):
@@ -122,6 +123,15 @@ function normalizeBlocks(data: HistoryApiResponse): Array<any> {
 
 // ── 构建 ──
 
+function normalizeHistoryTimestamp(value: number | string | null | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
 export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] {
   const items: ChatListItem[] = [];
 
@@ -135,6 +145,7 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
   for (let i = 0; i < data.messages.length; i++) {
     const m = data.messages[i];
     const id = m.id || `hist-${i}`;
+    const timestamp = normalizeHistoryTimestamp(m.timestamp);
 
     if (m.role === 'user') {
       // strip steer 前缀（内部标记，不应展示给用户）
@@ -145,7 +156,7 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         continue;
       }
 
-      const { text, files, attachedImages, deskContext, quotedText } = parseUserAttachments(rawContent);
+      const { text, files, attachedImages, attachedVideos, deskContext, quotedText } = parseUserAttachments(rawContent);
       const fileAtts = files.map(f => ({
         path: f.path,
         name: f.name,
@@ -169,7 +180,12 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         base64Data: img.data,
         mimeType: img.mimeType,
       }));
-      const allAtts = [...fileAtts, ...markerImageAtts, ...imageAtts];
+      const markerVideoAtts = attachedVideos.map((ref) => ({
+        path: ref.path,
+        name: ref.name,
+        isDir: false,
+      }));
+      const allAtts = [...fileAtts, ...markerImageAtts, ...markerVideoAtts, ...imageAtts];
       const msg: ChatMessage = {
         id,
         role: 'user',
@@ -178,6 +194,7 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         attachments: allAtts.length ? allAtts : undefined,
         deskContext: deskContext || undefined,
         quotedText: quotedText || undefined,
+        timestamp,
       };
       items.push({ type: 'message', data: msg });
     } else if (m.role === 'assistant') {
@@ -226,6 +243,7 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
       }
 
       const msg: ChatMessage = { id, role: 'assistant', blocks };
+      if (timestamp !== undefined) msg.timestamp = timestamp;
       items.push({ type: 'message', data: msg });
     }
   }

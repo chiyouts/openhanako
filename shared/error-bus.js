@@ -1,5 +1,8 @@
 // shared/error-bus.js
 import { AppError } from './errors.js';
+import redactor from './log-redactor.cjs';
+
+const { redactLogText, redactLogValue } = redactor;
 
 export class ErrorBus {
   constructor() {
@@ -62,7 +65,10 @@ export class ErrorBus {
 
   _log(entry) {
     const { error } = entry;
-    console.error(`[ErrorBus][${error.code}][${error.traceId}] ${error.message}`, error.context);
+    console.error(
+      `[ErrorBus][${error.code}][${error.traceId}] ${redactLogText(error.message)}`,
+      redactLogValue(error.context),
+    );
   }
 }
 

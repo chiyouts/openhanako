@@ -23,7 +23,12 @@ export function PluginWidgetView({ pluginId }: Props) {
     return `${fullUrl}${sep}agentId=${encodeURIComponent(agentId || '')}&hana-theme=${encodeURIComponent(theme)}&hana-css=${encodeURIComponent(cssUrl)}`;
   }, [widget?.routeUrl, agentId]);
 
-  const { iframeRef, status, retry } = usePluginIframe(iframeSrc);
+  const { iframeRef, status, retry } = usePluginIframe(iframeSrc, {
+    pluginId,
+    agentId,
+    slot: 'widget',
+    capabilityGrants: widget?.hostCapabilities ?? [],
+  });
 
   if (!widget) {
     return <div className={s.error}>Widget not found</div>;

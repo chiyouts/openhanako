@@ -149,12 +149,35 @@ export async function execute(input, toolCtx) {  // required
 
 - Automatically namespaced: `pluginId_name` (e.g. `my-plugin_search`)
 - Restricted plugins' `toolCtx.bus` only has `emit/subscribe/request`, not `handle`
+- New plugins can use `defineTool()` from `@hana/plugin-runtime` for types and default parameters. The current static `tools/*.js` loader still reads named exports.
+
+```js
+import { defineTool } from '@hana/plugin-runtime';
+
+const tool = defineTool({
+  name: "search",
+  description: "Search project data",
+  parameters: {
+    type: "object",
+    properties: { query: { type: "string" } },
+    required: ["query"]
+  },
+  async execute(input, ctx) {
+    ctx.log.info("search", input.query);
+    return `results for ${input.query}`;
+  }
+});
+
+export const { name, description, parameters, execute } = tool;
+```
 
 #### Media Delivery
 
 When a tool needs to deliver files, first stage the local file as a `SessionFile` for the current session, then return the staged media item through `details.media.items`:
 
 ```js
+import { createMediaDetails } from "@hana/plugin-runtime";
+
 const staged = toolCtx.stageFile({
   sessionPath: toolCtx.sessionPath,
   filePath: "/path/to/image.png",
@@ -163,11 +186,7 @@ const staged = toolCtx.stageFile({
 
 return {
   content: [{ type: "text", text: "Image generated" }],
-  details: {
-    media: {
-      items: [staged.mediaItem],
-    },
-  },
+  details: createMediaDetails([staged]),
 };
 ```
 
@@ -380,17 +399,66 @@ Declare in `manifest.json` under `contributes`:
 - Hovering over the tab shows the plugin's full name (tooltip)
 - When there are more than 5 tabs, extras are collapsed into an overflow dropdown menu; users can drag to reorder
 
-Plugin pages are rendered via iframe. The plugin must send a handshake signal after loading:
+Plugin pages are rendered via iframe. New plugins should use `@hana/plugin-sdk` for handshake and host requests:
+
+```js
+import { hana } from '@hana/plugin-sdk';
+
+hana.ready();
+hana.ui.resize({ height: 320 });
+await hana.toast.show({ message: 'Refreshed', type: 'success' });
+await hana.external.open('https://example.com');
+await hana.clipboard.writeText('Copied text');
+```
+
+The lower-level `hana.host.request(type, payload)` remains available for future or experimental capabilities. Prefer typed helpers for stable capabilities.
+
+For compatibility, the host still accepts the legacy handshake:
 
 ```js
 window.parent.postMessage({ type: 'ready' }, '*');
 ```
+
+The host accepts messages only from the current iframe window and matching origin. SDK requests go through the capability registry. Current built-in capabilities include `toast.show` (no grant required), `external.open` (grant required), and `clipboard.writeText` (grant required).
+
+Grant-required iframe host capabilities must be declared in the manifest:
+
+```json
+{
+  "manifestVersion": 1,
+  "ui": {
+    "hostCapabilities": ["external.open", "clipboard.writeText"]
+  }
+}
+```
+
+Sensitive capabilities that are not declared return `CAPABILITY_DENIED`. Unknown capability names are ignored at load time; `toast.show` does not need to be declared.
 
 The host appends `hana-theme` and `hana-css` query parameters to the iframe URL. Plugins can optionally reference the theme CSS for visual consistency:
 
 ```html
 <link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
 ```
+
+React plugin UIs should use `@hana/plugin-components`. It provides Button, IconButton, TextInput, Textarea, Select, Switch, SettingRow, CardShell, List, EmptyState, and related primitives that match Hana's current controls:
+
+```tsx
+import { Button, CardShell, HanaThemeProvider, SettingRow, Switch } from "@hana/plugin-components";
+import "@hana/plugin-components/styles.css";
+
+export function PluginPanel() {
+  return (
+    <HanaThemeProvider mode="inherit">
+      <CardShell title="Sync">
+        <SettingRow label="Enabled" control={<Switch checked label="On" />} />
+        <Button variant="primary">Run</Button>
+      </CardShell>
+    </HanaThemeProvider>
+  );
+}
+```
+
+`HanaThemeProvider` supports three modes: `inherit` reads host CSS variables and then uses SDK fallback tokens; `hana` pins the UI to a named Hana theme token set; `custom` only overrides explicitly provided tokens and lets missing fields continue through the fallback chain. Components depend only on `hana-plugin-*` classes and CSS variables, not renderer internals.
 
 ### Widget (Sidebar Component) ⚡ full-access
 
@@ -440,17 +508,22 @@ Bundled built-in plugins can register a native settings page shown in the settin
 Most plugins don't need a manifest. Only required for:
 
 - Declaring `trust: "full-access"` for full permissions
+- Declaring iframe UI host capabilities (`ui.hostCapabilities`)
 - Configuration schema (JSON Schema declarations)
 - Plugin metadata (name, version, description for the management UI)
 - Soft dependency declarations
 
 ```json
 {
+  "manifestVersion": 1,
   "id": "my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
   "description": "What this plugin does",
   "trust": "full-access",
+  "ui": {
+    "hostCapabilities": ["external.open"]
+  },
   "contributes": {
     "configuration": { ... }
   },
@@ -466,7 +539,25 @@ Without a manifest, `id` is derived from the directory name, other fields defaul
 
 If a plugin needs persistent connections, scheduled tasks, or bus handlers, create `index.js`:
 
+New plugins should use `definePlugin()` from `@hana/plugin-runtime`. It returns a class-compatible value for the current PluginManager:
+
 ```js
+import { definePlugin } from '@hana/plugin-runtime';
+
+export default definePlugin({
+  async onload(ctx, { register }) {
+    register(ctx.bus.handle("bridge:send", async (payload) => {
+      return { sent: true, payload };
+    }));
+  },
+});
+```
+
+The traditional class form is still supported:
+
+```js
+import { HANA_BUS_SKIP } from "@hana/plugin-runtime";
+
 export default class MyPlugin {
   async onload() {
     // ctx is injected by PluginManager:
@@ -481,7 +572,7 @@ export default class MyPlugin {
     // Resources registered via register() are auto-cleaned on unload (reverse order)
     this.register(
       this.ctx.bus.handle("bridge:send", async (payload) => {
-        if (payload.platform !== "feishu") return EventBus.SKIP;
+        if (payload.platform !== "feishu") return HANA_BUS_SKIP;
         await this.sendToFeishu(payload);
         return { sent: true };
       })
@@ -500,36 +591,41 @@ export default class MyPlugin {
 
 ## Bus Communication (bus.request / bus.handle)
 
-Inter-plugin communication uses EventBus request-response. `bus.handle` requires full-access permission; `bus.request` is available to all plugins.
+Inter-plugin communication uses EventBus request-response. `bus.handle` requires full-access permission; `bus.request` is available to all plugins. New plugins should use `defineBusHandler()`, `requestBus()`, and `HANA_BUS_SKIP` from `@hana/plugin-runtime` so handler types, request arguments, and chained skip semantics come from the SDK instead of hand-written conventions.
 
 ```js
+import { defineBusHandler, HANA_BUS_SKIP, requestBus } from "@hana/plugin-runtime";
+
 // Plugin A (full-access): register a capability
-this.register(
-  this.ctx.bus.handle("bridge:send", async (payload) => {
-    if (payload.platform !== "telegram") return EventBus.SKIP;
+const bridgeSend = defineBusHandler({
+  type: "bridge:send",
+  async handle(payload) {
+    if (payload.platform !== "telegram") return HANA_BUS_SKIP;
     await telegramBot.send(payload.chatId, payload.text);
     return { sent: true };
-  })
-);
+  },
+});
+
+this.register(this.ctx.bus.handle(bridgeSend.type, (payload) => bridgeSend.handle(payload, this.ctx)));
 
 // Plugin B (any permission): call the capability
 if (this.ctx.bus.hasHandler("bridge:send")) {
-  const result = await this.ctx.bus.request("bridge:send", {
+  const result = await requestBus(this.ctx, "bridge:send", {
     platform: "telegram",
     chatId: "123",
     text: "Hello",
-  });
+  }, { timeout: 5000 });
 }
 ```
 
 **Naming convention**: `domain:action`, colon-separated. E.g. `bridge:send`, `memory:query`, `timer:schedule`.
 
-**SKIP chain**: Multiple handlers can be registered for the same event type. The system calls them in registration order until one returns a value other than `EventBus.SKIP`. Returning `EventBus.SKIP` means "I don't handle this, pass it on":
+**SKIP chain**: Multiple handlers can be registered for the same event type. The system calls them in registration order until one returns a value other than `HANA_BUS_SKIP`. Returning `HANA_BUS_SKIP` means "I don't handle this, pass it on":
 
 ```js
 this.register(
   this.ctx.bus.handle("bridge:send", async (payload) => {
-    if (payload.platform !== "telegram") return EventBus.SKIP;
+    if (payload.platform !== "telegram") return HANA_BUS_SKIP;
     await telegramBot.send(payload.chatId, payload.text);
     return { sent: true };
   })

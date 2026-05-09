@@ -22,6 +22,9 @@ jobs:
           - os: windows-latest
             target: nsis
             arch: x64
+          - os: ubuntu-latest
+            target: AppImage
+            arch: x64
 
     runs-on: ${{ matrix.os }}
 
@@ -47,6 +50,8 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
             node scripts/build-server.mjs darwin ${{ matrix.arch }}
+          elif [ "$RUNNER_OS" = "Linux" ]; then
+            node scripts/build-server.mjs linux ${{ matrix.arch }}
           else
             node scripts/build-server.mjs win32 ${{ matrix.arch }}
           fi
@@ -56,6 +61,11 @@ jobs:
         shell: bash
         run: |
           HANA_COMPUTER_USE_HELPER_ARCH=${{ matrix.arch }} node scripts/build-computer-use-helper.mjs ${{ matrix.arch }}
+
+      - name: Build Windows sandbox helper
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/build-windows-sandbox-helper.mjs ${{ matrix.arch }}
 
       - name: Build client bundles (main + preload + renderer)
         run: npm run build:client
@@ -142,6 +152,15 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
+      # Linux Preview 打包
+      # AppImage 给下载即用体验，deb 给 Ubuntu/Debian 系安装。
+      - name: Build Linux preview packages
+        if: runner.os == 'Linux'
+        run: |
+          npx electron-builder --linux AppImage deb --${{ matrix.arch }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -150,6 +169,8 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
             dist/latest*.yml
           if-no-files-found: error
 
@@ -264,7 +285,7 @@ jobs:
             exit 1
           fi
 
-      # 单点上传所有 release assets（dmg/zip/exe/yml），blockmap 不上传
+      # 单点上传所有 release assets（dmg/zip/exe/AppImage/deb/yml），blockmap 不上传
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -272,7 +293,7 @@ jobs:
           set -e
 
           echo "=== Uploading installers ==="
-          find artifacts \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) -print0 |
+          find artifacts \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \) -print0 |
             while IFS= read -r -d '' f; do
               echo "  $f"
               gh release upload "${{ github.ref_name }}" "$f" --clobber
@@ -310,6 +331,8 @@ jobs:
           echo "$ASSETS" | grep -qE '^Hanako-.*-macOS-x64\.dmg$' || MISSING+=("macOS-x64.dmg")
           echo "$ASSETS" | grep -qE '^Hanako-.*-macOS-x64\.zip$' || MISSING+=("macOS-x64.zip")
           echo "$ASSETS" | grep -qE '^Hanako-.*-Windows-x64\.exe$' || MISSING+=("Windows-x64.exe")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-Linux-(x64|x86_64)\.AppImage$' || MISSING+=("Linux AppImage")
+          echo "$ASSETS" | grep -qE '^Hanako-.*-Linux-(x64|amd64)\.deb$' || MISSING+=("Linux deb")
 
           # 清洁性检查：不应该有 blockmap 漏进来
           if echo "$ASSETS" | grep -qE '\.blockmap$'; then

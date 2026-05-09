@@ -123,25 +123,27 @@ export class ConfigCoordinator {
 
   /**
    * @param {string} [agentId] - 指定 agent；省略时查主 agent
+   * @returns {string|null} 该 agent 自己显式绑定且仍存在的工作目录
+   */
+  getExplicitHomeFolder(agentId) {
+    const targetId = agentId || this._getPrimaryAgentId();
+    if (!targetId) return null;
+    const agent = this._d.getAgentById(targetId);
+    const folder = agent?.config?.desk?.home_folder;
+    if (folder && fs.existsSync(folder)) return folder;
+    return null;
+  }
+
+  /**
+   * @param {string} [agentId] - 指定 agent；省略时查主 agent
    * @returns {string} 工作目录（保证返回有效路径）
    */
   getHomeFolder(agentId) {
-    // 1. 指定 agent 自己的 config
-    if (agentId) {
-      const agent = this._d.getAgentById(agentId);
-      const folder = agent?.config?.desk?.home_folder;
-      if (folder && fs.existsSync(folder)) return folder;
-    }
+    const explicit = this.getExplicitHomeFolder(agentId);
+    if (explicit) return explicit;
 
-    // 2. 主 agent 的 config
-    const primaryId = this._getPrimaryAgentId();
-    if (primaryId && primaryId !== agentId) {
-      const primary = this._d.getAgentById(primaryId);
-      const folder = primary?.config?.desk?.home_folder;
-      if (folder && fs.existsSync(folder)) return folder;
-    }
-
-    // 3. 显式默认工作区，避免把整个桌面暴露成工作目录
+    // 显式默认工作区，避免把整个桌面暴露成工作目录。
+    // 不从别的 agent 继承 home_folder；跨 agent fallback 会让状态归属变成隐式焦点推导。
     return ensureDefaultWorkspace();
   }
 

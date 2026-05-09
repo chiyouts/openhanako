@@ -25,11 +25,14 @@ const KNOWN_IMAGE_MODELS = {
     { id: "doubao-seedream-5-0-lite-260128", name: "Seedream 5.0 Lite" },
   ],
   openai: [
+    { id: "gpt-image-2", name: "GPT Image 2" },
     { id: "gpt-image-1", name: "GPT Image 1" },
     { id: "gpt-image-1.5", name: "GPT Image 1.5" },
-    { id: "gpt-image-2", name: "GPT Image 2" },
     { id: "gpt-image-1-mini", name: "GPT Image 1 Mini" },
     { id: "dall-e-3", name: "DALL-E 3" },
+  ],
+  "openai-codex-oauth": [
+    { id: "gpt-image-2", name: "GPT Image 2" },
   ],
 };
 
@@ -42,6 +45,7 @@ function streamPipe(nodeStream, writable) {
 
 function catalogKeyForProvider(entry) {
   if (!entry) return null;
+  if (entry.id === "openai-codex-oauth") return "openai-codex-oauth";
   if (isVolcengineImageProvider(entry)) return "volcengine";
   if (entry.id === "openai") return "openai";
   if (!entry.isBuiltin && isOpenAIImageProvider(entry)) return "openai";

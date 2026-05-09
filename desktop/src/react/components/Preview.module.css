@@ -12,8 +12,8 @@
     border-left: 1px solid var(--overlay-light);
     padding-top: 48px;
     overflow: hidden;
-    transition: width 0.28s var(--ease-out),
-                border-color 0.28s var(--ease-out);
+    transition: width var(--duration-slow) var(--ease-out),
+                border-color var(--duration-slow) var(--ease-out);
     z-index: 10;
 }
 
@@ -30,7 +30,7 @@
     height: 100%;
     min-height: 0;
     opacity: 1;
-    transition: opacity 0.18s var(--ease-out);
+    transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 .previewPanelCollapsed .previewPanelInner {
@@ -241,7 +241,7 @@
     color: #fff;
     font-size: 0.88rem;
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: opacity var(--duration-fast);
 }
 
 .previewPanelBody :global(.preview-file-open-btn):hover {
@@ -358,9 +358,9 @@
 }
 
 :global(.cm-link-text) {
-    color: var(--accent);
+    color: var(--link);
     text-decoration: underline;
-    text-decoration-color: var(--accent);
+    text-decoration-color: rgba(var(--link-rgb), 0.55);
     text-underline-offset: 2px;
 }
 
@@ -398,6 +398,43 @@
 :global(.cm-table-widget th[contenteditable]),
 :global(.cm-table-widget td[contenteditable]) {
     cursor: text;
+}
+
+:global(.cm-mermaid-widget) {
+    display: block;
+    margin: var(--space-xs) 0;
+    padding: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--overlay-subtle);
+    cursor: text;
+    overflow-x: auto;
+}
+
+:global(.cm-mermaid-widget:hover),
+:global(.cm-mermaid-widget:focus) {
+    background: var(--overlay-light);
+}
+
+:global(.cm-mermaid-widget .mermaid-source[hidden]) {
+    display: none;
+}
+
+:global(.cm-mermaid-widget .mermaid-rendered) {
+    overflow-x: auto;
+}
+
+:global(.cm-mermaid-widget .mermaid-rendered svg) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+}
+
+:global(.cm-mermaid-widget.is-error .mermaid-rendered) {
+    margin-bottom: var(--space-xs);
+    color: var(--coral);
+    font-size: 0.82em;
 }
 
 /* CSV 表格 widget（编辑器内渲染） */

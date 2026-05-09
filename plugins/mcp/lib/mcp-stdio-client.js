@@ -24,7 +24,7 @@ export class McpStdioClient {
     this._closed = false;
     this.process = spawn(this.server.command, this.server.args || [], {
       cwd: this.server.cwd || undefined,
-      env: { ...process.env, ...(this.server.env || {}) },
+      env: { ...process.env, ...registryEnv(this.server), ...(this.server.env || {}) },
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
     });
@@ -61,13 +61,13 @@ export class McpStdioClient {
         title: "Hana",
         version: "0.1.0",
       },
-    });
+    }, { timeout: requestTimeoutMs(this.server) });
     this.notify("notifications/initialized", {});
     return result;
   }
 
   async listTools() {
-    const result = await this.request("tools/list", {});
+    const result = await this.request("tools/list", {}, { timeout: requestTimeoutMs(this.server) });
     return Array.isArray(result?.tools) ? result.tools : [];
   }
 
@@ -75,7 +75,7 @@ export class McpStdioClient {
     return this.request("tools/call", {
       name,
       arguments: args || {},
-    });
+    }, { timeout: requestTimeoutMs(this.server) });
   }
 
   request(method, params = {}, { timeout = 30_000 } = {}) {
@@ -159,4 +159,31 @@ export class McpStdioClient {
       pending.resolve(message.result);
     }
   }
+}
+
+function registryEnv(server) {
+  const registryUrl = typeof server?.registryUrl === "string" ? server.registryUrl.trim() : "";
+  if (!registryUrl) return {};
+  const command = commandName(server.command);
+  if (command === "npx" || command === "bun" || command === "bunx") {
+    return { NPM_CONFIG_REGISTRY: registryUrl };
+  }
+  if (command === "uv" || command === "uvx") {
+    return {
+      UV_DEFAULT_INDEX: registryUrl,
+      PIP_INDEX_URL: registryUrl,
+    };
+  }
+  return {};
+}
+
+function commandName(command) {
+  const raw = typeof command === "string" ? command.trim() : "";
+  const name = raw.split(/[\\/]/).pop() || raw;
+  return name.replace(/\.exe$/i, "").toLowerCase();
+}
+
+function requestTimeoutMs(server) {
+  const timeout = Number(server?.timeout || 0);
+  return Number.isFinite(timeout) && timeout > 0 ? timeout * 1000 : 30_000;
 }

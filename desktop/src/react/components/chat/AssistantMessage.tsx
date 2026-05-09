@@ -31,9 +31,10 @@ interface Props {
   sessionPath: string;
   agentId?: string | null;
   readOnly?: boolean;
+  messageRef?: (element: HTMLDivElement | null) => void;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ message, showAvatar, sessionPath, agentId, readOnly = false }: Props) {
+export const AssistantMessage = memo(function AssistantMessage({ message, showAvatar, sessionPath, agentId, readOnly = false, messageRef }: Props) {
   const agents = useStore(s => s.agents);
   const globalAgentName = useStore(s => s.agentName) || 'Hanako';
   const globalYuan = useStore(s => s.agentYuan) || 'hanako';
@@ -117,6 +118,7 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
 
   return (
     <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
+         ref={messageRef}
          data-message-id={message.id}>
       {showAvatar && (
         <div className={styles.avatarRow}>

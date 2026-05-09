@@ -15,6 +15,14 @@ export interface AutoUpdateState {
   error: string | null;
 }
 
+export interface AutoLaunchStatus {
+  supported: boolean;
+  openAtLogin: boolean;
+  openedAtLogin: boolean;
+  status: string | null;
+  executableWillLaunchAtLogin?: boolean | null;
+}
+
 // ── 核心数据结构 ──
 
 export interface Session {
@@ -56,8 +64,8 @@ export interface Model {
   isCurrent?: boolean;
   reasoning?: boolean;
   xhigh?: boolean;
-  /** 输入模态数组（Pi SDK 标准字段）。包含 "image" 表示模型支持图像输入。 */
-  input?: ("text" | "image")[];
+  /** 输入模态数组（Pi SDK 标准字段）。包含 "image" / "video" 表示模型支持对应媒体输入。 */
+  input?: ("text" | "image" | "video")[];
 }
 
 export interface Channel {
@@ -68,6 +76,7 @@ export interface Channel {
   lastMessage: string;
   lastSender: string;
   lastTimestamp: string;
+  messageCount?: number;
   newMessageCount: number;
   isDM?: boolean;
   peerId?: string;
@@ -172,6 +181,7 @@ export interface PluginPageInfo {
   title: string | Record<string, string>;
   icon: string | null;
   routeUrl: string;
+  hostCapabilities: string[];
 }
 
 export interface PluginWidgetInfo {
@@ -179,6 +189,12 @@ export interface PluginWidgetInfo {
   title: string | Record<string, string>;
   icon: string | null;
   routeUrl: string;
+  hostCapabilities: string[];
+}
+
+export interface PluginUiHostCapabilityGrant {
+  pluginId: string;
+  hostCapabilities: string[];
 }
 
 // ── Platform API 类型声明 ──
@@ -221,6 +237,7 @@ export interface PlatformApi {
   browserEmergencyStop?(): void;
   openSkillViewer?(opts: { skillPath?: string; name?: string; baseDir?: string; filePath?: string; installed?: boolean }): void;
   settingsChanged(event: string, payload?: unknown): void;
+  syncWindowTheme?(theme: string): void;
   onSettingsChanged(callback: (event: string, payload: unknown) => void): void | (() => void);
   onOpenSettingsModal?(callback: (tab?: string) => void): void | (() => void);
   onSwitchTab?(callback: (tab: string) => void): void | (() => void);
@@ -269,6 +286,8 @@ export interface PlatformApi {
   autoUpdateState?(): Promise<AutoUpdateState>;
   autoUpdateSetChannel?(channel: 'stable' | 'beta'): Promise<void>;
   onAutoUpdateState?(callback: (state: AutoUpdateState) => void): (() => void) | void;
+  getAutoLaunchStatus?(): Promise<AutoLaunchStatus>;
+  setAutoLaunchEnabled?(enabled: boolean): Promise<AutoLaunchStatus>;
 
   // ── Skill viewer overlay ──
   onShowSkillViewer?(callback: (data: unknown) => void): void;

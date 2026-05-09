@@ -98,14 +98,16 @@ describe("agent experience toggle", () => {
       .toContain("create_artifact");
   });
 
-  it("guides fresh sessions to deliver files through stage_files", () => {
+  it("guides fresh sessions to record session files and deliver them through stage_files", () => {
     const { agent, root } = makeAgent({ experienceEnabled: false });
     roots.push(root);
 
     const prompt = agent.buildSystemPrompt();
-    expect(prompt).toContain("use stage_files to register it");
+    expect(prompt).toContain("SessionFile means a local file related to the current session");
+    expect(prompt).toContain("After write/edit succeeds, the tool layer records the file as session-related automatically");
+    expect(prompt).toContain("use stage_files to mark it as delivered");
     expect(prompt).toContain("Bridge can send according to platform capabilities");
-    expect(prompt).toContain("Files contributed by plugins, browser screenshots, installers, and sub-agents follow the same rule");
+    expect(prompt).toContain("Do not repeatedly stage the same file once it has already been staged");
     expect(prompt).toContain("same SessionFile");
     expect(prompt).not.toContain("create_artifact");
   });

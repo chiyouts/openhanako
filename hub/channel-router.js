@@ -99,8 +99,16 @@ export class ChannelRouter {
    */
   setupPostHandler() {
     for (const [, agent] of this._engine.agents || []) {
-      agent.setChannelPostHandler((channelName, senderId) => {
+      agent.setChannelPostHandler((channelName, senderId, message) => {
         debugLog()?.log("channel", `agent ${senderId} posted to #${channelName}, triggering triage`);
+        if (message) {
+          this._hub.eventBus.emit({
+            type: "channel_new_message",
+            channelName,
+            sender: senderId,
+            message,
+          }, null);
+        }
         this.triggerImmediate(channelName)?.catch(err =>
           console.error(`[channel] agent post triage 失败: ${err.message}`)
         );
@@ -243,13 +251,18 @@ export class ChannelRouter {
 
       // 写入频道文件
       const channelFile = path.join(engine.channelsDir, `${channelName}.md`);
-      await appendMessage(channelFile, agentId, replyText);
+      const { timestamp } = await appendMessage(channelFile, agentId, replyText);
 
       console.log(`\x1b[90m[channel] ${agentId} replied #${channelName} (${replyText.length} chars)\x1b[0m`);
       debugLog()?.log("channel", `${agentId} replied #${channelName} (${replyText.length} chars)`);
 
       // WS 广播
-      this._hub.eventBus.emit({ type: "channel_new_message", channelName, sender: agentId }, null);
+      this._hub.eventBus.emit({
+        type: "channel_new_message",
+        channelName,
+        sender: agentId,
+        message: { sender: agentId, timestamp, body: replyText },
+      }, null);
 
       return { replied: true, replyContent: replyText };
     } catch (err) {

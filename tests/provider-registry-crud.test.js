@@ -259,6 +259,39 @@ describe("getCredentials", () => {
     const creds = reg.getCredentials("test-oauth");
     expect(creds.apiKey).toBe("");
   });
+
+  it("OAuth-only provider 没有 added-models 条目时仍能从 auth.json 读取凭证", () => {
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({
+      "test-oauth": {
+        type: "oauth",
+        access: "oauth-access-token-abc",
+        accountId: "acct_123",
+      },
+    }), "utf-8");
+
+    writeAddedModels({});
+
+    const reg = new ProviderRegistry(tmpDir);
+    reg._plugins.clear();
+    reg._entries.clear();
+    reg._plugins.set("test-oauth-plugin", {
+      id: "test-oauth-plugin",
+      displayName: "Test OAuth",
+      authType: "oauth",
+      defaultBaseUrl: "https://oauth.test.com/backend-api",
+      defaultApi: "openai-codex-responses",
+      authJsonKey: "test-oauth",
+    });
+
+    const creds = reg.getCredentials("test-oauth-plugin");
+    expect(creds).toEqual({
+      apiKey: "oauth-access-token-abc",
+      baseUrl: "https://oauth.test.com/backend-api",
+      api: "openai-codex-responses",
+      accountId: "acct_123",
+    });
+  });
 });
 
 // ── auth policy ──────────────────────────────────────────────────────────────
@@ -312,6 +345,13 @@ describe("builtin default models", () => {
       "deepseek-v4-pro",
       "deepseek-v4-flash",
     ]);
+  });
+
+  it("uses the native Google Gemini API as the built-in Gemini contract", () => {
+    writeAddedModels({});
+    const reg = new ProviderRegistry(tmpDir);
+    expect(reg.get("gemini").baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(reg.get("gemini").api).toBe("google-generative-ai");
   });
 });
 

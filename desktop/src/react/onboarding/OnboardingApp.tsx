@@ -10,11 +10,16 @@ import { ModelStep } from './steps/ModelStep';
 import { ThemeStep } from './steps/ThemeStep';
 import { WorkspaceStep } from './steps/WorkspaceStep';
 import { TutorialStep } from './steps/TutorialStep';
+import {
+  appendConnectionAuth,
+  buildConnectionUrl,
+  createLocalServerConnection,
+  type ServerConnection,
+} from '../services/server-connection';
 
 interface OnboardingAppProps { preview: boolean; skipToTutorial: boolean }
 export function OnboardingApp({ preview, skipToTutorial }: OnboardingAppProps) {
-  const [serverPort, setServerPort] = useState<string | null>(null);
-  const [serverToken, setServerToken] = useState<string | null>(null);
+  const [serverConnection, setServerConnection] = useState<ServerConnection | null>(null);
   const [step, setStep] = useState(skipToTutorial ? 6 : 0);
   const [stepKey, setStepKey] = useState(0);
   const [agentName, setAgentName] = useState('Hanako');
@@ -30,12 +35,15 @@ export function OnboardingApp({ preview, skipToTutorial }: OnboardingAppProps) {
 
   const [toastMsg, setToastMsg] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localeLoadSeq = useRef(0);
 
   const hanaFetch: HanaFetch = useCallback((path, opts = {}) => {
-    const headers: Record<string, string> = { ...(opts.headers as Record<string, string>) };
-    if (serverToken) headers['Authorization'] = `Bearer ${serverToken}`;
-    return fetch(`http://127.0.0.1:${serverPort}${path}`, { ...opts, headers });
-  }, [serverPort, serverToken]);
+    if (!serverConnection) {
+      throw new Error(`onboarding hanaFetch ${path}: server connection not ready`);
+    }
+    const headers = appendConnectionAuth(serverConnection, opts.headers);
+    return fetch(buildConnectionUrl(serverConnection, path), { ...opts, headers });
+  }, [serverConnection]);
 
   const showError = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -49,10 +57,20 @@ export function OnboardingApp({ preview, skipToTutorial }: OnboardingAppProps) {
     setStep(index);
   }, []);
 
-  const onLocaleChange = useCallback((loc: string) => {
+  const onLocaleChange = useCallback(async (loc: string) => {
+    const seq = localeLoadSeq.current + 1;
+    localeLoadSeq.current = seq;
     setLocale(loc);
     setI18nReady(false);
-    requestAnimationFrame(() => setI18nReady(true));
+    try {
+      await i18n.load(loc);
+    } catch (err) {
+      console.error('[onboarding] locale load failed:', err);
+    } finally {
+      if (localeLoadSeq.current === seq) {
+        setI18nReady(true);
+      }
+    }
   }, []);
 
   const onProviderReady = useCallback((name: string, url: string, api: string, key: string) => {
@@ -67,8 +85,7 @@ export function OnboardingApp({ preview, skipToTutorial }: OnboardingAppProps) {
       try {
         const port = await window.hana.getServerPort();
         const token = await window.hana.getServerToken();
-        setServerPort(port);
-        setServerToken(token);
+        setServerConnection(createLocalServerConnection({ serverPort: port, serverToken: token }));
         const splashInfo = await window.hana.getSplashInfo?.();
         const loc = splashInfo?.locale || 'zh-CN';
         const name = splashInfo?.agentName || 'Hanako';

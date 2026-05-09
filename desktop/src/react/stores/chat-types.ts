@@ -36,6 +36,26 @@ export interface DeskContext {
   fileCount: number;
 }
 
+export interface SessionRegistryFile {
+  id?: string;
+  fileId?: string;
+  sessionPath?: string;
+  filePath?: string;
+  realPath?: string;
+  label?: string;
+  displayName?: string;
+  filename?: string;
+  ext?: string;
+  mime?: string;
+  kind?: string;
+  status?: 'available' | 'expired' | string;
+  missingAt?: number | null;
+  origin?: string;
+  operations?: string[];
+  createdAt?: number;
+  isDirectory?: boolean;
+}
+
 // ── 内容块 ──
 
 export interface SessionConfirmationBlock {
@@ -128,7 +148,7 @@ export interface SessionModel {
   name: string;
   provider: string;
   /** 输入模态数组（Pi SDK 标准字段），镜像后端 /models, /models/switch 响应。 */
-  input?: ("text" | "image")[];
+  input?: ("text" | "image" | "video")[];
   reasoning?: boolean;
   xhigh?: boolean;
   contextWindow?: number;

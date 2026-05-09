@@ -1,6 +1,7 @@
 /**
  * Session 管理 REST 路由
  */
+import { appendFileSync } from "fs";
 import fs from "fs/promises";
 import path from "path";
 import { Hono } from "hono";
@@ -19,13 +20,19 @@ import {
   isValidSessionPath,
   isActiveSessionPath,
 } from "../../core/message-utils.js";
-import { loadLatestTodosFromSessionFile } from "../../lib/tools/todo-compat.js";
+import {
+  loadLatestTodosFromSessionFile,
+  loadLatestTodoSnapshotFromSessionFile,
+} from "../../lib/tools/todo-compat.js";
+import { SessionManager } from "../../lib/pi-sdk/index.js";
+import { TODO_STATE_CUSTOM_TYPE } from "../../lib/tools/todo-constants.js";
 import { mergeWorkspaceHistory } from "../../shared/workspace-history.js";
 import {
   deleteSessionFileSidecarSync,
   moveSessionFileSidecarSync,
   sessionFileSidecarPath,
 } from "../../lib/session-files/session-file-registry.js";
+import { serializeSessionFile } from "../../lib/session-files/session-file-response.js";
 import { deleteSessionSkillSnapshotSync } from "../../lib/skills/session-skill-snapshot.js";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.js";
 import { modelSupportsXhigh } from "../../core/session-thinking-level.js";
@@ -43,6 +50,22 @@ async function pathExists(filePath) {
     return false;
   }
 }
+
+function completeTodoItems(todos) {
+  return (Array.isArray(todos) ? todos : []).map((todo) => ({
+    ...todo,
+    status: "completed",
+  }));
+}
+
+function getWritableSessionManager(engine, sessionPath) {
+  const liveSession = engine.getSessionByPath?.(sessionPath);
+  if (liveSession?.sessionManager) return liveSession.sessionManager;
+  return SessionManager.open(sessionPath, path.dirname(sessionPath));
+}
+
+const TODO_COMPLETE_MESSAGE =
+  "[Hana Todo] The user marked the current todo list as completed and removed it from the session UI. Treat every item in that list as completed. Create a new todo list only if new work needs tracking.";
 
 export function createSessionsRoute(engine) {
   const route = new Hono();
@@ -223,7 +246,15 @@ export function createSessionsRoute(engine) {
       for (const m of sourceMessages) {
         if (m.role === "user") {
           const { text, images } = extractTextContent(m.content);
-          if (text || images.length) allMessages.push({ id: String(globalIdx++), role: "user", content: text, images: images.length ? images : undefined });
+          if (text || images.length) {
+            allMessages.push({
+              id: String(globalIdx++),
+              role: "user",
+              content: text,
+              images: images.length ? images : undefined,
+              ...(m.timestamp ? { timestamp: m.timestamp } : {}),
+            });
+          }
         } else if (m.role === "assistant") {
           const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
           if (text || toolUses.length) {
@@ -233,6 +264,7 @@ export function createSessionsRoute(engine) {
               content: text,
               thinking: thinking || undefined,
               toolCalls: toolUses.length ? toolUses : undefined,
+              ...(m.timestamp ? { timestamp: m.timestamp } : {}),
             });
           }
         } else if (m.role === "toolResult") {
@@ -320,13 +352,58 @@ export function createSessionsRoute(engine) {
         }
       }
 
-      patchSessionFileLifecycleBlocks(slicedBlocks, engine, queryPath || engine.currentSessionPath || null);
+      const resolvedSessionPath = queryPath || engine.currentSessionPath || null;
+      patchSessionFileLifecycleBlocks(slicedBlocks, engine, resolvedSessionPath);
+      const sessionFiles = listSessionRegistryFiles(engine, resolvedSessionPath);
 
       // 从历史中提取最新 todo 状态：branch-aware，沿当前 leaf 回溯到 root，
       // 只在当前分支路径上找最新合法快照。避免从抛弃的分支取到错误状态。
       const todos = await loadLatestTodosFromSessionFile(queryPath);
 
-      return c.json({ messages, blocks: slicedBlocks, todos, hasMore });
+      return c.json({ messages, blocks: slicedBlocks, todos, hasMore, sessionFiles });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  route.post("/sessions/todos/complete", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const sessionPath = body?.path;
+      if (!sessionPath) {
+        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+      }
+      if (!isValidSessionPath(sessionPath, engine.agentsDir) || !isActiveSessionPath(sessionPath, engine.agentsDir)) {
+        return c.json({ error: "Invalid session path" }, 403);
+      }
+      try {
+        await fs.access(sessionPath);
+      } catch {
+        return c.json({ error: t("error.sessionNotFound") }, 404);
+      }
+      if (engine.isSessionStreaming?.(sessionPath)) {
+        return c.json({ error: "Cannot complete todos while session is streaming" }, 409);
+      }
+
+      const snapshot = await loadLatestTodoSnapshotFromSessionFile(sessionPath);
+      const completedTodos = completeTodoItems(snapshot?.todos || []);
+      if (!snapshot?.removed && completedTodos.length > 0) {
+        const manager = getWritableSessionManager(engine, sessionPath);
+        manager.appendCustomMessageEntry(
+          TODO_STATE_CUSTOM_TYPE,
+          TODO_COMPLETE_MESSAGE,
+          false,
+          {
+            action: "complete_all",
+            source: "user",
+            removed: true,
+            todos: completedTodos,
+          },
+        );
+      }
+
+      engine.emitEvent?.({ type: "todo_update", todos: [] }, sessionPath);
+      return c.json({ ok: true, todos: [] });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -466,7 +543,7 @@ export function createSessionsRoute(engine) {
     } catch (err) {
       const errDetail = `${err.message}\n${err.stack || ""}`;
       console.error("[sessions/switch] error:", errDetail);
-      try { require("fs").appendFileSync(require("path").join(engine.hanakoHome, "switch-error.log"), `${new Date().toISOString()}\n${errDetail}\n---\n`); } catch {}
+      try { appendFileSync(path.join(engine.hanakoHome, "switch-error.log"), `${new Date().toISOString()}\n${errDetail}\n---\n`); } catch {}
       return c.json({ error: err.message }, 500);
     }
   });
@@ -716,6 +793,11 @@ function patchSessionFileLifecycleBlocks(blocks, engine, sessionPath) {
       block.installedFile = { ...block.installedFile, ...patch };
     }
   }
+}
+
+function listSessionRegistryFiles(engine, sessionPath) {
+  if (!sessionPath || typeof engine?.listSessionFiles !== "function") return [];
+  return engine.listSessionFiles(sessionPath).map(file => serializeSessionFile(file)).filter(Boolean);
 }
 
 function sessionFileLifecycleFields(file) {

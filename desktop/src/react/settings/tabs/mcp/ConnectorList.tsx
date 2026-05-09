@@ -8,6 +8,7 @@ interface ConnectorListProps {
   globalEnabled: boolean;
   busyKey: string | null;
   onAction: (connectorId: string, action: 'start' | 'stop' | 'refresh-tools') => void;
+  onEdit: (connectorId: string) => void;
   onRemove: (connectorId: string) => void;
   onOAuthStart: (connectorId: string) => void;
   onOAuthLogout: (connectorId: string) => void;
@@ -18,6 +19,7 @@ export function ConnectorList({
   globalEnabled,
   busyKey,
   onAction,
+  onEdit,
   onRemove,
   onOAuthStart,
   onOAuthLogout,
@@ -40,6 +42,24 @@ export function ConnectorList({
               {transportLabel(connector.transport)}
               {' · '}
               {authLabel(connector)}
+              {connector.autoStart && (
+                <>
+                  {' · '}
+                  {t('settings.mcp.autoStart')}
+                </>
+              )}
+              {recordCount(connector.env) > 0 && (
+                <>
+                  {' · '}
+                  {recordCount(connector.env)} {t('settings.mcp.envCount')}
+                </>
+              )}
+              {recordCount(connector.headers) > 0 && (
+                <>
+                  {' · '}
+                  {recordCount(connector.headers)} {t('settings.mcp.headersCount')}
+                </>
+              )}
               {' · '}
               {connector.tools.length} {t('settings.mcp.toolsCount')}
             </div>
@@ -93,6 +113,14 @@ export function ConnectorList({
               className={styles['pv-add-form-btn']}
               type="button"
               disabled={busyKey === `remove-${connector.id}`}
+              onClick={() => onEdit(connector.id)}
+            >
+              {t('common.edit')}
+            </button>
+            <button
+              className={styles['pv-add-form-btn']}
+              type="button"
+              disabled={busyKey === `remove-${connector.id}`}
               onClick={() => onRemove(connector.id)}
             >
               {t('common.remove')}
@@ -130,4 +158,8 @@ function authLabel(connector: McpConnector): string {
       : t('settings.mcp.oauthDisconnected');
   }
   return t('settings.mcp.authNone');
+}
+
+function recordCount(record?: Record<string, string>): number {
+  return record ? Object.keys(record).length : 0;
 }

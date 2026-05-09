@@ -13,7 +13,11 @@ import { updateKeyed } from '../stores/create-keyed-slice';
 import { loadSessions as loadSessionsAction } from '../stores/session-actions';
 import { handleLegacyArtifactBlock } from '../stores/preview-actions';
 import { loadDeskFiles } from '../stores/desk-actions';
-import { loadChannels as loadChannelsAction, openChannel as openChannelAction } from '../stores/channel-actions';
+import {
+  appendChannelMessage as appendChannelMessageAction,
+  loadChannels as loadChannelsAction,
+  openChannel as openChannelAction,
+} from '../stores/channel-actions';
 import { showError } from '../utils/ui-helpers';
 import { handleAppEvent } from './app-event-actions';
 import {
@@ -23,7 +27,7 @@ import {
   updateSessionStreamMeta,
 } from './stream-resume';
 import { TODO_TOOL_NAMES, type TodoToolName } from '../utils/todo-constants';
-import { migrateLegacyTodos } from '../utils/todo-compat';
+import { applyTodoLifecycle, migrateLegacyTodos } from '../utils/todo-compat';
 import { renderMarkdown } from '../utils/markdown';
 import { bumpMessageLiveVersion } from '../stores/message-live-version';
 
@@ -75,6 +79,20 @@ function hasOptimisticCurrentSession(): boolean {
   const sessionPath = state.currentSessionPath;
   if (!sessionPath) return false;
   return !!state.sessions.find((s: any) => s.path === sessionPath && s._optimistic);
+}
+
+function applyTodoToolEnd(msg: any): void {
+  if (msg.type !== 'tool_end' || !TODO_TOOL_NAMES.includes(msg.name as TodoToolName)) return;
+  const sp = msg.sessionPath;
+  if (!sp) {
+    console.warn('[ws] tool_end(todo) missing sessionPath, skipping');
+    return;
+  }
+  const todos = applyTodoLifecycle(migrateLegacyTodos(msg.details as { todos?: unknown[] } | null));
+  useStore.getState().setSessionTodosForPath(sp, todos);
+  // bump 版本：若 loadMessages 正在 fetch 旧快照，回来时会发现
+  // 版本号变了，主动跳过 hydrate 写入，避免覆盖本次 live 状态。
+  useStore.getState().bumpTodosLiveVersion(sp);
 }
 
 function isKnownChatSession(sessionPath: string, state = useStore.getState()): boolean {
@@ -153,6 +171,15 @@ function sameJsonish(a: any, b: any): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+function normalizeMessageTimestamp(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
 function replayUserMessageAlreadyHydrated(sessionPath: string, message: any): boolean {
   const session = useStore.getState().chatSessions[sessionPath];
   const last = session?.items?.[session.items.length - 1];
@@ -200,6 +227,8 @@ export function handleServerMessage(msg: any): void {
       streamBufferManager.handle(msg);
     }
     dispatchStreamKey(msg.sessionPath, msg);
+    applyTodoToolEnd(msg);
+    applyToolEndSessionFile(msg);
     return;
   }
 
@@ -217,17 +246,9 @@ export function handleServerMessage(msg: any): void {
       }
     }
     // tool_end 后更新 todo（兼容新旧工具名 + 新旧格式）
-    if (msg.type === 'tool_end' && TODO_TOOL_NAMES.includes(msg.name as TodoToolName)) {
-      const sp = msg.sessionPath;
-      if (!sp) {
-        console.warn('[ws] tool_end(todo) missing sessionPath, skipping');
-      } else {
-        const todos = migrateLegacyTodos(msg.details as { todos?: unknown[] } | null);
-        useStore.getState().setSessionTodosForPath(sp, todos);
-        // bump 版本：若 loadMessages 正在 fetch 旧快照，回来时会发现
-        // 版本号变了，主动跳过 hydrate 写入，避免覆盖本次 live 状态。
-        useStore.getState().bumpTodosLiveVersion(sp);
-      }
+    applyTodoToolEnd(msg);
+    if (msg.type === 'tool_end') {
+      applyToolEndSessionFile(msg);
     }
     // COMPAT(create_artifact, remove no earlier than v0.133):
     // 旧 artifact block 进入当前 Preview 面板。
@@ -275,6 +296,14 @@ export function handleServerMessage(msg: any): void {
           thumbnail: bThumbnail,
         });
       }
+      break;
+    }
+
+    case 'todo_update': {
+      const sp = msg.sessionPath;
+      if (!sp) { console.warn('[ws] event missing sessionPath:', msg.type); break; }
+      useStore.getState().setSessionTodosForPath(sp, Array.isArray(msg.todos) ? msg.todos : []);
+      useStore.getState().bumpTodosLiveVersion(sp);
       break;
     }
 
@@ -369,6 +398,7 @@ export function handleServerMessage(msg: any): void {
           role: 'user',
           text,
           textHtml: text ? renderMarkdown(text) : undefined,
+          timestamp: normalizeMessageTimestamp(msg.message.timestamp),
           attachments: msg.message.attachments,
           quotedText: msg.message.quotedText,
           skills: msg.message.skills,
@@ -449,7 +479,9 @@ export function handleServerMessage(msg: any): void {
     case 'channel_new_message': {
       const store = useStore.getState();
       const isViewing = store.currentTab === 'channels' && store.currentChannel === msg.channelName && document.visibilityState === 'visible';
-      if (msg.channelName && isViewing) {
+      if (msg.channelName && isViewing && msg.message) {
+        appendChannelMessageAction(msg.channelName, msg.message);
+      } else if (msg.channelName && isViewing) {
         openChannelAction(msg.channelName);
       } else if (msg.channelName) {
         loadChannelsAction();
@@ -545,9 +577,21 @@ export function handleServerMessage(msg: any): void {
     }
 
     case 'status': {
+      const sp = msg.sessionPath || null;
+      if (sp) {
+        if (msg.isStreaming) streamBufferManager.beginTurn(sp);
+        else streamBufferManager.finishTurn(sp);
+      }
       // streamingSessions 维护 + 焦点 UI 占位一并由 applyStreamingStatus 处理
-      applyStreamingStatus(msg.isStreaming, msg.sessionPath || null);
+      applyStreamingStatus(msg.isStreaming, sp);
       break;
     }
   }
+}
+
+function applyToolEndSessionFile(msg: any): void {
+  const sp = msg.sessionPath;
+  const sessionFile = msg.details?.sessionFile;
+  if (!sp || !sessionFile) return;
+  useStore.getState().upsertSessionRegistryFile?.(sp, sessionFile);
 }

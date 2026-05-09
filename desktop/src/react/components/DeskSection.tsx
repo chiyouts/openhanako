@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useStore } from '../stores';
 import { loadDeskTreeFiles } from '../stores/desk-actions';
 import { subscribeFileChanges } from '../services/file-change-events';
-import { ContextMenu } from './ContextMenu';
+import { ContextMenu } from '../ui';
 import { DESK_SORT_KEY, type SortMode, type CtxMenuState, type FileTypeFilter } from './desk/desk-types';
 import { DeskFilterButton, DeskOpenIconButton, DeskSearchBox, DeskSortButton } from './desk/DeskToolbar';
 import { DeskTree } from './desk/DeskTree';

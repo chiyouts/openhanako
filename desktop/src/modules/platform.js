@@ -29,6 +29,7 @@
     getServerPort: async () => location.port || "3000",
     getServerToken: async () => token,
     appReady: async () => {},
+    syncWindowTheme: () => {},
     runEditCommand: async () => false,
 
     // 文件 I/O → server HTTP
