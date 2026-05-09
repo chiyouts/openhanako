@@ -25,6 +25,7 @@ import { getInvalidProviderModelIds } from "../shared/provider-model-validation.
 import { normalizeThinkingLevelForModel } from "./session-thinking-level.js";
 import { lookupKnown } from "../shared/known-models.js";
 import { SESSION_PREFIX_MAP } from "../lib/bridge/session-key.js";
+import { migrateLegacyApiKeyAuthToProviders } from "./provider-auth-migration.js";
 
 // ── 迁移表 ──────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,8 @@ const migrations = {
   17: migrateBridgeSessionKeysToAgentScoped,
   // Space 基础身份：为旧 HANA_HOME 补齐 server / legacy owner / default Space registry
   18: migrateLocalIdentityRegistries,
+  // API-key provider 凭证真相源迁移：auth.json → added-models.yaml
+  19: migrateLegacyApiKeyAuthEntriesToProviders,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -1957,4 +1960,9 @@ function migrateLocalIdentityRegistries(ctx) {
   const { hanakoHome, log } = ctx;
   const { created } = ensureLocalIdentityRegistries(hanakoHome);
   log?.(`[migrations] #18: local identity registries ready${created.length ? ` (created=${created.join(",")})` : ""}`);
+}
+
+function migrateLegacyApiKeyAuthEntriesToProviders(ctx) {
+  const result = migrateLegacyApiKeyAuthToProviders(ctx);
+  ctx.log?.(`[migrations] #19: legacy API-key auth migrated (${result.providers.join(", ") || "none"})`);
 }

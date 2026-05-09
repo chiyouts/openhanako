@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 18;
+const LATEST_DATA_VERSION = 19;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -1894,5 +1894,235 @@ describe("migration #18 — create local identity registries", () => {
     expect(prefs.getPreferences()._dataVersion).toBe(17);
     expect(fs.existsSync(path.join(tmpDir, "server-node.json"))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, "spaces.json"))).toBe(false);
+  });
+});
+
+describe("migration #19 — migrate legacy API-key auth to provider config", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = path.join(tmpDir, "user");
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeAuth(data) {
+    writeJson(path.join(tmpDir, "auth.json"), data);
+  }
+
+  function writeAddedModels(data) {
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump(data, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '"' }),
+      "utf-8",
+    );
+  }
+
+  function readAddedModels() {
+    return YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+  }
+
+  function makeProviderRegistry() {
+    return {
+      reload: vi.fn(),
+      get(id) {
+        if (id === "deepseek") {
+          return {
+            id: "deepseek",
+            authType: "api-key",
+            baseUrl: "https://api.deepseek.com",
+            api: "openai-completions",
+            authJsonKey: "deepseek",
+          };
+        }
+        if (id === "openai-codex-oauth") {
+          return {
+            id: "openai-codex-oauth",
+            authType: "oauth",
+            baseUrl: "",
+            api: "openai-codex-responses",
+            authJsonKey: "openai-codex",
+          };
+        }
+        if (id === "openai-codex") {
+          return {
+            id: "openai-codex-oauth",
+            authType: "oauth",
+            baseUrl: "",
+            api: "openai-codex-responses",
+            authJsonKey: "openai-codex",
+          };
+        }
+        if (id === "ollama") {
+          return {
+            id: "ollama",
+            authType: "none",
+            baseUrl: "http://localhost:11434/v1",
+            api: "openai-completions",
+            authJsonKey: "ollama",
+          };
+        }
+        return null;
+      },
+      getDefaultModels(id) {
+        return id === "deepseek" ? ["deepseek-v4-pro", "deepseek-v4-flash"] : [];
+      },
+    };
+  }
+
+  function runFrom18(providerRegistry = makeProviderRegistry()) {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 18 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry,
+      log: () => {},
+    });
+    return prefs;
+  }
+
+  it("moves legacy DeepSeek API key into existing added-models provider before auth cleanup", () => {
+    writeAuth({
+      deepseek: { type: "api_key", key: "sk-legacy-4d2a" },
+      "openai-codex": { type: "oauth", access: "oauth-access-token" },
+    });
+    writeAddedModels({
+      providers: {
+        deepseek: {
+          models: ["deepseek-v4-flash"],
+        },
+      },
+    });
+
+    const prefs = runFrom18();
+
+    const providers = readAddedModels().providers;
+    expect(providers.deepseek).toEqual({
+      api_key: "sk-legacy-4d2a",
+      base_url: "https://api.deepseek.com",
+      api: "openai-completions",
+      models: ["deepseek-v4-flash"],
+    });
+    expect(providers["openai-codex-oauth"]).toBeUndefined();
+    expect(readJson(path.join(tmpDir, "auth.json"))["openai-codex"].access).toBe("oauth-access-token");
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("recreates a missing known provider from legacy auth and models.json", () => {
+    writeAuth({
+      deepseek: { type: "api_key", key: "sk-legacy-4d2a" },
+    });
+    writeAddedModels({ providers: {} });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com",
+          api: "openai-completions",
+          models: [
+            { id: "deepseek-v4-pro" },
+            { id: "deepseek-v4-flash" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.deepseek).toEqual({
+      api_key: "sk-legacy-4d2a",
+      base_url: "https://api.deepseek.com",
+      api: "openai-completions",
+      models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    });
+  });
+
+  it("recovers a legacy key from models.json after auth.json has already been cleaned", () => {
+    writeAuth({});
+    writeAddedModels({
+      providers: {
+        deepseek: {
+          models: ["deepseek-v4-flash"],
+        },
+      },
+    });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com",
+          api: "openai-completions",
+          apiKey: "sk-projected-6ad1",
+          models: [
+            { id: "deepseek-v4-flash" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.deepseek).toEqual({
+      api_key: "sk-projected-6ad1",
+      base_url: "https://api.deepseek.com",
+      api: "openai-completions",
+      models: ["deepseek-v4-flash"],
+    });
+  });
+
+  it("does not persist the synthetic local API key from no-auth provider projections", () => {
+    writeAuth({});
+    writeAddedModels({
+      providers: {
+        ollama: {
+          base_url: "http://localhost:11434/v1",
+          api: "openai-completions",
+          models: ["llama3.2"],
+        },
+      },
+    });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        ollama: {
+          baseUrl: "http://localhost:11434/v1",
+          api: "openai-completions",
+          apiKey: "local",
+          models: [
+            { id: "llama3.2" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.ollama).toEqual({
+      base_url: "http://localhost:11434/v1",
+      api: "openai-completions",
+      models: ["llama3.2"],
+    });
+  });
+
+  it("does not overwrite an explicit added-models API key, including an intentional clear", () => {
+    writeAuth({
+      deepseek: { type: "api_key", key: "sk-old-3ffa" },
+    });
+    writeAddedModels({
+      providers: {
+        deepseek: {
+          api_key: "",
+          base_url: "https://api.deepseek.com",
+          api: "openai-completions",
+          models: ["deepseek-v4-pro"],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.deepseek.api_key).toBe("");
   });
 });
