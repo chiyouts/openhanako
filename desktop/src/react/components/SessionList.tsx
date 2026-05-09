@@ -115,7 +115,6 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [summaryPreviewPosition, setSummaryPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const hasSummary = s.hasSummary === true;
 
   const handleClick = useCallback(() => {
     if (editing) return;
@@ -188,9 +187,8 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
   return (
     <>
       <button
-        className={`${styles.sessionItem}${isActive ? ` ${styles.sessionItemActive}` : ''}${hasSummary ? '' : ` ${styles.sessionItemSummaryEmpty}`}`}
+        className={`${styles.sessionItem}${isActive ? ` ${styles.sessionItemActive}` : ''}`}
         data-session-path={s.path}
-        data-summary-state={hasSummary ? 'ready' : 'empty'}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
       >
@@ -316,9 +314,9 @@ const SessionContextMenu = memo(function SessionContextMenu({
   const items = useMemo<ContextMenuItem[]>(() => [
     {
       label: t('session.summary.open'),
+      disabled: session.hasSummary !== true,
       action: () => onShowSummary(position),
     },
-    { divider: true },
     {
       label: t(isPinned ? 'session.unpin' : 'session.pin'),
       action: () => pinSession(session.path, !isPinned),

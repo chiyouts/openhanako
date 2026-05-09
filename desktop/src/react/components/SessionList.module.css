@@ -35,28 +35,6 @@
     background: var(--accent-light);
 }
 
-.sessionItemSummaryEmpty .sessionItemTitle {
-    color: var(--text-muted);
-    opacity: 0.72;
-    font-weight: 400;
-}
-
-.sessionItemSummaryEmpty .sessionItemMeta {
-    color: var(--text-faint, rgba(0, 0, 0, 0.38));
-    opacity: 0.65;
-}
-
-.sessionItemSummaryEmpty .sessionAgentBadge {
-    opacity: 0.62;
-    filter: grayscale(0.15);
-}
-
-.sessionItemActive.sessionItemSummaryEmpty .sessionItemTitle {
-    color: color-mix(in srgb, var(--accent) 46%, var(--text-muted));
-    opacity: 0.86;
-    font-weight: 600;
-}
-
 .sessionItemTitle {
     font-size: 0.8rem;
     color: var(--text);

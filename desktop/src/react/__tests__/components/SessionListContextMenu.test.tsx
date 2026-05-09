@@ -27,7 +27,7 @@ vi.mock('../../stores/session-actions', () => ({
 
 vi.mock('../../hooks/use-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string) => key === 'session.summary.open' ? '摘要' : key,
   }),
 }));
 
@@ -113,11 +113,20 @@ describe('SessionList context menu', () => {
     cleanup();
   });
 
-  it('marks sessions without summaries as empty summary state', () => {
+  it('keeps summaryless session rows readable and disables only the summary menu item', () => {
     render(<SessionList />);
 
-    expect(sessionButton('Has summary')).toHaveAttribute('data-summary-state', 'ready');
-    expect(sessionButton('No summary')).toHaveAttribute('data-summary-state', 'empty');
+    expect(sessionButton('No summary').className).not.toContain('sessionItemSummaryEmpty');
+
+    fireEvent.contextMenu(sessionButton('No summary'), { clientX: 24, clientY: 32 });
+    const summaryItem = screen.getByText('摘要').closest('.context-menu-item');
+    expect(summaryItem).toHaveClass('disabled');
+
+    fireEvent.click(screen.getByText('摘要'));
+    expect(screen.queryByTestId('session-summary-card')).not.toBeInTheDocument();
+    expect(hanaFetchMock).not.toHaveBeenCalledWith(
+      '/api/sessions/summary?path=%2Ftmp%2Fagents%2Fhana%2Fsessions%2Fno-summary.jsonl',
+    );
   });
 
   it('keeps the right-click menu as a shared narrow menu and opens summary as a click-through preview card', async () => {
@@ -129,13 +138,14 @@ describe('SessionList context menu', () => {
     expect(menu).toBeInTheDocument();
     expect(menu).toHaveClass('context-menu');
     expect(menu?.className).toBe('context-menu');
-    expect(screen.getByText('session.summary.open')).toBeInTheDocument();
+    expect(screen.getByText('摘要')).toBeInTheDocument();
+    expect(menu?.querySelector('.context-menu-divider')).toBeNull();
     expect(screen.queryByTestId('session-summary-card')).not.toBeInTheDocument();
     expect(hanaFetchMock).not.toHaveBeenCalledWith(
       '/api/sessions/summary?path=%2Ftmp%2Fagents%2Fhana%2Fsessions%2Fwith-summary.jsonl',
     );
 
-    fireEvent.click(screen.getByText('session.summary.open'));
+    fireEvent.click(screen.getByText('摘要'));
 
     expect(await screen.findByTestId('session-summary-card')).toHaveAttribute('data-scrollable', 'true');
     expect(screen.getByText(/用户在做记忆系统/)).toBeInTheDocument();
@@ -174,5 +184,6 @@ describe('SessionList context menu', () => {
 
     expect(css).toMatch(/\.sessionSummaryBody\s*\{[\s\S]*font-size:\s*0\.66rem/);
     expect(css).not.toMatch(/\.sessionContextMenu/);
+    expect(css).not.toMatch(/sessionItemSummaryEmpty/);
   });
 });
