@@ -146,13 +146,13 @@ describe('plugin runtime SDK', () => {
     });
     const ctx = { bus: { request } };
 
-    await registerTask(ctx, { taskId: 't1', type: 'render', parentSessionPath: '/s/a' });
-    await updateTask(ctx, { taskId: 't1', progress: { current: 1, total: 2 } });
-    await completeTask(ctx, 't1', { ok: true });
-    await failTask(ctx, 't1', 'nope');
-    await cancelTask(ctx, 't1', 'user');
-    await scheduleTask(ctx, { scheduleId: 'daily', type: 'digest', intervalMs: 60_000 });
-    await unscheduleTask(ctx, 'daily');
+    await registerTask(ctx as any, { taskId: 't1', type: 'render', parentSessionPath: '/s/a' });
+    await updateTask(ctx as any, { taskId: 't1', progress: { current: 1, total: 2 } });
+    await completeTask(ctx as any, 't1', { ok: true });
+    await failTask(ctx as any, 't1', 'nope');
+    await cancelTask(ctx as any, 't1', 'user');
+    await scheduleTask(ctx as any, { scheduleId: 'daily', type: 'digest', intervalMs: 60_000 });
+    await unscheduleTask(ctx as any, 'daily');
 
     expect(request).toHaveBeenCalledWith('task:register', { taskId: 't1', type: 'render', parentSessionPath: '/s/a' }, undefined);
     expect(request).toHaveBeenCalledWith('task:update', { taskId: 't1', progress: { current: 1, total: 2 } }, undefined);

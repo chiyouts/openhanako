@@ -1092,7 +1092,17 @@
       "configTitle": "「{name}」设置",
       "configLoadError": "插件设置加载失败",
       "sensitiveHint": "已保存的值会被隐藏。输入新值即可替换。",
-      "invalidJson": "JSON 格式不正确"
+      "invalidJson": "JSON 格式不正确",
+      "showDiagnostics": "查看插件诊断",
+      "diagnosticsTitle": "插件诊断",
+      "diagnosticsLoadError": "插件诊断加载失败",
+      "diagnosticsSummary": "能力 {capabilities}/{total} · 任务 {tasks} · 计划 {schedules}",
+      "noDiagnostics": "暂无诊断数据",
+      "diagnosticActivation": "激活：{state}",
+      "diagnosticRoutes": "页面 {pages} · 组件 {widgets} · 设置页 {settingsTabs}",
+      "diagnosticTools": "工具 {count}",
+      "diagnosticCommands": "命令 {count}",
+      "diagnosticConfig": "配置项 {count}"
     },
     "mcp": {
       "masterTitle": "总开关",

@@ -14,6 +14,9 @@ interface PluginInfo {
   version?: string;
   description?: string;
   status: 'loaded' | 'failed' | 'disabled' | 'restricted';
+  activationState?: string | null;
+  activationEvents?: string[];
+  activationError?: string | null;
   source: 'builtin' | 'community';
   trust: 'restricted' | 'full-access';
   contributions?: string[];
@@ -37,6 +40,36 @@ interface PluginConfigResponse {
     properties?: Record<string, PluginConfigProperty>;
   };
   values: Record<string, unknown>;
+}
+
+interface PluginDiagnostics {
+  id: string;
+  name?: string;
+  status?: string;
+  error?: string | null;
+  activationState?: string | null;
+  activationEvents?: string[];
+  activationError?: string | null;
+  source?: string;
+  trust?: string;
+  contributions?: string[];
+  routes?: {
+    hasRouteApp?: boolean;
+    pages?: unknown[];
+    widgets?: unknown[];
+    settingsTabs?: unknown[];
+  };
+  tools?: { name: string; dynamic?: boolean }[];
+  commands?: { name: string }[];
+  providers?: { id: string; name?: string }[];
+  config?: { hasSchema?: boolean; keys?: string[] };
+}
+
+interface PluginDiagnosticsResponse {
+  plugins: PluginDiagnostics[];
+  eventBus: { type: string; available?: boolean }[];
+  tasks: { taskId: string; type: string; status?: string }[];
+  schedules: { scheduleId: string; type: string; enabled?: boolean }[];
 }
 
 /* ── Status badge ── */
@@ -101,6 +134,10 @@ function parseConfigValue(property: PluginConfigProperty, value: string): unknow
   return value;
 }
 
+function count(value: unknown[] | undefined): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
 /* ── Main tab ── */
 
 export function PluginsTab() {
@@ -114,6 +151,8 @@ export function PluginsTab() {
   const [configDraft, setConfigDraft] = useState<Record<string, unknown>>({});
   const [dirtyConfigKeys, setDirtyConfigKeys] = useState<Set<string>>(new Set());
   const [configSaving, setConfigSaving] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<PluginDiagnosticsResponse | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
 
   /* ── data fetchers ── */
 
@@ -139,6 +178,25 @@ export function PluginsTab() {
       setDirtyConfigKeys(new Set());
     } catch (err: unknown) {
       showToast(t('settings.plugins.configLoadError') + ': ' + (err instanceof Error ? err.message : String(err)), 'error');
+    }
+  }, [showToast]);
+
+  const loadDiagnostics = useCallback(async () => {
+    setDiagnosticsLoading(true);
+    try {
+      const res = await hanaFetch('/api/plugins/diagnostics');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setDiagnostics({
+        plugins: Array.isArray(data.plugins) ? data.plugins : [],
+        eventBus: Array.isArray(data.eventBus) ? data.eventBus : [],
+        tasks: Array.isArray(data.tasks) ? data.tasks : [],
+        schedules: Array.isArray(data.schedules) ? data.schedules : [],
+      });
+    } catch (err: unknown) {
+      showToast(t('settings.plugins.diagnosticsLoadError') + ': ' + (err instanceof Error ? err.message : String(err)), 'error');
+    } finally {
+      setDiagnosticsLoading(false);
     }
   }, [showToast]);
 
@@ -301,10 +359,33 @@ export function PluginsTab() {
     </button>
   );
 
+  const diagnosticsButton = (
+    <button
+      className={styles['settings-icon-btn']}
+      title={t('settings.plugins.showDiagnostics')}
+      onClick={loadDiagnostics}
+      disabled={diagnosticsLoading}
+    >
+      <svg
+        width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+        className={diagnosticsLoading ? styles['spin'] : ''}
+      >
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    </button>
+  );
+
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="plugins">
       {/* 管理插件：dropzone + 列表 + 路径提示，同一 flush section；reload 按钮放 context */}
-      <SettingsSection title="管理插件" variant="flush" context={reloadButton}>
+      <SettingsSection
+        title="管理插件"
+        variant="flush"
+        context={<div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{diagnosticsButton}{reloadButton}</div>}
+      >
         {/* 安装区：dropzone 自带虚线边框卡 */}
         <div
           className={`${styles['skills-dropzone']}${dragOver ? ' ' + styles['drag-over'] : ''}`}
@@ -413,6 +494,74 @@ export function PluginsTab() {
           </p>
         )}
       </SettingsSection>
+
+      {diagnostics && (
+        <SettingsSection
+          title={t('settings.plugins.diagnosticsTitle')}
+          variant="flush"
+          context={
+            <span className={styles['skills-source-badge']} style={{ marginRight: 0 }}>
+              {t('settings.plugins.diagnosticsSummary', {
+                capabilities: String(diagnostics.eventBus.filter(item => item.available).length),
+                total: String(diagnostics.eventBus.length),
+                tasks: String(diagnostics.tasks.length),
+                schedules: String(diagnostics.schedules.length),
+              })}
+            </span>
+          }
+        >
+          {diagnostics.plugins.length === 0 ? (
+            <p className={`${styles['settings-muted-note']} ${styles['skills-empty']}`}>
+              {t('settings.plugins.noDiagnostics')}
+            </p>
+          ) : (
+            <div className={styles['skills-list-block']}>
+              {diagnostics.plugins.map(plugin => {
+                const routeText = t('settings.plugins.diagnosticRoutes', {
+                  pages: String(count(plugin.routes?.pages)),
+                  widgets: String(count(plugin.routes?.widgets)),
+                  settingsTabs: String(count(plugin.routes?.settingsTabs)),
+                });
+                const capabilityText = [
+                  t('settings.plugins.diagnosticTools', { count: String(count(plugin.tools)) }),
+                  t('settings.plugins.diagnosticCommands', { count: String(count(plugin.commands)) }),
+                  t('settings.plugins.diagnosticConfig', { count: String(count(plugin.config?.keys)) }),
+                ].join(' · ');
+                const activationText = plugin.activationState
+                  ? t('settings.plugins.diagnosticActivation', { state: plugin.activationState })
+                  : t('settings.plugins.diagnosticActivation', { state: '-' });
+                return (
+                  <div key={plugin.id} className={styles['skills-list-item']}>
+                    <div className={styles['skills-list-info']}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span className={styles['skills-list-name']}>{plugin.name || plugin.id}</span>
+                        <span className={styles['skills-list-name-hint']}>{plugin.id}</span>
+                        {plugin.status && (
+                          <span className={styles['skills-source-badge']} style={{ marginRight: 0 }}>
+                            {plugin.status}
+                          </span>
+                        )}
+                        {plugin.activationState && (
+                          <span className={styles['skills-source-badge']} style={{ marginRight: 0 }}>
+                            {plugin.activationState}
+                          </span>
+                        )}
+                      </div>
+                      <span className={styles['skills-list-desc']}>{activationText} · {routeText}</span>
+                      <span className={styles['skills-list-desc']}>{capabilityText}</span>
+                      {(plugin.error || plugin.activationError) && (
+                        <span className={styles['skills-list-desc']} style={{ color: 'var(--danger, #c55)' }}>
+                          {plugin.error || plugin.activationError}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SettingsSection>
+      )}
 
       {configPlugin && pluginConfig && (
         <SettingsSection

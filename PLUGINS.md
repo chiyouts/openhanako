@@ -834,6 +834,10 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
 - 单个 tool/route/command 文件的语法错误只影响该文件
 - 失败的 plugin 标记为 `status: "failed"`，在插件页面显示错误信息
 
+## 诊断面板
+
+设置 → 插件里的诊断按钮会读取 `/api/plugins/diagnostics`，统一展示插件加载状态、激活状态、routes、tools、commands、configuration、EventBus 能力、后台任务和计划任务。插件作者排查问题时优先看这里：如果插件已加载但 `activationState` 仍是 `inactive`，说明生命周期尚未被对应 `activationEvents` 触发；如果任务处于 `recovering`，说明 app 重启后宿主恢复了任务记录，但插件还需要在 `onload()` 里重新注册 handler 并恢复业务状态。
+
 ## 并发设计
 
 Hana 支持多 session / 多 agent 并行运行。插件开发时需注意：

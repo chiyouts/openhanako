@@ -1059,6 +1059,46 @@ export class PluginManager {
   getPages() { return [...this._pages]; }
   getWidgets() { return [...this._widgets]; }
   getSettingsTabs() { return [...this._settingsTabs]; }
+  getDiagnostics() {
+    return [...this._plugins.values()].map((entry) => {
+      const pluginId = entry.id;
+      return {
+        id: pluginId,
+        name: entry.name,
+        version: entry.version,
+        source: entry.source || "community",
+        trust: entry.trust || "restricted",
+        hidden: !!entry.hidden,
+        status: entry.status,
+        error: entry.error || null,
+        activationState: entry.activationState || null,
+        activationEvents: Array.isArray(entry.activationEvents) ? [...entry.activationEvents] : [],
+        activationReason: entry.activationReason || null,
+        activationError: entry.activationError || null,
+        contributions: Array.isArray(entry.contributions) ? [...entry.contributions] : [],
+        uiHostCapabilities: Array.isArray(entry.uiHostCapabilities) ? [...entry.uiHostCapabilities] : [],
+        routes: {
+          hasRouteApp: this.routeRegistry.has(pluginId),
+          pages: this._pages.filter((item) => item.pluginId === pluginId).map(clonePlain),
+          widgets: this._widgets.filter((item) => item.pluginId === pluginId).map(clonePlain),
+          settingsTabs: this._settingsTabs.filter((item) => item.pluginId === pluginId).map(clonePlain),
+        },
+        tools: this._tools
+          .filter((item) => item._pluginId === pluginId)
+          .map((item) => ({ name: item.name, dynamic: !!item._dynamic })),
+        commands: this._commands
+          .filter((item) => item._pluginId === pluginId)
+          .map((item) => ({ name: item.name })),
+        providers: this._providerPlugins
+          .filter((item) => item._pluginId === pluginId)
+          .map((item) => ({ id: item.id, name: item.name || item.id })),
+        config: {
+          hasSchema: !!entry.configSchema,
+          keys: Object.keys(entry.configSchema?.properties || {}),
+        },
+      };
+    });
+  }
   getUiHostCapabilityGrants() {
     return [...this._plugins.values()]
       .filter(entry => entry.status === "loaded" && Array.isArray(entry.uiHostCapabilities) && entry.uiHostCapabilities.length > 0)
@@ -1070,4 +1110,8 @@ export class PluginManager {
 
   getPlugin(id) { return this._plugins.get(id) || null; }
   listPlugins() { return [...this._plugins.values()]; }
+}
+
+function clonePlain(value) {
+  return structuredClone(value);
 }

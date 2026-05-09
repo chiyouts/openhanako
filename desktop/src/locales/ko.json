@@ -1061,7 +1061,17 @@
       "configTitle": "{name} 설정",
       "configLoadError": "플러그인 설정을 불러오지 못했습니다",
       "sensitiveHint": "저장된 값은 숨겨집니다. 새 값을 입력하면 교체됩니다.",
-      "invalidJson": "JSON 형식이 올바르지 않습니다"
+      "invalidJson": "JSON 형식이 올바르지 않습니다",
+      "showDiagnostics": "플러그인 진단 보기",
+      "diagnosticsTitle": "플러그인 진단",
+      "diagnosticsLoadError": "플러그인 진단을 불러오지 못했습니다",
+      "diagnosticsSummary": "기능 {capabilities}/{total} · 작업 {tasks} · 일정 {schedules}",
+      "noDiagnostics": "진단 데이터가 없습니다",
+      "diagnosticActivation": "활성화: {state}",
+      "diagnosticRoutes": "페이지 {pages} · 위젯 {widgets} · 설정 {settingsTabs}",
+      "diagnosticTools": "도구 {count}",
+      "diagnosticCommands": "명령 {count}",
+      "diagnosticConfig": "설정 {count}"
     },
     "mcp": {
       "masterTitle": "Master Switch",

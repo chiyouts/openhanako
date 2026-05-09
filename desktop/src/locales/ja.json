@@ -1061,7 +1061,17 @@
       "configTitle": "{name} 設定",
       "configLoadError": "プラグイン設定の読み込みに失敗しました",
       "sensitiveHint": "保存済みの値は非表示です。新しい値を入力すると置き換えます。",
-      "invalidJson": "JSON 形式が正しくありません"
+      "invalidJson": "JSON 形式が正しくありません",
+      "showDiagnostics": "プラグイン診断を表示",
+      "diagnosticsTitle": "プラグイン診断",
+      "diagnosticsLoadError": "プラグイン診断の読み込みに失敗しました",
+      "diagnosticsSummary": "機能 {capabilities}/{total} · タスク {tasks} · スケジュール {schedules}",
+      "noDiagnostics": "診断データはまだありません",
+      "diagnosticActivation": "起動：{state}",
+      "diagnosticRoutes": "ページ {pages} · ウィジェット {widgets} · 設定 {settingsTabs}",
+      "diagnosticTools": "ツール {count}",
+      "diagnosticCommands": "コマンド {count}",
+      "diagnosticConfig": "設定 {count}"
     },
     "mcp": {
       "masterTitle": "Master Switch",

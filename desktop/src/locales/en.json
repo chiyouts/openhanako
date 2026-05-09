@@ -1087,7 +1087,17 @@
       "configTitle": "{name} settings",
       "configLoadError": "Plugin settings failed to load",
       "sensitiveHint": "Stored value is hidden. Enter a new value to replace it.",
-      "invalidJson": "Invalid JSON"
+      "invalidJson": "Invalid JSON",
+      "showDiagnostics": "Show plugin diagnostics",
+      "diagnosticsTitle": "Plugin Diagnostics",
+      "diagnosticsLoadError": "Plugin diagnostics failed to load",
+      "diagnosticsSummary": "Capabilities {capabilities}/{total} · Tasks {tasks} · Schedules {schedules}",
+      "noDiagnostics": "No diagnostics yet",
+      "diagnosticActivation": "Activation: {state}",
+      "diagnosticRoutes": "Pages {pages} · Widgets {widgets} · Settings {settingsTabs}",
+      "diagnosticTools": "Tools {count}",
+      "diagnosticCommands": "Commands {count}",
+      "diagnosticConfig": "Config {count}"
     },
     "mcp": {
       "masterTitle": "Master Switch",

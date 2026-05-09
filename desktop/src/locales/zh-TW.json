@@ -1061,7 +1061,17 @@
       "configTitle": "「{name}」設定",
       "configLoadError": "插件設定載入失敗",
       "sensitiveHint": "已儲存的值會被隱藏。輸入新值即可替換。",
-      "invalidJson": "JSON 格式不正確"
+      "invalidJson": "JSON 格式不正確",
+      "showDiagnostics": "查看插件診斷",
+      "diagnosticsTitle": "插件診斷",
+      "diagnosticsLoadError": "插件診斷載入失敗",
+      "diagnosticsSummary": "能力 {capabilities}/{total} · 任務 {tasks} · 排程 {schedules}",
+      "noDiagnostics": "暫無診斷資料",
+      "diagnosticActivation": "激活：{state}",
+      "diagnosticRoutes": "頁面 {pages} · 元件 {widgets} · 設定頁 {settingsTabs}",
+      "diagnosticTools": "工具 {count}",
+      "diagnosticCommands": "命令 {count}",
+      "diagnosticConfig": "配置項 {count}"
     },
     "mcp": {
       "masterTitle": "總開關",

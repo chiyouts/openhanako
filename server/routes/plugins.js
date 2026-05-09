@@ -101,6 +101,19 @@ export function createPluginsRoute(engine) {
     return c.json(capabilities);
   });
 
+  route.get("/plugins/diagnostics", (c) => {
+    const pm = engine.pluginManager;
+    const bus = engine.getEventBus?.() || engine.eventBus || null;
+    return c.json({
+      plugins: typeof pm?.getDiagnostics === "function"
+        ? pm.getDiagnostics().filter(p => !p.hidden)
+        : [],
+      eventBus: typeof bus?.listCapabilities === "function" ? bus.listCapabilities() : [],
+      tasks: typeof engine.taskRegistry?.listAll === "function" ? engine.taskRegistry.listAll() : [],
+      schedules: typeof engine.taskRegistry?.listSchedules === "function" ? engine.taskRegistry.listSchedules() : [],
+    });
+  });
+
   route.get("/plugins/:id/config-schema", (c) => {
     const pm = engine.pluginManager;
     const schema = pm?.getConfigSchema(c.req.param("id"));

@@ -62,6 +62,7 @@ function mockEngine(overrides = {}) {
       getConfigSchema: () => null,
       getConfig: overrides.getConfig || (() => null),
       setConfig: overrides.setConfig || vi.fn(),
+      getDiagnostics: overrides.getDiagnostics || (() => overrides.diagnostics || []),
       getUserPluginsDir: () => "/user",
       isValidPluginDir: () => true,
       getAllowFullAccess: () => allowFullAccess,
@@ -310,6 +311,52 @@ describe("plugin management API", () => {
           available: true,
         },
       ]);
+    });
+  });
+
+  describe("GET /plugins/diagnostics", () => {
+    it("returns plugin, bus, task, and schedule diagnostics", async () => {
+      const engine = mockEngine({
+        diagnostics: [
+          {
+            id: "demo",
+            name: "Demo",
+            status: "loaded",
+            activationState: "activated",
+            hidden: false,
+            routes: { pages: [], widgets: [] },
+            tools: [{ name: "demo_search" }],
+          },
+        ],
+        eventBus: {
+          listCapabilities: () => [{ type: "task:list", available: true }],
+        },
+      });
+      engine.taskRegistry = {
+        listAll: () => [{ taskId: "t1", type: "render", status: "running" }],
+        listSchedules: () => [{ scheduleId: "daily", type: "digest", enabled: true }],
+      };
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/diagnostics");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        plugins: [
+          {
+            id: "demo",
+            name: "Demo",
+            status: "loaded",
+            activationState: "activated",
+            hidden: false,
+            routes: { pages: [], widgets: [] },
+            tools: [{ name: "demo_search" }],
+          },
+        ],
+        eventBus: [{ type: "task:list", available: true }],
+        tasks: [{ taskId: "t1", type: "render", status: "running" }],
+        schedules: [{ scheduleId: "daily", type: "digest", enabled: true }],
+      });
     });
   });
 
