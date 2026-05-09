@@ -116,6 +116,44 @@ describe("known-models dictionary", () => {
     });
   });
 
+  it("declares Xiaomi MiMo V2.5 series with official multimodal and TTS limits", () => {
+    expect(lookupKnown("mimo", "mimo-v2.5-pro")).toEqual({
+      name: "MiMo V2.5 Pro",
+      context: 1048576,
+      maxOutput: 131072,
+      reasoning: true,
+    });
+    expect(lookupKnown("mimo", "mimo-v2.5")).toEqual({
+      name: "MiMo V2.5",
+      context: 1048576,
+      maxOutput: 131072,
+      image: true,
+      video: true,
+      reasoning: true,
+    });
+
+    for (const id of [
+      "mimo-v2.5-tts",
+      "mimo-v2.5-tts-voicedesign",
+      "mimo-v2.5-tts-voiceclone",
+    ]) {
+      expect(lookupKnown("mimo", id)).toMatchObject({
+        context: 8192,
+        maxOutput: 8192,
+      });
+    }
+  });
+
+  it("keeps Xiaomi MiMo V2 Omni aligned with current official full-modal metadata", () => {
+    expect(lookupKnown("mimo", "mimo-v2-omni")).toMatchObject({
+      context: 262144,
+      maxOutput: 131072,
+      image: true,
+      video: true,
+      reasoning: true,
+    });
+  });
+
   it("keeps provider-specific metadata ahead of generic fallbacks", () => {
     expect(lookupKnown("openai-codex-oauth", "gpt-5.5")).toMatchObject({
       context: 400000,

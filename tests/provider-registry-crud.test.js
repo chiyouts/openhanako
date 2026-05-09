@@ -675,6 +675,13 @@ describe("saveProvider", () => {
 
     const persisted = readAddedModels();
     expect(persisted.mimo.models).toEqual(reg.getDefaultModels("mimo"));
+    expect(persisted.mimo.models).toEqual(expect.arrayContaining([
+      "mimo-v2.5-pro",
+      "mimo-v2.5",
+      "mimo-v2.5-tts",
+      "mimo-v2.5-tts-voicedesign",
+      "mimo-v2.5-tts-voiceclone",
+    ]));
     expect(persisted.mimo.seed_default_models).toBeUndefined();
   });
 

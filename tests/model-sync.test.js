@@ -84,6 +84,16 @@ const KNOWN_MODELS = {
   minimax: {
     "MiniMax-M2.7": { name: "MiniMax M2.7", context: 204800, maxOutput: 131072, reasoning: true },
   },
+  mimo: {
+    "mimo-v2.5": {
+      name: "MiMo V2.5",
+      context: 1048576,
+      maxOutput: 131072,
+      image: true,
+      video: true,
+      reasoning: true,
+    },
+  },
   // 兼容读验证：legacy-vision 模型词典里用旧字段 vision，model-sync 应当识别并投影为 input
   legacy: {
     "legacy-vision-model": { name: "Legacy Vision Model", context: 32000, vision: true },
@@ -551,6 +561,36 @@ describe("syncModels", () => {
     const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
     expect(result.providers.dashscope.models[0].input).toEqual(["text", "image"]);
     expect(result.providers.dashscope.models[0].compat.hanaVideoInput).toBe(true);
+  });
+
+  it("projects MiMo V2.5 full-modal metadata without invalid Pi input", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      mimo: {
+        base_url: "https://api.xiaomimimo.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["mimo-v2.5"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const model = result.providers.mimo.models[0];
+    expect(model).toMatchObject({
+      id: "mimo-v2.5",
+      name: "MiMo V2.5",
+      input: ["text", "image"],
+      contextWindow: 1048576,
+      maxTokens: 131072,
+      reasoning: true,
+    });
+    expect(model.compat).toMatchObject({
+      supportsDeveloperRole: false,
+      hanaVideoInput: true,
+    });
   });
 
   it("writes Pi-loadable models when Hana video capability is enabled", async () => {
