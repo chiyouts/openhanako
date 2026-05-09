@@ -9,6 +9,8 @@ Hana's plugin SDK is split into small packages so plugin authors can choose only
 | `@hana/plugin-runtime` | plugin Node runtime | Helpers for tools, lifecycle plugins, EventBus handlers, SessionFile media details, providers, and Pi SDK extensions. |
 | `@hana/plugin-components` | iframe React UI | Hana-styled React primitives with theme fallback: controls, cards, rows, lists, and empty states. |
 
+For the end-to-end plugin author workflow, read `.docs/PLUGIN-DEVELOPMENT.md` first, then use this file as the SDK package map.
+
 Run `npm run build:packages` after SDK changes. The command builds all SDK packages and their `.d.ts` files:
 
 ```bash
@@ -20,6 +22,13 @@ npm run build:packages
 The SDK packages are developer-facing source/build dependencies. The app package still excludes `packages/**`, so plugin UI code should bundle `@hana/plugin-sdk` and `@hana/plugin-components` into its iframe assets. Runtime helpers from `@hana/plugin-runtime` should be bundled or installed with the plugin when the plugin is distributed outside the monorepo.
 
 Built-in plugins may use the same source patterns, but they should be checked against the packaged server bundle before release. The host does not silently provide these SDK packages as global runtime modules.
+
+## Plugin Shape Guide
+
+- Tool-only plugins usually need only `tools/*.js` and `@hana/plugin-runtime` helpers. They can stay `restricted`.
+- Runtime plugins use `index.js` for lifecycle, EventBus handlers, background tasks, schedules, or dynamic tools. They require `trust: "full-access"`.
+- UI plugins use iframe routes plus `@hana/plugin-sdk` and, for React UI, `@hana/plugin-components`. They require `trust: "full-access"` and explicit `ui.hostCapabilities` grants for host calls such as `external.open` or `clipboard.writeText`.
+- Marketplace metadata lives outside the app repo in `OH-Plugins`. The app can browse a URL marketplace and can install local `source` entries when the marketplace is loaded from a local file. Use inline `readme` or HTTPS `readmeUrl` for URL marketplaces; `readmePath` is for local file marketplaces. Remote package download/checksum install is a later distribution step.
 
 ## UI Path
 

@@ -31,6 +31,25 @@ export async function execute(input) {
 3. After installation, the Agent can immediately call `my-plugin_hello`
 4. Uninstall: click the delete button on the plugins page
 
+## From Idea To Plugin
+
+Read `.docs/PLUGIN-DEVELOPMENT.md` for the end-to-end workflow. Pick the plugin shape first:
+
+| Shape | Best for | Permission |
+|------|----------|------------|
+| Tool-only | No UI, adds Agent-callable tools | `restricted` |
+| Runtime | Lifecycle, EventBus, background tasks, dynamic tools | `full-access` |
+| UI | Page / widget / iframe card | `full-access` |
+| Marketplace entry | Makes the plugin discoverable in the marketplace | `OH-Plugins/plugins/<id>.json` |
+
+Start with the `hana-plugin-creator` scaffold, then delete what you do not need:
+
+```bash
+python3 skills2set/hana-plugin-creator/scripts/create_hana_plugin.py "My Plugin" --path examples/plugins --kind full
+```
+
+Debug order: install the local folder, inspect Settings diagnostics, finish README/manifest, then add an `OH-Plugins` marketplace entry when the plugin is ready to publish.
+
 ## Installation & Management
 
 ### Installation Methods
@@ -693,6 +712,38 @@ await this.ctx.bus.request("task:remove", { taskId: "my-task-123" });
 **Result delivery** usually combines `task:*` with `deferred:*`: `task:*` tracks runtime lifecycle, while `deferred:*` tracks result delivery back to the parent session. A long task commonly calls `deferred:register` and `task:register` at start, then `deferred:resolve` and `task:remove` at completion.
 
 `TaskRegistry` is runtime-only and not persisted. If a plugin wants restart recovery, it must restore pending jobs from its own storage in `onload()` and call `task:register` again.
+
+### Marketplace And Install Sources
+
+The "Open plugin marketplace" button in Settings -> Plugins opens a full marketplace subpage that reads `/api/plugins/marketplace`. The host supports two marketplace source types:
+
+- `HANA_PLUGIN_MARKETPLACE_FILE=/path/to/marketplace.json`
+- `HANA_PLUGIN_MARKETPLACE_URL=https://.../marketplace.json`
+
+Without either environment variable, Hana tries `${HANA_HOME}/plugin-marketplace/marketplace.json`; if it does not exist, the marketplace page is empty and local drag-and-drop installation still works. The marketplace index shape matches the `OH-Plugins` repository:
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": [{
+    "schemaVersion": 1,
+    "id": "demo",
+    "name": "Demo",
+    "publisher": "Hana",
+    "version": "1.0.0",
+    "description": "Demo plugin",
+    "repository": "https://example.com/demo",
+    "compatibility": { "minAppVersion": "0.170.0" },
+    "trust": "restricted",
+    "permissions": ["task.read"],
+    "contributions": ["tools"],
+    "distribution": { "kind": "source", "path": "plugins/demo" },
+    "readmePath": "plugins/demo/README.md"
+  }]
+}
+```
+
+The marketplace UI shows the plugin list and README in a wider settings subpage. Selecting a plugin reads `/api/plugins/marketplace/:id/readme`. Local file marketplaces can install `distribution.kind: "source"` entries because paths resolve on disk. URL marketplaces can list entries and show README content; URL sources should use inline `readme` or HTTPS `readmeUrl`, while `readmePath` is for local file marketplaces. Remote release package download, sha256 verification, and permission review are still future distribution work.
 
 ## Forward Compatibility
 

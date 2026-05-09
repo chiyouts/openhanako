@@ -31,6 +31,25 @@ export async function execute(input) {
 3. 安装后 Agent 立即可以调用 `my-plugin_hello` 工具
 4. 卸载：在插件页面点删除按钮
 
+## 从想法到插件
+
+完整实操流程见 `.docs/PLUGIN-DEVELOPMENT.md`。开发时先选插件形态：
+
+| 形态 | 适合什么 | 权限 |
+|------|----------|------|
+| Tool-only | 没有 UI，只给 Agent 增加工具能力 | `restricted` |
+| Runtime | 需要生命周期、EventBus、后台任务、动态工具 | `full-access` |
+| UI | 需要 page / widget / iframe card | `full-access` |
+| Marketplace entry | 让插件出现在插件市场 | 写入 `OH-Plugins/plugins/<id>.json` |
+
+推荐先用 `hana-plugin-creator` 脚手架生成，再按需求删减：
+
+```bash
+python3 skills2set/hana-plugin-creator/scripts/create_hana_plugin.py "My Plugin" --path examples/plugins --kind full
+```
+
+调试顺序：本地文件夹安装 → 设置页诊断 → 补 README/manifest → 需要公开时再写 `OH-Plugins` 市场条目。
+
 ## 安装与管理
 
 ### 安装方式
@@ -854,7 +873,7 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
 }
 ```
 
-市场 UI 会在设置主区域内展示更宽的插件列表和 README 单页视图，点击插件后读取 `/api/plugins/marketplace/:id/readme` 展示 README。当前可直接安装 `distribution.kind: "source"` 的本地源插件；release 包安装需要后续接入远端包下载、校验 sha256 与权限确认。
+市场 UI 会在设置主区域内展示更宽的插件列表和 README 单页视图，点击插件后读取 `/api/plugins/marketplace/:id/readme` 展示 README。当前可直接安装 `distribution.kind: "source"` 的本地源插件。URL 市场源可以浏览条目和 README；URL 源推荐使用内联 `readme` 或 HTTPS `readmeUrl`，`readmePath` 只适合本地 file marketplace。远端 release 包一键下载安装还需要后续接入包下载、sha256 校验与权限确认。
 
 ## 前向兼容
 
