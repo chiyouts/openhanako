@@ -61,6 +61,7 @@ export function createProvidersRoute(engine) {
         api_key: p.api_key || "",
         api: p.api || entry?.api || "",
         models: p.models || [],
+        config_error: p._config_error || null,
       };
     }
 
@@ -99,6 +100,13 @@ export function createProvidersRoute(engine) {
       const rawModels = p.models || [];
       const customModels = oauthCustom[name] || [];
       const allowsMissingApiKey = !!p.base_url && provRegistry.allowsMissingApiKey?.(name, p.base_url);
+      const hasCredentials = !!(p.api_key || (isOAuth && oauthInfo?.loggedIn) || (!isOAuth && allowsMissingApiKey));
+      const missingFields = [];
+      if (!isOAuth) {
+        if (!p.base_url) missingFields.push("base_url");
+        if (!hasCredentials) missingFields.push("api_key");
+      }
+      if (rawModels.length === 0 && customModels.length === 0) missingFields.push("models");
 
       result[name] = {
         type: isOAuth ? "oauth" : "api-key",
@@ -109,11 +117,14 @@ export function createProvidersRoute(engine) {
         api_key: p.api_key || "",
         models: rawModels,
         custom_models: customModels,
-        has_credentials: !!(p.api_key || (isOAuth && oauthInfo?.loggedIn) || (!isOAuth && allowsMissingApiKey)),
+        has_credentials: hasCredentials,
         logged_in: isOAuth ? !!oauthInfo?.loggedIn : undefined,
         supports_oauth: isOAuth,
         is_coding_plan: name.endsWith("-coding"),
         can_delete: !isOAuth || Object.prototype.hasOwnProperty.call(providers, name),
+        config_status: p.config_error ? "invalid" : (missingFields.length > 0 ? "needs_setup" : "ok"),
+        config_error: p.config_error || null,
+        missing_fields: missingFields,
       };
     }
 
@@ -139,6 +150,9 @@ export function createProvidersRoute(engine) {
         supports_oauth: true,
         is_coding_plan: false,
         can_delete: false,
+        config_status: customModels.length > 0 && loginInfo.loggedIn ? "ok" : "needs_setup",
+        config_error: null,
+        missing_fields: customModels.length > 0 ? [] : ["models"],
       };
     }
 
@@ -162,6 +176,12 @@ export function createProvidersRoute(engine) {
           supports_oauth: false,
           is_coding_plan: id.endsWith("-coding"),
           can_delete: false,
+          config_status: "needs_setup",
+          config_error: null,
+          missing_fields: [
+            ...(entry.authType === "none" ? [] : ["api_key"]),
+            "models",
+          ],
         };
       }
     }

@@ -41,6 +41,9 @@ export interface ProviderSummary {
   supports_oauth: boolean;
   is_coding_plan?: boolean;
   can_delete: boolean;
+  config_status?: 'ok' | 'needs_setup' | 'invalid';
+  config_error?: string | null;
+  missing_fields?: string[];
 }
 
 export interface PluginSettingsTab {

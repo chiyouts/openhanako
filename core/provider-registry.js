@@ -26,6 +26,70 @@ const _defaultModels = JSON.parse(
   fs.readFileSync(fromRoot("lib", "default-models.json"), "utf-8"),
 );
 
+const MALFORMED_PROVIDER_CONFIG = "malformed_provider_config";
+const INVALID_MODELS_CONFIG = "invalid_models_config";
+const PROVIDER_RUNTIME_META_KEYS = new Set(["_config_error"]);
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeProviderUserConfig(value) {
+  if (!isPlainObject(value)) {
+    return { _config_error: MALFORMED_PROVIDER_CONFIG };
+  }
+
+  const next = { ...value };
+  if (Object.prototype.hasOwnProperty.call(next, "models") && !Array.isArray(next.models)) {
+    delete next.models;
+    next._config_error = next._config_error || INVALID_MODELS_CONFIG;
+  } else if (Array.isArray(next.models)) {
+    const models = [];
+    for (const model of next.models) {
+      if (typeof model === "string" && model.trim()) {
+        models.push(model.trim());
+        continue;
+      }
+      if (isPlainObject(model) && typeof model.id === "string" && model.id.trim()) {
+        models.push({ ...model, id: model.id.trim() });
+        continue;
+      }
+      next._config_error = next._config_error || INVALID_MODELS_CONFIG;
+    }
+    next.models = models;
+  }
+  return next;
+}
+
+function normalizeProviderUserConfigMap(providers) {
+  if (!isPlainObject(providers)) return {};
+  const normalized = {};
+  for (const [providerId, config] of Object.entries(providers)) {
+    if (!providerId) continue;
+    normalized[providerId] = normalizeProviderUserConfig(config);
+  }
+  return normalized;
+}
+
+function stripProviderRuntimeMeta(config) {
+  const normalized = normalizeProviderUserConfig(config);
+  const clean = {};
+  for (const [key, value] of Object.entries(normalized)) {
+    if (PROVIDER_RUNTIME_META_KEYS.has(key)) continue;
+    clean[key] = value;
+  }
+  return clean;
+}
+
+function stripProviderRuntimeMetaMap(providers) {
+  if (!isPlainObject(providers)) return {};
+  const clean = {};
+  for (const [providerId, config] of Object.entries(providers)) {
+    clean[providerId] = stripProviderRuntimeMeta(config);
+  }
+  return clean;
+}
+
 // ── 内置插件 ────────────────────────────────────────────────────────────────
 
 import { dashscopePlugin } from "../lib/providers/dashscope.js";
@@ -244,7 +308,7 @@ export class ProviderRegistry {
         return this._addedModelsCache;
       }
       const raw = safeReadYAMLSync(ymlPath, {}, YAML) || {};
-      this._addedModelsCache = raw.providers || {};
+      this._addedModelsCache = normalizeProviderUserConfigMap(raw.providers);
       this._addedModelsMtime = mtime;
       return this._addedModelsCache;
     } catch {
@@ -260,7 +324,7 @@ export class ProviderRegistry {
     const header =
       "# Hanako 供应商配置（全局，跨 agent 共享）\n" +
       "# 由设置页面管理\n\n";
-    const data = { ...existing, providers };
+    const data = { ...existing, providers: stripProviderRuntimeMetaMap(providers) };
     const yamlStr = header + YAML.dump(data, {
       indent: 2,
       lineWidth: -1,

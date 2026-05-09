@@ -431,6 +431,39 @@ describe("getAllProvidersRaw", () => {
     const raw = reg.getAllProvidersRaw();
     expect(raw).toEqual({});
   });
+
+  it("normalizes malformed provider records to empty configs at the registry boundary", () => {
+    const ymlPath = path.join(tmpDir, "added-models.yaml");
+    fs.writeFileSync(ymlPath, [
+      "providers:",
+      "  test-provider:",
+      "    api_key: sk-x",
+      "    models:",
+      "      - model-a",
+      "  empty-coding:",
+      "  string-provider: broken",
+      "  array-provider:",
+      "    - nope",
+      "  invalid-models:",
+      "    models:",
+      "      -",
+      "      - id:",
+      "      - id: model-b",
+      "",
+    ].join("\n"), "utf-8");
+
+    const reg = makeRegistry();
+    const raw = reg.getAllProvidersRaw();
+
+    expect(raw["test-provider"].models).toEqual(["model-a"]);
+    expect(raw["empty-coding"]).toEqual({ _config_error: "malformed_provider_config" });
+    expect(raw["string-provider"]).toEqual({ _config_error: "malformed_provider_config" });
+    expect(raw["array-provider"]).toEqual({ _config_error: "malformed_provider_config" });
+    expect(raw["invalid-models"]).toEqual({
+      _config_error: "invalid_models_config",
+      models: [{ id: "model-b" }],
+    });
+  });
 });
 
 // ── addModel ─────────────────────────────────────────────────────────────────

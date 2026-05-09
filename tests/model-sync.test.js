@@ -762,6 +762,42 @@ describe("syncModels", () => {
     expect(mm.availableModels).toEqual([{ id: "llama3", provider: "ollama" }]);
   });
 
+  it("ignores malformed provider records without breaking valid model projection", async () => {
+    const { ModelManager } = await import("../core/model-manager.js");
+    fs.writeFileSync(path.join(tmpDir, "added-models.yaml"), [
+      "providers:",
+      "  deepseek:",
+      "    base_url: https://api.deepseek.com/v1",
+      "    api: openai-completions",
+      "    api_key: sk-deep",
+      "    models:",
+      "      - deepseek-chat",
+      "  dashscope-coding:",
+      "  string-provider: broken",
+      "",
+    ].join("\n"), "utf-8");
+
+    const mm = new ModelManager({ hanakoHome: tmpDir });
+    mm._modelRegistry = {
+      refresh: vi.fn(),
+      getAvailable: vi.fn().mockResolvedValue([
+        { id: "deepseek-chat", provider: "deepseek" },
+        { id: "unconfigured-model", provider: "other" },
+      ]),
+    };
+
+    await expect(mm.syncAndRefresh()).resolves.toBe(true);
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.deepseek.models[0].id).toBe("deepseek-chat");
+    expect(result.providers["dashscope-coding"]).toBeUndefined();
+    expect(result.providers["string-provider"]).toBeUndefined();
+    expect(mm.availableModels).toEqual([
+      { id: "deepseek-chat", provider: "deepseek" },
+      { id: "unconfigured-model", provider: "other" },
+    ]);
+  });
+
   it("handles multiple providers in one call", async () => {
     const syncModels = await loadSync();
 

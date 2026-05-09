@@ -74,10 +74,11 @@ export function AgentTab() {
       group: m.provider,
     }));
     if (currentModel && !opts.some(o => o.value === currentModel)) {
-      opts.unshift({ value: currentModel, label: currentModel, group: '' });
+      opts.unshift({ value: currentModel, label: t('settings.agent.modelUnavailable', { model: currentModel }), group: '' });
     }
     return opts;
   }, [availableModels, currentModel]);
+  const currentModelUnavailable = !!currentModel && !availableModels.some(m => `${m.provider}/${m.id}` === currentModel);
 
   const memoryEnabled = settingsConfig?.memory?.enabled !== false;
   const experienceEnabled = settingsConfig?.experience?.enabled === true;
@@ -207,6 +208,9 @@ export function AgentTab() {
             />
           </div>
           <span className={styles['settings-form-hint']}>{t('settings.agent.chatModelHint')}</span>
+          {currentModelUnavailable && (
+            <span className={styles['settings-form-hint']}>{t('settings.agent.modelUnavailableHint')}</span>
+          )}
         </div>
         {/* 图片模型选择器暂时隐藏，后续重新设计 */}
       </section>

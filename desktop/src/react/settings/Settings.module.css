@@ -2762,6 +2762,16 @@ a.about-link:hover {
     opacity: 1;
 }
 
+.pv-config-alert {
+    margin: 0 0 var(--space-md);
+    padding: 8px 10px;
+    border: 1px solid rgba(var(--danger-rgb, 200, 81, 67), 0.24);
+    background: rgba(var(--danger-rgb, 200, 81, 67), 0.08);
+    color: var(--danger, #c85143);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
 .pv-list-divider {
     height: 1px;
     background: var(--overlay-light);
