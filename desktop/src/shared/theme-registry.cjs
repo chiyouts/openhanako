@@ -13,6 +13,10 @@ const AUTO_DARK_DEFAULT = 'midnight';
 const LEGACY_THEME_ALIASES = Object.freeze({
   'claude-design': 'new-warm-paper',
 });
+const PAPER_TEXTURE_BLOCKED_THEME_IDS = Object.freeze([
+  'midnight',
+  'midnight-contrast',
+]);
 
 const AUTO_OPTION = Object.freeze({
   id: 'auto',
@@ -129,11 +133,16 @@ function getAllUIOptions() {
   return [...themeOpts, { ...AUTO_OPTION }];
 }
 
+function isPaperTextureBlockedTheme(themeId) {
+  return PAPER_TEXTURE_BLOCKED_THEME_IDS.includes(themeId);
+}
+
 module.exports = {
   STORAGE_KEY,
   DEFAULT_THEME,
   AUTO_LIGHT_DEFAULT,
   AUTO_DARK_DEFAULT,
+  PAPER_TEXTURE_BLOCKED_THEME_IDS,
   AUTO_OPTION,
   LEGACY_THEME_ALIASES,
   THEMES,
@@ -141,4 +150,5 @@ module.exports = {
   resolveSavedTheme,
   getThemeIds,
   getAllUIOptions,
+  isPaperTextureBlockedTheme,
 };

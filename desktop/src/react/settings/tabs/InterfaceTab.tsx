@@ -12,7 +12,10 @@ import {
   normalizeEditorTypography,
   type EditorMarkdownTypography,
 } from '../../editor/typography';
-import { isPaperTextureEnabled } from '../../../shared/appearance-preferences';
+import {
+  isPaperTextureBlockedTheme,
+  isPaperTextureEnabled,
+} from '../../../shared/appearance-preferences';
 import styles from '../Settings.module.css';
 import registry from '../../../shared/theme-registry.cjs';
 
@@ -52,6 +55,7 @@ export function InterfaceTab() {
   const currentTheme = registry.migrateSavedTheme(localStorage.getItem(registry.STORAGE_KEY));
   const serifEnabled = localStorage.getItem('hana-font-serif') !== '0';
   const paperTextureEnabled = isPaperTextureEnabled(localStorage);
+  const paperTextureBlocked = isPaperTextureBlockedTheme(document.documentElement.getAttribute('data-theme'));
   const leavesOverlayEnabled = localStorage.getItem('hana-leaves-overlay') === '1';
   const editorTypography = useMemo(
     () => normalizeEditorTypography(settingsConfig?.editor),
@@ -146,12 +150,15 @@ export function InterfaceTab() {
         />
         <SettingsRow
           label={t('settings.appearance.paperTexture')}
-          hint={t('settings.appearance.paperTextureHint')}
+          hint={paperTextureBlocked
+            ? t('settings.appearance.paperTextureDarkDisabledHint')
+            : t('settings.appearance.paperTextureHint')}
           control={
             <Toggle
-              on={paperTextureEnabled}
+              on={paperTextureBlocked ? false : paperTextureEnabled}
+              disabled={paperTextureBlocked}
               onChange={(next) => {
-                (window as any).setPaperTexture?.(next);
+                window.setPaperTexture?.(next);
                 platform?.settingsChanged?.('paper-texture-changed', { enabled: next });
                 useSettingsStore.setState({});
               }}
