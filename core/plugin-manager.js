@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { createPluginContext } from "./plugin-context.js";
 import { freshImport } from "./fresh-import.js";
+import { normalizePluginConfigSchema } from "./plugin-config.js";
 
 const KNOWN_CONTRIBUTION_DIRS = [
   "tools", "routes", "skills", "agents", "commands", "providers",
@@ -145,6 +146,9 @@ export class PluginManager {
     const version = manifest?.version || "0.0.0";
     const description = manifest?.description || "";
     const uiHostCapabilities = normalizeUiHostCapabilities(manifest?.ui?.hostCapabilities, id);
+    const configSchema = manifest?.contributes?.configuration
+      ? normalizePluginConfigSchema(id, manifest.contributes.configuration)
+      : normalizePluginConfigSchema(id, {});
     const contributions = [];
     for (const dir of KNOWN_CONTRIBUTION_DIRS) {
       if (fs.existsSync(path.join(pluginDir, dir))) contributions.push(dir);
@@ -153,7 +157,7 @@ export class PluginManager {
     if (fs.existsSync(path.join(pluginDir, "index.js"))) contributions.push("lifecycle");
     const trust = manifest?.trust === "full-access" ? "full-access" : "restricted";
     const hidden = !!manifest?.hidden;
-    return { id, name, version, description, pluginDir, manifest, contributions, trust, hidden, uiHostCapabilities };
+    return { id, name, version, description, pluginDir, manifest, contributions, trust, hidden, uiHostCapabilities, configSchema };
   }
 
   async loadAll() {
@@ -286,6 +290,7 @@ export class PluginManager {
       bus: this._bus,
       accessLevel,
       registerSessionFile: this._registerSessionFile,
+      configSchema: entry.configSchema,
     });
 
     // All plugins: declarative contributions
@@ -596,8 +601,8 @@ export class PluginManager {
   // ── Task 9: Configuration loader ─────────────────────────────────────────
 
   _loadConfiguration(entry) {
-    const schema = entry.manifest?.contributes?.configuration;
-    if (!schema) return;
+    const schema = entry.configSchema;
+    if (!schema || Object.keys(schema.properties || {}).length === 0) return;
     this._configSchemas.push({ pluginId: entry.id, schema });
   }
 
@@ -607,6 +612,29 @@ export class PluginManager {
 
   getAllConfigSchemas() {
     return [...this._configSchemas];
+  }
+
+  getConfig(pluginId, options = {}) {
+    const entry = this._plugins.get(pluginId);
+    if (!entry?.ctx?.config) return null;
+    return {
+      pluginId,
+      schema: entry.ctx.config.getSchema(),
+      values: entry.ctx.config.getAll({ ...options, redacted: true }),
+    };
+  }
+
+  setConfig(pluginId, values, options = {}) {
+    const entry = this._plugins.get(pluginId);
+    if (!entry?.ctx?.config) throw new Error(`Plugin "${pluginId}" not found`);
+    const nextValues = entry.ctx.config.setMany(values, options);
+    this._bus?.emit({ type: "plugin_config_changed", pluginId, scope: options.scope || "global" });
+    return {
+      pluginId,
+      schema: entry.ctx.config.getSchema(),
+      values: entry.ctx.config.getAll({ ...options, redacted: true }),
+      rawValues: nextValues,
+    };
   }
 
   // ── Page / Widget loader ──────────────────────────────────────────────────

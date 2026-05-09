@@ -357,22 +357,52 @@ export const defaultApi = "openai-completions";
 
 ### Configuration（配置 schema）
 
-在 `manifest.json` 的 `contributes.configuration` 中用 JSON Schema 声明：
+在 `manifest.json` 的 `contributes.configuration` 中声明配置 schema。Hana 会规范化字段、写入默认值、校验类型，并在设置 API 中自动隐藏敏感字段：
 
 ```json
 {
   "contributes": {
     "configuration": {
       "properties": {
-        "interval": { "type": "number", "default": 25, "title": "工作间隔（分钟）" },
-        "sound": { "type": "boolean", "default": true, "title": "结束提示音" }
+        "interval": {
+          "type": "number",
+          "default": 25,
+          "title": "工作间隔（分钟）",
+          "scope": "global",
+          "ui": { "control": "number" }
+        },
+        "sound": { "type": "boolean", "default": true, "title": "结束提示音" },
+        "apiKey": {
+          "type": "string",
+          "title": "API Key",
+          "sensitive": true,
+          "ui": { "control": "password" }
+        }
       }
     }
   }
 }
 ```
 
-配置通过 `ctx.config.get(key)` / `ctx.config.set(key, value)` 读写，持久化在 `plugin-data/{pluginId}/config.json`。
+配置通过 `ctx.config.get(key)` / `ctx.config.set(key, value)` 读写，持久化在 `plugin-data/{pluginId}/config.json`。旧插件没有 schema 时仍可自由读写平铺 key；声明了 schema 的插件会按字段类型、`enum` 和 `scope` 校验。
+
+字段支持：
+
+- `type`: `string` / `number` / `integer` / `boolean` / `object` / `array`
+- `default`
+- `title` / `description`
+- `enum`
+- `scope`: `global` / `per-agent` / `per-session`
+- `sensitive`: 设置 API 返回时显示为 `********`
+- `ui`: 自动设置页的控件提示
+- `reloadRequired`
+
+per-agent 和 per-session 配置要显式传归属：
+
+```js
+await ctx.config.set("agentMode", "strict", { scope: "per-agent", agentId: "hanako" });
+const value = await ctx.config.get("agentMode", { scope: "per-agent", agentId: "hanako" });
+```
 
 ### Page（插件页面）⚡ full-access
 

@@ -114,8 +114,17 @@ export interface HanaProviderDefinition {
 export type HanaExtensionFactory<Pi = unknown> = (pi: Pi) => MaybePromise<void>;
 
 export interface HanaPluginConfigStore {
-  get<T = unknown>(key: string): MaybePromise<T | undefined>;
-  set<T = unknown>(key: string, value: T): MaybePromise<void>;
+  get<T = unknown>(key: string, options?: HanaPluginConfigScopeOptions): MaybePromise<T | undefined>;
+  getAll?(options?: HanaPluginConfigScopeOptions & { redacted?: boolean }): MaybePromise<Record<string, unknown>>;
+  set<T = unknown>(key: string, value: T, options?: HanaPluginConfigScopeOptions): MaybePromise<void>;
+  setMany?(values: Record<string, unknown>, options?: HanaPluginConfigScopeOptions): MaybePromise<Record<string, unknown>>;
+  getSchema?(): JsonSchema;
+}
+
+export interface HanaPluginConfigScopeOptions {
+  scope?: 'global' | 'per-agent' | 'per-session';
+  agentId?: string;
+  sessionPath?: string;
 }
 
 export interface HanaEventBus {

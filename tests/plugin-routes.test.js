@@ -60,7 +60,8 @@ function mockEngine(overrides = {}) {
       setFullAccess: overrides.setFullAccess || vi.fn(),
       getAllConfigSchemas: () => [],
       getConfigSchema: () => null,
-      getEventBus: () => null,
+      getConfig: overrides.getConfig || (() => null),
+      setConfig: overrides.setConfig || vi.fn(),
       getUserPluginsDir: () => "/user",
       isValidPluginDir: () => true,
       getAllowFullAccess: () => allowFullAccess,
@@ -332,6 +333,50 @@ describe("plugin management API", () => {
       expect(body).toHaveLength(1);
       expect(body[0].trust).toBe("restricted");
       expect(setFn).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("plugin config routes", () => {
+    it("returns redacted plugin config", async () => {
+      const engine = mockEngine({
+        getConfig: () => ({
+          pluginId: "demo",
+          schema: { properties: { apiKey: { type: "string", sensitive: true } } },
+          values: { apiKey: "********" },
+        }),
+      });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/demo/config");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        pluginId: "demo",
+        values: { apiKey: "********" },
+      });
+    });
+
+    it("validates plugin config writes", async () => {
+      const setConfig = vi.fn(() => ({
+        pluginId: "demo",
+        schema: { properties: { enabled: { type: "boolean" } } },
+        values: { enabled: true },
+      }));
+      const engine = mockEngine({ setConfig });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/demo/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { enabled: true } }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(setConfig).toHaveBeenCalledWith("demo", { enabled: true }, {
+        scope: "global",
+        agentId: undefined,
+        sessionPath: undefined,
+      });
     });
   });
 

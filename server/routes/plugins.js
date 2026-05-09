@@ -105,6 +105,37 @@ export function createPluginsRoute(engine) {
     return c.json(schema);
   });
 
+  route.get("/plugins/:id/config", (c) => {
+    const pm = engine.pluginManager;
+    const config = pm?.getConfig(c.req.param("id"), {
+      scope: c.req.query("scope") || "global",
+      agentId: c.req.query("agentId") || undefined,
+      sessionPath: c.req.query("sessionPath") || undefined,
+    });
+    if (!config) return c.json({ error: "not found" }, 404);
+    return c.json(config);
+  });
+
+  route.put("/plugins/:id/config", async (c) => {
+    const pm = engine.pluginManager;
+    if (!pm) return c.json({ error: "Plugin manager not available" }, 500);
+    const body = await c.req.json();
+    try {
+      const config = pm.setConfig(c.req.param("id"), body.values || {}, {
+        scope: body.scope || "global",
+        agentId: body.agentId,
+        sessionPath: body.sessionPath,
+      });
+      const { rawValues: _rawValues, ...safeConfig } = config;
+      return c.json(safeConfig);
+    } catch (err) {
+      if (err?.code === "PLUGIN_CONFIG_INVALID") {
+        return c.json({ error: err.message, code: err.code, fields: err.errors || [] }, 400);
+      }
+      return c.json({ error: err.message }, 404);
+    }
+  });
+
   // ── Plugin install ──
   route.post("/plugins/install", async (c) => {
     const pm = engine.pluginManager;

@@ -452,6 +452,7 @@ describe("configuration", () => {
     await pm.loadAll();
     const schema = pm.getConfigSchema("config-plug");
     expect(schema.properties.interval.type).toBe("number");
+    expect(schema.properties.enabled.default).toBe(true);
   });
 
   it("getAllConfigSchemas returns schemas for all plugins", async () => {
@@ -467,6 +468,26 @@ describe("configuration", () => {
     const all = pm.getAllConfigSchemas();
     expect(all).toHaveLength(1);
     expect(all[0].pluginId).toBe("cfg");
+  });
+
+  it("reads and writes redacted config through the manager", async () => {
+    const dir = path.join(pluginsDir, "secret-cfg");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
+      id: "secret-cfg", name: "Secret", version: "0.1.0",
+      contributes: { configuration: { properties: {
+        apiKey: { type: "string", sensitive: true },
+        enabled: { type: "boolean", default: true },
+      } } }
+    }));
+    const pm = new PluginManager({ pluginsDir, dataDir, bus: await makeBus() });
+    pm.scan();
+    await pm.loadAll();
+
+    const saved = pm.setConfig("secret-cfg", { apiKey: "secret-value" });
+    expect(saved.values.apiKey).toBe("********");
+    expect(pm.getConfig("secret-cfg").values).toEqual({ enabled: true, apiKey: "********" });
+    expect(pm.getPlugin("secret-cfg").ctx.config.get("apiKey")).toBe("secret-value");
   });
 });
 

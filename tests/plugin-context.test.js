@@ -40,7 +40,7 @@ describe("createPluginContext", () => {
       ctx.config.set("foo", 42);
       expect(ctx.config.get("foo")).toBe(42);
       const raw = JSON.parse(fs.readFileSync(path.join(tmpDir, "config.json"), "utf-8"));
-      expect(raw.foo).toBe(42);
+      expect(raw.global.foo).toBe(42);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
