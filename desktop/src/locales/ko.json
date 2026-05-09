@@ -1071,7 +1071,19 @@
       "diagnosticRoutes": "페이지 {pages} · 위젯 {widgets} · 설정 {settingsTabs}",
       "diagnosticTools": "도구 {count}",
       "diagnosticCommands": "명령 {count}",
-      "diagnosticConfig": "설정 {count}"
+      "diagnosticConfig": "설정 {count}",
+      "openMarketplace": "플러그인 마켓 열기",
+      "marketplaceTitle": "플러그인 마켓",
+      "marketplaceCount": "플러그인 {count}개",
+      "marketplaceNoSource": "마켓 소스 없음",
+      "marketplaceEmpty": "둘러볼 플러그인이 없습니다",
+      "marketLoadError": "플러그인 마켓을 불러오지 못했습니다",
+      "marketReadmeLoadError": "README를 불러오지 못했습니다",
+      "marketInstalled": "설치됨",
+      "marketInstall": "설치",
+      "marketUpdate": "업데이트",
+      "marketReadmeLoading": "README를 불러오는 중…",
+      "marketSelectPlugin": "README를 볼 플러그인을 선택하세요"
     },
     "mcp": {
       "masterTitle": "Master Switch",

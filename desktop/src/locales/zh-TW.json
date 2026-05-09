@@ -1071,7 +1071,19 @@
       "diagnosticRoutes": "頁面 {pages} · 元件 {widgets} · 設定頁 {settingsTabs}",
       "diagnosticTools": "工具 {count}",
       "diagnosticCommands": "命令 {count}",
-      "diagnosticConfig": "配置項 {count}"
+      "diagnosticConfig": "配置項 {count}",
+      "openMarketplace": "打開插件市場",
+      "marketplaceTitle": "插件市場",
+      "marketplaceCount": "{count} 個插件",
+      "marketplaceNoSource": "未配置市場源",
+      "marketplaceEmpty": "暫無可瀏覽插件",
+      "marketLoadError": "插件市場載入失敗",
+      "marketReadmeLoadError": "README 載入失敗",
+      "marketInstalled": "已安裝",
+      "marketInstall": "安裝",
+      "marketUpdate": "更新",
+      "marketReadmeLoading": "正在讀取 README…",
+      "marketSelectPlugin": "選擇一個插件查看 README"
     },
     "mcp": {
       "masterTitle": "總開關",

@@ -1288,6 +1288,19 @@
     flex-shrink: 0;
 }
 
+.plugin-marketplace-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);
+    gap: var(--space-md);
+    align-items: start;
+}
+
+@media (max-width: 760px) {
+    .plugin-marketplace-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 .mcp-list-item {
     align-items: flex-start;
 }

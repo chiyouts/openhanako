@@ -1097,7 +1097,19 @@
       "diagnosticRoutes": "Pages {pages} · Widgets {widgets} · Settings {settingsTabs}",
       "diagnosticTools": "Tools {count}",
       "diagnosticCommands": "Commands {count}",
-      "diagnosticConfig": "Config {count}"
+      "diagnosticConfig": "Config {count}",
+      "openMarketplace": "Open plugin marketplace",
+      "marketplaceTitle": "Plugin Marketplace",
+      "marketplaceCount": "{count} plugins",
+      "marketplaceNoSource": "No marketplace source",
+      "marketplaceEmpty": "No plugins to browse",
+      "marketLoadError": "Plugin marketplace failed to load",
+      "marketReadmeLoadError": "README failed to load",
+      "marketInstalled": "Installed",
+      "marketInstall": "Install",
+      "marketUpdate": "Update",
+      "marketReadmeLoading": "Loading README…",
+      "marketSelectPlugin": "Select a plugin to view its README"
     },
     "mcp": {
       "masterTitle": "Master Switch",

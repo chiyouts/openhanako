@@ -824,6 +824,38 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
 
 **重启恢复**：Hana 持久化任务与 schedule 元数据，不持久化插件函数。插件需要在 `onload()` 时重新注册 `task:register-handler`，然后调用 `task:list` 查询 `status: "recovering"` 的本插件任务，按自己的业务存储恢复或失败它们。
 
+### 插件市场与安装源
+
+设置 → 插件里的市场按钮会读取 `/api/plugins/marketplace`。当前宿主支持两类市场源：
+
+- `HANA_PLUGIN_MARKETPLACE_FILE=/path/to/marketplace.json`
+- `HANA_PLUGIN_MARKETPLACE_URL=https://.../marketplace.json`
+
+没有配置环境变量时，Hana 会尝试读取 `${HANA_HOME}/plugin-marketplace/marketplace.json`；如果不存在，市场页显示为空，但本地拖拽安装仍然可用。市场 index 的基本形状与 `OH-Plugins` 仓库一致：
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": [{
+    "schemaVersion": 1,
+    "id": "demo",
+    "name": "Demo",
+    "publisher": "Hana",
+    "version": "1.0.0",
+    "description": "Demo plugin",
+    "repository": "https://example.com/demo",
+    "compatibility": { "minAppVersion": "0.170.0" },
+    "trust": "restricted",
+    "permissions": ["task.read"],
+    "contributions": ["tools"],
+    "distribution": { "kind": "source", "path": "plugins/demo" },
+    "readmePath": "plugins/demo/README.md"
+  }]
+}
+```
+
+市场 UI 会展示插件列表，点击后读取 `/api/plugins/marketplace/:id/readme` 展示 README。当前可直接安装 `distribution.kind: "source"` 的本地源插件；release 包安装需要后续接入远端包下载、校验 sha256 与权限确认。
+
 ## 前向兼容
 
 系统忽略不认识的目录和 manifest 字段。老 plugin 永远能跑在新系统上，新 plugin 在老系统上只是新贡献类型不生效。不需要 `manifestVersion`，不需要版本迁移。

@@ -360,6 +360,48 @@ describe("plugin management API", () => {
     });
   });
 
+  describe("GET /plugins/marketplace", () => {
+    it("returns marketplace plugins with installed status and readme endpoint", async () => {
+      const plugin = {
+        id: "demo",
+        name: "Demo",
+        publisher: "Hana",
+        version: "1.0.0",
+        description: "Demo plugin",
+        trust: "restricted",
+        permissions: [],
+        contributions: ["tools"],
+        distribution: { kind: "source", path: "plugins/demo", resolvedPath: "/tmp/demo" },
+        readme: "# Demo",
+      };
+      const engine = mockEngine({
+        plugins: [{ id: "demo", name: "Demo", version: "0.9.0", status: "loaded" }],
+      });
+      engine.pluginMarketplace = {
+        load: async () => ({ source: { kind: "file", configured: true }, schemaVersion: 1, plugins: [plugin], warnings: [] }),
+        getReadme: async () => "# Demo",
+        getPlugin: async () => plugin,
+        resolveSourceDistribution: () => "/tmp/demo",
+      };
+      const app = createApp(engine);
+
+      const listRes = await app.request("/api/plugins/marketplace");
+      const readmeRes = await app.request("/api/plugins/marketplace/demo/readme");
+
+      expect(listRes.status).toBe(200);
+      expect(await listRes.json()).toMatchObject({
+        plugins: [{
+          id: "demo",
+          installed: true,
+          installedVersion: "0.9.0",
+          canInstall: true,
+          distribution: { kind: "source", path: "plugins/demo" },
+        }],
+      });
+      expect(await readmeRes.json()).toEqual({ pluginId: "demo", markdown: "# Demo" });
+    });
+  });
+
   describe("PUT /plugins/settings", () => {
     it("calls setFullAccess and returns plugin list", async () => {
       const setFn = vi.fn().mockResolvedValue();

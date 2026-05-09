@@ -7,6 +7,7 @@ import { resolveAgent } from "../utils/resolve-agent.js";
 import { fromRoot } from "../../shared/hana-root.js";
 import { DEFAULT_THEME } from "../../desktop/src/shared/theme-registry.cjs";
 import { registerSessionFileFromRequest } from "../../lib/session-files/session-file-response.js";
+import { createDefaultPluginMarketplace } from "../../lib/plugin-marketplace.js";
 
 /**
  * 代理分发：将 /plugins/:pluginId/* 的请求转发到对应 plugin 子 app。
@@ -50,6 +51,83 @@ export function createPluginProxyRoute(routeRegistry) {
     return proxyToPlugin(c, pluginApp, pluginId);
   });
   return route;
+}
+
+async function installPluginFromPath({ engine, pm, sourcePath, sessionPath }) {
+  const stat = fs.statSync(sourcePath);
+  const sourceFile = registerSessionFileFromRequest(engine, {
+    sessionPath,
+    filePath: sourcePath,
+    label: path.basename(sourcePath),
+    origin: "plugin_install_source",
+    storageKind: "install_source",
+  });
+  let targetDir;
+  const userPluginsDir = pm.getUserPluginsDir();
+  fs.mkdirSync(userPluginsDir, { recursive: true });
+
+  if (sourcePath.endsWith(".zip")) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-install-"));
+    await extractZip(sourcePath, tmpDir);
+    const entries = fs.readdirSync(tmpDir, { withFileTypes: true });
+    const pluginSrc = entries.length === 1 && entries[0].isDirectory()
+      ? path.join(tmpDir, entries[0].name)
+      : tmpDir;
+    const dirName = path.basename(pluginSrc);
+    targetDir = path.join(userPluginsDir, dirName);
+    const tmpTarget = targetDir + ".installing";
+    if (fs.existsSync(tmpTarget)) fs.rmSync(tmpTarget, { recursive: true });
+    fs.cpSync(pluginSrc, tmpTarget, { recursive: true });
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true });
+    fs.renameSync(tmpTarget, targetDir);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } else if (stat.isDirectory()) {
+    const dirName = path.basename(sourcePath);
+    targetDir = path.join(userPluginsDir, dirName);
+    const tmpTarget = targetDir + ".installing";
+    if (fs.existsSync(tmpTarget)) fs.rmSync(tmpTarget, { recursive: true });
+    fs.cpSync(sourcePath, tmpTarget, { recursive: true });
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true });
+    fs.renameSync(tmpTarget, targetDir);
+  } else {
+    const err = new Error("Path must be a .zip file or directory");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!pm.isValidPluginDir(targetDir)) {
+    fs.rmSync(targetDir, { recursive: true, force: true });
+    const err = new Error("Not a valid plugin directory");
+    err.status = 400;
+    throw err;
+  }
+
+  const entry = await pm.installPlugin(targetDir);
+  await engine.syncPluginExtensions();
+  return {
+    ...entry,
+    ...(sourceFile ? { sourceFile } : {}),
+  };
+}
+
+function sanitizeMarketplacePluginForClient(plugin) {
+  const {
+    readme: _readme,
+    readmePath: _readmePath,
+    distribution,
+    ...rest
+  } = plugin;
+  return {
+    ...rest,
+    distribution: distribution
+      ? {
+          kind: distribution.kind,
+          ...(distribution.path ? { path: distribution.path } : {}),
+          ...(distribution.packageUrl ? { packageUrl: distribution.packageUrl } : {}),
+          ...(distribution.sha256 ? { sha256: distribution.sha256 } : {}),
+        }
+      : null,
+  };
 }
 
 /**
@@ -114,6 +192,57 @@ export function createPluginsRoute(engine) {
     });
   });
 
+  function getMarketplace() {
+    return engine.pluginMarketplace || createDefaultPluginMarketplace({ hanakoHome: engine.hanakoHome });
+  }
+
+  route.get("/plugins/marketplace", async (c) => {
+    const pm = engine.pluginManager;
+    const marketplace = getMarketplace();
+    const data = await marketplace.load();
+    const installed = new Map((pm?.listPlugins?.() || []).map((plugin) => [plugin.id, plugin]));
+    return c.json({
+      ...data,
+      plugins: data.plugins.map((plugin) => {
+        const installedPlugin = installed.get(plugin.id);
+        return {
+          ...sanitizeMarketplacePluginForClient(plugin),
+          installed: !!installedPlugin,
+          installedVersion: installedPlugin?.version || null,
+          canInstall: plugin.distribution?.kind === "source" && !!marketplace.resolveSourceDistribution(plugin),
+        };
+      }),
+    });
+  });
+
+  route.get("/plugins/marketplace/:id/readme", async (c) => {
+    const marketplace = getMarketplace();
+    try {
+      const readme = await marketplace.getReadme(c.req.param("id"));
+      if (readme === null) return c.json({ error: "not found" }, 404);
+      return c.json({ pluginId: c.req.param("id"), markdown: readme });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  route.post("/plugins/marketplace/:id/install", async (c) => {
+    const pm = engine.pluginManager;
+    if (!pm) return c.json({ error: "Plugin manager not available" }, 500);
+    const marketplace = getMarketplace();
+    const plugin = await marketplace.getPlugin(c.req.param("id"));
+    if (!plugin) return c.json({ error: "not found" }, 404);
+    const sourcePath = marketplace.resolveSourceDistribution(plugin);
+    if (!sourcePath) return c.json({ error: "Only local source marketplace plugins can be installed here" }, 400);
+    const { sessionPath } = await c.req.json().catch(() => ({}));
+    try {
+      const entry = await installPluginFromPath({ engine, pm, sourcePath, sessionPath });
+      return c.json(entry);
+    } catch (err) {
+      return c.json({ error: err.message }, err.status || 500);
+    }
+  });
+
   route.get("/plugins/:id/config-schema", (c) => {
     const pm = engine.pluginManager;
     const schema = pm?.getConfigSchema(c.req.param("id"));
@@ -160,60 +289,9 @@ export function createPluginsRoute(engine) {
     if (!sourcePath) return c.json({ error: "path is required" }, 400);
 
     try {
-      const stat = fs.statSync(sourcePath);
-      const sourceFile = registerSessionFileFromRequest(engine, {
-        sessionPath,
-        filePath: sourcePath,
-        label: path.basename(sourcePath),
-        origin: "plugin_install_source",
-        storageKind: "install_source",
-      });
-      let targetDir;
-      const userPluginsDir = pm.getUserPluginsDir();
-      // Ensure plugins directory exists
-      fs.mkdirSync(userPluginsDir, { recursive: true });
-
-      if (sourcePath.endsWith(".zip")) {
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-install-"));
-        await extractZip(sourcePath, tmpDir);
-        const entries = fs.readdirSync(tmpDir, { withFileTypes: true });
-        const pluginSrc = entries.length === 1 && entries[0].isDirectory()
-          ? path.join(tmpDir, entries[0].name)
-          : tmpDir;
-        const dirName = path.basename(pluginSrc);
-        targetDir = path.join(userPluginsDir, dirName);
-        // Atomic install: copy to temp target, then rename
-        const tmpTarget = targetDir + ".installing";
-        if (fs.existsSync(tmpTarget)) fs.rmSync(tmpTarget, { recursive: true });
-        fs.cpSync(pluginSrc, tmpTarget, { recursive: true });
-        if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true });
-        fs.renameSync(tmpTarget, targetDir);
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } else if (stat.isDirectory()) {
-        const dirName = path.basename(sourcePath);
-        targetDir = path.join(userPluginsDir, dirName);
-        const tmpTarget = targetDir + ".installing";
-        if (fs.existsSync(tmpTarget)) fs.rmSync(tmpTarget, { recursive: true });
-        fs.cpSync(sourcePath, tmpTarget, { recursive: true });
-        if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true });
-        fs.renameSync(tmpTarget, targetDir);
-      } else {
-        return c.json({ error: "Path must be a .zip file or directory" }, 400);
-      }
-
-      if (!pm.isValidPluginDir(targetDir)) {
-        fs.rmSync(targetDir, { recursive: true, force: true });
-        return c.json({ error: "Not a valid plugin directory" }, 400);
-      }
-
-      const entry = await pm.installPlugin(targetDir);
-      await engine.syncPluginExtensions();
-      return c.json({
-        ...entry,
-        ...(sourceFile ? { sourceFile } : {}),
-      });
+      return c.json(await installPluginFromPath({ engine, pm, sourcePath, sessionPath }));
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      return c.json({ error: err.message }, err.status || 500);
     }
   });
 
