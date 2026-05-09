@@ -826,7 +826,7 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
 
 ### 插件市场与安装源
 
-设置 → 插件里的市场按钮会读取 `/api/plugins/marketplace`。当前宿主支持两类市场源：
+设置 → 插件里的「打开插件市场」会进入独立的市场子页，该页面读取 `/api/plugins/marketplace`。当前宿主支持两类市场源：
 
 - `HANA_PLUGIN_MARKETPLACE_FILE=/path/to/marketplace.json`
 - `HANA_PLUGIN_MARKETPLACE_URL=https://.../marketplace.json`
@@ -854,7 +854,7 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
 }
 ```
 
-市场 UI 会展示插件列表，点击后读取 `/api/plugins/marketplace/:id/readme` 展示 README。当前可直接安装 `distribution.kind: "source"` 的本地源插件；release 包安装需要后续接入远端包下载、校验 sha256 与权限确认。
+市场 UI 会在设置主区域内展示更宽的插件列表和 README 单页视图，点击插件后读取 `/api/plugins/marketplace/:id/readme` 展示 README。当前可直接安装 `distribution.kind: "source"` 的本地源插件；release 包安装需要后续接入远端包下载、校验 sha256 与权限确认。
 
 ## 前向兼容
 

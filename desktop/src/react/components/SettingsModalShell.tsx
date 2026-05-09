@@ -35,6 +35,7 @@ export function SettingsModalShell() {
   const visualState: VisualState =
     stage === 'exit' ? 'closing' :
     shown ? 'open' : 'opening';
+  const isWideSettingsPage = settingsModal.activeTab === 'plugin-marketplace';
 
   const requestClose = useCallback(() => {
     closeSettingsModal();
@@ -102,6 +103,7 @@ export function SettingsModalShell() {
       <div
         ref={cardRef}
         className={`${styles.card} ${styles[visualState]}`}
+        data-wide={isWideSettingsPage ? 'true' : undefined}
         data-state={visualState}
         role="dialog"
         aria-modal="true"

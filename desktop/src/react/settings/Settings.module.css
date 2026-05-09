@@ -70,6 +70,10 @@
     -webkit-app-region: no-drag;
 }
 
+.settings-panel-wide.settings-panel-modal .settings-header-modal {
+    grid-template-columns: calc(var(--settings-nav-width, 160px) + var(--settings-main-x-padding, var(--space-xl))) minmax(0, 960px);
+}
+
 .settings-return-btn {
     display: inline-flex;
     align-items: center;
@@ -166,6 +170,10 @@
     overflow-y: auto;
     padding: 0 var(--settings-main-x-padding, var(--space-xl)) var(--space-xl);
     max-width: 640px;
+}
+
+.settings-main-wide {
+    max-width: 960px;
 }
 
 .settings-panel-modal .settings-main::before {
@@ -1295,9 +1303,52 @@
     align-items: start;
 }
 
+.plugin-marketplace-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: calc(-1 * var(--space-sm)) 0 var(--space-md);
+}
+
+.plugin-marketplace-toolbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.plugin-marketplace-detail-header {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-md);
+    align-items: center;
+}
+
+.plugin-marketplace-readme {
+    font-size: 0.78rem;
+    line-height: 1.65;
+    color: var(--text);
+    max-height: 520px;
+    overflow: auto;
+}
+
 @media (max-width: 760px) {
     .plugin-marketplace-grid {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    .plugin-marketplace-toolbar {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .plugin-marketplace-toolbar-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
+    }
+
+    .plugin-marketplace-detail-header {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }
 

@@ -18,6 +18,7 @@ import { ProvidersTab } from './tabs/ProvidersTab';
 import { MediaTab } from './tabs/MediaTab';
 import { AboutTab } from './tabs/AboutTab';
 import { PluginsTab } from './tabs/PluginsTab';
+import { PluginMarketplaceTab } from './tabs/PluginMarketplaceTab';
 import { SecurityTab } from './tabs/SecurityTab';
 import { SharingTab } from './tabs/SharingTab';
 import { getNativeSettingsTabComponent } from './native-settings-tabs';
@@ -44,6 +45,7 @@ const TAB_COMPONENTS: Record<string, React.ComponentType> = {
   media: MediaTab,
   sharing: SharingTab,
   plugins: PluginsTab,
+  'plugin-marketplace': PluginMarketplaceTab,
   security: SecurityTab,
   about: AboutTab,
 };
@@ -61,6 +63,7 @@ const TAB_TITLES: Record<string, string> = {
   media: '多媒体',
   sharing: '分享',
   plugins: '插件',
+  'plugin-marketplace': '插件市场',
   security: '安全',
   about: '关于',
 };
@@ -139,10 +142,18 @@ export function SettingsContent({
     || AgentTab;
   const isModal = variant === 'modal';
   const activeTabTitle = TAB_TITLES[effectiveActiveTab] || titleToLabel(dynamicTab?.title);
+  const isWideTab = effectiveActiveTab === 'plugin-marketplace';
+
+  useEffect(() => {
+    onActiveTabChange?.(effectiveActiveTab);
+  }, [effectiveActiveTab, onActiveTabChange]);
 
   return (
     <ErrorBoundary region="settings">
-      <div className={`settings-panel ${isModal ? styles['settings-panel-modal'] : ''}`} id="settingsPanel">
+      <div
+        className={`settings-panel ${isModal ? styles['settings-panel-modal'] : ''}${isWideTab ? ' ' + styles['settings-panel-wide'] : ''}`}
+        id="settingsPanel"
+      >
         <div className={`settings-header ${isModal ? styles['settings-header-modal'] : ''}`}>
           {isModal ? (
             <>
@@ -168,7 +179,7 @@ export function SettingsContent({
         </div>
         <div className={styles['settings-body']}>
           <SettingsNav onTabChange={onActiveTabChange} />
-          <div className={styles['settings-main']}>
+          <div className={`${styles['settings-main']}${isWideTab ? ' ' + styles['settings-main-wide'] : ''}`}>
             {!isModal && (
               <h1 className={styles['settings-tab-title']}>{activeTabTitle}</h1>
             )}
