@@ -172,6 +172,8 @@
     "pastedImage": "붙여넣은 이미지",
     "textModelImageBlocked": "현재 모델은 텍스트 전용이라 이미지를 직접 보낼 수 없습니다. 설정에서 모델 기능을 조정하거나 보조 시각을 설정하고 켜 주세요.",
     "textModelVideoBlocked": "현재 모델은 비디오 입력을 지원하지 않아요. 설정에서 비디오 기능을 켜거나 비디오 지원 모델로 전환해 주세요.",
+    "imageReadFailed": "이미지를 읽지 못해 메시지를 보내지 않았어요. 다시 붙여넣거나 첨부해 주세요.",
+    "videoReadFailed": "비디오를 읽지 못해 메시지를 보내지 않았어요. 다시 첨부해 주세요.",
     "openModelSettings": "모델 설정 열기",
     "attachFiles": "파일 추가",
     "commandMenu": "명령 메뉴",

@@ -173,6 +173,8 @@
     "pastedImage": "粘贴图片",
     "textModelImageBlocked": "当前模型为文本模型，不能直接发送图片。请在设置里调整模型能力，或配置并启用辅助视觉。",
     "textModelVideoBlocked": "当前模型不支持视频输入。请在设置里开启视频能力，或切换到支持视频的模型。",
+    "imageReadFailed": "图片读取失败，消息没有发送。请重新粘贴或重新添加图片。",
+    "videoReadFailed": "视频读取失败，消息没有发送。请重新添加视频。",
     "openModelSettings": "打开模型设置",
     "attachFiles": "添加文件",
     "commandMenu": "命令菜单",

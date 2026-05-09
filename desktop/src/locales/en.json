@@ -173,6 +173,8 @@
     "pastedImage": "Pasted image",
     "textModelImageBlocked": "The current model is text-only and cannot send images directly. Adjust the model capability in settings, or configure and enable auxiliary vision.",
     "textModelVideoBlocked": "The current model does not support video input. Enable video capability in settings, or switch to a video-capable model.",
+    "imageReadFailed": "Could not read the image, so the message was not sent. Paste or attach it again.",
+    "videoReadFailed": "Could not read the video, so the message was not sent. Attach it again.",
     "openModelSettings": "Open model settings",
     "attachFiles": "Add files",
     "commandMenu": "Command menu",

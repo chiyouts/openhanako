@@ -38,10 +38,6 @@ import { createCurrentStatusTool } from "../lib/tools/current-status-tool.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
 
-function isExplicitTextOnlyModel(model) {
-  return Array.isArray(model?.input) && !model.input.includes("image");
-}
-
 export class Agent {
   /**
    * @param {object} opts
@@ -109,7 +105,6 @@ export class Agent {
     this._artifactTool = null;
     this._channelTool = null;
     this._browserTool = null;
-    this._browserToolNoScreenshot = null;
     this._computerUseTool = null;
     this._notifyTool = null;
     this._stopTaskTool = null;
@@ -327,17 +322,6 @@ export class Agent {
       isVisionAuxiliaryEnabled: () => this._cb?.getEngine?.()?.isVisionAuxiliaryEnabled?.() === true,
       getHanakoHome: () => this._cb?.getEngine?.()?.hanakoHome,
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
-    });
-    this._browserToolNoScreenshot = createBrowserTool(() => this._cb?.getCurrentSessionPath?.(), {
-      getSessionModel: (sessionPath) => {
-        const engine = this._cb?.getEngine?.();
-        return engine?.getSessionByPath?.(sessionPath)?.model || null;
-      },
-      getVisionBridge: () => this._cb?.getEngine?.()?.getVisionBridge?.() || null,
-      isVisionAuxiliaryEnabled: () => this._cb?.getEngine?.()?.isVisionAuxiliaryEnabled?.() === true,
-      getHanakoHome: () => this._cb?.getEngine?.()?.hanakoHome,
-      registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
-      screenshotEnabled: false,
     });
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
@@ -595,10 +579,6 @@ export class Agent {
     const computerUseTools = this._isComputerUseAvailableForThisAgent()
       ? [this._getComputerUseTool()]
       : [];
-    const auxiliaryVisionAvailable = this._cb?.getEngine?.()?.isVisionAuxiliaryEnabled?.() === true;
-    const browserTool = isExplicitTextOnlyModel(options.model) && !auxiliaryVisionAvailable
-      ? this._browserToolNoScreenshot
-      : this._browserTool;
     const legacyArtifactTools = options.includeLegacyArtifactTool === true
       ? [this._artifactTool]
       : [];
@@ -613,7 +593,7 @@ export class Agent {
       ...legacyArtifactTools,
       this._channelTool,
       this._dmTool,
-      browserTool,
+      this._browserTool,
       ...computerUseTools,
       this._installSkillTool,
       this._notifyTool,

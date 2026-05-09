@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { Agent } from "../core/agent.js";
 import { createBrowserTool } from "../lib/tools/browser-tool.js";
 import { extractBlocks } from "../server/block-extractors.js";
 
@@ -210,5 +211,38 @@ describe("browser screenshot vision adaptation", () => {
     expect(result.details.media.items).toEqual([
       expect.objectContaining({ type: "session_file", fileId: "sf_text_only_browser_shot", kind: "image" }),
     ]);
+  });
+
+  it("keeps screenshot in the agent browser tool schema for text-only sessions when auxiliary vision is toggled later", () => {
+    const agent = new Agent({
+      id: "hana",
+      agentsDir: tmpDir,
+      productDir: tmpDir,
+      userDir: tmpDir,
+    });
+    const fullBrowserTool = {
+      name: "browser",
+      parameters: { properties: { action: { enum: ["snapshot", "screenshot"] } } },
+    };
+    const noScreenshotBrowserTool = {
+      name: "browser",
+      parameters: { properties: { action: { enum: ["snapshot"] } } },
+    };
+    agent._browserTool = fullBrowserTool;
+    agent._browserToolNoScreenshot = noScreenshotBrowserTool;
+    agent._cb = {
+      getEngine: () => ({
+        isVisionAuxiliaryEnabled: () => false,
+        isComputerUseSupported: () => false,
+      }),
+    };
+
+    const browserTool = agent.getToolsSnapshot({
+      forceMemoryEnabled: false,
+      model: { id: "deepseek-v4-pro", provider: "deepseek", input: ["text"] },
+    }).find((tool) => tool.name === "browser");
+
+    expect(browserTool).toBe(fullBrowserTool);
+    expect(browserTool.parameters.properties.action.enum).toContain("screenshot");
   });
 });

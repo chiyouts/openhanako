@@ -172,6 +172,8 @@
     "pastedImage": "貼上圖片",
     "textModelImageBlocked": "目前模型是文字模型，不能直接傳送圖片。請在設定中調整模型能力，或設定並啟用輔助視覺。",
     "textModelVideoBlocked": "目前模型不支援影片輸入。請在設定中開啟影片能力，或切換到支援影片的模型。",
+    "imageReadFailed": "圖片讀取失敗，訊息沒有傳送。請重新貼上或重新加入圖片。",
+    "videoReadFailed": "影片讀取失敗，訊息沒有傳送。請重新加入影片。",
     "openModelSettings": "開啟模型設定",
     "attachFiles": "新增檔案",
     "commandMenu": "命令選單",
