@@ -60,12 +60,14 @@ function mockEngine(overrides = {}) {
       setFullAccess: overrides.setFullAccess || vi.fn(),
       getAllConfigSchemas: () => [],
       getConfigSchema: () => null,
+      getEventBus: () => null,
       getUserPluginsDir: () => "/user",
       isValidPluginDir: () => true,
       getAllowFullAccess: () => allowFullAccess,
       getRouteApp: (id) => routeRegistry.get(id) || null,
       ...overrides.pm,
     },
+    getEventBus: overrides.getEventBus || (() => overrides.eventBus || null),
   };
 }
 
@@ -264,6 +266,48 @@ describe("plugin management API", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual([
         { pluginId: "demo", hostCapabilities: ["external.open"] },
+      ]);
+    });
+  });
+
+  describe("GET /plugins/event-bus/capabilities", () => {
+    it("returns EventBus capability records", async () => {
+      const engine = mockEngine({
+        eventBus: {
+          listCapabilities: () => [
+            {
+              type: "session:send",
+              title: "Send session message",
+              description: "Send text into a session.",
+              inputSchema: { type: "object" },
+              outputSchema: { type: "object" },
+              permission: "session.write",
+              errors: ["NO_HANDLER"],
+              stability: "stable",
+              owner: "system",
+              available: true,
+            },
+          ],
+        },
+      });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/event-bus/capabilities");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([
+        {
+          type: "session:send",
+          title: "Send session message",
+          description: "Send text into a session.",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+          permission: "session.write",
+          errors: ["NO_HANDLER"],
+          stability: "stable",
+          owner: "system",
+          available: true,
+        },
       ]);
     });
   });

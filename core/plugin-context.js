@@ -34,6 +34,8 @@ export function createPluginContext({ pluginId, pluginDir, dataDir, bus, accessL
         subscribe: bus.subscribe.bind(bus),
         request: bus.request.bind(bus),
         hasHandler: bus.hasHandler.bind(bus),
+        listCapabilities: typeof bus.listCapabilities === "function" ? bus.listCapabilities.bind(bus) : () => [],
+        getCapability: typeof bus.getCapability === "function" ? bus.getCapability.bind(bus) : () => null,
       });
 
   const prefix = `[plugin:${pluginId}]`;

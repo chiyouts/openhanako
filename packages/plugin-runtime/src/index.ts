@@ -124,6 +124,22 @@ export interface HanaEventBus {
   request<T = unknown>(type: string, payload?: unknown, options?: Record<string, unknown>): Promise<T>;
   hasHandler?(type: string): boolean;
   handle?(type: string, handler: (payload: unknown) => MaybePromise<unknown>): () => void;
+  listCapabilities?(): HanaEventBusCapability[];
+  getCapability?(type: string): HanaEventBusCapability | null;
+}
+
+export interface HanaEventBusCapability {
+  type: string;
+  title: string;
+  description: string;
+  inputSchema: JsonSchema;
+  outputSchema: JsonSchema;
+  permission: string;
+  errors: string[];
+  stability: string;
+  owner: string;
+  since?: string;
+  available?: boolean;
 }
 
 export interface HanaPluginLogger {

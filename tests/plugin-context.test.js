@@ -66,6 +66,8 @@ describe("createPluginContext with accessLevel", () => {
     expect(typeof ctx.bus.handle).toBe("function");
     expect(typeof ctx.bus.request).toBe("function");
     expect(typeof ctx.bus.emit).toBe("function");
+    expect(typeof ctx.bus.listCapabilities).toBe("function");
+    expect(typeof ctx.bus.getCapability).toBe("function");
   });
 
   it("restricted context does NOT expose bus.handle", async () => {
@@ -78,6 +80,8 @@ describe("createPluginContext with accessLevel", () => {
     expect(typeof ctx.bus.request).toBe("function");
     expect(typeof ctx.bus.emit).toBe("function");
     expect(typeof ctx.bus.subscribe).toBe("function");
+    expect(typeof ctx.bus.listCapabilities).toBe("function");
+    expect(typeof ctx.bus.getCapability).toBe("function");
   });
 
   it("restricted bus proxy is frozen", async () => {

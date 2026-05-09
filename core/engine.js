@@ -1299,6 +1299,10 @@ export class HanaEngine {
     this._eventBus = bus;
   }
 
+  getEventBus() {
+    return this._eventBus;
+  }
+
   subscribe(listener) {
     if (this._eventBus) return this._eventBus.subscribe(listener);
     this._listeners.add(listener);

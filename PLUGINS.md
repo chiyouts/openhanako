@@ -591,7 +591,7 @@ export default class MyPlugin {
 
 ## 总线通信（bus.request / bus.handle）
 
-Plugin 间通信通过 EventBus 的请求-响应机制。`bus.handle` 需要 full-access 权限，`bus.request` 所有插件都可以用。新插件建议用 `@hana/plugin-runtime` 的 `defineBusHandler()`、`requestBus()` 和 `HANA_BUS_SKIP`，这样 handler 类型、请求参数和链式跳过语义都来自 SDK，而不是手写约定。
+Plugin 间通信通过 EventBus 的请求-响应机制。`bus.handle` 需要 full-access 权限，`bus.request` 所有插件都可以用。`bus.listCapabilities()` / `bus.getCapability(type)` 可以读取当前稳定能力目录，目录记录能力名、输入输出 schema、权限要求、错误码、稳定性和当前是否有 handler 可用。新插件建议用 `@hana/plugin-runtime` 的 `defineBusHandler()`、`requestBus()` 和 `HANA_BUS_SKIP`，这样 handler 类型、请求参数和链式跳过语义都来自 SDK，而不是手写约定。
 
 ```js
 import { defineBusHandler, HANA_BUS_SKIP, requestBus } from "@hana/plugin-runtime";
@@ -606,10 +606,34 @@ const bridgeSend = defineBusHandler({
   },
 });
 
-this.register(this.ctx.bus.handle(bridgeSend.type, (payload) => bridgeSend.handle(payload, this.ctx)));
+this.register(this.ctx.bus.handle(
+  bridgeSend.type,
+  (payload) => bridgeSend.handle(payload, this.ctx),
+  {
+    capability: {
+      title: "Bridge send",
+      description: "Send text to a bridge platform.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: { type: "string" },
+          chatId: { type: "string" },
+          text: { type: "string" },
+        },
+        required: ["platform", "text"],
+      },
+      outputSchema: { type: "object" },
+      permission: "bridge.send",
+      errors: ["NO_HANDLER", "TIMEOUT", "INTERNAL_ERROR"],
+      owner: "plugin:my-plugin",
+      stability: "experimental",
+    },
+  },
+));
 
 // Plugin B（任意权限）: 调用能力
-if (this.ctx.bus.hasHandler("bridge:send")) {
+const capability = this.ctx.bus.getCapability?.("bridge:send");
+if (capability?.available) {
   const result = await requestBus(this.ctx, "bridge:send", {
     platform: "telegram",
     chatId: "123",
@@ -637,7 +661,7 @@ this.register(
 - 超时（默认 30s）→ 抛 `BusTimeoutError`
 - handler 业务错误 → 直接透传
 
-**软依赖**：manifest 的 `depends.capabilities` 只是提示，系统不会因缺失而阻止安装。Plugin 代码用 `bus.hasHandler()` 在运行时做优雅降级。
+**软依赖**：manifest 的 `depends.capabilities` 只是提示，系统不会因缺失而阻止安装。Plugin 代码优先用 `bus.getCapability(type)?.available`，旧插件也可以继续用 `bus.hasHandler()` 在运行时做优雅降级。
 
 ### 动态工具注册 ⚡ full-access
 

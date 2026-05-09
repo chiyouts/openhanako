@@ -90,6 +90,14 @@ export function createPluginsRoute(engine) {
     return c.json(pm?.getAllConfigSchemas() || []);
   });
 
+  route.get("/plugins/event-bus/capabilities", (c) => {
+    const bus = engine.getEventBus?.() || engine.eventBus || null;
+    const capabilities = typeof bus?.listCapabilities === "function"
+      ? bus.listCapabilities()
+      : [];
+    return c.json(capabilities);
+  });
+
   route.get("/plugins/:id/config-schema", (c) => {
     const pm = engine.pluginManager;
     const schema = pm?.getConfigSchema(c.req.param("id"));
