@@ -28,7 +28,7 @@ Built-in plugins may use the same source patterns, but they should be checked ag
 - Tool-only plugins usually need only `tools/*.js` and `@hana/plugin-runtime` helpers. They can stay `restricted`.
 - Runtime plugins use `index.js` for lifecycle, EventBus handlers, background tasks, schedules, or dynamic tools. They require `trust: "full-access"`.
 - UI plugins use iframe routes plus `@hana/plugin-sdk` and, for React UI, `@hana/plugin-components`. They require `trust: "full-access"` and explicit `ui.hostCapabilities` grants for host calls such as `external.open` or `clipboard.writeText`.
-- Marketplace metadata lives outside the app repo in `OH-Plugins`. The app can browse a URL marketplace and can install local `source` entries when the marketplace is loaded from a local file. Use inline `readme` or HTTPS `readmeUrl` for URL marketplaces; `readmePath` is for local file marketplaces. Remote package download/checksum install is a later distribution step.
+- Marketplace metadata lives outside the app repo in `OH-Plugins`, the official community plugin catalog. The app reads the generated catalog URL by default, installs `distribution.kind = "release"` entries by downloading the zip package and verifying `sha256`, and keeps `distribution.kind = "source"` for local file marketplace development only. `readmePath` is resolved relative to the catalog when the official URL is used.
 
 ## UI Path
 

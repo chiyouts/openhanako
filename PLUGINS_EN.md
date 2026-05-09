@@ -40,7 +40,7 @@ Read `.docs/PLUGIN-DEVELOPMENT.md` for the end-to-end workflow. Pick the plugin 
 | Tool-only | No UI, adds Agent-callable tools | `restricted` |
 | Runtime | Lifecycle, EventBus, background tasks, dynamic tools | `full-access` |
 | UI | Page / widget / iframe card | `full-access` |
-| Marketplace entry | Makes the plugin discoverable in the marketplace | `OH-Plugins/plugins/<id>.json` |
+| Marketplace entry | Makes the plugin discoverable in the marketplace | `OH-Plugins/plugins/<id>.yaml` |
 
 Start with the `hana-plugin-creator` scaffold, then delete what you do not need:
 
@@ -713,14 +713,22 @@ await this.ctx.bus.request("task:remove", { taskId: "my-task-123" });
 
 `TaskRegistry` is runtime-only and not persisted. If a plugin wants restart recovery, it must restore pending jobs from its own storage in `onload()` and call `task:register` again.
 
-### Marketplace And Install Sources
+### Official Plugin Marketplace
 
-The "Open plugin marketplace" button in Settings -> Plugins opens a full marketplace subpage that reads `/api/plugins/marketplace`. The host supports two marketplace source types:
+The "Open plugin marketplace" button in Settings -> Plugins opens a full marketplace subpage that reads `/api/plugins/marketplace`. Hana follows the Obsidian-style official community catalog model: third-party authors submit plugins to `OH-Plugins`, while users browse, install, enable, and disable plugins without managing marketplace sources.
+
+Default official catalog:
+
+```text
+https://raw.githubusercontent.com/liliMozi/OH-Plugins/main/marketplace.json
+```
+
+Developer overrides remain available:
 
 - `HANA_PLUGIN_MARKETPLACE_FILE=/path/to/marketplace.json`
 - `HANA_PLUGIN_MARKETPLACE_URL=https://.../marketplace.json`
 
-Without either environment variable, Hana tries `${HANA_HOME}/plugin-marketplace/marketplace.json`; if it does not exist, the marketplace page is empty and local drag-and-drop installation still works. The marketplace index shape matches the `OH-Plugins` repository:
+Without either environment variable, Hana first tries `${HANA_HOME}/plugin-marketplace/marketplace.json` for local development. If it does not exist, Hana reads the official `OH-Plugins` URL. The marketplace index shape matches the `OH-Plugins` repository:
 
 ```json
 {
@@ -737,13 +745,17 @@ Without either environment variable, Hana tries `${HANA_HOME}/plugin-marketplace
     "trust": "restricted",
     "permissions": ["task.read"],
     "contributions": ["tools"],
-    "distribution": { "kind": "source", "path": "plugins/demo" },
+    "distribution": {
+      "kind": "release",
+      "packageUrl": "https://github.com/liliMozi/OH-Plugins/releases/download/demo-v1.0.0/demo.zip",
+      "sha256": "..."
+    },
     "readmePath": "plugins/demo/README.md"
   }]
 }
 ```
 
-The marketplace UI shows the plugin list and README in a wider settings subpage. Selecting a plugin reads `/api/plugins/marketplace/:id/readme`. Local file marketplaces can install `distribution.kind: "source"` entries because paths resolve on disk. URL marketplaces can list entries and show README content; URL sources should use inline `readme` or HTTPS `readmeUrl`, while `readmePath` is for local file marketplaces. Remote release package download, sha256 verification, and permission review are still future distribution work.
+The marketplace UI shows the plugin list and README in a wider settings subpage. Selecting a plugin reads `/api/plugins/marketplace/:id/readme`. `distribution.kind: "release"` downloads the zip package, verifies `sha256`, then installs it into the user's plugin directory. `distribution.kind: "source"` is only for local file marketplace development because the source path must resolve to a directory on the user's machine.
 
 ## Forward Compatibility
 

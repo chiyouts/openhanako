@@ -40,7 +40,7 @@ export async function execute(input) {
 | Tool-only | 没有 UI，只给 Agent 增加工具能力 | `restricted` |
 | Runtime | 需要生命周期、EventBus、后台任务、动态工具 | `full-access` |
 | UI | 需要 page / widget / iframe card | `full-access` |
-| Marketplace entry | 让插件出现在插件市场 | 写入 `OH-Plugins/plugins/<id>.json` |
+| Marketplace entry | 让插件出现在插件市场 | 写入 `OH-Plugins/plugins/<id>.yaml` |
 
 推荐先用 `hana-plugin-creator` 脚手架生成，再按需求删减：
 
@@ -843,14 +843,22 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
 
 **重启恢复**：Hana 持久化任务与 schedule 元数据，不持久化插件函数。插件需要在 `onload()` 时重新注册 `task:register-handler`，然后调用 `task:list` 查询 `status: "recovering"` 的本插件任务，按自己的业务存储恢复或失败它们。
 
-### 插件市场与安装源
+### 官方插件市场
 
-设置 → 插件里的「打开插件市场」会进入独立的市场子页，该页面读取 `/api/plugins/marketplace`。当前宿主支持两类市场源：
+设置 → 插件里的「打开插件市场」会进入独立的市场子页，该页面读取 `/api/plugins/marketplace`。Hana 采用 Obsidian 式官方社区插件目录：第三方开发者把插件提交到 `OH-Plugins`，用户只浏览、安装、启用、禁用，不管理市场源。
+
+默认官方目录：
+
+```text
+https://raw.githubusercontent.com/liliMozi/OH-Plugins/main/marketplace.json
+```
+
+开发调试仍可用环境变量覆盖：
 
 - `HANA_PLUGIN_MARKETPLACE_FILE=/path/to/marketplace.json`
 - `HANA_PLUGIN_MARKETPLACE_URL=https://.../marketplace.json`
 
-没有配置环境变量时，Hana 会尝试读取 `${HANA_HOME}/plugin-marketplace/marketplace.json`；如果不存在，市场页显示为空，但本地拖拽安装仍然可用。市场 index 的基本形状与 `OH-Plugins` 仓库一致：
+没有配置环境变量时，Hana 会先尝试读取 `${HANA_HOME}/plugin-marketplace/marketplace.json`（本地开发覆盖），如果不存在则读取官方 `OH-Plugins` URL。市场 index 的基本形状与 `OH-Plugins` 仓库一致：
 
 ```json
 {
@@ -867,13 +875,17 @@ const schedules = await this.ctx.bus.request("task:list-schedules", {
     "trust": "restricted",
     "permissions": ["task.read"],
     "contributions": ["tools"],
-    "distribution": { "kind": "source", "path": "plugins/demo" },
+    "distribution": {
+      "kind": "release",
+      "packageUrl": "https://github.com/liliMozi/OH-Plugins/releases/download/demo-v1.0.0/demo.zip",
+      "sha256": "..."
+    },
     "readmePath": "plugins/demo/README.md"
   }]
 }
 ```
 
-市场 UI 会在设置主区域内展示更宽的插件列表和 README 单页视图，点击插件后读取 `/api/plugins/marketplace/:id/readme` 展示 README。当前可直接安装 `distribution.kind: "source"` 的本地源插件。URL 市场源可以浏览条目和 README；URL 源推荐使用内联 `readme` 或 HTTPS `readmeUrl`，`readmePath` 只适合本地 file marketplace。远端 release 包一键下载安装还需要后续接入包下载、sha256 校验与权限确认。
+市场 UI 会在设置主区域内展示更宽的插件列表和 README 单页视图，点击插件后读取 `/api/plugins/marketplace/:id/readme` 展示 README。`distribution.kind: "release"` 会下载 zip、校验 `sha256`，再安装到用户插件目录。`distribution.kind: "source"` 仅用于本地开发文件市场，因为 source path 必须能在本机解析成目录。
 
 ## 前向兼容
 

@@ -2,12 +2,15 @@ import { Hono } from "hono";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
 import { extractZip } from "../../lib/extract-zip.js";
 import { resolveAgent } from "../utils/resolve-agent.js";
 import { fromRoot } from "../../shared/hana-root.js";
 import { DEFAULT_THEME } from "../../desktop/src/shared/theme-registry.cjs";
 import { registerSessionFileFromRequest } from "../../lib/session-files/session-file-response.js";
 import { createDefaultPluginMarketplace } from "../../lib/plugin-marketplace.js";
+
+const MAX_PLUGIN_RELEASE_PACKAGE_SIZE = 50 * 1024 * 1024;
 
 /**
  * 代理分发：将 /plugins/:pluginId/* 的请求转发到对应 plugin 子 app。
@@ -110,6 +113,95 @@ async function installPluginFromPath({ engine, pm, sourcePath, sessionPath }) {
   };
 }
 
+function safePathSegment(value, fallback) {
+  const text = String(value || "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return text || fallback;
+}
+
+async function downloadMarketplaceRelease({ engine, plugin }) {
+  const dist = plugin?.distribution;
+  if (!dist || dist.kind !== "release") {
+    const err = new Error("Plugin has no release distribution");
+    err.status = 400;
+    throw err;
+  }
+  if (!dist.packageUrl || !dist.sha256) {
+    const err = new Error("Plugin release distribution is missing packageUrl or sha256");
+    err.status = 400;
+    throw err;
+  }
+
+  const expectedSha256 = String(dist.sha256).trim();
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256)) {
+    const err = new Error("Plugin release sha256 must be 64 lowercase hex characters");
+    err.status = 400;
+    throw err;
+  }
+
+  const packageUrl = new URL(dist.packageUrl);
+  if (packageUrl.protocol !== "https:") {
+    const err = new Error("Plugin release packageUrl must use https");
+    err.status = 400;
+    throw err;
+  }
+
+  const fetchImpl = engine.fetch || globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    const err = new Error("fetch is unavailable");
+    err.status = 500;
+    throw err;
+  }
+  if (!engine.hanakoHome) {
+    const err = new Error("HANA_HOME is unavailable for plugin release installation");
+    err.status = 500;
+    throw err;
+  }
+
+  const res = await fetchImpl(packageUrl.toString());
+  if (!res.ok) {
+    const err = new Error(`Plugin release download failed: ${res.status}`);
+    err.status = 502;
+    throw err;
+  }
+  const contentLength = Number(res.headers?.get?.("content-length") || 0);
+  if (contentLength > MAX_PLUGIN_RELEASE_PACKAGE_SIZE) {
+    const err = new Error("Plugin release package is too large");
+    err.status = 413;
+    throw err;
+  }
+
+  const body = Buffer.from(await res.arrayBuffer());
+  if (body.length > MAX_PLUGIN_RELEASE_PACKAGE_SIZE) {
+    const err = new Error("Plugin release package is too large");
+    err.status = 413;
+    throw err;
+  }
+  const actualSha256 = crypto.createHash("sha256").update(body).digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    const err = new Error("Plugin release sha256 mismatch");
+    err.status = 502;
+    throw err;
+  }
+
+  const pluginId = safePathSegment(plugin.id, "plugin");
+  const version = safePathSegment(plugin.version, "0.0.0");
+  const downloadsDir = path.join(engine.hanakoHome, "plugin-install-sources", pluginId, version);
+  fs.mkdirSync(downloadsDir, { recursive: true });
+  const packagePath = path.join(downloadsDir, `${pluginId}-${version}.zip`);
+  fs.writeFileSync(packagePath, body);
+  return packagePath;
+}
+
+function isMarketplacePluginInstallable(plugin, marketplace) {
+  if (plugin.distribution?.kind === "source") {
+    return !!marketplace.resolveSourceDistribution(plugin);
+  }
+  if (plugin.distribution?.kind === "release") {
+    return !!(plugin.distribution.packageUrl && plugin.distribution.sha256);
+  }
+  return false;
+}
+
 function sanitizeMarketplacePluginForClient(plugin) {
   const {
     readme: _readme,
@@ -193,7 +285,10 @@ export function createPluginsRoute(engine) {
   });
 
   function getMarketplace() {
-    return engine.pluginMarketplace || createDefaultPluginMarketplace({ hanakoHome: engine.hanakoHome });
+    return engine.pluginMarketplace || createDefaultPluginMarketplace({
+      hanakoHome: engine.hanakoHome,
+      fetchImpl: engine.fetch,
+    });
   }
 
   route.get("/plugins/marketplace", async (c) => {
@@ -209,7 +304,7 @@ export function createPluginsRoute(engine) {
           ...sanitizeMarketplacePluginForClient(plugin),
           installed: !!installedPlugin,
           installedVersion: installedPlugin?.version || null,
-          canInstall: plugin.distribution?.kind === "source" && !!marketplace.resolveSourceDistribution(plugin),
+          canInstall: isMarketplacePluginInstallable(plugin, marketplace),
         };
       }),
     });
@@ -233,10 +328,10 @@ export function createPluginsRoute(engine) {
     const plugin = await marketplace.getPlugin(c.req.param("id"));
     if (!plugin) return c.json({ error: "not found" }, 404);
     const sourcePath = marketplace.resolveSourceDistribution(plugin);
-    if (!sourcePath) return c.json({ error: "Only local source marketplace plugins can be installed here" }, 400);
     const { sessionPath } = await c.req.json().catch(() => ({}));
     try {
-      const entry = await installPluginFromPath({ engine, pm, sourcePath, sessionPath });
+      const installPath = sourcePath || await downloadMarketplaceRelease({ engine, plugin });
+      const entry = await installPluginFromPath({ engine, pm, sourcePath: installPath, sessionPath });
       return c.json(entry);
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
