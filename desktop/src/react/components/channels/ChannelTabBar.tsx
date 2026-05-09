@@ -33,12 +33,12 @@ export function switchTab(tab: TabType) {
   s.setCurrentTab(tab);
   localStorage.setItem('hana-tab', tab);
 
-  // Plugin tabs don't have sidebar persistence
-  if (typeof tab === 'string' && tab.startsWith('plugin:')) return;
-
-  const savedLeft = localStorage.getItem(`hana-sidebar-${tab}`);
-  const wantLeftOpen = savedLeft !== 'closed';
-  if (s.sidebarOpen !== wantLeftOpen) toggleSidebar(wantLeftOpen);
+  const isPluginTab = typeof tab === 'string' && tab.startsWith('plugin:');
+  if (!isPluginTab) {
+    const savedLeft = localStorage.getItem(`hana-sidebar-${tab}`);
+    const wantLeftOpen = savedLeft !== 'closed';
+    if (s.sidebarOpen !== wantLeftOpen) toggleSidebar(wantLeftOpen);
+  }
 
   const savedRight = localStorage.getItem(`hana-jian-${tab}`);
   const wantRightOpen = savedRight !== 'closed';
