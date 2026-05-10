@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { SkillManager } from "../core/skill-manager.js";
+import path from "path";
+import { SkillManager, __test } from "../core/skill-manager.js";
 
 function makeAgent(id, enabled = []) {
   return { id, config: { skills: { enabled } } };
@@ -219,5 +220,49 @@ describe("SkillManager.computeDefaultEnabledForNewAgent", () => {
       { name: "c", source: "user" },
     ];
     expect(sm.computeDefaultEnabledForNewAgent()).toEqual(["a", "c"]);
+  });
+});
+
+describe("createSkillWatchIgnore", () => {
+  const root = path.resolve("/tmp/skills-root");
+  const ignore = __test.createSkillWatchIgnore(root);
+
+  it("does not ignore the root itself", () => {
+    expect(ignore(root)).toBe(false);
+  });
+
+  it("does not ignore normal skill files", () => {
+    expect(ignore(path.join(root, "my-skill", "SKILL.md"))).toBe(false);
+    expect(ignore(path.join(root, "my-skill", "references", "guide.md"))).toBe(false);
+  });
+
+  it("ignores dot-prefixed files and directories below the root", () => {
+    expect(ignore(path.join(root, ".DS_Store"))).toBe(true);
+    expect(ignore(path.join(root, "my-skill", ".git", "HEAD"))).toBe(true);
+    expect(ignore(path.join(root, "my-skill", ".cache", "x"))).toBe(true);
+  });
+
+  it("ignores editor temp files", () => {
+    expect(ignore(path.join(root, "skill.md~"))).toBe(true);
+    expect(ignore(path.join(root, "#skill.md#"))).toBe(true);
+  });
+
+  it("ignores heavy directory names anywhere in the path (root cause of #765 / #787)", () => {
+    for (const heavy of ["node_modules", "target", "build", "dist", "out", "__pycache__", "coverage", "venv", ".venv"]) {
+      expect(ignore(path.join(root, "skill", heavy, "anything"))).toBe(true);
+      expect(ignore(path.join(root, "skill", "nested", heavy, "deep", "x"))).toBe(true);
+    }
+  });
+
+  it("does not ignore skill files that merely mention heavy names", () => {
+    expect(ignore(path.join(root, "node_modules-loader-skill", "SKILL.md"))).toBe(false);
+    expect(ignore(path.join(root, "skill", "build-config.md"))).toBe(false);
+  });
+});
+
+describe("SKILL_WATCH_DEPTH", () => {
+  it("limits chokidar recursion to a sane skill tree depth", () => {
+    expect(__test.SKILL_WATCH_DEPTH).toBeGreaterThanOrEqual(2);
+    expect(__test.SKILL_WATCH_DEPTH).toBeLessThanOrEqual(5);
   });
 });

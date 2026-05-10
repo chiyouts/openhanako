@@ -10,17 +10,39 @@ import chokidar from "chokidar";
 import { parseSkillMetadata } from "../lib/skills/skill-metadata.js";
 import { sourceIdentityForSkill } from "../lib/skills/skill-file-identity.js";
 
+// 重型目录名：watcher 必须主动跳过，否则一个带 npm 依赖的 skill 就能撑爆 fd
+// 上限（macOS 默认 256），触发 EMFILE → 错误日志雪崩 → server OOM/SIGKILL。
+// 详见 #765 / #787 根因分析。
+const HEAVY_DIR_NAMES = new Set([
+  "node_modules", "target", "build", "dist", "out",
+  "__pycache__", "coverage", "venv", ".venv",
+]);
+
 // chokidar 默认会对"绝对路径里任意段带点"判定为隐藏，而用户的 skill 根
 // （~/.hanako/skills、workspace 下的 .agents/... 等）自身就住在隐藏目录里，
-// 用全局 regex 会把整棵树吞掉。这里改为相对 watch 根做判断，只屏蔽根以下
-// 的隐藏文件和编辑器临时文件（.DS_Store / .swp / foo~ / #foo# 等）。
-function createRelativeDotIgnore(rootDir) {
+// 用全局 regex 会把整棵树吞掉。这里改为相对 watch 根做判断：
+//   1. 屏蔽根以下的隐藏文件和编辑器临时文件（.DS_Store / .swp / foo~ / #foo#）
+//   2. 屏蔽 HEAVY_DIR_NAMES 下的所有内容（node_modules 等递归会爆 fd）
+function createSkillWatchIgnore(rootDir) {
   return (absPath) => {
     const rel = path.relative(rootDir, absPath);
     if (!rel) return false;
-    return /(^|[/\\])\./.test(rel) || /[~#]$/.test(rel);
+    if (/(^|[/\\])\./.test(rel)) return true;
+    if (/[~#]$/.test(rel)) return true;
+    for (const seg of rel.split(/[/\\]/)) {
+      if (HEAVY_DIR_NAMES.has(seg)) return true;
+    }
+    return false;
   };
 }
+
+// 限制 chokidar 递归深度。Skill 通常住在 `<root>/<skill-name>/SKILL.md` 或
+// `<root>/<skill-name>/references/...`，3 层足够覆盖；更深的目录树（典型是
+// 误打入的 node_modules 或源码 vendor 目录）不该被监控。
+const SKILL_WATCH_DEPTH = 3;
+
+// 内部测试用：暴露 ignore/depth 工厂，方便 unit test 验证规则行为。
+export const __test = { createSkillWatchIgnore, HEAVY_DIR_NAMES, SKILL_WATCH_DEPTH };
 
 function readSkillFileMetadata(skill) {
   if (!skill?.filePath) return null;
@@ -194,7 +216,8 @@ export class SkillManager {
     try {
       this._watcher = chokidar.watch(this.skillsDir, {
         ignoreInitial: true,
-        ignored: createRelativeDotIgnore(this.skillsDir),
+        ignored: createSkillWatchIgnore(this.skillsDir),
+        depth: SKILL_WATCH_DEPTH,
         persistent: true,
       });
       this._watcher.on("all", () => {
@@ -319,7 +342,8 @@ export class SkillManager {
       try {
         const w = chokidar.watch(dirPath, {
           ignoreInitial: true,
-          ignored: createRelativeDotIgnore(dirPath),
+          ignored: createSkillWatchIgnore(dirPath),
+          depth: SKILL_WATCH_DEPTH,
           persistent: true,
         });
         w.on("all", () => {
