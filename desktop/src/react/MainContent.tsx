@@ -195,6 +195,9 @@ function DropText() {
 export function MainContent({ children }: { children: React.ReactNode }) {
   const [dragActive, setDragActive] = useState(false);
   const dragCounter = useRef(0);
+  const welcomeVisible = useStore(s => s.welcomeVisible);
+  const currentTab = useStore(s => s.currentTab);
+  const welcomeMode = welcomeVisible && currentTab === 'chat';
 
   const onDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -216,7 +219,7 @@ export function MainContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="main-content"
+      className={`main-content${welcomeMode ? ' welcome-mode' : ''}`}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}

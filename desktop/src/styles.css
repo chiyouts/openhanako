@@ -2082,6 +2082,30 @@ html[data-platform="linux"] .tb-toggle-right {
     pointer-events: auto;
 }
 
+/* welcome 模式：让 welcome 内容紧凑、用 padding 定位到原视觉位置，输入框紧跟其后 */
+.main-content.welcome-mode .chat-area {
+    flex: 0 0 auto;
+    overflow: visible;
+    padding-top: 18vh;
+    padding-bottom: var(--space-md);
+}
+
+.main-content.welcome-mode .input-area {
+    position: relative;
+    bottom: auto;
+    flex: 0 0 auto;
+}
+
+/* 覆盖 Welcome.module.css 的 min-height: 60vh，让内容自然紧凑 */
+.main-content.welcome-mode .chat-area > #welcome > * {
+    min-height: 0;
+}
+
+/* welcome 模式下输入框文本区多撑半行高度 */
+.main-content.welcome-mode .input-area .tiptap {
+    min-height: 2.4em;
+}
+
 /* (输入区子组件样式已迁移到 InputArea.module.css) */
 
 /* ═══════════════════════════════════════
