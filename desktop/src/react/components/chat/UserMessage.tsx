@@ -10,6 +10,7 @@ const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeSc
 import type { ChatMessage, UserAttachment, DeskContext } from '../../stores/chat-types';
 import { useStore } from '../../stores';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
+import { extractSelectedTexts } from '../../utils/message-text';
 import { openFilePreview } from '../../utils/file-preview';
 import { isImageOrSvgExt, extOfName } from '../../utils/file-kind';
 import { getUserAttachmentImageSrc } from '../../utils/user-attachment-media';
@@ -42,13 +43,16 @@ export const UserMessage = memo(function UserMessage({ message, showAvatar, sess
   }, [userAvatarUrl]);
 
   const handleCopy = useCallback(() => {
-    const text = message.text || '';
+    const ids = selectSelectedIdsBySession(useStore.getState(), sessionPath);
+    const text = ids.length > 0
+      ? extractSelectedTexts(sessionPath, ids)
+      : (message.text || '');
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }).catch(() => {});
-  }, [message.text]);
+  }, [message.text, sessionPath]);
 
   const handleScreenshot = useCallback(async () => {
     const fn = await lazyScreenshot();

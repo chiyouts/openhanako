@@ -21,6 +21,7 @@ import { openMediaViewerForRef } from '../../utils/open-media-viewer';
 import { buildFileRefId, isImageOrSvgExt } from '../../utils/file-kind';
 import { openPreview } from '../../stores/preview-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
+import { extractSelectedTexts } from '../../utils/message-text';
 import styles from './Chat.module.css';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -67,19 +68,26 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
 
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    const textBlocks = blocks.filter(
-      (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
-    );
-    if (textBlocks.length === 0) return;
-    // eslint-disable-next-line no-restricted-syntax
-    const tmp = document.createElement('div');
-    tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-    const text = tmp.innerText.trim();
+    const ids = selectSelectedIdsBySession(useStore.getState(), sessionPath);
+    let text: string;
+    if (ids.length > 0) {
+      text = extractSelectedTexts(sessionPath, ids);
+    } else {
+      const textBlocks = blocks.filter(
+        (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
+      );
+      if (textBlocks.length === 0) return;
+      // eslint-disable-next-line no-restricted-syntax
+      const tmp = document.createElement('div');
+      tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
+      text = tmp.innerText.trim();
+    }
+    if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }).catch(() => {});
-  }, [blocks]);
+  }, [blocks, sessionPath]);
 
   const handleScreenshot = useCallback(async () => {
     const fn = await lazyScreenshot();
