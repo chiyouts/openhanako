@@ -92,7 +92,7 @@ interface FileMentionRange {
   query: string;
 }
 
-function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string): SessionConfirmationBlock | null {
+function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string, pendingOnly?: boolean): SessionConfirmationBlock | null {
   if (!items) return null;
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
@@ -102,6 +102,7 @@ function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, c
       const block = blocks[j];
       if (block.type !== 'session_confirmation' || block.surface !== 'input') continue;
       if (confirmId && block.confirmId !== confirmId) continue;
+      if (pendingOnly && block.status !== 'pending') continue;
       return block;
     }
   }
@@ -190,8 +191,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const modelSwitching = useStore(s => s.modelSwitching);
   const currentSessionItems = useStore(s => s.currentSessionPath ? s.chatSessions[s.currentSessionPath]?.items : undefined);
   const pendingSessionConfirmation = useMemo(() => {
-    const latest = findLatestInputSessionConfirmation(currentSessionItems);
-    return latest?.status === 'pending' ? latest : null;
+    return findLatestInputSessionConfirmation(currentSessionItems, undefined, true);
   }, [currentSessionItems]);
 
   // Local state
