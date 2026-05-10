@@ -7,7 +7,7 @@ import { MarkdownContent } from './MarkdownContent';
 import { AttachmentChip } from '../shared/AttachmentChip';
 import { MessageActions } from './MessageActions';
 const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeScreenshot);
-import type { ChatMessage, UserAttachment, DeskContext, ContentBlock } from '../../stores/chat-types';
+import type { ChatMessage, UserAttachment, DeskContext } from '../../stores/chat-types';
 import { useStore } from '../../stores';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import { openFilePreview } from '../../utils/file-preview';
@@ -42,42 +42,13 @@ export const UserMessage = memo(function UserMessage({ message, showAvatar, sess
   }, [userAvatarUrl]);
 
   const handleCopy = useCallback(() => {
-    const state = useStore.getState();
-    const ids = selectSelectedIdsBySession(state, sessionPath);
-
-    if (ids.length > 0) {
-      const session = state.chatSessions[sessionPath];
-      if (!session) return;
-      const texts: string[] = [];
-      for (const item of session.items) {
-        if (item.type !== 'message') continue;
-        if (!ids.includes(item.data.id)) continue;
-        if (item.data.role === 'user') {
-          texts.push(item.data.text || '');
-        } else {
-          const textBlocks = (item.data.blocks || []).filter(
-            (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
-          );
-          if (textBlocks.length === 0) continue;
-          // eslint-disable-next-line no-restricted-syntax
-          const tmp = document.createElement('div');
-          tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-          texts.push(tmp.innerText.trim());
-        }
-      }
-      navigator.clipboard.writeText(texts.join('\n\n')).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }).catch(() => {});
-    } else {
-      const text = message.text || '';
-      if (!text) return;
-      navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }).catch(() => {});
-    }
-  }, [message.text, sessionPath]);
+    const text = message.text || '';
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [message.text]);
 
   const handleScreenshot = useCallback(async () => {
     const fn = await lazyScreenshot();

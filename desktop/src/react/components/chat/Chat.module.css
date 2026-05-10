@@ -166,12 +166,6 @@
     position: absolute;
     top: 4px;
     right: 4px;
-    display: flex;
-    gap: 2px;
-    background: var(--hana-bg);
-    border: 1px solid var(--hana-border);
-    border-radius: 4px;
-    padding: 2px;
     opacity: 0;
     transition: opacity var(--duration-fast);
     z-index: 2;
@@ -187,6 +181,33 @@
 .messageGroupAssistant:hover .msgActions,
 .messageGroupUser:hover .msgActions { opacity: 0.6; }
 .msgActions:hover { opacity: 1 !important; }
+
+.msgActionsPopover {
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 2px;
+    background: var(--hana-bg);
+    border: 1px solid var(--hana-border);
+    border-radius: 6px;
+    padding: 2px 3px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-fast);
+}
+
+.msgActions:hover .msgActionsPopover {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.msgActionsLeft .msgActionsPopover {
+    right: auto;
+    left: 100%;
+}
 
 .msgActionBtn {
     display: flex;
@@ -214,12 +235,13 @@
 }
 
 .msgActionBtnActive {
-    color: var(--hana-accent, #4a9) !important;
+    color: var(--accent) !important;
+    background: rgba(var(--accent-rgb), 0.10);
     opacity: 1;
 }
 
 .msgActionBtnCopied {
-    color: var(--hana-accent, #4a9) !important;
+    color: var(--accent) !important;
 }
 
 .msgActionBadge {
@@ -228,7 +250,7 @@
     height: 14px;
     line-height: 14px;
     text-align: center;
-    background: var(--hana-accent, #4a9);
+    background: var(--accent);
     color: #fff;
     border-radius: 7px;
     padding: 0 3px;
@@ -237,7 +259,7 @@
 
 /* 选中消息的视觉提示 */
 .messageGroupSelected {
-    background: rgba(68, 170, 153, 0.05);
+    background: var(--accent-light);
     border-radius: 4px;
 }
 

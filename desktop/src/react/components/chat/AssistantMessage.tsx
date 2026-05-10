@@ -67,49 +67,19 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
 
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    const state = useStore.getState();
-    const ids = selectSelectedIdsBySession(state, sessionPath);
-
-    if (ids.length > 0) {
-      const session = state.chatSessions[sessionPath];
-      if (!session) return;
-      const texts: string[] = [];
-      for (const item of session.items) {
-        if (item.type !== 'message') continue;
-        if (!ids.includes(item.data.id)) continue;
-        if (item.data.role === 'user') {
-          texts.push(item.data.text || '');
-        } else {
-          const textBlocks = (item.data.blocks || []).filter(
-            (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
-          );
-          if (textBlocks.length === 0) continue;
-          // eslint-disable-next-line no-restricted-syntax
-          const tmp = document.createElement('div');
-          tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-          texts.push(tmp.innerText.trim());
-        }
-      }
-      navigator.clipboard.writeText(texts.join('\n\n')).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }).catch(() => {});
-    } else {
-      // single message copy (existing logic)
-      const textBlocks = blocks.filter(
-        (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
-      );
-      if (textBlocks.length === 0) return;
-      // eslint-disable-next-line no-restricted-syntax
-      const tmp = document.createElement('div');
-      tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-      const text = tmp.innerText.trim();
-      navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }).catch(() => {});
-    }
-  }, [blocks, sessionPath]);
+    const textBlocks = blocks.filter(
+      (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
+    );
+    if (textBlocks.length === 0) return;
+    // eslint-disable-next-line no-restricted-syntax
+    const tmp = document.createElement('div');
+    tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
+    const text = tmp.innerText.trim();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [blocks]);
 
   const handleScreenshot = useCallback(async () => {
     const fn = await lazyScreenshot();
