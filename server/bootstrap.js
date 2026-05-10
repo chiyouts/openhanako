@@ -31,14 +31,23 @@ importTimer.unref?.();
 
 // Independent keepalive thread.
 //
-// 主线程被 native module 加载（better-sqlite3 等）或重型 import 阻塞时，
-// 上面的 setInterval 不会 fire，Electron 因 progress grace 用尽误判启动失败
-// (#719 / #736 根因)。Worker 跑在独立 V8 isolate，不受主线程 event loop
-// 影响，stdout 直连父进程 pipe，能持续输出"我还活着"信号。
+// 主线程被 native module 加载（better-sqlite3 等）或重型 import 阻塞时，上面的
+// setInterval 不会 fire，Electron 因 progress grace 用尽误判启动失败
+// (#719 / #736 根因)。
+//
+// ⚠️ Worker 里 **必须** 用 `fs.writeSync(1, ...)` 直接写 stdout fd——绝不能用
+// `process.stdout.write()`。Worker 的 stdout 默认走 MessagePort 转发到主线程的
+// writable，主线程被阻塞时这些 message 会堆在主线程消息队列里，直到主线程恢复才
+// 被一起 flush，keepalive 形同虚设。
+//
+// fs.writeSync(1, ...) 直接对父进程继承下来的 OS pipe fd 做 write() syscall，
+// 不需要主线程参与；Worker 跑在独立 V8 isolate，自己的 event loop 不受主线程
+// 影响，syscall 直达 Electron 端的 stdout pipe。
 let keepaliveWorker = null;
 try {
   keepaliveWorker = new Worker(
-    "setInterval(() => { try { process.stdout.write('[server-bootstrap] keepalive\\n'); } catch {} }, 5000);",
+    "const fs = require('fs');"
+    + "setInterval(() => { try { fs.writeSync(1, '[server-bootstrap] keepalive\\n'); } catch {} }, 5000);",
     { eval: true },
   );
   keepaliveWorker.on("error", (err) => {
