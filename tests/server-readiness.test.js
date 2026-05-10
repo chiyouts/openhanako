@@ -14,6 +14,9 @@ import {
   isModuleResolutionError,
   CRITICAL_BUNDLED_EXTERNALS,
   CRITICAL_BUNDLED_FILES,
+  SERVER_INFO_FIRST_WAIT_MS,
+  SERVER_INFO_PROGRESS_GRACE_MS,
+  SERVER_INFO_MAX_WAIT_MS,
   shouldKeepWaitingForServerInfo,
 } from "../desktop/src/shared/server-readiness.cjs";
 
@@ -205,5 +208,15 @@ describe("shouldKeepWaitingForServerInfo", () => {
       childAlive: true,
       maxWaitMs: 300_000,
     })).toBe(false);
+  });
+
+  // #719 / #736 root-cause: bundle import sync-blocks event loop long enough
+  // that bootstrap.js's main-thread setInterval cannot fire. The timeouts must
+  // be wide enough to cover Windows + Defender cold-start, and bootstrap.js
+  // must keep emitting heartbeats from a worker thread to keep grace alive.
+  it("default timeouts cover Windows cold-start with Defender scanning", () => {
+    expect(SERVER_INFO_FIRST_WAIT_MS).toBeGreaterThanOrEqual(90_000);
+    expect(SERVER_INFO_PROGRESS_GRACE_MS).toBeGreaterThanOrEqual(180_000);
+    expect(SERVER_INFO_MAX_WAIT_MS).toBeGreaterThanOrEqual(5 * 60_000);
   });
 });

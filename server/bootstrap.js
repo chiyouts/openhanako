@@ -1,5 +1,6 @@
 import path from "path";
 import { pathToFileURL } from "url";
+import { Worker } from "worker_threads";
 
 function log(line) {
   try {
@@ -28,6 +29,25 @@ const importTimer = setInterval(() => {
 }, 15000);
 importTimer.unref?.();
 
+// Independent keepalive thread.
+//
+// 主线程被 native module 加载（better-sqlite3 等）或重型 import 阻塞时，
+// 上面的 setInterval 不会 fire，Electron 因 progress grace 用尽误判启动失败
+// (#719 / #736 根因)。Worker 跑在独立 V8 isolate，不受主线程 event loop
+// 影响，stdout 直连父进程 pipe，能持续输出"我还活着"信号。
+let keepaliveWorker = null;
+try {
+  keepaliveWorker = new Worker(
+    "setInterval(() => { try { process.stdout.write('[server-bootstrap] keepalive\\n'); } catch {} }, 5000);",
+    { eval: true },
+  );
+  keepaliveWorker.on("error", (err) => {
+    logError(`[server-bootstrap] keepalive worker error: ${err?.message || err}`);
+  });
+} catch (err) {
+  logError(`[server-bootstrap] failed to start keepalive worker: ${err?.message || err}`);
+}
+
 try {
   log("[server-bootstrap] importing server entry");
   await import(pathToFileURL(serverEntry).href);
@@ -38,4 +58,7 @@ try {
   throw err;
 } finally {
   clearInterval(importTimer);
+  if (keepaliveWorker) {
+    keepaliveWorker.terminate().catch(() => {});
+  }
 }
