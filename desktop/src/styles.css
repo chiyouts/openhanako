@@ -2086,7 +2086,7 @@ html[data-platform="linux"] .tb-toggle-right {
 .main-content.welcome-mode .chat-area {
     flex: 0 0 auto;
     overflow: visible;
-    padding-top: 18vh;
+    padding-top: calc(18vh + 1.6em);
     padding-bottom: var(--space-md);
 }
 

@@ -1107,17 +1107,17 @@
     flex-direction: column;
     gap: var(--space-sm);
     background: var(--bg-card);
-    border: 1px solid rgba(var(--accent-rgb), 0.12);
+    border: 1px solid var(--overlay-light);
     border-radius: var(--radius-lg);
     padding: var(--space-md) var(--space-sm) var(--space-sm) var(--space-md);
-    box-shadow: 0 2px 6px var(--shadow);
-    transition: border-color 0.5s var(--ease-out),
-                box-shadow 0.5s var(--ease-out);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.3s var(--ease-out),
+                box-shadow 0.3s var(--ease-out);
 }
 
-.input-wrapper:focus-within {
-    border-color: rgba(0, 0, 0, 0.10);
-    box-shadow: 0 3px 10px var(--shadow);
+.input-wrapper:hover {
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .input-box {
@@ -1130,6 +1130,7 @@
     border: none;
     outline: none;
     resize: none;
+    min-height: 1.6em;
     max-height: 120px;
     overflow-y: auto;
     scrollbar-width: none;
@@ -1141,6 +1142,8 @@
 
 .input-box::placeholder {
     color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.55;
 }
 
 /* 发送按钮 */
@@ -1235,28 +1238,16 @@
     gap: 0.3rem;
 }
 
-/* TipTap editor container */
-.input-box :global(.tiptap) {
-    outline: none;
-    min-height: 1.6em;
-    font-family: inherit;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: var(--text);
-}
-
-.input-box :global(.tiptap)::-webkit-scrollbar {
-    display: none;
-}
-
-.input-box :global(.tiptap p.is-editor-empty:first-child::before) {
+.input-box p:global(.is-editor-empty):first-child::before {
     content: attr(data-placeholder);
     color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.55;
     pointer-events: none;
     float: left;
     height: 0;
 }
 
-.input-box :global(.tiptap p) {
+.input-box p {
     margin: 0;
 }

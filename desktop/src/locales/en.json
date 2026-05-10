@@ -217,7 +217,30 @@
     "memoryOn": "Memory",
     "memoryOff": "Memory not used for this chat",
     "memoryDisabled": "Memory is off",
-    "agentSelector": "Choose agent"
+    "agentSelector": "Choose agent",
+    "placeholderTips": [
+      "Type / to bring up the command menu",
+      "Use @ to reference files in your workspace",
+      "Drop a file into the input to send it along",
+      "Paste an image to send it directly",
+      "Select any text on the page — a floating input will appear",
+      "The diamond button below the avatar toggles memory for this chat",
+      "The workspace button lets you switch or add folders",
+      "The right panel holds notes and context for this chat",
+      "Tap the small dots under the avatar to switch assistants",
+      "Ask-before-acting mode makes the assistant confirm before doing things",
+      "Try /rc to control your computer from your phone",
+      "Enable Vision Assist in settings — text models can understand images too",
+      "Looking for something new? Check out the plugin marketplace",
+      "File backup helps if you're worried about losing data",
+      "Use subagents for Agent collaboration at work; channels are for play",
+      "Each Agent can be configured with its own Skills",
+      "Try sunbathing in Sunny mode!",
+      "Markdown files in the workspace can be edited directly when opened",
+      "After spending some time with your assistant, try the diary feature!",
+      "Diaries and screenshots are saved in the main assistant's workspace",
+      "Each assistant can have its own workspace; with Patrol on, they'll act on their own there"
+    ]
   },
   "drop": {
     "hint": "Drop to send files to {name}"

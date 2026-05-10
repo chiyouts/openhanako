@@ -156,7 +156,7 @@ interface InputAreaInnerProps {
 }
 
 function InputAreaInner({ cardRef }: InputAreaInnerProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   // Zustand state
   const isStreaming = useStore(s => s.streamingSessions.includes(s.currentSessionPath || ''));
@@ -178,6 +178,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const previewOpen = useStore(s => s.previewOpen);
   const models = useStore(s => s.models);
   const agentYuan = useStore(s => s.agentYuan);
+  const welcomeVisible = useStore(s => s.welcomeVisible);
   const thinkingLevel = useStore(s => s.thinkingLevel);
   const setThinkingLevel = useStore(s => s.setThinkingLevel);
   const addToast = useStore(s => s.addToast);
@@ -252,15 +253,53 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     return () => window.removeEventListener('hana-inline-notice', handler);
   }, []);
 
+  // ── Welcome 模式 placeholder tip（mount、i18n ready、每次 welcome 重新激活时随机一条） ──
+  const pickRandomWelcomeTip = useCallback((): string => {
+    const tipsRaw: unknown = t('welcome.placeholderTips');
+    const tips = Array.isArray(tipsRaw)
+      ? tipsRaw.filter((tip): tip is string => typeof tip === 'string' && tip.length > 0)
+      : [];
+    if (tips.length === 0) return '';
+    return tips[Math.floor(Math.random() * tips.length)];
+  }, [t]);
+
+  const [welcomeTip, setWelcomeTip] = useState<string>(() =>
+    welcomeVisible ? pickRandomWelcomeTip() : '',
+  );
+
+  const prevWelcomeVisibleRef = useRef(welcomeVisible);
+  const prevLocaleRef = useRef(locale);
+  useEffect(() => {
+    const wasVisible = prevWelcomeVisibleRef.current;
+    const previousLocale = prevLocaleRef.current;
+    prevWelcomeVisibleRef.current = welcomeVisible;
+    prevLocaleRef.current = locale;
+
+    if (!welcomeVisible) {
+      if (welcomeTip) setWelcomeTip('');
+      return;
+    }
+
+    // false→true（重新进入欢迎页）、locale ready/切换，或 mount 时 i18n 还没 ready 现在能拿到
+    if (!wasVisible || previousLocale !== locale || !welcomeTip) {
+      const tip = pickRandomWelcomeTip();
+      if (tip) setWelcomeTip(tip);
+    }
+  }, [welcomeVisible, locale, welcomeTip, pickRandomWelcomeTip]);
+
   // ── Placeholder ──
+  const placeholderRef = useRef('');
+  const getEditorPlaceholder = useCallback(() => placeholderRef.current, []);
   const placeholder = (() => {
+    if (welcomeVisible && welcomeTip) return welcomeTip;
     const yuanPh = t(`yuan.placeholder.${agentYuan}`);
     return (yuanPh && !yuanPh.startsWith('yuan.')) ? yuanPh : t('input.placeholder');
   })();
+  placeholderRef.current = placeholder;
 
   // ── TipTap editor ──
   const editor = useEditor({
-    extensions: createInputEditorExtensions(placeholder),
+    extensions: createInputEditorExtensions(getEditorPlaceholder),
     editorProps: {
       attributes: {
         class: styles['input-box'],
@@ -269,6 +308,11 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       },
     },
   });
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta('input-placeholder-refresh', placeholder));
+  }, [editor, placeholder]);
 
   // Focus trigger from store
   const inputFocusTrigger = useStore(s => s.inputFocusTrigger);
