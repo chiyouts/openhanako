@@ -368,6 +368,9 @@ export async function switchSession(path: string): Promise<void> {
     }).catch((err) => {
       console.warn('[session] context usage refresh skipped:', err);
     });
+
+    // Restore input focus after session switch completes
+    useStore.getState().requestInputFocus();
   } catch (err) {
     if (myVersion !== _switchVersion || isAbortError(err)) return;
     useStore.setState((state: Record<string, any>) => (
