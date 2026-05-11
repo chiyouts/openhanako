@@ -851,7 +851,10 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                   displayMessage: msg.displayMessage,
                 });
               } catch (err) {
-                if (!err.message?.includes("aborted")) {
+                const isUserAbort = err.name === 'AbortError'
+                  || (err.message === 'This operation was aborted')
+                  || (err.type === 'aborted');
+                if (!isUserAbort) {
                   const errMessage = err.message === "session_busy"
                     ? t("error.stillStreaming", { name: engine.agentName })
                     : err.message;
@@ -862,7 +865,10 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           })().catch((err) => {
             const appErr = AppError.wrap(err);
             errorBus.report(appErr, { context: { wsMessageType: msg.type } });
-            if (!appErr.message?.includes('aborted')) {
+            const isUserAbort = appErr.name === 'AbortError'
+              || appErr.message === 'This operation was aborted'
+              || appErr.type === 'aborted';
+            if (!isUserAbort) {
               wsSend(ws, { type: 'error', message: appErr.message || 'Unknown error', error: appErr.toJSON(), sessionPath: msg.sessionPath });
             }
           });

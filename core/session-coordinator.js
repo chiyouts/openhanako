@@ -929,15 +929,22 @@ export class SessionCoordinator {
       if (!bridge) {
         throw new Error("vision auxiliary model is required for image input with the current text-only model");
       }
-      const prepared = await bridge.prepare({
-        sessionPath,
-        targetModel: entry.session.model,
-        text,
-        images: opts.images,
-        imageAttachmentPaths: opts.imageAttachmentPaths,
-      });
-      text = prepared.text;
-      opts = { ...opts, images: prepared.images };
+      try {
+        const prepared = await bridge.prepare({
+          sessionPath,
+          targetModel: entry.session.model,
+          text,
+          images: opts.images,
+          imageAttachmentPaths: opts.imageAttachmentPaths,
+        });
+        text = prepared.text;
+        opts = { ...opts, images: prepared.images };
+      } catch (visionErr) {
+        const log = this._d.getEngine?.()?.log;
+        (log || console).warn?.("[session] vision prepare failed, proceeding without images:", visionErr?.message || visionErr);
+        // Strip images so the model receives the text message at least
+        opts = { ...opts, images: [] };
+      }
     }
     assertVideoInputSupported(entry.session.model, opts?.videos);
     const promptOpts = buildPromptMediaOptions(opts);
