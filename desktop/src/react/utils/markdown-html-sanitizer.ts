@@ -18,13 +18,13 @@ const ALLOWED_TAGS = new Set([
   'ul', 'ol', 'li',
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
   'details', 'summary',
-  'a',
+  'a', 'label',
   ...MATHML_TAGS,
   ...SVG_TAGS,
 ]);
 
 const REMOVE_WITH_CONTENT = new Set([
-  'script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button',
+  'script', 'style', 'iframe', 'object', 'embed', 'form', 'button',
   'textarea', 'select', 'link', 'meta', 'base',
 ]);
 
@@ -51,6 +51,10 @@ const ALLOWED_CLASS_NAMES = new Set([
   'language-mermaid',
   'is-rendered',
   'is-error',
+  'task-list-item',
+  'task-list-item-checkbox',
+  'task-list-item-label',
+  'contains-task-list',
 ]);
 const KATEX_CLASS_NAMES = new Set([
   'katex',
@@ -379,6 +383,19 @@ function sanitizeNode(node: ChildNode): void {
 
   const element = node as Element;
   const tagName = element.tagName.toLowerCase();
+
+  if (tagName === 'input') {
+    if (element.getAttribute('type') === 'checkbox') {
+      const checked = element.hasAttribute('checked');
+      for (const attr of Array.from(element.attributes)) element.removeAttribute(attr.name);
+      element.setAttribute('type', 'checkbox');
+      element.setAttribute('disabled', '');
+      if (checked) element.setAttribute('checked', '');
+      return;
+    }
+    element.remove();
+    return;
+  }
 
   if (REMOVE_WITH_CONTENT.has(tagName)) {
     element.remove();

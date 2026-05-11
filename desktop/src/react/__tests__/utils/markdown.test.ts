@@ -164,6 +164,31 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<span class="katex"><span class="mord">x</span></span>');
   });
 
+  it('preserves task list checkboxes in markdown preview mode', () => {
+    const html = renderMarkdownPreview('- [ ] 未完成\n- [x] 已完成');
+
+    expect(html).toContain('class="task-list-item"');
+    expect(html).toContain('class="contains-task-list"');
+    expect(html).toContain('<input type="checkbox" disabled="">');
+    expect(html).toContain('<input type="checkbox" disabled="" checked="">');
+  });
+
+  it('strips non-checkbox inputs even in task list context', () => {
+    const html = renderMarkdownPreview('<input type="text" value="xss"><input type="checkbox">');
+
+    expect(html).not.toContain('type="text"');
+    expect(html).toContain('<input type="checkbox" disabled="">');
+  });
+
+  it('forces disabled on checkbox inputs and strips unsafe attributes', () => {
+    const html = renderMarkdownPreview('<input type="checkbox" onclick="alert(1)" data-evil="x" checked>');
+
+    expect(html).not.toContain('onclick');
+    expect(html).not.toContain('data-evil');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('checked=""');
+  });
+
   it('does not allow raw SVG outside generated KaTeX markup', () => {
     const html = renderMarkdownPreview('<svg onload="alert(1)"><path d="M0 0"></path></svg><span>ok</span>');
 
