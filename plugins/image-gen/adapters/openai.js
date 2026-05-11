@@ -49,11 +49,11 @@ export const openaiImageAdapter = {
     const { apiKey, baseUrl } = creds;
 
     // 2. Resolve model — short names resolved via shared catalog
-    const rawModel = params.model || ctx.config?.get?.("defaultImageModel")?.id;
+    const rawModel = params.model || ctx.config?.get?.("defaultImageModel", ctx.configOpts || {})?.id;
     const modelId = resolveModelId("openai", rawModel);
 
     // 3. Get provider defaults
-    const allDefaults = ctx.config?.get?.("providerDefaults") || {};
+    const allDefaults = ctx.config?.get?.("providerDefaults", ctx.configOpts || {}) || {};
     const providerDefaults = allDefaults["openai"] || {};
 
     // 4. Translate params → API body

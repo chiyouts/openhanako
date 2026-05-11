@@ -10,6 +10,7 @@
       "properties": {
         "defaultImageModel": {
           "type": "object",
+          "scope": "per-agent",
           "title": "默认图片模型",
           "properties": {
             "id": { "type": "string" },
@@ -18,6 +19,7 @@
         },
         "providerDefaults": {
           "type": "object",
+          "scope": "per-agent",
           "title": "per-provider 默认参数"
         }
       }
