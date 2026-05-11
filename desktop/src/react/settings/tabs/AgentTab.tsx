@@ -20,12 +20,13 @@ import {
 
 export function AgentTab() {
   const {
-    agents, currentAgentId, settingsConfig, currentPins,
+    agents, currentAgentId, settingsAgentId, settingsConfig, currentPins,
     globalModelsConfig,
   } = useSettingsStore(
     useShallow(s => ({
       agents: s.agents,
       currentAgentId: s.currentAgentId,
+      settingsAgentId: s.settingsAgentId,
       settingsConfig: s.settingsConfig,
       currentPins: s.currentPins,
       globalModelsConfig: s.globalModelsConfig,
@@ -36,7 +37,7 @@ export function AgentTab() {
   const getSettingsAgentId = useSettingsStore(s => s.getSettingsAgentId);
 
   const hasUtilityModel = !!(globalModelsConfig?.models?.utility && globalModelsConfig?.models?.utility_large);
-  const settingsAgentId = getSettingsAgentId();
+  const selectedSettingsAgentId = settingsAgentId || currentAgentId;
 
   const [agentName, setAgentName] = useState('');
   const [identity, setIdentity] = useState('');
@@ -52,7 +53,7 @@ export function AgentTab() {
     }
   }, [settingsConfig]);
 
-  const isViewingOther = settingsAgentId !== currentAgentId;
+  const isViewingOther = selectedSettingsAgentId !== currentAgentId;
   const currentYuan = settingsConfig?.agent?.yuan || 'hanako';
 
   // 用 "provider/id" 复合键作为 SelectWidget 的 value，区分多 provider 下同名模型。
@@ -161,7 +162,7 @@ export function AgentTab() {
         <h2 className={styles['settings-section-title']}>{t('settings.agent.title')}</h2>
         <AgentCardStack
           agents={agents}
-          selectedId={settingsAgentId}
+          selectedId={selectedSettingsAgentId}
           currentAgentId={currentAgentId}
           onSelect={(id) => browseAgent(id)}
           onAvatarClick={() => {
