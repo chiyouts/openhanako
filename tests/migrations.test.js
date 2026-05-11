@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 20;
+const LATEST_DATA_VERSION = 21;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -1560,6 +1560,57 @@ describe("migration #20: Pi model input schema compatibility", () => {
     const registry = createModelRegistry(new AuthStorage(tmpDir), modelsJsonPath);
     const available = await registry.getAvailable();
     expect(available.map((model) => model.id)).toEqual(["qwen3-vl-plus", "qwen-plus", "custom-video"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #21: video transport capability refresh", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration21(prefs) {
+    prefs.savePreferences({ _dataVersion: 20 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({}),
+      log: () => {},
+    });
+  }
+
+  it("repairs existing models.json entries for newly declared Kimi video models", () => {
+    const prefs = makePrefs(userDir);
+    const modelsJsonPath = path.join(tmpDir, "models.json");
+    fs.writeFileSync(modelsJsonPath, JSON.stringify({
+      providers: {
+        moonshot: {
+          baseUrl: "https://api.moonshot.cn/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [
+            { id: "kimi-k2.6", name: "Kimi K2.6", input: ["text", "image"] },
+          ],
+        },
+      },
+    }, null, 2) + "\n", "utf-8");
+
+    runMigration21(prefs);
+
+    const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(raw.providers.moonshot.models[0]).toMatchObject({
+      id: "kimi-k2.6",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    });
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
   });
 });

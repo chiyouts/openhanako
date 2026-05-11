@@ -30,7 +30,7 @@ import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/w
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
-import { modelSupportsVideoInput } from "../shared/model-capabilities.js";
+import { modelSupportsDirectVideoInput, modelSupportsVideoInput } from "../shared/model-capabilities.js";
 import {
   normalizeSessionThinkingLevel,
   normalizeThinkingLevelForModel,
@@ -55,6 +55,9 @@ function assertVideoInputSupported(model, videos) {
   if (!videos?.length) return;
   if (!modelSupportsVideoInput(model)) {
     throw new Error("current model does not support video input");
+  }
+  if (!modelSupportsDirectVideoInput(model)) {
+    throw new Error("current provider does not support direct video input");
   }
 }
 

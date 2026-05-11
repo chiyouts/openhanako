@@ -116,6 +116,15 @@ describe("known-models dictionary", () => {
     });
   });
 
+  it("declares official Moonshot Kimi K2.6 video capability", () => {
+    expect(lookupKnown("moonshot", "kimi-k2.6")).toMatchObject({
+      name: "Kimi K2.6",
+      image: true,
+      video: true,
+      reasoning: true,
+    });
+  });
+
   it("declares Xiaomi MiMo V2.5 series with official multimodal and TTS limits", () => {
     expect(lookupKnown("mimo", "mimo-v2.5-pro")).toEqual({
       name: "MiMo V2.5 Pro",

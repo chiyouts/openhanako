@@ -183,6 +183,7 @@
     "context": 262144,
     "maxOutput": 98304,
     "image": true,
+    "video": true,
     "reasoning": true,
     "visionCapabilities": {
       "grounding": true,
