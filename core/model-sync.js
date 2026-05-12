@@ -1,4 +1,4 @@
-﻿/**
+/**
  * model-sync.js 鈥?added-models.yaml 鈫?models.json 鍗曞悜鎶曞奖
  *
  * 绯荤粺涓敮涓€鍐?models.json 鐨勫湴鏂广€備粠 providers 閰嶇疆锛坰nake_case锛?
@@ -201,12 +201,27 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
 
   const videoAwareEntry = video === true ? withHanaVideoInputCompat(entry, true) : entry;
   return withThinkingFormatCompat(videoAwareEntry, { provider, api });
- * @param {Record<string, object>} providers - added-models.yaml 涓殑 providers 鍧楋紙snake_case锛?
+}
+
+function filterChatModelEntries(provider, models) {
+  return models.filter(m => {
+    const isObj = typeof m === "object" && m !== null;
+    const id = getModelId(m);
+    const known = lookupKnown(provider, id);
+    const type = (isObj && m.type) || known?.type || "chat";
+    return type === "chat";
+  });
+}
+
+/**
+ * 单向投影：providers 配置 → models.json（Pi SDK 格式）
+ *
+ * @param {Record<string, object>} providers - added-models.yaml 中的 providers 块（snake_case）
  * @param {object} [opts]
- * @param {string} opts.modelsJsonPath - models.json 杈撳嚭璺緞
- * @param {string} [opts.authJsonPath] - auth.json 璺緞锛圤Auth 鍑瘉鏌ユ壘鐢級
- * @param {Record<string, string>} [opts.oauthKeyMap] - providerId 鈫?auth.json key 鏄犲皠
- * @returns {boolean} 鍐呭鏄惁鏈夊彉鍖?
+ * @param {string} opts.modelsJsonPath - models.json 输出路径
+ * @param {string} [opts.authJsonPath] - auth.json 路径（OAuth 凭证查找用）
+ * @param {Record<string, string>} [opts.oauthKeyMap] - providerId → auth.json key 映射
+ * @returns {boolean} 内容是否有变化
  */
 export function syncModels(providers, opts = {}) {
   const modelsJsonPath = opts.modelsJsonPath;
