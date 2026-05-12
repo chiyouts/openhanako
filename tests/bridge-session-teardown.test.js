@@ -531,6 +531,43 @@ describe("BridgeSessionManager teardown", () => {
     expect(sessionManagerOpenMock).not.toHaveBeenCalled();
   });
 
+  it("recordAssistantMessage creates an owner bridge session when requested", () => {
+    const agent = makeAgent(rootDir);
+    const manager = new BridgeSessionManager(makeDeps(agent));
+    const sessionPath = path.join(agent.sessionDir, "bridge", "owner", "proactive.jsonl");
+    const appendMessage = vi.fn();
+    sessionManagerCreateMock.mockReturnValue({
+      getSessionFile: () => sessionPath,
+      appendMessage,
+    });
+
+    const recorded = manager.recordAssistantMessage(
+      "wx_dm_owner@agent-a",
+      "AI 日报\n\n今天有三条新闻。",
+      {
+        agentId: "agent-a",
+        createIfMissing: true,
+        meta: { userId: "owner", chatId: "owner", name: "Owner" },
+      },
+    );
+
+    expect(recorded).toBe(true);
+    expect(sessionManagerCreateMock).toHaveBeenCalledWith(
+      rootCwd,
+      path.join(agent.sessionDir, "bridge", "owner"),
+    );
+    expect(appendMessage).toHaveBeenCalledWith({
+      role: "assistant",
+      content: [{ type: "text", text: "AI 日报\n\n今天有三条新闻。" }],
+    });
+    expect(manager.readIndex(agent)["wx_dm_owner@agent-a"]).toMatchObject({
+      file: "owner/proactive.jsonl",
+      userId: "owner",
+      chatId: "owner",
+      name: "Owner",
+    });
+  });
+
   it("reconcile cleans bridge indexes for every agent, not just focus agent", () => {
     const focusAgent = makeAgent(path.join(rootDir, "focus"), "focus");
     const otherAgent = makeAgent(path.join(rootDir, "other"), "other");

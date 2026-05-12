@@ -95,6 +95,7 @@ import {
   isComputerUsePlatformSupported,
 } from "./computer-use/platform-support.js";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.js";
+import { NotificationService } from "../lib/notifications/notification-service.js";
 import {
   getSkillNameTranslationCachePath,
   translateSkillNamesWithCache,
@@ -221,6 +222,12 @@ export class HanaEngine {
       registerSessionFile: (entry) => this.registerSessionFile(entry),
       getSessionFile: (fileId, options) => this.getSessionFile(fileId, options),
       getSessionFileByPath: (filePath, options) => this.getSessionFileByPath(filePath, options),
+    });
+    this._notifications = new NotificationService({
+      emitDesktop: ({ title, body, agentId }) => {
+        this._hubCallbacks?.eventBus?.emit({ type: "notification", title, body, agentId: agentId || null }, null);
+      },
+      getBridgeManager: () => this._hubCallbacks?.hub?.bridgeManager || null,
     });
 
     // ── Slash Command System ──
@@ -431,6 +438,9 @@ export class HanaEngine {
   async abortBridgeSession(key) { return this._bridge?.abortSession(key) ?? false; }
   steerBridgeSession(key, text) { return this._bridge?.steerSession(key, text) ?? false; }
   get bridgeSessionManager() { return this._bridge; }
+  async deliverNotification(payload, opts = {}) {
+    return this._notifications.notify(payload, opts);
+  }
   get slashRegistry() { return this._slashSystem?.registry ?? null; }
   get slashDispatcher() { return this._slashSystem?.dispatcher ?? null; }
   /** /rc 接管态 + pending-selection 内存 store（Phase 2-A） */

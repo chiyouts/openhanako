@@ -324,7 +324,7 @@ export class Agent {
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
     });
     this._notifyTool = createNotifyTool({
-      onNotify: (title, body) => this._notifyHandler?.(title, body),
+      onNotify: (payload) => this._notifyHandler?.(payload),
     });
     this._stopTaskTool = createStopTaskTool({
       getTaskRegistry: () => this._cb?.getTaskRegistry?.(),

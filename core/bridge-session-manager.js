@@ -498,42 +498,76 @@ export class BridgeSessionManager {
   }
 
   /**
-   * 往指定 bridge session 追加一条 assistant 消息（不触发 LLM）
+   * 往指定 bridge session 追加一条 assistant 消息（不触发 LLM）。
+   * createIfMissing 仅用于真实外发成功后的主动通知记录。
+   *
    * @param {string} sessionKey - bridge session 标识
    * @param {string} text - 要追加的 assistant 消息文本
-   * @param {object} [opts] - { agentId?: string }
+   * @param {object} [opts] - { agentId?: string, createIfMissing?: boolean, meta?: object }
    * @returns {boolean}
    */
-  injectMessage(sessionKey, text, opts = {}) {
-    const agent = this._resolveAgent(opts, "injectMessage");
+  recordAssistantMessage(sessionKey, text, opts = {}) {
+    const agent = this._resolveAgent(opts, "recordAssistantMessage");
     try {
       const index = this.readIndex(agent);
       const raw = index[sessionKey];
       const existingFile = typeof raw === "string" ? raw : raw?.file || null;
-      if (!existingFile) {
-        console.warn(`[bridge-session] injectMessage: sessionKey "${sessionKey}" 不存在`);
-        return false;
-      }
-
       const bridgeDir = path.join(agent.sessionDir, "bridge");
-      const sessionPath = path.join(bridgeDir, existingFile);
-      if (!fs.existsSync(sessionPath)) {
-        console.warn(`[bridge-session] injectMessage: session 文件不存在: ${sessionPath}`);
+      const sessionDir = path.join(bridgeDir, "owner");
+      fs.mkdirSync(sessionDir, { recursive: true });
+
+      let mgr = null;
+      let sessionPath = null;
+      if (existingFile) {
+        sessionPath = path.join(bridgeDir, existingFile);
+        if (fs.existsSync(sessionPath)) {
+          mgr = SessionManager.open(sessionPath, path.dirname(sessionPath));
+        } else if (!opts.createIfMissing) {
+          console.warn(`[bridge-session] recordAssistantMessage: session 文件不存在: ${sessionPath}`);
+          return false;
+        }
+      } else if (!opts.createIfMissing) {
+        console.warn(`[bridge-session] recordAssistantMessage: sessionKey "${sessionKey}" 不存在`);
         return false;
       }
 
-      const mgr = SessionManager.open(sessionPath, path.dirname(sessionPath));
+      if (!mgr) {
+        const homeCwd = this._deps.getHomeCwd(agent.id) || process.cwd();
+        mgr = SessionManager.create(homeCwd, sessionDir);
+        sessionPath = mgr.getSessionFile?.() || null;
+        if (!sessionPath) {
+          console.warn(`[bridge-session] recordAssistantMessage: new session path unavailable for "${sessionKey}"`);
+          return false;
+        }
+      }
+
       mgr.appendMessage({
         role: "assistant",
         content: [{ type: "text", text }],
       });
 
-      debugLog()?.log("bridge-session", `injected message to ${sessionKey} (${text.length} chars)`);
+      if (sessionPath) {
+        const { changed } = this._syncIndexEntry(index, sessionKey, raw, {
+          bridgeDir,
+          sessionPath,
+          meta: opts.meta || null,
+        });
+        if (changed) this.writeIndex(index, agent);
+      }
+
+      debugLog()?.log("bridge-session", `recorded assistant message to ${sessionKey} (${text.length} chars)`);
       return true;
     } catch (err) {
-      console.error(`[bridge-session] injectMessage failed: ${err.message}`);
+      console.error(`[bridge-session] recordAssistantMessage failed: ${err.message}`);
       return false;
     }
+  }
+
+  /**
+   * Back-compat wrapper used by slash/session ops.
+   */
+  injectMessage(sessionKey, text, opts = {}) {
+    return this.recordAssistantMessage(sessionKey, text, { ...opts, createIfMissing: false });
   }
 
   /**
