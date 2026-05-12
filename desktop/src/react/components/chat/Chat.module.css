@@ -1125,7 +1125,7 @@
     cursor: pointer;
     padding: 0 var(--timeline-marker-pad-right) 0 var(--timeline-marker-pad-left);
     opacity: 0;
-    pointer-events: auto;
+    pointer-events: none;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 24px;
     align-items: center;
@@ -1137,10 +1137,10 @@
 .timelineNav:hover .timelineMarker,
 .timelineNav:focus-within .timelineMarker {
     opacity: 1;
-    pointer-events: auto;
 }
 
 .timelineNavExpanded .timelineCard,
+.timelineNavExpanded .timelineMarker,
 .timelineNavExpanded .timelineLabel {
     pointer-events: auto;
 }
@@ -1155,6 +1155,7 @@
 }
 
 .timelineLine {
+    position: relative;
     justify-self: end;
     width: var(--timeline-marker-width);
     min-width: 0.5em;
@@ -1163,7 +1164,14 @@
     border-radius: 999px;
     background: currentColor;
     opacity: 0.74;
+    pointer-events: auto;
     transition: opacity var(--duration-instant) var(--ease-out);
+}
+
+.timelineLine::before {
+    content: "";
+    position: absolute;
+    inset: -12px -4px;
 }
 
 .timelineMarker:hover .timelineLine,
