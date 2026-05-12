@@ -18,7 +18,7 @@ const ALLOWED_TAGS = new Set([
   'ul', 'ol', 'li',
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
   'details', 'summary',
-  'a', 'label',
+  'a', 'label', 'img',
   ...MATHML_TAGS,
   ...SVG_TAGS,
 ]);
@@ -123,7 +123,9 @@ const KATEX_CLASS_NAMES = new Set([
 ]);
 
 const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+const SAFE_IMAGE_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:']);
 const EXPLICIT_PROTOCOL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+const HTML_DIMENSION_RE = /^[1-9]\d{0,4}$/;
 const MATHML_ATTRS = new Set([
   'xmlns',
   'display',
@@ -227,6 +229,18 @@ function sanitizeHref(raw: string): string | null {
   }
 }
 
+function sanitizeImageSrc(raw: string): string | null {
+  const src = raw.trim();
+  if (!src || !EXPLICIT_PROTOCOL_RE.test(src)) return null;
+
+  try {
+    const parsed = new URL(src);
+    return SAFE_IMAGE_URL_PROTOCOLS.has(parsed.protocol) ? src : null;
+  } catch {
+    return null;
+  }
+}
+
 function isSafeCssValue(value: string): boolean {
   if (UNSAFE_CSS_VALUE_RE.test(value)) return false;
 
@@ -310,6 +324,37 @@ function sanitizeAttributes(element: Element, tagName: string): void {
       } else {
         element.removeAttribute(attr.name);
       }
+      continue;
+    }
+
+    if (tagName === 'img' && name === 'src') {
+      const src = sanitizeImageSrc(attr.value);
+      if (src) element.setAttribute('src', src);
+      else element.removeAttribute(attr.name);
+      continue;
+    }
+
+    if (tagName === 'img' && name === 'alt') {
+      element.setAttribute('alt', attr.value);
+      continue;
+    }
+
+    if (tagName === 'img' && (name === 'width' || name === 'height')) {
+      if (HTML_DIMENSION_RE.test(attr.value.trim())) {
+        element.setAttribute(name, attr.value.trim());
+      } else {
+        element.removeAttribute(attr.name);
+      }
+      continue;
+    }
+
+    if (tagName === 'img' && name === 'loading') {
+      element.setAttribute('loading', 'lazy');
+      continue;
+    }
+
+    if (tagName === 'img' && name === 'decoding') {
+      element.setAttribute('decoding', 'async');
       continue;
     }
 
@@ -415,6 +460,10 @@ function sanitizeNode(node: ChildNode): void {
   }
 
   sanitizeAttributes(element, tagName);
+  if (tagName === 'img' && !element.getAttribute('src')) {
+    element.remove();
+    return;
+  }
   sanitizeChildren(element);
 }
 

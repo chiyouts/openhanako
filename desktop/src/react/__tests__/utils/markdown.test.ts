@@ -96,6 +96,61 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<div>safe text</div>');
   });
 
+  it('resolves standard markdown image paths relative to the previewed markdown file', () => {
+    const seenPaths: string[] = [];
+    const html = renderMarkdownPreview(
+      '![Cover](./assets/Cover%20Image.png)',
+      {
+        filePath: '/vault/notes/chapter.md',
+        getFileUrl: (filePath) => {
+          seenPaths.push(filePath);
+          return `file://${filePath.replaceAll(' ', '%20')}`;
+        },
+      },
+    );
+
+    expect(seenPaths).toEqual(['/vault/notes/assets/Cover Image.png']);
+    expect(html).toContain('<img src="file:///vault/notes/assets/Cover%20Image.png" alt="Cover"');
+  });
+
+  it('resolves markdown image paths from Windows-style previewed markdown paths', () => {
+    const seenPaths: string[] = [];
+    renderMarkdownPreview(
+      '![Diagram](../images/diagram.png)',
+      {
+        filePath: 'C:\\vault\\notes\\chapter.md',
+        getFileUrl: (filePath) => {
+          seenPaths.push(filePath);
+          return `file:///${filePath}`;
+        },
+      },
+    );
+
+    expect(seenPaths).toEqual(['C:/vault/images/diagram.png']);
+  });
+
+  it('renders Obsidian wikilink image embeds with width and height', () => {
+    const html = renderMarkdownPreview(
+      '![[attachments/diagram.png|320x180]]',
+      {
+        filePath: '/vault/notes/chapter.md',
+        getFileUrl: (filePath) => `file://${filePath}`,
+      },
+    );
+
+    expect(html).toContain('<img src="file:///vault/notes/attachments/diagram.png"');
+    expect(html).toContain('alt="diagram.png"');
+    expect(html).toContain('width="320"');
+    expect(html).toContain('height="180"');
+  });
+
+  it('renders Obsidian external image width shorthand without leaking the size into alt text', () => {
+    const html = renderMarkdownPreview('![250](https://example.com/image.jpg)');
+
+    expect(html).toContain('<img src="https://example.com/image.jpg" alt="" width="250"');
+    expect(html).not.toContain('alt="250"');
+  });
+
   it('filters unsafe markdown preview links while preserving safe links', () => {
     const html = renderMarkdownPreview([
       '<a href="javascript:alert(1)">bad</a>',
