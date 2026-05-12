@@ -128,9 +128,7 @@ export default function (app, ctx) {
         const addedIds = new Set(grouped[preset.id].models.map(m => m.id));
         grouped[preset.id].availableModels = known.filter(m => !addedIds.has(m.id));
       }
-      const agentId = c.req.query("agentId") || c.get("agentId");
-      const configOpts = agentId ? { scope: "per-agent", agentId } : {};
-      return c.json({ providers: grouped, config: ctx.config.get(undefined, configOpts) || {} });
+      return c.json({ providers: grouped, config: ctx.config.get() || {} });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -140,10 +138,11 @@ export default function (app, ctx) {
   app.put("/config", async (c) => {
     try {
       const body = await c.req.json();
-      const agentId = c.req.query("agentId") || c.get("agentId");
-      const options = agentId ? { scope: "per-agent", agentId } : {};
-      for (const [key, value] of Object.entries(body)) {
-        ctx.config.set(key, value, options);
+      const values = body?.values && typeof body.values === "object" && !Array.isArray(body.values)
+        ? body.values
+        : body;
+      for (const [key, value] of Object.entries(values || {})) {
+        ctx.config.set(key, value === null ? undefined : value);
       }
       return c.json({ ok: true });
     } catch (err) {

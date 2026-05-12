@@ -200,6 +200,60 @@ describe("BridgeSessionManager teardown", () => {
     expect(manager.activeSessions.has("bridge-k1")).toBe(false);
   });
 
+  it("abortSession cancels pre-prompt vision prepare before bridge streaming starts", async () => {
+    const agent = makeAgent(rootDir);
+    const mgrPath = path.join(agent.sessionDir, "bridge", "owner", "pre-vision.jsonl");
+    let resolvePrepareStarted;
+    const prepareStarted = new Promise((resolve) => { resolvePrepareStarted = resolve; });
+    let prepareSignal;
+    const deps = {
+      ...makeDeps(agent),
+      isVisionAuxiliaryEnabled: () => true,
+      getVisionBridge: () => ({
+        prepare: vi.fn(({ signal }) => {
+          prepareSignal = signal;
+          resolvePrepareStarted();
+          return new Promise((_, reject) => {
+            signal.addEventListener("abort", () => {
+              const err = new Error("This operation was aborted");
+              err.name = "AbortError";
+              err.type = "aborted";
+              reject(err);
+            }, { once: true });
+          });
+        }),
+      }),
+    };
+    const manager = new BridgeSessionManager(deps);
+    sessionManagerCreateMock.mockReturnValue({ getSessionFile: () => mgrPath });
+    const session = {
+      model: { input: ["text"] },
+      isStreaming: false,
+      prompt: vi.fn(async () => {}),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(),
+      sessionManager: { getSessionFile: () => mgrPath },
+      extensionRunner: {
+        hasHandlers: vi.fn(() => false),
+      },
+    };
+    createAgentSessionMock.mockResolvedValue({ session });
+
+    const task = manager.executeExternalMessage("hello", "bridge-pre", null, {
+      agentId: "agent-a",
+      images: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
+    });
+    await prepareStarted;
+
+    expect(manager.isSessionStreaming("bridge-pre")).toBe(true);
+    await expect(manager.abortSession("bridge-pre")).resolves.toBe(true);
+    await expect(task).resolves.toBeNull();
+    expect(prepareSignal.aborted).toBe(true);
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(session.dispose).toHaveBeenCalled();
+    expect(manager.activeSessions.has("bridge-pre")).toBe(false);
+  });
+
   it("owner bridge session prompt snapshot uses the same home cwd as execution", async () => {
     const agent = makeAgent(rootDir);
     agent.buildSystemPrompt = vi.fn(({ cwdOverride } = {}) => `system prompt @ ${cwdOverride ?? "missing"}`);

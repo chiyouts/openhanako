@@ -6,6 +6,26 @@ describe("callText provider-compat routing", () => {
     vi.restoreAllMocks();
   });
 
+  it("classifies response body read aborts from timeout as LLM_TIMEOUT", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => {
+        const err = new Error("body read aborted");
+        err.name = "AbortError";
+        throw err;
+      },
+    });
+
+    await expect(callText({
+      api: "openai-completions",
+      baseUrl: "https://example.test/v1",
+      model: "qwen3.5-plus",
+      messages: [{ role: "user", content: "hi" }],
+      timeoutMs: 5_000,
+    })).rejects.toMatchObject({ code: "LLM_TIMEOUT" });
+  });
+
   it("裸 model id + opts.quirks 仍走 qwen utility 兼容层", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,

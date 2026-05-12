@@ -15,6 +15,15 @@ function makeCtx(sessionPath = "/tmp/agents/hana/sessions/s1.jsonl") {
 }
 
 describe("current_status tool", () => {
+  it("describes time and logical_date as distinct lookup contracts", () => {
+    const tool = createCurrentStatusTool();
+
+    expect(tool.description).toContain('key="time"');
+    expect(tool.description).toContain("hour/minute");
+    expect(tool.description).toContain('key="logical_date"');
+    expect(tool.description).toContain("does not return hour/minute/second");
+  });
+
   it("lists available status keys without returning live status values", async () => {
     const tool = createCurrentStatusTool({
       now: () => new Date("2026-05-03T19:30:00.000Z"),

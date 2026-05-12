@@ -656,9 +656,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               const abortSs = getState(abortPath);
               if (abortSs) abortSs.isAborted = true;
               let abortAccepted = false;
-              if (engine.isSessionStreaming(abortPath)) {
-                try { abortAccepted = !!(await hub.abort(abortPath)); } catch {}
-              }
+              try { abortAccepted = !!(await hub.abort(abortPath)); } catch {}
               if (!abortAccepted) {
                 finishStreamingState(abortSs);
                 broadcast({ type: "status", isStreaming: false, sessionPath: abortPath });

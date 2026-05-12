@@ -36,7 +36,7 @@ async function adapterIsAvailable(adapter, submitCtx) {
 export async function resolveImageAdapter(input, registry, submitCtx) {
   if (input.provider) return registry.get(input.provider);
 
-  const defaultProvider = submitCtx.config?.get?.("defaultImageModel", submitCtx.configOpts || {})?.provider;
+  const defaultProvider = submitCtx.config?.get?.("defaultImageModel")?.provider;
   if (defaultProvider) {
     const adapter = registry.get(defaultProvider);
     if (adapter && await adapterIsAvailable(adapter, submitCtx)) return adapter;
@@ -58,9 +58,7 @@ export async function execute(input, ctx) {
 
   // Build adapter context
   const generatedDir = path.join(ctx.dataDir, "generated");
-  const agentId = ctx.agentId || undefined;
-  const configOpts = agentId ? { scope: "per-agent", agentId } : {};
-  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config, configOpts };
+  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config };
 
   // Resolve adapter: explicit → configured default → latest credentialed adapter.
   const adapter = await resolveImageAdapter(input, registry, submitCtx);

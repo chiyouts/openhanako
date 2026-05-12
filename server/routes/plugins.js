@@ -118,6 +118,13 @@ function safePathSegment(value, fallback) {
   return text || fallback;
 }
 
+function decodeHttpConfigValues(values) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return {};
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, value === null ? undefined : value]),
+  );
+}
+
 async function downloadMarketplaceRelease({ engine, plugin }) {
   const dist = plugin?.distribution;
   if (!dist || dist.kind !== "release") {
@@ -361,7 +368,8 @@ export function createPluginsRoute(engine) {
     if (!pm) return c.json({ error: "Plugin manager not available" }, 500);
     const body = await c.req.json();
     try {
-      const config = pm.setConfig(c.req.param("id"), body.values || {}, {
+      const values = decodeHttpConfigValues(body.values || {});
+      const config = pm.setConfig(c.req.param("id"), values, {
         scope: body.scope || "global",
         agentId: body.agentId,
         sessionPath: body.sessionPath,

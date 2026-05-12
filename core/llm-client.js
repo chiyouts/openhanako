@@ -34,6 +34,21 @@ function normalizeTextFromContent(content) {
     .join("");
 }
 
+function createUserAbortError() {
+  const abortErr = new Error("This operation was aborted");
+  abortErr.name = "AbortError";
+  abortErr.type = "aborted";
+  return abortErr;
+}
+
+function throwAbortOrTimeout(err, signal, modelId) {
+  if (err.name === "AbortError" || err.name === "TimeoutError") {
+    if (signal?.aborted) throw createUserAbortError();
+    throw new AppError('LLM_TIMEOUT', { context: { model: modelId }, cause: err });
+  }
+  throw err;
+}
+
 function convertContentForApi(content, api) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return typeof content === "undefined" ? "" : JSON.stringify(content);
@@ -214,14 +229,17 @@ export async function callText({
     signal: combinedSignal,
   }).catch(err => {
     clearTimeout(slowTimer);
-    if (err.name === "AbortError" || err.name === "TimeoutError") {
-      throw new AppError('LLM_TIMEOUT', { context: { model: modelId }, cause: err });
-    }
-    throw err;
+    throwAbortOrTimeout(err, signal, modelId);
   });
 
   // ── 5. 解析响应 ──
-  const rawText = await res.text();
+  let rawText;
+  try {
+    rawText = await res.text();
+  } catch (err) {
+    clearTimeout(slowTimer);
+    throwAbortOrTimeout(err, signal, modelId);
+  }
   clearTimeout(slowTimer);
   let data;
   try {
@@ -266,6 +284,9 @@ export async function callText({
   text = text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim();
 
   if (!text) {
+    if (signal?.aborted) {
+      throw createUserAbortError();
+    }
     if (combinedSignal.aborted) {
       throw new AppError('LLM_TIMEOUT', { context: { model: modelId } });
     }

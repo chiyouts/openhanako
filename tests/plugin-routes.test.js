@@ -683,6 +683,29 @@ describe("plugin management API", () => {
         sessionPath: undefined,
       });
     });
+
+    it("decodes null values as config deletes for HTTP patches", async () => {
+      const setConfig = vi.fn(() => ({
+        pluginId: "demo",
+        schema: { properties: { defaultImageModel: { type: "object" } } },
+        values: {},
+      }));
+      const engine = mockEngine({ setConfig });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/demo/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { defaultImageModel: null } }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(setConfig).toHaveBeenCalledWith("demo", { defaultImageModel: undefined }, {
+        scope: "global",
+        agentId: undefined,
+        sessionPath: undefined,
+      });
+    });
   });
 
   describe("POST /plugins/install", () => {

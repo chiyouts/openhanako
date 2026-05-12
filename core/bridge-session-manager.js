@@ -14,7 +14,7 @@ import { t, getLocale } from "../server/i18n.js";
 import { safeReadJSON } from "../shared/safe-fs.js";
 import { findModel } from "../shared/model-ref.js";
 import { teardownSessionResources } from "./session-teardown.js";
-import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
+import { isAbortLikeError, prepareVisionInputForTextOnlyModel } from "./vision-prepare.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
 import { SESSION_PERMISSION_MODES } from "./session-permission-mode.js";
 import { collectMediaItems } from "../lib/tools/media-details.js";
@@ -131,6 +131,7 @@ export class BridgeSessionManager {
   constructor(deps) {
     this._deps = deps;
     this._activeSessions = new Map();
+    this._prePromptAbortControllers = new Map();
   }
 
   /** 活跃 bridge sessions（供 bridge-manager abort 用） */
@@ -138,11 +139,18 @@ export class BridgeSessionManager {
 
   /** 指定 bridge session 是否正在 streaming */
   isSessionStreaming(sessionKey) {
-    return this._activeSessions.get(sessionKey)?.isStreaming ?? false;
+    return this._prePromptAbortControllers.has(sessionKey)
+      || (this._activeSessions.get(sessionKey)?.isStreaming ?? false);
   }
 
   /** abort 指定 bridge session（如果正在 streaming） */
   async abortSession(sessionKey) {
+    const pending = this._prePromptAbortControllers.get(sessionKey);
+    if (pending) {
+      pending.abort();
+      this._prePromptAbortControllers.delete(sessionKey);
+      return true;
+    }
     const session = this._activeSessions.get(sessionKey);
     if (!session?.isStreaming) return false;
     this._activeSessions.delete(sessionKey);
@@ -413,30 +421,28 @@ export class BridgeSessionManager {
       });
 
       try {
-        // 非 image 模型：用视觉桥生成隐藏纸条，历史由 context extension 注入
-        const bridgeInput = session.model?.input;
-        if (opts.images?.length && Array.isArray(bridgeInput) && !bridgeInput.includes("image")) {
-          requireVisionAuxiliaryEnabled({
+        const abortController = new AbortController();
+        this._prePromptAbortControllers.set(sessionKey, abortController);
+        ({ text: promptText, opts } = await prepareVisionInputForTextOnlyModel({
+          targetModel: session.model,
+          text: promptText,
+          opts,
+          sessionPath: activeSessionPath,
+          getVisionBridge: () => this._deps.getVisionBridge?.(),
+          visionPolicyTarget: {
             isVisionAuxiliaryEnabled: this._deps.isVisionAuxiliaryEnabled,
-          });
-          const visionBridge = this._deps.getVisionBridge?.();
-          if (!visionBridge) {
-            throw new Error("vision auxiliary model is required for image input with the current text-only model");
-          }
-          const prepared = await visionBridge.prepare({
-            sessionPath: activeSessionPath,
-            targetModel: session.model,
-            text: promptText,
-            images: opts.images,
-            imageAttachmentPaths: opts.imageAttachmentPaths,
-          });
-          promptText = prepared.text;
-          opts = { ...opts, images: prepared.images };
+          },
+          warn: (msg) => console.warn(`[bridge-session] ${msg}`),
+          signal: abortController.signal,
+        }));
+        if (this._prePromptAbortControllers.get(sessionKey) === abortController) {
+          this._prePromptAbortControllers.delete(sessionKey);
         }
         assertVideoInputSupported(session.model, opts?.videos);
         const promptOpts = buildPromptMediaOptions(opts);
         await session.prompt(promptText, promptOpts);
       } finally {
+        this._prePromptAbortControllers.delete(sessionKey);
         await teardownSessionResources({
           session,
           unsub,
@@ -472,6 +478,7 @@ export class BridgeSessionManager {
       }
       return text;
     } catch (err) {
+      if (isAbortLikeError(err)) return null;
       console.error(`[bridge-session] external message failed (${sessionKey}):`, err.message);
       return { __bridgeError: true, message: err.message };
     }

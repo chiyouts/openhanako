@@ -129,7 +129,7 @@ export const openaiCodexImageAdapter = {
 
   async submit(params, ctx) {
     const creds = await getCredentials(ctx);
-    const allDefaults = ctx.config?.get?.("providerDefaults", ctx.configOpts || {}) || {};
+    const allDefaults = ctx.config?.get?.("providerDefaults") || {};
     const providerDefaults = allDefaults[PROVIDER_ID] || {};
     const outputFormat = params.format || providerDefaults?.format || "png";
     const effectiveRatio = params.aspect_ratio || params.aspectRatio || params.ratio || providerDefaults?.aspect_ratio;

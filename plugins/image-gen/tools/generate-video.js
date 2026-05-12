@@ -30,9 +30,7 @@ export async function execute(input, ctx) {
 
   // Build adapter context
   const generatedDir = path.join(ctx.dataDir, "generated");
-  const agentId = ctx.agentId || undefined;
-  const configOpts = agentId ? { scope: "per-agent", agentId } : {};
-  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config, configOpts };
+  const submitCtx = { dataDir: ctx.dataDir, bus: ctx.bus, log: ctx.log, generatedDir, config: ctx.config };
 
   // Resolve adapter: explicit → last registered (external adapters take over)
   const adapter = input.provider
