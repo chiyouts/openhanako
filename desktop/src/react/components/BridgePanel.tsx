@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../stores';
 import { usePanel } from '../hooks/use-panel';
-import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
+import { hanaFetch } from '../hooks/use-hana-fetch';
 import { formatSessionDate, parseMoodFromContent } from '../utils/format';
 import { renderMarkdown } from '../utils/markdown';
-import { yuanFallbackAvatar } from '../utils/agent-helpers';
+import { AgentAvatar, resolveAgentDisplayInfo } from '../utils/agent-display';
 import { openSettingsModal } from '../stores/settings-modal-actions';
 import { useMermaidDiagrams } from '../hooks/use-mermaid-diagrams';
 import fp from './FloatingPanels.module.css';
@@ -231,14 +231,19 @@ export function BridgePanel() {
               >
                 {(() => {
                   const agent = agents.find(a => a.id === bridgeAgentId);
+                  const info = resolveAgentDisplayInfo({
+                    id: agent?.id || bridgeAgentId,
+                    agents,
+                    fallbackAgentName: agent?.name || '—',
+                    fallbackAgentYuan: agent?.yuan,
+                  });
                   return (
                     <>
-                      <img
+                      <AgentAvatar
+                        info={info}
                         className={fp.bridgeAgentAvatar}
-                        src={agent?.hasAvatar ? hanaUrl(`/api/agents/${agent.id}/avatar?t=1`) : yuanFallbackAvatar(agent?.yuan)}
-                        onError={(e) => { (e.target as HTMLImageElement).src = yuanFallbackAvatar(agent?.yuan); }}
                       />
-                      <span className={fp.bridgeAgentName}>{agent?.name || '—'}</span>
+                      <span className={fp.bridgeAgentName}>{info.displayName}</span>
                       <span className={fp.bridgeAgentArrow}>▾</span>
                     </>
                   );
@@ -252,10 +257,14 @@ export function BridgePanel() {
                       className={`${fp.bridgeAgentMenuItem}${agent.id === bridgeAgentId ? ` ${fp.bridgeAgentMenuItemActive}` : ''}`}
                       onClick={() => { setBridgeAgentId(agent.id); setAgentMenuOpen(false); }}
                     >
-                      <img
+                      <AgentAvatar
+                        info={resolveAgentDisplayInfo({
+                          id: agent.id,
+                          agents,
+                          fallbackAgentName: agent.name,
+                          fallbackAgentYuan: agent.yuan,
+                        })}
                         className={fp.bridgeAgentAvatar}
-                        src={agent.hasAvatar ? hanaUrl(`/api/agents/${agent.id}/avatar?t=1`) : yuanFallbackAvatar(agent.yuan)}
-                        onError={(e) => { (e.target as HTMLImageElement).src = yuanFallbackAvatar(agent.yuan); }}
                       />
                       <span>{agent.name}</span>
                     </button>

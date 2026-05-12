@@ -667,7 +667,8 @@ export class HanaEngine {
   // ════════════════════════════
 
   async deleteChannelByName(n) { return this._channels.deleteChannelByName(n); }
-  async triggerChannelTriage(n, o) { return this._channels.triggerChannelTriage(n, o); }
+  async triggerChannelDelivery(n, o) { return this._channels.triggerChannelDelivery(n, o); }
+  async triggerChannelTriage(n, o) { return this.triggerChannelDelivery(n, o); }
 
   // ════════════════════════════
   //  Bridge 代理（→ BridgeSessionManager）

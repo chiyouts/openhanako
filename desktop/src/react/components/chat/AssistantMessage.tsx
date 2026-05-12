@@ -2,7 +2,7 @@
  * AssistantMessage — 助手消息，遍历 ContentBlock 按类型渲染
  */
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { MarkdownContent } from './MarkdownContent';
 import { MoodBlock } from './MoodBlock';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -16,13 +16,14 @@ import { FileOutputActions } from './FileOutputActions';
 const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeScreenshot);
 import type { ChatMessage, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
-import { hanaFetch, hanaUrl } from '../../hooks/use-hana-fetch';
+import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { openFilePreview, openSkillPreview } from '../../utils/file-preview';
 import { openMediaViewerForRef } from '../../utils/open-media-viewer';
 import { buildFileRefId, isImageOrSvgExt } from '../../utils/file-kind';
 import { openPreview } from '../../stores/preview-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import { extractSelectedTexts } from '../../utils/message-text';
+import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display';
 import styles from './Chat.module.css';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -43,24 +44,16 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
   const isStreaming = useStore(s => selectIsStreamingSession(s, sessionPath));
   const selectedIds = useStore(s => selectSelectedIdsBySession(s, sessionPath));
   const isSelected = selectedIds.includes(message.id);
-  const [avatarFailed, setAvatarFailed] = useState(false);
 
   // Resolve agent identity from agentId prop; fall back to global values
-  const agent = agentId ? agents.find(a => a.id === agentId) : null;
-  const displayName = agent?.name || globalAgentName;
-  const displayYuan = agent?.yuan || globalYuan;
-  const fallbackAvatar = useMemo(() => {
-    const types = (window.t?.('yuan.types') || {}) as Record<string, { avatar?: string }>;
-    const entry = types[displayYuan] || types['hanako'];
-    return `assets/${entry?.avatar || 'Hanako.png'}`;
-  }, [displayYuan]);
-  const avatarSrc = (agent?.hasAvatar && agentId)
-    ? hanaUrl(`/api/agents/${agentId}/avatar?t=${agentId}`)
-    : fallbackAvatar;
-
-  useEffect(() => {
-    setAvatarFailed(false);
-  }, [avatarSrc, fallbackAvatar]);
+  const displayInfo = resolveAgentDisplayInfo({
+    id: agentId || null,
+    agents,
+    fallbackAgentName: globalAgentName,
+    fallbackAgentYuan: globalYuan,
+  });
+  const displayName = displayInfo.displayName;
+  const displayYuan = displayInfo.yuan || globalYuan;
 
   const blocks = useMemo(
     () => (message.blocks || []).filter(block => block.type !== 'session_confirmation' || block.surface !== 'input'),
@@ -101,26 +94,11 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
          data-message-id={message.id}>
       {showAvatar && (
         <div className={styles.avatarRow}>
-          {!avatarFailed ? (
-            <img
-              className={`${styles.avatar} ${styles.hanaAvatar}`}
-              src={avatarSrc}
-              alt={displayName}
-              draggable={false}
-              onError={(e) => {
-                const img = e.target as HTMLImageElement;
-                if (img.src.endsWith(fallbackAvatar)) {
-                  img.onerror = null;
-                  setAvatarFailed(true);
-                  return;
-                }
-                img.onerror = null;
-                img.src = fallbackAvatar;
-              }}
-            />
-          ) : (
-            <span className={`${styles.avatar} ${styles.userAvatar}`}>🌸</span>
-          )}
+          <AgentAvatar
+            info={displayInfo}
+            className={`${styles.avatar} ${styles.hanaAvatar}`}
+            alt={displayName}
+          />
           <span className={styles.avatarName}>{displayName}</span>
         </div>
       )}
