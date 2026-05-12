@@ -40,7 +40,7 @@ describe("createPluginContext", () => {
       ctx.config.set("foo", 42);
       expect(ctx.config.get("foo")).toBe(42);
       const raw = JSON.parse(fs.readFileSync(path.join(tmpDir, "config.json"), "utf-8"));
-      expect(raw.foo).toBe(42);
+      expect(raw.global.foo).toBe(42);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -66,6 +66,8 @@ describe("createPluginContext with accessLevel", () => {
     expect(typeof ctx.bus.handle).toBe("function");
     expect(typeof ctx.bus.request).toBe("function");
     expect(typeof ctx.bus.emit).toBe("function");
+    expect(typeof ctx.bus.listCapabilities).toBe("function");
+    expect(typeof ctx.bus.getCapability).toBe("function");
   });
 
   it("restricted context does NOT expose bus.handle", async () => {
@@ -78,6 +80,8 @@ describe("createPluginContext with accessLevel", () => {
     expect(typeof ctx.bus.request).toBe("function");
     expect(typeof ctx.bus.emit).toBe("function");
     expect(typeof ctx.bus.subscribe).toBe("function");
+    expect(typeof ctx.bus.listCapabilities).toBe("function");
+    expect(typeof ctx.bus.getCapability).toBe("function");
   });
 
   it("restricted bus proxy is frozen", async () => {

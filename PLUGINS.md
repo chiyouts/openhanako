@@ -31,6 +31,25 @@ export async function execute(input) {
 3. 安装后 Agent 立即可以调用 `my-plugin_hello` 工具
 4. 卸载：在插件页面点删除按钮
 
+## 从想法到插件
+
+完整实操流程见 `.docs/PLUGIN-DEVELOPMENT.md`。开发时先选插件形态：
+
+| 形态 | 适合什么 | 权限 |
+|------|----------|------|
+| Tool-only | 没有 UI，只给 Agent 增加工具能力 | `restricted` |
+| Runtime | 需要生命周期、EventBus、后台任务、动态工具 | `full-access` |
+| UI | 需要 page / widget / iframe card | `full-access` |
+| Marketplace entry | 让插件出现在插件市场 | 写入 `OH-Plugins/plugins/<id>.yaml` |
+
+推荐先用 `hana-plugin-creator` 脚手架生成，再按需求删减：
+
+```bash
+python3 skills2set/hana-plugin-creator/scripts/create_hana_plugin.py "My Plugin" --path examples/plugins --kind full
+```
+
+调试顺序：本地文件夹安装 → 设置页诊断 → 补 README/manifest → 需要公开时再写 `OH-Plugins` 市场条目。
+
 ## 安装与管理
 
 ### 安装方式
@@ -357,22 +376,52 @@ export const defaultApi = "openai-completions";
 
 ### Configuration（配置 schema）
 
-在 `manifest.json` 的 `contributes.configuration` 中用 JSON Schema 声明：
+在 `manifest.json` 的 `contributes.configuration` 中声明配置 schema。Hana 会规范化字段、写入默认值、校验类型，并在设置 API 中自动隐藏敏感字段：
 
 ```json
 {
   "contributes": {
     "configuration": {
       "properties": {
-        "interval": { "type": "number", "default": 25, "title": "工作间隔（分钟）" },
-        "sound": { "type": "boolean", "default": true, "title": "结束提示音" }
+        "interval": {
+          "type": "number",
+          "default": 25,
+          "title": "工作间隔（分钟）",
+          "scope": "global",
+          "ui": { "control": "number" }
+        },
+        "sound": { "type": "boolean", "default": true, "title": "结束提示音" },
+        "apiKey": {
+          "type": "string",
+          "title": "API Key",
+          "sensitive": true,
+          "ui": { "control": "password" }
+        }
       }
     }
   }
 }
 ```
 
-配置通过 `ctx.config.get(key)` / `ctx.config.set(key, value)` 读写，持久化在 `plugin-data/{pluginId}/config.json`。
+配置通过 `ctx.config.get(key)` / `ctx.config.set(key, value)` 读写，持久化在 `plugin-data/{pluginId}/config.json`。旧插件没有 schema 时仍可自由读写平铺 key；声明了 schema 的插件会按字段类型、`enum` 和 `scope` 校验。
+
+字段支持：
+
+- `type`: `string` / `number` / `integer` / `boolean` / `object` / `array`
+- `default`
+- `title` / `description`
+- `enum`
+- `scope`: `global` / `per-agent` / `per-session`
+- `sensitive`: 设置 API 返回时显示为 `********`
+- `ui`: 自动设置页的控件提示
+- `reloadRequired`
+
+per-agent 和 per-session 配置要显式传归属：
+
+```js
+await ctx.config.set("agentMode", "strict", { scope: "per-agent", agentId: "hanako" });
+const value = await ctx.config.get("agentMode", { scope: "per-agent", agentId: "hanako" });
+```
 
 ### Page（插件页面）⚡ full-access
 
@@ -521,6 +570,7 @@ Widget 同样通过 iframe 渲染，需要发送 `ready` 握手信号。
   "version": "1.0.0",
   "description": "What this plugin does",
   "trust": "full-access",
+  "activationEvents": ["onToolCall:search"],
   "ui": {
     "hostCapabilities": ["external.open"]
   },
@@ -538,6 +588,32 @@ Widget 同样通过 iframe 渲染，需要发送 `ready` 握手信号。
 ## 有状态 Plugin（生命周期）⚡ full-access
 
 如果 plugin 需要持久连接、定时任务或 bus handler，创建 `index.js`：
+
+`index.js` 不一定会在 app 启动时立刻执行。新插件可以在 `manifest.json` 里声明 `activationEvents`，让生命周期按需启动：
+
+| 事件 | 触发时机 |
+|------|----------|
+| `onStartup` | 插件加载时立刻执行 `onload()` |
+| `onPageOpen` | 用户打开插件页面 route |
+| `onWidgetOpen` | 用户打开插件 widget route |
+| `onToolCall` | 插件任意静态 tool 被调用 |
+| `onToolCall:name` | 指定静态 tool 被调用 |
+| `onBusRequest` | 预留给 bus 请求触发 |
+| `onBusRequest:type` | 预留给指定 bus 能力请求触发 |
+| `*` | 任意已知触发原因 |
+
+没有声明 `activationEvents` 的老插件保持兼容：只要存在 `index.js`，默认等价于 `["onStartup"]`。新插件建议按能力声明最小激活条件，避免 app 启动时把所有长连接、任务和 handler 一次性拉起来。
+
+```json
+{
+  "id": "lazy-search",
+  "trust": "full-access",
+  "activationEvents": ["onToolCall:search"],
+  "contributes": {
+    "page": { "title": "Search", "route": "/search" }
+  }
+}
+```
 
 新插件建议使用 `@hana/plugin-runtime` 的 `definePlugin()`。它会返回兼容当前 PluginManager 的 class：
 
@@ -591,7 +667,7 @@ export default class MyPlugin {
 
 ## 总线通信（bus.request / bus.handle）
 
-Plugin 间通信通过 EventBus 的请求-响应机制。`bus.handle` 需要 full-access 权限，`bus.request` 所有插件都可以用。新插件建议用 `@hana/plugin-runtime` 的 `defineBusHandler()`、`requestBus()` 和 `HANA_BUS_SKIP`，这样 handler 类型、请求参数和链式跳过语义都来自 SDK，而不是手写约定。
+Plugin 间通信通过 EventBus 的请求-响应机制。`bus.handle` 需要 full-access 权限，`bus.request` 所有插件都可以用。`bus.listCapabilities()` / `bus.getCapability(type)` 可以读取当前稳定能力目录，目录记录能力名、输入输出 schema、权限要求、错误码、稳定性和当前是否有 handler 可用。新插件建议用 `@hana/plugin-runtime` 的 `defineBusHandler()`、`requestBus()` 和 `HANA_BUS_SKIP`，这样 handler 类型、请求参数和链式跳过语义都来自 SDK，而不是手写约定。
 
 ```js
 import { defineBusHandler, HANA_BUS_SKIP, requestBus } from "@hana/plugin-runtime";
@@ -606,10 +682,34 @@ const bridgeSend = defineBusHandler({
   },
 });
 
-this.register(this.ctx.bus.handle(bridgeSend.type, (payload) => bridgeSend.handle(payload, this.ctx)));
+this.register(this.ctx.bus.handle(
+  bridgeSend.type,
+  (payload) => bridgeSend.handle(payload, this.ctx),
+  {
+    capability: {
+      title: "Bridge send",
+      description: "Send text to a bridge platform.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: { type: "string" },
+          chatId: { type: "string" },
+          text: { type: "string" },
+        },
+        required: ["platform", "text"],
+      },
+      outputSchema: { type: "object" },
+      permission: "bridge.send",
+      errors: ["NO_HANDLER", "TIMEOUT", "INTERNAL_ERROR"],
+      owner: "plugin:my-plugin",
+      stability: "experimental",
+    },
+  },
+));
 
 // Plugin B（任意权限）: 调用能力
-if (this.ctx.bus.hasHandler("bridge:send")) {
+const capability = this.ctx.bus.getCapability?.("bridge:send");
+if (capability?.available) {
   const result = await requestBus(this.ctx, "bridge:send", {
     platform: "telegram",
     chatId: "123",
@@ -637,7 +737,7 @@ this.register(
 - 超时（默认 30s）→ 抛 `BusTimeoutError`
 - handler 业务错误 → 直接透传
 
-**软依赖**：manifest 的 `depends.capabilities` 只是提示，系统不会因缺失而阻止安装。Plugin 代码用 `bus.hasHandler()` 在运行时做优雅降级。
+**软依赖**：manifest 的 `depends.capabilities` 只是提示，系统不会因缺失而阻止安装。Plugin 代码优先用 `bus.getCapability(type)?.available`，旧插件也可以继续用 `bus.hasHandler()` 在运行时做优雅降级。
 
 ### 动态工具注册 ⚡ full-access
 
@@ -656,16 +756,19 @@ this.register(this.ctx.registerTool({
 
 ### 后台任务（Background Tasks） ⚡ full-access
 
-插件可以注册后台任务，让 Agent 能够追踪和终止它们。系统通过 `TaskRegistry` 管理所有后台任务的运行时生命周期。
+插件可以注册后台任务，让 Agent 能够追踪、终止、诊断和恢复它们。系统通过 `TaskRegistry` 管理任务记录和计划任务元数据。
+
+`TaskRegistry` 的边界很明确：任务 handler 是插件运行时函数，只存在内存里；任务记录和 schedule 元数据可以持久化，重启后仍能被诊断面板看到。重启后仍处于 `pending` / `running` / `paused` / `blocked` 的任务会标记为 `recovering`，插件在 `onload()` 里重新注册 handler 后，再按自己的持久化状态继续执行或清理。
 
 **注册任务类型处理器**（在 `onload()` 中调用一次）：
 
 ```js
-// 告诉系统如何终止你的任务
 await this.ctx.bus.request("task:register-handler", {
   type: "my-task-type",
-  abort: (taskId) => {
-    // 终止逻辑：取消轮询、中断请求等
+  abort: (taskId) => { /* 终止逻辑：取消轮询、中断请求等 */ },
+  run: async (schedule) => {
+    // 可选：计划任务触发时执行
+    await this.runScheduledJob(schedule.payload);
   },
 });
 
@@ -682,21 +785,107 @@ await this.ctx.bus.request("task:register", {
   taskId: "my-task-123",
   type: "my-task-type",
   parentSessionPath: sessionPath,
+  pluginId: this.ctx.pluginId,
   meta: { type: "my-task", prompt: "..." },
 });
 ```
 
-**任务完成后移除**：
+**更新进度、完成和失败**：
 
 ```js
+await this.ctx.bus.request("task:update", {
+  taskId: "my-task-123",
+  progress: { current: 3, total: 10, message: "rendering" },
+});
+
+await this.ctx.bus.request("task:complete", {
+  taskId: "my-task-123",
+  result: { fileId: "sf_123" },
+});
+
+await this.ctx.bus.request("task:fail", {
+  taskId: "my-task-123",
+  reason: "remote service timeout",
+});
+```
+
+**取消和移除**：
+
+```js
+await this.ctx.bus.request("task:cancel", {
+  taskId: "my-task-123",
+  reason: "user canceled",
+});
+
 await this.ctx.bus.request("task:remove", { taskId: "my-task-123" });
+```
+
+**计划任务**：
+
+```js
+await this.ctx.bus.request("task:schedule", {
+  scheduleId: "my-plugin.daily-sync",
+  type: "my-task-type",
+  pluginId: this.ctx.pluginId,
+  intervalMs: 24 * 60 * 60 * 1000,
+  payload: { agentId: "default" },
+  meta: { label: "Daily sync" },
+});
+
+const schedules = await this.ctx.bus.request("task:list-schedules", {
+  pluginId: this.ctx.pluginId,
+});
 ```
 
 **结果通知**（搭配 `deferred:*` 使用）：
 
 `task:*` 管理运行时生命周期（注册、终止），`deferred:*` 管理结果送达。后台任务通常同时使用两套协议：`deferred:register` 注册结果占位，`task:register` 注册运行时实例；完成时 `deferred:resolve` 送达结果，`task:remove` 清理运行时状态。
 
-**重启恢复**：`TaskRegistry` 是运行时临时状态，不做持久化。插件需要在 `onload()` 时从自己的持久化存储中恢复 pending 任务，重新调用 `task:register`。
+**重启恢复**：Hana 持久化任务与 schedule 元数据，不持久化插件函数。插件需要在 `onload()` 时重新注册 `task:register-handler`，然后调用 `task:list` 查询 `status: "recovering"` 的本插件任务，按自己的业务存储恢复或失败它们。
+
+### 官方插件市场
+
+设置 → 插件里的「打开插件市场」会进入独立的市场子页，该页面读取 `/api/plugins/marketplace`。Hana 采用 Obsidian 式官方社区插件目录：第三方开发者把插件提交到 `OH-Plugins`，用户只浏览、安装、启用、禁用，不管理市场源。
+
+默认官方目录：
+
+```text
+https://raw.githubusercontent.com/liliMozi/OH-Plugins/main/marketplace.json
+```
+
+开发调试仍可用环境变量覆盖：
+
+- `HANA_PLUGIN_MARKETPLACE_FILE=/path/to/marketplace.json`
+- `HANA_PLUGIN_MARKETPLACE_URL=https://.../marketplace.json`
+
+没有配置环境变量时，Hana 会先尝试读取 `${HANA_HOME}/plugin-marketplace/marketplace.json`（本地开发覆盖），如果不存在则读取官方 `OH-Plugins` URL。市场 index 的基本形状与 `OH-Plugins` 仓库一致：
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": [{
+    "schemaVersion": 1,
+    "id": "demo",
+    "name": "Demo",
+    "publisher": "Hana",
+    "version": "1.0.0",
+    "description": "Demo plugin",
+    "repository": "https://example.com/demo",
+    "compatibility": { "minAppVersion": "0.170.0" },
+    "trust": "restricted",
+    "permissions": ["task.read"],
+    "contributions": ["tools"],
+    "distribution": {
+      "kind": "release",
+      "packageUrl": "https://github.com/liliMozi/OH-Plugins/releases/download/demo-v1.0.0/demo.zip",
+      "sha256": "..."
+    },
+    "readmePath": "plugins/demo/README.md"
+  }]
+}
+```
+
+市场 UI 会在设置主区域内展示更宽的插件列表和 README 单页视图，点击插件后读取 `/api/plugins/marketplace/:id/readme` 展示 README。`distribution.kind: "release"` 会下载 zip、校验 `sha256`，再安装到用户插件目录。`distribution.kind: "source"` 仅用于本地开发文件市场，因为 source path 必须能在本机解析成目录。
 
 ## 前向兼容
 
@@ -707,6 +896,10 @@ await this.ctx.bus.request("task:remove", { taskId: "my-task-123" });
 - 单个 plugin 的 `onload()` 失败不阻塞其他 plugin 和系统启动
 - 单个 tool/route/command 文件的语法错误只影响该文件
 - 失败的 plugin 标记为 `status: "failed"`，在插件页面显示错误信息
+
+## 诊断面板
+
+设置 → 插件里的诊断按钮会读取 `/api/plugins/diagnostics`，统一展示插件加载状态、激活状态、routes、tools、commands、configuration、EventBus 能力、后台任务和计划任务。插件作者排查问题时优先看这里：如果插件已加载但 `activationState` 仍是 `inactive`，说明生命周期尚未被对应 `activationEvents` 触发；如果任务处于 `recovering`，说明 app 重启后宿主恢复了任务记录，但插件还需要在 `onload()` 里重新注册 handler 并恢复业务状态。
 
 ## 并发设计
 

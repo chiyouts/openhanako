@@ -470,6 +470,11 @@ if (isWin) {
     'DIR="$(cd "$(dirname "$0")" && pwd)"',
     'export HANA_ROOT="$DIR"',
     'export HANA_SERVER_ENTRY="$DIR/bundle/index.js"',
+    "# Raise file descriptor limit. Server got split out of Electron in v0.67",
+    "# (see #765 / #787 root-cause); standalone Node loses Electron's implicit",
+    "# fd raise (macOS default 256 → not enough for chokidar + DB + WS + plugins).",
+    "# Best-effort: silently fall back if hard limit is lower.",
+    "ulimit -n 65536 2>/dev/null || ulimit -n 8192 2>/dev/null || true",
     'exec "$DIR/node" "$DIR/bootstrap.js" "$@"',
     "",
   ].join("\n"));

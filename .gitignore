@@ -49,6 +49,7 @@ CLAUDE.md
 
 # 临时文件
 tmp/
+test-results/
 __pycache__/
 *.pyc
 /index.html

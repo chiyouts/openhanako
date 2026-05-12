@@ -170,6 +170,81 @@ export function withThinkingFormatCompat(model, context = {}) {
   };
 }
 
+export function modelSupportsVideoInput(model) {
+  if (!isPlainObject(model)) return false;
+  if (model.video === true) return true;
+  if (model.compat?.hanaVideoInput === true) return true;
+
+  // Legacy runtime objects created before Pi SDK tightened models.json input
+  // validation may still carry video in input. Read it for compatibility, but
+  // model-sync/migrations must not write it back to Pi-facing JSON.
+  return Array.isArray(model.input) && model.input.includes("video");
+}
+
+export const MODEL_VIDEO_TRANSPORTS = Object.freeze({
+  NONE: "none",
+  GEMINI_INLINE_DATA: "gemini-inline-data",
+  OPENAI_VIDEO_URL: "openai-video-url",
+  UNSUPPORTED: "unsupported",
+});
+
+export function resolveModelVideoInputTransport(model, context = {}) {
+  if (!modelSupportsVideoInput(model)) return MODEL_VIDEO_TRANSPORTS.NONE;
+
+  const api = getApi(model, context);
+  if (api === "google-generative-ai") {
+    return MODEL_VIDEO_TRANSPORTS.GEMINI_INLINE_DATA;
+  }
+
+  if (api === "openai-completions" && usesOpenAiVideoUrlTransport(model, context)) {
+    return MODEL_VIDEO_TRANSPORTS.OPENAI_VIDEO_URL;
+  }
+
+  return MODEL_VIDEO_TRANSPORTS.UNSUPPORTED;
+}
+
+export function modelSupportsDirectVideoInput(model, context = {}) {
+  const transport = resolveModelVideoInputTransport(model, context);
+  return transport === MODEL_VIDEO_TRANSPORTS.GEMINI_INLINE_DATA
+    || transport === MODEL_VIDEO_TRANSPORTS.OPENAI_VIDEO_URL;
+}
+
+function usesOpenAiVideoUrlTransport(model, context = {}) {
+  return isDashScopeEndpoint(model, context) || isMoonshotEndpoint(model, context);
+}
+
+function isDashScopeEndpoint(model, context = {}) {
+  const provider = getProvider(model, context);
+  const baseUrl = getBaseUrl(model, context);
+  return provider === "dashscope"
+    || provider === "dashscope-coding"
+    || baseUrl.includes("dashscope");
+}
+
+function isMoonshotEndpoint(model, context = {}) {
+  const provider = getProvider(model, context);
+  const baseUrl = getBaseUrl(model, context);
+  return provider === "moonshot"
+    || provider === "kimi"
+    || baseUrl.includes("moonshot.cn")
+    || baseUrl.includes("moonshot.ai");
+}
+
+export function withHanaVideoInputCompat(model, enabled) {
+  if (!isPlainObject(model) || enabled !== true) return model;
+
+  const compat = isPlainObject(model.compat) ? model.compat : {};
+  if (compat.hanaVideoInput === true) return model;
+
+  return {
+    ...model,
+    compat: {
+      ...compat,
+      hanaVideoInput: true,
+    },
+  };
+}
+
 /**
  * Resolve stable visual grounding capabilities for an auxiliary vision model.
  *

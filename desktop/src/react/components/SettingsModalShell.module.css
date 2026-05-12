@@ -60,6 +60,10 @@
   will-change: transform, opacity;
 }
 
+.card[data-wide="true"] {
+  width: min(1080px, calc(100vw - var(--space-lg) - var(--space-lg)));
+}
+
 .card.open {
   opacity: 1;
   transform: scale(1);

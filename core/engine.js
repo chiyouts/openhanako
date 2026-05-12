@@ -227,8 +227,10 @@ export class HanaEngine {
     // hub 尚未注入，dispatcher 的 hub 字段先为 null；setHubCallbacks 时通过 setHub() 补齐
     this._slashSystem = createSlashSystem({ engine: this, hub: null });
 
-    // 任务注册表（外部 abort 用）
-    this._taskRegistry = new TaskRegistry();
+    // 任务注册表（外部 abort 用）；handler 是运行时函数，任务元数据持久化供插件重启恢复和诊断使用。
+    this._taskRegistry = new TaskRegistry({
+      persistencePath: path.join(this.hanakoHome, ".ephemeral", "plugin-tasks.json"),
+    });
 
     // subagent AbortController 存储（engine 级别，跨 agent 共享）
     this._subagentControllers = new Map();
@@ -623,6 +625,8 @@ export class HanaEngine {
   setEditor(p) { return this._prefs.setEditor(p); }
   getWorkspaceUiState(workspaceRoot) { return this._prefs.getWorkspaceUiState(workspaceRoot); }
   setWorkspaceUiState(workspaceRoot, state) { return this._prefs.setWorkspaceUiState(workspaceRoot, state); }
+  getPluginUiPrefs() { return this._prefs.getPluginUiPrefs(); }
+  setPluginUiPrefs(partial) { return this._prefs.setPluginUiPrefs(partial); }
   getTimezone() { return this._prefs.getTimezone(); }
   setTimezone(tz) { this._prefs.setTimezone(tz); }
   getUpdateChannel() { return this._prefs.getUpdateChannel(); }
@@ -1305,6 +1309,10 @@ export class HanaEngine {
     this._eventBus = bus;
   }
 
+  getEventBus() {
+    return this._eventBus;
+  }
+
   subscribe(listener) {
     if (this._eventBus) return this._eventBus.subscribe(listener);
     this._listeners.add(listener);
@@ -1401,7 +1409,7 @@ export class HanaEngine {
   async translateSkillNames(names, lang, opts = {}) {
     const skills = Array.isArray(opts.skills)
       ? opts.skills
-      : (opts.agentId ? this.getAllSkills(opts.agentId) : this._skillMgr?.allSkills || []);
+      : (opts.agentId ? this.getAllSkills(opts.agentId) : []);
     return translateSkillNamesWithCache({
       cachePath: getSkillNameTranslationCachePath(this.hanakoHome),
       skills,

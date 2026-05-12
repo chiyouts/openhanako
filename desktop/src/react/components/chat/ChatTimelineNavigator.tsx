@@ -1,10 +1,11 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { RefObject } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import type { TimelineAnchor } from './timeline-anchors';
 import styles from './Chat.module.css';
 
+const TIMELINE_MAX_VISIBLE_ROWS = 10;
+
 interface MarkerLayout {
-  percent: number;
   targetTop: number;
 }
 
@@ -29,7 +30,9 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
 }: Props) {
   const [layouts, setLayouts] = useState<Record<string, MarkerLayout>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [cardOpen, setCardOpen] = useState(false);
   const rafRef = useRef<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const measure = useCallback(() => {
     const panel = scrollRef.current;
@@ -49,7 +52,6 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
       const rect = element.getBoundingClientRect();
       const targetTop = clamp(panel.scrollTop + rect.top - panelRect.top - 16, 0, maxScroll);
       next[anchor.messageId] = {
-        percent: maxScroll > 0 ? (targetTop / maxScroll) * 100 : 0,
         targetTop,
       };
     }
@@ -122,29 +124,67 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
     panel.scrollTo({ top: layout.targetTop, behavior: 'smooth' });
   }, [layouts, scrollRef]);
 
+  const renderedAnchors = useMemo(
+    () => anchors.filter(anchor => layouts[anchor.messageId]),
+    [anchors, layouts],
+  );
+
+  const visibleRows = Math.min(renderedAnchors.length, TIMELINE_MAX_VISIBLE_ROWS);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
+  }, [renderedAnchors.length, visibleRows]);
+
   if (!active || anchors.length === 0) return null;
 
+  const cardVars: CSSProperties & { '--timeline-visible-rows': number } = {
+    '--timeline-visible-rows': Math.max(1, visibleRows),
+  };
+
   return (
-    <nav className={styles.timelineNav} aria-label="对话时间导航">
-      {anchors.map((anchor) => {
-        const layout = layouts[anchor.messageId];
-        if (!layout) return null;
-        const selected = anchor.messageId === activeId;
-        return (
-          <button
-            key={anchor.messageId}
-            type="button"
-            className={`${styles.timelineMarker}${selected ? ` ${styles.timelineMarkerActive}` : ''}`}
-            style={{ top: `${layout.percent}%` }}
-            aria-label={`跳转到 ${anchor.label}`}
-            title={anchor.label}
-            onClick={() => jumpTo(anchor)}
-          >
-            <span className={styles.timelineDot} aria-hidden="true" />
-            <span className={styles.timelineLabel}>{anchor.label}</span>
-          </button>
-        );
-      })}
+    <nav
+      className={`${styles.timelineNav}${cardOpen ? ` ${styles.timelineNavExpanded}` : ''}`}
+      aria-label="对话轮次导航"
+      onMouseLeave={() => setCardOpen(false)}
+      onBlur={(event) => {
+        const nextFocus = event.relatedTarget;
+        if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) return;
+        setCardOpen(false);
+      }}
+    >
+      <div
+        className={styles.timelineCard}
+        style={cardVars}
+        onMouseEnter={() => setCardOpen(true)}
+        onMouseLeave={() => setCardOpen(false)}
+      >
+        <div className={styles.timelineList} ref={listRef}>
+          {renderedAnchors.map((anchor) => {
+            const selected = anchor.messageId === activeId;
+            const markerStyle: CSSProperties & { '--timeline-marker-width': string } = {
+              '--timeline-marker-width': `${anchor.markerWidthEm}em`,
+            };
+            return (
+              <button
+                key={anchor.messageId}
+                type="button"
+                className={`${styles.timelineMarker}${selected ? ` ${styles.timelineMarkerActive}` : ''}`}
+                style={markerStyle}
+                aria-label={`跳转到 ${anchor.label}`}
+                title={anchor.label}
+                onFocus={() => setCardOpen(true)}
+                onMouseEnter={() => setCardOpen(true)}
+                onClick={() => jumpTo(anchor)}
+              >
+                <span className={styles.timelineLabel}>{anchor.label}</span>
+                <span className={styles.timelineLine} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </nav>
   );
 });

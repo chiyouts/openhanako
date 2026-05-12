@@ -81,8 +81,29 @@ const KNOWN_MODELS = {
       visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "anchor", groundingMode: "prompted" },
     },
   },
+  moonshot: {
+    "kimi-k2.6": {
+      name: "Kimi K2.6",
+      context: 262144,
+      maxOutput: 98304,
+      image: true,
+      video: true,
+      reasoning: true,
+      visionCapabilities: { grounding: true, boxes: true, points: true, coordinateSpace: "norm-1000", boxOrder: "xyxy", outputFormat: "anchor", groundingMode: "prompted" },
+    },
+  },
   minimax: {
     "MiniMax-M2.7": { name: "MiniMax M2.7", context: 204800, maxOutput: 131072, reasoning: true },
+  },
+  mimo: {
+    "mimo-v2.5": {
+      name: "MiMo V2.5",
+      context: 1048576,
+      maxOutput: 131072,
+      image: true,
+      video: true,
+      reasoning: true,
+    },
   },
   // 兼容读验证：legacy-vision 模型词典里用旧字段 vision，model-sync 应当识别并投影为 input
   legacy: {
@@ -389,7 +410,8 @@ describe("syncModels", () => {
     expect(result.providers["kimi-coding"].modelOverrides["kimi-for-coding"]).toEqual({
       name: "Kimi 自定义显示名",
       maxTokens: 16000,
-      input: ["text", "image", "video"],
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
     });
   });
 
@@ -507,7 +529,7 @@ describe("syncModels", () => {
     expect(model.input).toEqual(["text"]);
   });
 
-  it("projects explicit video capability into model.input and keeps unknown models video-off by default", async () => {
+  it("projects explicit video capability into Hana compat and keeps Pi input schema-compatible", async () => {
     const syncModels = await loadSync();
 
     const providers = {
@@ -526,14 +548,14 @@ describe("syncModels", () => {
     syncModels(providers, { modelsJsonPath });
 
     const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
-    expect(result.providers.custom.models.map((m) => [m.id, m.input])).toEqual([
-      ["custom-video", ["text", "video"]],
-      ["custom-multimodal", ["text", "image", "video"]],
-      ["custom-unknown", ["text"]],
+    expect(result.providers.custom.models.map((m) => [m.id, m.input, m.compat?.hanaVideoInput])).toEqual([
+      ["custom-video", ["text"], true],
+      ["custom-multimodal", ["text", "image"], true],
+      ["custom-unknown", ["text"], undefined],
     ]);
   });
 
-  it("projects known video-capable models into model.input", async () => {
+  it("projects known video-capable models into Hana compat without invalid Pi input", async () => {
     const syncModels = await loadSync();
 
     const providers = {
@@ -548,7 +570,86 @@ describe("syncModels", () => {
     syncModels(providers, { modelsJsonPath });
 
     const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
-    expect(result.providers.dashscope.models[0].input).toEqual(["text", "image", "video"]);
+    expect(result.providers.dashscope.models[0].input).toEqual(["text", "image"]);
+    expect(result.providers.dashscope.models[0].compat.hanaVideoInput).toBe(true);
+  });
+
+  it("projects Moonshot Kimi official video capability into Hana compat", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      moonshot: {
+        base_url: "https://api.moonshot.cn/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["kimi-k2.6"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.moonshot.models[0]).toMatchObject({
+      id: "kimi-k2.6",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    });
+  });
+
+  it("projects MiMo V2.5 full-modal metadata without invalid Pi input", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      mimo: {
+        base_url: "https://api.xiaomimimo.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["mimo-v2.5"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const model = result.providers.mimo.models[0];
+    expect(model).toMatchObject({
+      id: "mimo-v2.5",
+      name: "MiMo V2.5",
+      input: ["text", "image"],
+      contextWindow: 1048576,
+      maxTokens: 131072,
+      reasoning: true,
+    });
+    expect(model.compat).toMatchObject({
+      supportsDeveloperRole: false,
+      hanaVideoInput: true,
+    });
+  });
+
+  it("writes Pi-loadable models when Hana video capability is enabled", async () => {
+    const syncModels = await loadSync();
+    const { AuthStorage, createModelRegistry } = await import("../lib/pi-sdk/index.js");
+
+    const providers = {
+      dashscope: {
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["qwen3-vl-plus"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const registry = createModelRegistry(new AuthStorage(tmpDir), modelsJsonPath);
+    const available = await registry.getAvailable();
+    expect(available).toHaveLength(1);
+    expect(available[0]).toMatchObject({
+      id: "qwen3-vl-plus",
+      provider: "dashscope",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    });
   });
 
   it("rejects the official DeepSeek provider id before writing models.json", async () => {
@@ -760,6 +861,42 @@ describe("syncModels", () => {
     expect(result.providers.ollama.apiKey).toBe("local");
     expect(mm._modelRegistry.refresh).toHaveBeenCalledTimes(1);
     expect(mm.availableModels).toEqual([{ id: "llama3", provider: "ollama" }]);
+  });
+
+  it("ignores malformed provider records without breaking valid model projection", async () => {
+    const { ModelManager } = await import("../core/model-manager.js");
+    fs.writeFileSync(path.join(tmpDir, "added-models.yaml"), [
+      "providers:",
+      "  deepseek:",
+      "    base_url: https://api.deepseek.com/v1",
+      "    api: openai-completions",
+      "    api_key: sk-deep",
+      "    models:",
+      "      - deepseek-chat",
+      "  dashscope-coding:",
+      "  string-provider: broken",
+      "",
+    ].join("\n"), "utf-8");
+
+    const mm = new ModelManager({ hanakoHome: tmpDir });
+    mm._modelRegistry = {
+      refresh: vi.fn(),
+      getAvailable: vi.fn().mockResolvedValue([
+        { id: "deepseek-chat", provider: "deepseek" },
+        { id: "unconfigured-model", provider: "other" },
+      ]),
+    };
+
+    await expect(mm.syncAndRefresh()).resolves.toBe(true);
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.deepseek.models[0].id).toBe("deepseek-chat");
+    expect(result.providers["dashscope-coding"]).toBeUndefined();
+    expect(result.providers["string-provider"]).toBeUndefined();
+    expect(mm.availableModels).toEqual([
+      { id: "deepseek-chat", provider: "deepseek" },
+      { id: "unconfigured-model", provider: "other" },
+    ]);
   });
 
   it("handles multiple providers in one call", async () => {

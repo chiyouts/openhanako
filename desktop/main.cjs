@@ -2230,6 +2230,10 @@ function _getScreenshotMd() {
     const mk = require("@traptitech/markdown-it-katex");
     _screenshotMd.use(mk);
   } catch { /* katex not available */ }
+  try {
+    const taskLists = require("markdown-it-task-lists");
+    _screenshotMd.use(taskLists, { enabled: false, label: true });
+  } catch { /* task-lists not available */ }
   return _screenshotMd;
 }
 

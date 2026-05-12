@@ -17,6 +17,7 @@ import { findModel, parseModelRef } from "../shared/model-ref.js";
 import { isLocalBaseUrl } from "../shared/net-utils.js";
 import { syncModels } from "./model-sync.js";
 import { enrichModelFromKnownMetadata } from "./model-known-enrichment.js";
+import { migrateLegacyApiKeyAuthToProviders } from "./provider-auth-migration.js";
 
 export class ModelManager {
   /**
@@ -182,6 +183,10 @@ export class ModelManager {
    */
   _removeApiKeyProviderAuthEntries() {
     if (!this._authStorage || !this.providerRegistry) return;
+    migrateLegacyApiKeyAuthToProviders({
+      hanakoHome: this._hanakoHome,
+      providerRegistry: this.providerRegistry,
+    });
     this._authStorage.reload?.();
 
     for (const entry of this.providerRegistry.getAll().values()) {

@@ -28,8 +28,13 @@ const CRITICAL_BUNDLED_FILES = [
 ];
 
 const DEFAULT_BACKOFF_MS = [200, 500, 1000, 2000, 4000, 8000];
-const SERVER_INFO_FIRST_WAIT_MS = 60_000;
-const SERVER_INFO_PROGRESS_GRACE_MS = 90_000;
+// 启动期望窗口。bundle 越打越大，Windows + Defender 实时扫描每个被 require 的
+// 文件让 cold start 经常突破 60s（#719 / #736），90s 给一次合理 buffer。
+const SERVER_INFO_FIRST_WAIT_MS = 90_000;
+// 超过 first deadline 后，看到任何 stdout 进度就再延这么久。bootstrap.js 用
+// worker_threads 跑独立 keepalive（5s 周期），即使主线程被 import 阻塞也能持续
+// 出信号，180s 是稳健的安全网。
+const SERVER_INFO_PROGRESS_GRACE_MS = 180_000;
 const SERVER_INFO_MAX_WAIT_MS = 5 * 60_000;
 
 /**

@@ -137,6 +137,26 @@ describe('SettingsContent title placement', () => {
     expect(onActiveTabChange).toHaveBeenCalledWith('computer');
   });
 
+  it('renders the plugin marketplace as a full settings subpage', async () => {
+    mockState.activeTab = 'plugin-marketplace';
+    const { SettingsContent } = await import('../../settings/SettingsContent');
+    render(<SettingsContent variant="window" />);
+
+    expect(screen.getByRole('heading', { name: '插件市场' })).toBeInTheDocument();
+    expect(screen.queryByText('agent tab')).not.toBeInTheDocument();
+  });
+
+  it('notifies the modal shell when a hidden settings subpage is active', async () => {
+    mockState.activeTab = 'plugin-marketplace';
+    const onActiveTabChange = vi.fn();
+    const { SettingsContent } = await import('../../settings/SettingsContent');
+    render(<SettingsContent variant="modal" onClose={() => {}} onActiveTabChange={onActiveTabChange} />);
+
+    await waitFor(() => {
+      expect(onActiveTabChange).toHaveBeenCalledWith('plugin-marketplace');
+    });
+  });
+
   it('hides the Computer Use tab on Linux and redirects stale computer tabs', async () => {
     mockState.activeTab = 'computer';
     mockState.platformName = 'linux';

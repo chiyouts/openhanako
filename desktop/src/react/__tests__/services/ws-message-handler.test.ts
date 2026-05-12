@@ -402,6 +402,22 @@ describe('ws-message-handler compaction lifecycle', () => {
       percent: null,
     });
   });
+
+  it('preserves context_usage window even when tokens are unknown', () => {
+    handleServerMessage({
+      type: 'context_usage',
+      sessionPath: '/session/a.jsonl',
+      tokens: null,
+      contextWindow: 200_000,
+      percent: null,
+    });
+
+    expect(useStore.getState().contextBySession['/session/a.jsonl']).toEqual({
+      tokens: null,
+      window: 200_000,
+      percent: null,
+    });
+  });
 });
 
 describe('ws-message-handler app events', () => {

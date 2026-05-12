@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -60,12 +61,18 @@ function mockEngine(overrides = {}) {
       setFullAccess: overrides.setFullAccess || vi.fn(),
       getAllConfigSchemas: () => [],
       getConfigSchema: () => null,
+      getConfig: overrides.getConfig || (() => null),
+      setConfig: overrides.setConfig || vi.fn(),
+      getDiagnostics: overrides.getDiagnostics || (() => overrides.diagnostics || []),
       getUserPluginsDir: () => "/user",
       isValidPluginDir: () => true,
       getAllowFullAccess: () => allowFullAccess,
       getRouteApp: (id) => routeRegistry.get(id) || null,
       ...overrides.pm,
     },
+    fetch: overrides.fetch,
+    hanakoHome: overrides.hanakoHome,
+    getEventBus: overrides.getEventBus || (() => overrides.eventBus || null),
   };
 }
 
@@ -73,6 +80,87 @@ function createApp(engine) {
   const app = new Hono();
   app.route("/api", createPluginsRoute(engine));
   return app;
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let j = 0; j < 8; j += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function makeStoredZip(files) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+
+  for (const [name, content] of Object.entries(files)) {
+    const nameBuf = Buffer.from(name);
+    const data = Buffer.from(content);
+    const crc = crc32(data);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    local.writeUInt16LE(0, 28);
+    locals.push(local, nameBuf, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBuf);
+
+    offset += local.length + nameBuf.length + data.length;
+  }
+
+  const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(Object.keys(files).length, 8);
+  end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...locals, ...centrals, end]);
 }
 
 describe("plugin management API", () => {
@@ -268,6 +356,268 @@ describe("plugin management API", () => {
     });
   });
 
+  describe("GET /plugins/event-bus/capabilities", () => {
+    it("returns EventBus capability records", async () => {
+      const engine = mockEngine({
+        eventBus: {
+          listCapabilities: () => [
+            {
+              type: "session:send",
+              title: "Send session message",
+              description: "Send text into a session.",
+              inputSchema: { type: "object" },
+              outputSchema: { type: "object" },
+              permission: "session.write",
+              errors: ["NO_HANDLER"],
+              stability: "stable",
+              owner: "system",
+              available: true,
+            },
+          ],
+        },
+      });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/event-bus/capabilities");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([
+        {
+          type: "session:send",
+          title: "Send session message",
+          description: "Send text into a session.",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+          permission: "session.write",
+          errors: ["NO_HANDLER"],
+          stability: "stable",
+          owner: "system",
+          available: true,
+        },
+      ]);
+    });
+  });
+
+  describe("GET /plugins/diagnostics", () => {
+    it("returns plugin, bus, task, and schedule diagnostics", async () => {
+      const engine = mockEngine({
+        diagnostics: [
+          {
+            id: "demo",
+            name: "Demo",
+            status: "loaded",
+            activationState: "activated",
+            hidden: false,
+            routes: { pages: [], widgets: [] },
+            tools: [{ name: "demo_search" }],
+          },
+        ],
+        eventBus: {
+          listCapabilities: () => [{ type: "task:list", available: true }],
+        },
+      });
+      engine.taskRegistry = {
+        listAll: () => [{ taskId: "t1", type: "render", status: "running" }],
+        listSchedules: () => [{ scheduleId: "daily", type: "digest", enabled: true }],
+      };
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/diagnostics");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        plugins: [
+          {
+            id: "demo",
+            name: "Demo",
+            status: "loaded",
+            activationState: "activated",
+            hidden: false,
+            routes: { pages: [], widgets: [] },
+            tools: [{ name: "demo_search" }],
+          },
+        ],
+        eventBus: [{ type: "task:list", available: true }],
+        tasks: [{ taskId: "t1", type: "render", status: "running" }],
+        schedules: [{ scheduleId: "daily", type: "digest", enabled: true }],
+      });
+    });
+  });
+
+  describe("GET /plugins/marketplace", () => {
+    it("returns marketplace plugins with installed status and readme endpoint", async () => {
+      const plugin = {
+        id: "demo",
+        name: "Demo",
+        publisher: "Hana",
+        version: "1.0.0",
+        description: "Demo plugin",
+        trust: "restricted",
+        permissions: [],
+        contributions: ["tools"],
+        distribution: { kind: "source", path: "plugins/demo", resolvedPath: "/tmp/demo" },
+        readme: "# Demo",
+      };
+      const engine = mockEngine({
+        plugins: [{ id: "demo", name: "Demo", version: "0.9.0", status: "loaded" }],
+      });
+      engine.pluginMarketplace = {
+        load: async () => ({ source: { kind: "file", configured: true }, schemaVersion: 1, plugins: [plugin], warnings: [] }),
+        getReadme: async () => "# Demo",
+        getPlugin: async () => plugin,
+        resolveSourceDistribution: () => "/tmp/demo",
+      };
+      const app = createApp(engine);
+
+      const listRes = await app.request("/api/plugins/marketplace");
+      const readmeRes = await app.request("/api/plugins/marketplace/demo/readme");
+
+      expect(listRes.status).toBe(200);
+      expect(await listRes.json()).toMatchObject({
+        plugins: [{
+          id: "demo",
+          installed: true,
+          installedVersion: "0.9.0",
+          canInstall: true,
+          distribution: { kind: "source", path: "plugins/demo" },
+        }],
+      });
+      expect(await readmeRes.json()).toEqual({ pluginId: "demo", markdown: "# Demo" });
+    });
+
+    it("installs release marketplace plugins after downloading and verifying sha256", async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hana-release-plugin-"));
+      try {
+        const zip = makeStoredZip({
+          "demo/manifest.json": JSON.stringify({
+            id: "demo",
+            name: "Demo",
+            version: "1.0.0",
+            trust: "restricted",
+          }),
+        });
+        const sha256 = crypto.createHash("sha256").update(zip).digest("hex");
+        const plugin = {
+          id: "demo",
+          name: "Demo",
+          publisher: "Hana",
+          version: "1.0.0",
+          description: "Demo plugin",
+          trust: "restricted",
+          permissions: [],
+          contributions: ["tools"],
+          distribution: {
+            kind: "release",
+            packageUrl: "https://example.com/demo.zip",
+            sha256,
+          },
+          readme: "# Demo",
+        };
+        const installPlugin = vi.fn(async (dir) => ({
+          id: "demo",
+          name: "Demo",
+          version: "1.0.0",
+          installedManifestExists: fs.existsSync(path.join(dir, "manifest.json")),
+        }));
+        const engine = mockEngine({
+          hanakoHome: tmp,
+          fetch: vi.fn(async () => new Response(zip)),
+          plugins: [],
+          pm: {
+            getUserPluginsDir: () => path.join(tmp, "plugins"),
+            installPlugin,
+          },
+        });
+        engine.pluginMarketplace = {
+          load: async () => ({ source: { kind: "url", configured: true }, schemaVersion: 1, plugins: [plugin], warnings: [] }),
+          getReadme: async () => "# Demo",
+          getPlugin: async () => plugin,
+          resolveSourceDistribution: () => null,
+        };
+        const app = createApp(engine);
+
+        const listRes = await app.request("/api/plugins/marketplace");
+        expect(await listRes.json()).toMatchObject({
+          plugins: [{ id: "demo", canInstall: true }],
+        });
+
+        const installRes = await app.request("/api/plugins/marketplace/demo/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        expect(installRes.status).toBe(200);
+        expect(await installRes.json()).toMatchObject({
+          id: "demo",
+          installedManifestExists: true,
+        });
+        expect(installPlugin).toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects release marketplace plugins when sha256 does not match", async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hana-release-plugin-bad-sha-"));
+      try {
+        const zip = makeStoredZip({
+          "demo/manifest.json": JSON.stringify({
+            id: "demo",
+            name: "Demo",
+            version: "1.0.0",
+            trust: "restricted",
+          }),
+        });
+        const plugin = {
+          id: "demo",
+          name: "Demo",
+          publisher: "Hana",
+          version: "1.0.0",
+          description: "Demo plugin",
+          trust: "restricted",
+          permissions: [],
+          contributions: ["tools"],
+          distribution: {
+            kind: "release",
+            packageUrl: "https://example.com/demo.zip",
+            sha256: "0".repeat(64),
+          },
+          readme: "# Demo",
+        };
+        const installPlugin = vi.fn();
+        const engine = mockEngine({
+          hanakoHome: tmp,
+          fetch: vi.fn(async () => new Response(zip)),
+          plugins: [],
+          pm: {
+            getUserPluginsDir: () => path.join(tmp, "plugins"),
+            installPlugin,
+          },
+        });
+        engine.pluginMarketplace = {
+          load: async () => ({ source: { kind: "url", configured: true }, schemaVersion: 1, plugins: [plugin], warnings: [] }),
+          getReadme: async () => "# Demo",
+          getPlugin: async () => plugin,
+          resolveSourceDistribution: () => null,
+        };
+        const app = createApp(engine);
+
+        const installRes = await app.request("/api/plugins/marketplace/demo/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        expect(installRes.status).toBe(502);
+        expect(await installRes.json()).toEqual({ error: "Plugin release sha256 mismatch" });
+        expect(installPlugin).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("PUT /plugins/settings", () => {
     it("calls setFullAccess and returns plugin list", async () => {
       const setFn = vi.fn().mockResolvedValue();
@@ -288,6 +638,50 @@ describe("plugin management API", () => {
       expect(body).toHaveLength(1);
       expect(body[0].trust).toBe("restricted");
       expect(setFn).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("plugin config routes", () => {
+    it("returns redacted plugin config", async () => {
+      const engine = mockEngine({
+        getConfig: () => ({
+          pluginId: "demo",
+          schema: { properties: { apiKey: { type: "string", sensitive: true } } },
+          values: { apiKey: "********" },
+        }),
+      });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/demo/config");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        pluginId: "demo",
+        values: { apiKey: "********" },
+      });
+    });
+
+    it("validates plugin config writes", async () => {
+      const setConfig = vi.fn(() => ({
+        pluginId: "demo",
+        schema: { properties: { enabled: { type: "boolean" } } },
+        values: { enabled: true },
+      }));
+      const engine = mockEngine({ setConfig });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/demo/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { enabled: true } }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(setConfig).toHaveBeenCalledWith("demo", { enabled: true }, {
+        scope: "global",
+        agentId: undefined,
+        sessionPath: undefined,
+      });
     });
   });
 

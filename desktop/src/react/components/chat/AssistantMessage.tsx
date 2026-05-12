@@ -12,6 +12,7 @@ import { SubagentCard } from './SubagentCard';
 import { SettingsConfirmCard } from './SettingsConfirmCard';
 import { MessageActions } from './MessageActions';
 import { BLOCK_RENDERERS } from './block-renderers';
+import { FileOutputActions } from './FileOutputActions';
 const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeScreenshot);
 import type { ChatMessage, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
@@ -21,6 +22,7 @@ import { openMediaViewerForRef } from '../../utils/open-media-viewer';
 import { buildFileRefId, isImageOrSvgExt } from '../../utils/file-kind';
 import { openPreview } from '../../stores/preview-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
+import { extractSelectedTexts } from '../../utils/message-text';
 import styles from './Chat.module.css';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -67,35 +69,11 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
 
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    const state = useStore.getState();
-    const ids = selectSelectedIdsBySession(state, sessionPath);
-
+    const ids = selectSelectedIdsBySession(useStore.getState(), sessionPath);
+    let text: string;
     if (ids.length > 0) {
-      const session = state.chatSessions[sessionPath];
-      if (!session) return;
-      const texts: string[] = [];
-      for (const item of session.items) {
-        if (item.type !== 'message') continue;
-        if (!ids.includes(item.data.id)) continue;
-        if (item.data.role === 'user') {
-          texts.push(item.data.text || '');
-        } else {
-          const textBlocks = (item.data.blocks || []).filter(
-            (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
-          );
-          if (textBlocks.length === 0) continue;
-          // eslint-disable-next-line no-restricted-syntax
-          const tmp = document.createElement('div');
-          tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-          texts.push(tmp.innerText.trim());
-        }
-      }
-      navigator.clipboard.writeText(texts.join('\n\n')).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }).catch(() => {});
+      text = extractSelectedTexts(sessionPath, ids);
     } else {
-      // single message copy (existing logic)
       const textBlocks = blocks.filter(
         (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
       );
@@ -103,12 +81,13 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
       // eslint-disable-next-line no-restricted-syntax
       const tmp = document.createElement('div');
       tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-      const text = tmp.innerText.trim();
-      navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }).catch(() => {});
+      text = tmp.innerText.trim();
     }
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
   }, [blocks, sessionPath]);
 
   const handleScreenshot = useCallback(async () => {
@@ -271,12 +250,6 @@ const ImageOutputCard = memo(function ImageOutputCard({ filePath, label, ext, st
 const FileOutputCard = memo(function FileOutputCard({ filePath, label, ext, status, ctx }: { filePath: string; label: string; ext: string; status?: string; ctx: FileBlockCtx }) {
   const expired = status === 'expired';
   const expiredLabel = window.t('chat.fileExpired');
-  const handleOpen = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (expired) return;
-    const p = window.platform;
-    if (p?.openFile) p.openFile(filePath);
-  };
   const handlePreview = () => {
     if (expired) return;
     openFilePreview(filePath, label, ext, {
@@ -310,13 +283,7 @@ const FileOutputCard = memo(function FileOutputCard({ filePath, label, ext, stat
         </div>
       </div>
       {!expired && (
-        <button className={styles.fileOutputOpen} onClick={handleOpen} title={window.t('desk.openWithDefault')}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-        </button>
+        <FileOutputActions filePath={filePath} displayName={displayName} />
       )}
     </div>
   );

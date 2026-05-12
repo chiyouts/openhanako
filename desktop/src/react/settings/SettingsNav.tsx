@@ -72,13 +72,14 @@ function buildNavItems(pluginSettingsTabs: PluginSettingsTab[], platformName?: s
 export function SettingsNav({ onTabChange }: SettingsNavProps) {
   const { activeTab, platformName, pluginSettingsTabs, set } = useSettingsStore();
   const navItems = buildNavItems(pluginSettingsTabs || [], platformName);
+  const activeNavTab = activeTab === 'plugin-marketplace' ? 'plugins' : activeTab;
 
   return (
     <nav className={styles['settings-nav']}>
       {navItems.map(item => (
         <button
           key={item.id}
-          className={`${styles['settings-nav-item']}${activeTab === item.id ? ' ' + styles['active'] : ''}`}
+          className={`${styles['settings-nav-item']}${activeNavTab === item.id ? ' ' + styles['active'] : ''}`}
           data-tab={item.id}
           onClick={() => {
             set({ activeTab: item.id });

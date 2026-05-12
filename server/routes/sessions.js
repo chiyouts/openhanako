@@ -9,6 +9,7 @@ import { safeJson } from "../hono-helpers.js";
 import { t } from "../i18n.js";
 import { extractBlocks } from "../block-extractors.js";
 import { BrowserManager } from "../../lib/browser/browser-manager.js";
+import { sessionIdFromFilename } from "../../lib/session-jsonl.js";
 import {
   materializeExecutorIdentity,
   readSubagentSessionMetaSync,
@@ -36,6 +37,11 @@ import { serializeSessionFile } from "../../lib/session-files/session-file-respo
 import { deleteSessionSkillSnapshotSync } from "../../lib/skills/session-skill-snapshot.js";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.js";
 import { modelSupportsXhigh } from "../../core/session-thinking-level.js";
+import {
+  modelSupportsDirectVideoInput,
+  modelSupportsVideoInput,
+  resolveModelVideoInputTransport,
+} from "../../shared/model-capabilities.js";
 
 function rcPlatformFromSessionKey(sessionKey) {
   const match = /^([a-z]+)_/i.exec(sessionKey || "");
@@ -151,6 +157,28 @@ export function createSessionsRoute(engine) {
     };
   }
 
+  function getSessionSummaryRecord(sessionPath, agentIdHint = null) {
+    if (!sessionPath) return null;
+    const agentId = agentIdHint || engine.agentIdFromSessionPath?.(sessionPath) || null;
+    if (!agentId) return null;
+    const agent = engine.getAgent?.(agentId) || null;
+    const summaryManager = agent?.summaryManager || null;
+    if (!summaryManager || typeof summaryManager.getSummary !== "function") return null;
+
+    const sessionId = sessionIdFromFilename(path.basename(sessionPath));
+    const record = summaryManager.getSummary(sessionId);
+    return record?.summary?.trim() ? record : null;
+  }
+
+  function serializeSessionSummaryRecord(record) {
+    return {
+      hasSummary: !!record,
+      summary: record?.summary || null,
+      createdAt: record?.created_at || null,
+      updatedAt: record?.updated_at || null,
+    };
+  }
+
   function invalidateRcTarget(sessionPath) {
     const rcState = engine.rcState;
     if (!rcState?.invalidateDesktopSession) return;
@@ -179,25 +207,47 @@ export function createSessionsRoute(engine) {
           platform: rcPlatformFromSessionKey(attachment.sessionKey),
         },
       ]));
-      return c.json(sessions.map(s => ({
-        path: s.path,
-        title: s.title || null,
-        firstMessage: (s.firstMessage || "").slice(0, 100),
-        modified: s.modified?.toISOString() || null,
-        messageCount: s.messageCount || 0,
-        cwd: s.cwd || null,
-        agentId: s.agentId || null,
-        agentName: s.agentName || null,
-        modelId: s.modelId || null,
-        modelProvider: s.modelProvider || null,
-        pinnedAt: s.pinnedAt || null,
-        rcAttachment: rcAttachmentByPath.get(s.path)
-          ? {
-            ...rcAttachmentByPath.get(s.path),
-            title: s.title || null,
-          }
-          : null,
-      })));
+      return c.json(sessions.map(s => {
+        const summaryRecord = getSessionSummaryRecord(s.path, s.agentId || null);
+        return ({
+          path: s.path,
+          title: s.title || null,
+          firstMessage: (s.firstMessage || "").slice(0, 100),
+          modified: s.modified?.toISOString() || null,
+          messageCount: s.messageCount || 0,
+          cwd: s.cwd || null,
+          agentId: s.agentId || null,
+          agentName: s.agentName || null,
+          modelId: s.modelId || null,
+          modelProvider: s.modelProvider || null,
+          pinnedAt: s.pinnedAt || null,
+          hasSummary: !!summaryRecord,
+          rcAttachment: rcAttachmentByPath.get(s.path)
+            ? {
+              ...rcAttachmentByPath.get(s.path),
+              title: s.title || null,
+            }
+            : null,
+        });
+      }));
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  // 获取单个 session 的滚动摘要。列表只暴露 hasSummary，正文按需读取。
+  route.get("/sessions/summary", async (c) => {
+    try {
+      const sessionPath = c.req.query("path") || null;
+      if (!sessionPath) {
+        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+      }
+      if (!isValidSessionPath(sessionPath, engine.agentsDir)) {
+        return c.json({ error: "Invalid session path" }, 403);
+      }
+
+      const record = getSessionSummaryRecord(sessionPath);
+      return c.json(serializeSessionSummaryRecord(record));
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -536,6 +586,9 @@ export function createSessionsRoute(engine) {
         currentModelProvider: activeModel?.provider || null,
         currentModelName: activeModel?.name || null,
         currentModelInput: Array.isArray(activeModel?.input) ? activeModel.input : null,
+        currentModelVideo: modelSupportsVideoInput(activeModel),
+        currentModelVideoTransport: resolveModelVideoInputTransport(activeModel),
+        currentModelVideoTransportSupported: modelSupportsDirectVideoInput(activeModel),
         currentModelReasoning: activeModel?.reasoning ?? null,
         currentModelXhigh: modelSupportsXhigh(activeModel),
         currentModelContextWindow: activeModel?.contextWindow ?? null,

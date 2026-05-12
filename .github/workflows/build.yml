@@ -165,6 +165,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}-${{ matrix.arch }}
+          retention-days: 3
           path: |
             dist/*.dmg
             dist/*.zip
@@ -217,73 +218,7 @@ jobs:
       # 合并双架构的 latest-mac.yml（本地生成，不上传；上传由下一步统一处理）
       - name: Generate merged latest-mac.yml
         run: |
-          ARM64_YML=$(find artifacts -path '*arm64*' -name 'latest-mac.yml' | head -1)
-          X64_YML=$(find artifacts -path '*x64*' -name 'latest-mac.yml' | head -1)
-
-          if [ -n "$ARM64_YML" ] && [ -n "$X64_YML" ]; then
-            echo "Merging $ARM64_YML + $X64_YML"
-            node -e "
-              const fs = require('fs');
-
-              function parseYml(text) {
-                const obj = { files: [] };
-                let currentFile = null;
-                for (const line of text.split('\n')) {
-                  if (line.trim().startsWith('- url:')) {
-                    currentFile = { url: line.split('url:')[1].trim() };
-                    obj.files.push(currentFile);
-                  } else if (currentFile && line.trim().startsWith('sha512:')) {
-                    currentFile.sha512 = line.split('sha512:')[1].trim();
-                  } else if (currentFile && line.trim().startsWith('size:')) {
-                    currentFile.size = parseInt(line.split('size:')[1].trim());
-                  } else if (!line.startsWith(' ') && !line.startsWith('-')) {
-                    const kv = line.match(/^(\w+):\s*(.+)/);
-                    if (kv && kv[1] !== 'files') obj[kv[1]] = kv[2].trim().replace(/^'(.*)'$/, '\$1');
-                    currentFile = null;
-                  }
-                }
-                return obj;
-              }
-
-              function dumpYml(obj) {
-                let out = 'version: ' + obj.version + '\n';
-                out += 'files:\n';
-                for (const f of obj.files) {
-                  out += '  - url: ' + f.url + '\n';
-                  if (f.sha512) out += '    sha512: ' + f.sha512 + '\n';
-                  if (f.size) out += '    size: ' + f.size + '\n';
-                }
-                if (obj.path) out += 'path: ' + obj.path + '\n';
-                if (obj.sha512) out += 'sha512: ' + obj.sha512 + '\n';
-                if (obj.releaseDate) out += \"releaseDate: '\" + obj.releaseDate + \"'\n\";
-                return out;
-              }
-
-              const arm64 = parseYml(fs.readFileSync('$ARM64_YML', 'utf8'));
-              const x64 = parseYml(fs.readFileSync('$X64_YML', 'utf8'));
-
-              const merged = { ...arm64 };
-              const allFiles = [...(arm64.files || []), ...(x64.files || [])];
-              const seen = new Set();
-              merged.files = allFiles.filter(f => {
-                if (seen.has(f.url)) return false;
-                seen.add(f.url);
-                return true;
-              });
-
-              fs.writeFileSync('latest-mac.yml', dumpYml(merged));
-              console.log('Merged latest-mac.yml with', merged.files.length, 'files');
-            "
-          elif [ -n "$ARM64_YML" ]; then
-            echo "Only arm64 yml found, using as-is"
-            cp "$ARM64_YML" latest-mac.yml
-          elif [ -n "$X64_YML" ]; then
-            echo "Only x64 yml found, using as-is"
-            cp "$X64_YML" latest-mac.yml
-          else
-            echo "::error::No mac latest-mac.yml found in any artifact"
-            exit 1
-          fi
+          node scripts/merge-latest-mac-yml.cjs artifacts latest-mac.yml
 
       # 单点上传所有 release assets（dmg/zip/exe/AppImage/deb/yml），blockmap 不上传
       - name: Upload release assets

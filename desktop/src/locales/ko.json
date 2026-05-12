@@ -64,6 +64,14 @@
     "unpin": "고정 해제",
     "pinFailed": "세션 고정 실패",
     "unpinFailed": "세션 고정 해제 실패",
+    "archive": "보관",
+    "summary": {
+      "title": "세션 요약",
+      "open": "세션 요약",
+      "loading": "요약을 불러오는 중…",
+      "empty": "아직 요약이 없습니다",
+      "loadFailed": "요약을 불러오지 못했습니다"
+    },
     "archived": {
       "entry": "보관된 대화",
       "title": "보관된 대화",
@@ -113,7 +121,7 @@
     "screenshotFailed": "스크린샷 저장 실패",
     "selectedCount": "{count}개 선택됨",
     "allDone": "모두 완료",
-    "completeAndDismiss": "완료하고 닫기"
+    "markAllComplete": "모두 완료로 표시"
   },
   "chat": {
     "send": "보내기",
@@ -122,7 +130,12 @@
     "browserScreenshot": "브라우저 스크린샷",
     "compacting": "컨텍스트 압축 중",
     "visionAuxiliary": "보조 시각",
-    "fileExpired": "파일 만료됨"
+    "fileExpired": "파일 만료됨",
+    "fileActions": {
+      "more": "파일 작업 더 보기",
+      "revealInFinder": "파일 관리자에서 보기",
+      "copyPath": "파일 경로 복사"
+    }
   },
   "time": {
     "justNow": "방금",
@@ -164,6 +177,8 @@
     "pastedImage": "붙여넣은 이미지",
     "textModelImageBlocked": "현재 모델은 텍스트 전용이라 이미지를 직접 보낼 수 없습니다. 설정에서 모델 기능을 조정하거나 보조 시각을 설정하고 켜 주세요.",
     "textModelVideoBlocked": "현재 모델은 비디오 입력을 지원하지 않아요. 설정에서 비디오 기능을 켜거나 비디오 지원 모델로 전환해 주세요.",
+    "imageReadFailed": "이미지를 읽지 못해 메시지를 보내지 않았어요. 다시 붙여넣거나 첨부해 주세요.",
+    "videoReadFailed": "비디오를 읽지 못해 메시지를 보내지 않았어요. 다시 첨부해 주세요.",
     "openModelSettings": "모델 설정 열기",
     "attachFiles": "파일 추가",
     "commandMenu": "명령 메뉴",
@@ -206,7 +221,30 @@
     "memoryOn": "기억",
     "memoryOff": "이 대화에서는 기억을 사용하지 않아요",
     "memoryDisabled": "기억이 꺼져 있어요",
-    "agentSelector": "에이전트 선택"
+    "agentSelector": "에이전트 선택",
+    "placeholderTips": [
+      "/ 를 입력하면 명령 메뉴가 열려요",
+      "@ 로 워크스페이스 안의 파일을 참조할 수 있어요",
+      "파일을 입력창에 직접 끌어다 놓으면 함께 보낼 수 있어요",
+      "이미지를 붙여넣으면 바로 전송돼요",
+      "페이지에서 텍스트를 선택하면 임시 입력창이 떠요",
+      "아바타 아래 마름모 버튼으로 이번 대화의 기억을 켜고 끌 수 있어요",
+      "워크스페이스 버튼으로 폴더를 바꾸거나 추가할 수 있어요",
+      "오른쪽 「笺」 패널에는 이번 대화의 메모와 컨텍스트가 있어요",
+      "아바타 아래 작은 원을 탭하면 도우미를 바꿀 수 있어요",
+      "「작업 전 확인」 모드는 도우미가 행동하기 전에 동의를 구해요",
+      "/rc 를 입력해서 휴대폰으로 컴퓨터를 조작해 보세요",
+      "설정에서 「시각 보조」를 켜면 텍스트 모델도 이미지를 이해해요",
+      "새로운 걸 발견하고 싶다면 플러그인 마켓을 둘러보세요",
+      "파일 백업 기능으로 안전에 대한 걱정을 덜 수 있어요",
+      "업무에서는 서브에이전트로 Agent 협업을, 채널은 즐거움을 위해",
+      "Agent마다 독립된 Skills 를 설정할 수 있어요",
+      "맑음 모드에서 일광욕을 즐겨 보세요!",
+      "워크스페이스의 Markdown 파일은 열면 바로 편집할 수 있어요",
+      "도우미와 한참 지내봤다면, 일기 기능을 써 보세요!",
+      "일기와 스크린샷은 메인 도우미의 작업 폴더에 저장돼요",
+      "도우미마다 다른 워크스페이스를 설정할 수 있고, 순찰을 켜면 그 안에서 자율적으로 움직여요"
+    ]
   },
   "drop": {
     "hint": "파일을 놓으면 {name}에게 보낼 수 있어요"
@@ -596,6 +634,7 @@
       "serifFontHint": "본문에 명조 글꼴을 사용해요",
       "paperTexture": "종이 질감",
       "paperTextureHint": "배경에 한지 질감을 추가해요",
+      "paperTextureDarkDisabledHint": "야간 테마에서는 종이 질감을 사용할 수 없고, 밝은 테마로 돌아오면 저장된 설정대로 복원돼요",
       "leavesOverlay": "맑은 날 모드",
       "leavesOverlayHint": "가끔은 햇볕도 쬐어요"
     },
@@ -641,6 +680,8 @@
       "publicIshikiHint": "개인정보 보호를 위해, 방문자와 대화할 때 어시스턴트는 기억, 개인 정보, 컴퓨터의 파일과 도구에 접근할 수 없어요.\n방문자 대화에서의 답변 스타일과 가이드라인을 여기서 설정할 수 있어요.",
       "chatModel": "모델",
       "chatModelHint": "대화와 작업에 사용하는 모델",
+      "modelUnavailable": "사용 불가: {model}",
+      "modelUnavailableHint": "현재 모델이 사용 가능한 목록에 없어요. 다른 모델을 선택하거나 Provider 페이지에서 설정을 다시 저장하고 모델을 가져오세요.",
       "addAgent": "새 에이전트",
       "createTitle": "새 에이전트",
       "namePlaceholder": "이름을 지어주세요",
@@ -778,6 +819,8 @@
       "verifySuccess": "연결 확인됨",
       "verifyFailed": "확인 실패",
       "setupHint": "API Key를 입력해서 이 Provider를 활성화하세요",
+      "configInvalid": "이 Provider 설정이 손상되어 임시로 건너뛰었어요. 설정을 다시 저장하거나 삭제 후 다시 만들어 주세요.",
+      "configIncomplete": "이 Provider 설정이 완전하지 않아요. API Key, Base URL을 채우고 모델을 추가하거나 가져오세요.",
       "selectHint": "Provider를 선택하면 상세 정보를 볼 수 있어요",
       "addCustom": "커스텀 Provider 추가",
       "noKey": "미설정",
@@ -1048,7 +1091,37 @@
       "installError": "플러그인 설치 실패",
       "invalidPlugin": "유효한 플러그인 디렉토리가 아닙니다",
       "pluginsDir": "플러그인 디렉토리: {path}",
-      "needsFullAccess": "이 플러그인을 사용하려면 「전체 권한 플러그인 허용」을 먼저 활성화하세요"
+      "needsFullAccess": "이 플러그인을 사용하려면 「전체 권한 플러그인 허용」을 먼저 활성화하세요",
+      "configure": "{name} 설정",
+      "configTitle": "{name} 설정",
+      "configLoadError": "플러그인 설정을 불러오지 못했습니다",
+      "sensitiveHint": "저장된 값은 숨겨집니다. 새 값을 입력하면 교체됩니다.",
+      "invalidJson": "JSON 형식이 올바르지 않습니다",
+      "showDiagnostics": "플러그인 진단 보기",
+      "diagnosticsTitle": "플러그인 진단",
+      "diagnosticsLoadError": "플러그인 진단을 불러오지 못했습니다",
+      "diagnosticsSummary": "기능 {capabilities}/{total} · 작업 {tasks} · 일정 {schedules}",
+      "noDiagnostics": "진단 데이터가 없습니다",
+      "diagnosticActivation": "활성화: {state}",
+      "diagnosticRoutes": "페이지 {pages} · 위젯 {widgets} · 설정 {settingsTabs}",
+      "diagnosticTools": "도구 {count}",
+      "diagnosticCommands": "명령 {count}",
+      "diagnosticConfig": "설정 {count}",
+      "openMarketplace": "플러그인 마켓 열기",
+      "marketBack": "플러그인 관리로 돌아가기",
+      "marketplaceTitle": "플러그인 마켓",
+      "marketplaceHint": "설치 가능한 플러그인, README, 권한, 기여 유형을 확인합니다.",
+      "marketplaceCount": "플러그인 {count}개",
+      "marketplaceNoSource": "마켓 소스 없음",
+      "marketplaceEmpty": "둘러볼 플러그인이 없습니다",
+      "marketLoading": "플러그인 마켓을 불러오는 중…",
+      "marketLoadError": "플러그인 마켓을 불러오지 못했습니다",
+      "marketReadmeLoadError": "README를 불러오지 못했습니다",
+      "marketInstalled": "설치됨",
+      "marketInstall": "설치",
+      "marketUpdate": "업데이트",
+      "marketReadmeLoading": "README를 불러오는 중…",
+      "marketSelectPlugin": "README를 볼 플러그인을 선택하세요"
     },
     "mcp": {
       "masterTitle": "Master Switch",

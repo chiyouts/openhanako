@@ -24,6 +24,16 @@ export function ProviderDetail({ providerId, summary, providerConfig, isPresetSe
           <ProviderDeleteButton providerId={providerId} onRefresh={onRefresh} />
         )}
       </div>
+      {summary.config_status === 'invalid' && (
+        <div className={styles['pv-config-alert']}>
+          {t('settings.providers.configInvalid')}
+        </div>
+      )}
+      {summary.config_status === 'needs_setup' && summary.can_delete && !summary.config_error && (
+        <div className={styles['pv-config-alert']}>
+          {t('settings.providers.configIncomplete')}
+        </div>
+      )}
       {summary.supports_oauth ? (
         <OAuthCredentials providerId={providerId} summary={summary} onRefresh={onRefresh} />
       ) : (

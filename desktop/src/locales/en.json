@@ -65,6 +65,14 @@
     "unpin": "Unpin",
     "pinFailed": "Failed to pin session",
     "unpinFailed": "Failed to unpin session",
+    "archive": "Archive",
+    "summary": {
+      "title": "Session Summary",
+      "open": "Session Summary",
+      "loading": "Loading summary…",
+      "empty": "No summary yet",
+      "loadFailed": "Failed to load summary"
+    },
     "archived": {
       "entry": "Archived Chats",
       "title": "Archived Chats",
@@ -114,7 +122,7 @@
     "screenshotFailed": "Screenshot save failed",
     "selectedCount": "{count} selected",
     "allDone": "All done",
-    "completeAndDismiss": "Complete and dismiss"
+    "markAllComplete": "Mark all as complete"
   },
   "chat": {
     "send": "Send",
@@ -123,7 +131,12 @@
     "browserScreenshot": "Browser screenshot",
     "compacting": "Compacting context",
     "visionAuxiliary": "Vision auxiliary",
-    "fileExpired": "File expired"
+    "fileExpired": "File expired",
+    "fileActions": {
+      "more": "More file actions",
+      "revealInFinder": "Reveal in file manager",
+      "copyPath": "Copy file path"
+    }
   },
   "time": {
     "justNow": "Just now",
@@ -165,6 +178,8 @@
     "pastedImage": "Pasted image",
     "textModelImageBlocked": "The current model is text-only and cannot send images directly. Adjust the model capability in settings, or configure and enable auxiliary vision.",
     "textModelVideoBlocked": "The current model does not support video input. Enable video capability in settings, or switch to a video-capable model.",
+    "imageReadFailed": "Could not read the image, so the message was not sent. Paste or attach it again.",
+    "videoReadFailed": "Could not read the video, so the message was not sent. Attach it again.",
     "openModelSettings": "Open model settings",
     "attachFiles": "Add files",
     "commandMenu": "Command menu",
@@ -207,7 +222,30 @@
     "memoryOn": "Memory",
     "memoryOff": "Memory not used for this chat",
     "memoryDisabled": "Memory is off",
-    "agentSelector": "Choose agent"
+    "agentSelector": "Choose agent",
+    "placeholderTips": [
+      "Type / to bring up the command menu",
+      "Use @ to reference files in your workspace",
+      "Drop a file into the input to send it along",
+      "Paste an image to send it directly",
+      "Select any text on the page — a floating input will appear",
+      "The diamond button below the avatar toggles memory for this chat",
+      "The workspace button lets you switch or add folders",
+      "The right panel holds notes and context for this chat",
+      "Tap the small dots under the avatar to switch assistants",
+      "Ask-before-acting mode makes the assistant confirm before doing things",
+      "Try /rc to control your computer from your phone",
+      "Enable Vision Assist in settings — text models can understand images too",
+      "Looking for something new? Check out the plugin marketplace",
+      "File backup helps if you're worried about losing data",
+      "Use subagents for Agent collaboration at work; channels are for play",
+      "Each Agent can be configured with its own Skills",
+      "Try sunbathing in Sunny mode!",
+      "Markdown files in the workspace can be edited directly when opened",
+      "After spending some time with your assistant, try the diary feature!",
+      "Diaries and screenshots are saved in the main assistant's workspace",
+      "Each assistant can have its own workspace; with Patrol on, they'll act on their own there"
+    ]
   },
   "drop": {
     "hint": "Drop to send files to {name}"
@@ -576,6 +614,7 @@
       "serifFontHint": "Use serif font for body text",
       "paperTexture": "Paper Texture",
       "paperTextureHint": "Add a rice paper texture to the background",
+      "paperTextureDarkDisabledHint": "Paper texture is unavailable in night themes and will return with your saved setting in light themes",
       "leavesOverlay": "Sunny Mode",
       "leavesOverlayHint": "Go touch some grass (and sunlight)"
     },
@@ -644,6 +683,8 @@
       "publicIshikiHint": "For privacy, the assistant cannot access memories, your personal info, or any files and tools on your computer when talking to visitors.\nYou can set the assistant's reply style and guidelines for visitor conversations here.",
       "chatModel": "Model",
       "chatModelHint": "The model used for conversations and tasks",
+      "modelUnavailable": "Unavailable: {model}",
+      "modelUnavailableHint": "The current model is no longer available. Select another model, or save the provider config again and fetch models.",
       "imageModel": "Image Model",
       "imageModelHint": "The model used for image generation",
       "addAgent": "New Agent",
@@ -783,6 +824,8 @@
       "verifySuccess": "Connection verified",
       "verifyFailed": "Verification failed",
       "setupHint": "Enter API Key to activate this provider",
+      "configInvalid": "This provider config is damaged and has been skipped temporarily. Save the config again, or delete and recreate it.",
+      "configIncomplete": "This provider config is incomplete. Fill API Key, Base URL, and add or fetch models.",
       "selectHint": "Select a provider to view details",
       "addCustom": "Add Custom Provider",
       "noKey": "Not configured",
@@ -1082,7 +1125,37 @@
       "installError": "Plugin install failed",
       "invalidPlugin": "Not a valid plugin directory",
       "pluginsDir": "Plugin directory: {path}",
-      "needsFullAccess": "Enable \"Allow full-access plugins\" to use this plugin"
+      "needsFullAccess": "Enable \"Allow full-access plugins\" to use this plugin",
+      "configure": "Configure {name}",
+      "configTitle": "{name} settings",
+      "configLoadError": "Plugin settings failed to load",
+      "sensitiveHint": "Stored value is hidden. Enter a new value to replace it.",
+      "invalidJson": "Invalid JSON",
+      "showDiagnostics": "Show plugin diagnostics",
+      "diagnosticsTitle": "Plugin Diagnostics",
+      "diagnosticsLoadError": "Plugin diagnostics failed to load",
+      "diagnosticsSummary": "Capabilities {capabilities}/{total} · Tasks {tasks} · Schedules {schedules}",
+      "noDiagnostics": "No diagnostics yet",
+      "diagnosticActivation": "Activation: {state}",
+      "diagnosticRoutes": "Pages {pages} · Widgets {widgets} · Settings {settingsTabs}",
+      "diagnosticTools": "Tools {count}",
+      "diagnosticCommands": "Commands {count}",
+      "diagnosticConfig": "Config {count}",
+      "openMarketplace": "Open plugin marketplace",
+      "marketBack": "Back to plugin management",
+      "marketplaceTitle": "Plugin Marketplace",
+      "marketplaceHint": "Browse installable plugins, README files, permissions, and contribution types.",
+      "marketplaceCount": "{count} plugins",
+      "marketplaceNoSource": "No marketplace source",
+      "marketplaceEmpty": "No plugins to browse",
+      "marketLoading": "Loading plugin marketplace…",
+      "marketLoadError": "Plugin marketplace failed to load",
+      "marketReadmeLoadError": "README failed to load",
+      "marketInstalled": "Installed",
+      "marketInstall": "Install",
+      "marketUpdate": "Update",
+      "marketReadmeLoading": "Loading README…",
+      "marketSelectPlugin": "Select a plugin to view its README"
     },
     "mcp": {
       "masterTitle": "Master Switch",

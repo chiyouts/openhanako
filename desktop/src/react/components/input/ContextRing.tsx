@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../../stores';
 import { useI18n } from '../../hooks/use-i18n';
 import { getWebSocket } from '../../services/websocket';
-import { shouldShowContextRing } from './context-ring-visibility';
+import { shouldShowContextRingTokenLabel } from './context-ring-visibility';
 import styles from './InputArea.module.css';
 
 export function ContextRing() {
@@ -26,13 +26,9 @@ export function ContextRing() {
   const storeCompacting = useStore(s => currentSessionPath ? s.compactingSessions.includes(currentSessionPath) : false);
 
   useEffect(() => {
-    if (storeContextTokens != null) {
-      setTokens(storeContextTokens);
-      setContextWindow(storeContextWindow);
-      setPercent(storeContextPercent);
-    } else {
-      setTokens(null);
-    }
+    setTokens(storeContextTokens ?? null);
+    setContextWindow(storeContextWindow ?? null);
+    setPercent(storeContextPercent ?? null);
     setCompacting(storeCompacting);
   }, [storeContextTokens, storeContextWindow, storeContextPercent, storeCompacting]);
 
@@ -44,9 +40,10 @@ export function ContextRing() {
     }
   }, [compacting]);
 
+  if (!currentSessionPath) return null;
+  const displayTokens = tokens ?? 0;
   const pct = percent ?? 0;
-  if (tokens == null) return null;
-  if (!shouldShowContextRing({ tokens, contextWindow, compacting })) return null;
+  const showTokenLabel = shouldShowContextRingTokenLabel(tokens);
 
   // SVG 圆环参数（更小更粗）
   const r = 6;
@@ -58,7 +55,7 @@ export function ContextRing() {
   const yuan = agentYuan || 'hanako';
 
   // token 数量格式化
-  const tokensK = Math.round(tokens / 1000);
+  const tokensK = Math.round(displayTokens / 1000);
   const windowK = contextWindow != null ? Math.round(contextWindow / 1000) : 0;
 
   return (
@@ -86,11 +83,16 @@ export function ContextRing() {
             className={styles['context-ring-progress']}
           />
         </svg>
+        {showTokenLabel && (
+          <span className={styles['context-ring-label']}>{tokensK}k</span>
+        )}
       </button>
       {hovered && (
         <div className={styles['context-ring-tooltip']}>
           <div>{t('input.contextWindow', { windowK })}</div>
-          <div>{t('input.tokensUsed', { tokensK, pct: Math.round(pct) })}</div>
+          {tokens != null && (
+            <div>{t('input.tokensUsed', { tokensK, pct: Math.round(pct) })}</div>
+          )}
         </div>
       )}
     </span>

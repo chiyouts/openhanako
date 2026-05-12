@@ -1,7 +1,7 @@
 /**
  * core/migrations.js 单元测试
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -10,7 +10,7 @@ import { runMigrations } from "../core/migrations.js";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 17;
+const LATEST_DATA_VERSION = 21;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -79,6 +79,15 @@ function readSessionJsonl(filePath) {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+}
+
+function writeJson(filePath, data) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
 // ── runner 行为 ──────────────────────────────────────────────────────────────
@@ -1436,7 +1445,8 @@ describe("migration #16: video capability projection", () => {
     runMigration16(prefs);
 
     const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
-    expect(raw.providers.dashscope.models[0].input).toEqual(["text", "image", "video"]);
+    expect(raw.providers.dashscope.models[0].input).toEqual(["text", "image"]);
+    expect(raw.providers.dashscope.models[0].compat.hanaVideoInput).toBe(true);
     expect(raw.providers.dashscope.models[0]).not.toHaveProperty("video");
     expect(raw.providers.dashscope.models[1].input).toEqual(["text"]);
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
@@ -1471,6 +1481,137 @@ describe("migration #16: video capability projection", () => {
     expect(raw.providers.dashscope.models[0]).toEqual({ id: "qwen3-vl-plus", video: true });
     const cfg = readAgentConfig(agentsDir, "hana");
     expect(cfg.models.overrides["qwen3-vl-plus"]).toEqual({ displayName: "Qwen VL" });
+  });
+});
+
+describe("migration #20: Pi model input schema compatibility", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration20(prefs) {
+    prefs.savePreferences({ _dataVersion: 19 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({}),
+      log: () => {},
+    });
+  }
+
+  it("removes invalid Pi input modalities and preserves Hana video capability in compat", async () => {
+    const prefs = makePrefs(userDir);
+    const modelsJsonPath = path.join(tmpDir, "models.json");
+    fs.writeFileSync(modelsJsonPath, JSON.stringify({
+      providers: {
+        dashscope: {
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [
+            { id: "qwen3-vl-plus", name: "Qwen VL", input: ["text", "image", "video"] },
+            { id: "qwen-plus", name: "Qwen Plus", input: ["text", "audio"] },
+            { id: "custom-video", name: "Custom Video", input: ["video"], video: true },
+          ],
+          modelOverrides: {
+            "qwen3-vl-plus": { input: ["text", "image", "video"] },
+            "qwen-plus": { input: ["text", "audio"] },
+          },
+        },
+      },
+    }, null, 2) + "\n", "utf-8");
+
+    runMigration20(prefs);
+
+    const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(raw.providers.dashscope.models[0]).toMatchObject({
+      id: "qwen3-vl-plus",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    });
+    expect(raw.providers.dashscope.models[1]).toMatchObject({
+      id: "qwen-plus",
+      input: ["text"],
+    });
+    expect(raw.providers.dashscope.models[1].compat?.hanaVideoInput).toBeUndefined();
+    expect(raw.providers.dashscope.models[2]).toMatchObject({
+      id: "custom-video",
+      input: ["text"],
+      compat: { hanaVideoInput: true },
+    });
+    expect(raw.providers.dashscope.models[2]).not.toHaveProperty("video");
+    expect(raw.providers.dashscope.modelOverrides["qwen3-vl-plus"]).toMatchObject({
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    });
+    expect(raw.providers.dashscope.modelOverrides["qwen-plus"]).toEqual({
+      input: ["text"],
+    });
+
+    const { AuthStorage, createModelRegistry } = await import("../lib/pi-sdk/index.js");
+    const registry = createModelRegistry(new AuthStorage(tmpDir), modelsJsonPath);
+    const available = await registry.getAvailable();
+    expect(available.map((model) => model.id)).toEqual(["qwen3-vl-plus", "qwen-plus", "custom-video"]);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #21: video transport capability refresh", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = tmpDir;
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runMigration21(prefs) {
+    prefs.savePreferences({ _dataVersion: 20 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({}),
+      log: () => {},
+    });
+  }
+
+  it("repairs existing models.json entries for newly declared Kimi video models", () => {
+    const prefs = makePrefs(userDir);
+    const modelsJsonPath = path.join(tmpDir, "models.json");
+    fs.writeFileSync(modelsJsonPath, JSON.stringify({
+      providers: {
+        moonshot: {
+          baseUrl: "https://api.moonshot.cn/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [
+            { id: "kimi-k2.6", name: "Kimi K2.6", input: ["text", "image"] },
+          ],
+        },
+      },
+    }, null, 2) + "\n", "utf-8");
+
+    runMigration21(prefs);
+
+    const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(raw.providers.moonshot.models[0]).toMatchObject({
+      id: "kimi-k2.6",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    });
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
   });
 });
 
@@ -1696,5 +1837,424 @@ describe("migration #17 — migrateBridgeSessionKeysToAgentScoped", () => {
     const index = readBridgeIndex("hana");
     expect(index["wx_dm_user"]).toEqual({ file: "owner/legacy.jsonl", userId: "user", name: "Old" });
     expect(index["wx_dm_user@hana"]).toEqual({ file: "owner/current.jsonl", userId: "user", name: "Current" });
+  });
+});
+
+describe("migration #18 — create local identity registries", () => {
+  let tmpDir, userDir, agentsDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    userDir = path.join(tmpDir, "user");
+    agentsDir = path.join(tmpDir, "agents");
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runFrom17() {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 17 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+    return prefs;
+  }
+
+  it("creates stable server, legacy owner user, and default personal space for old data roots", () => {
+    fs.mkdirSync(path.join(tmpDir, "user", "avatars"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "user", "user.md"), "old profile\n", "utf-8");
+    writeAgentConfig(agentsDir, "hana", { api: { provider: "" } });
+
+    const prefs = runFrom17();
+
+    const serverNode = readJson(path.join(tmpDir, "server-node.json"));
+    const users = readJson(path.join(tmpDir, "users.json"));
+    const spaces = readJson(path.join(tmpDir, "spaces.json"));
+
+    expect(serverNode).toEqual(expect.objectContaining({
+      schemaVersion: 1,
+      label: "Local Hana",
+    }));
+    expect(serverNode.serverId).toMatch(/^server_[0-9a-f-]{36}$/);
+
+    expect(users.schemaVersion).toBe(1);
+    expect(users.defaultUserId).toMatch(/^user_[0-9a-f-]{36}$/);
+    expect(users.users).toEqual([
+      expect.objectContaining({
+        userId: users.defaultUserId,
+        kind: "legacy_owner",
+        displayName: "Local User",
+        profileSource: "legacy_user_profile",
+      }),
+    ]);
+
+    expect(spaces.schemaVersion).toBe(1);
+    expect(spaces.defaultSpaceId).toMatch(/^space_[0-9a-f-]{36}$/);
+    expect(spaces.spaces).toEqual([
+      expect.objectContaining({
+        spaceId: spaces.defaultSpaceId,
+        ownerUserId: users.defaultUserId,
+        label: "Personal Space",
+        kind: "personal",
+        membershipModel: "single_user_implicit",
+        storage: {
+          provider: "legacy_hana_home",
+          legacyRoot: true,
+        },
+      }),
+    ]);
+    expect(fs.existsSync(path.join(tmpDir, "user", "user.md"))).toBe(true);
+    expect(fs.existsSync(path.join(agentsDir, "hana", "config.yaml"))).toBe(true);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("preserves existing valid identity registries exactly", () => {
+    const serverNodePath = path.join(tmpDir, "server-node.json");
+    const usersPath = path.join(tmpDir, "users.json");
+    const spacesPath = path.join(tmpDir, "spaces.json");
+    const serverNode = {
+      schemaVersion: 1,
+      serverId: "server_existing",
+      label: "Existing Server",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const users = {
+      schemaVersion: 1,
+      defaultUserId: "user_existing",
+      users: [{
+        userId: "user_existing",
+        kind: "legacy_owner",
+        displayName: "Existing User",
+        profileSource: "legacy_user_profile",
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      }],
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const spaces = {
+      schemaVersion: 1,
+      defaultSpaceId: "space_existing",
+      spaces: [{
+        spaceId: "space_existing",
+        ownerUserId: "user_existing",
+        label: "Existing Space",
+        kind: "personal",
+        storage: { provider: "legacy_hana_home", legacyRoot: true },
+        membershipModel: "single_user_implicit",
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      }],
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    writeJson(serverNodePath, serverNode);
+    writeJson(usersPath, users);
+    writeJson(spacesPath, spaces);
+
+    const prefs = runFrom17();
+
+    expect(readJson(serverNodePath)).toEqual(serverNode);
+    expect(readJson(usersPath)).toEqual(users);
+    expect(readJson(spacesPath)).toEqual(spaces);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("completes partial identity registries with consistent owner and space references", () => {
+    writeJson(path.join(tmpDir, "server-node.json"), {
+      schemaVersion: 1,
+      serverId: "server_partial",
+      label: "Partial Server",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    });
+    writeJson(path.join(tmpDir, "users.json"), {
+      schemaVersion: 1,
+      defaultUserId: "user_partial",
+      users: [{
+        userId: "user_partial",
+        kind: "legacy_owner",
+        displayName: "Partial User",
+        profileSource: "legacy_user_profile",
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      }],
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    });
+
+    const prefs = runFrom17();
+    const spaces = readJson(path.join(tmpDir, "spaces.json"));
+
+    expect(spaces.defaultSpaceId).toMatch(/^space_[0-9a-f-]{36}$/);
+    expect(spaces.spaces[0]).toEqual(expect.objectContaining({
+      spaceId: spaces.defaultSpaceId,
+      ownerUserId: "user_partial",
+      kind: "personal",
+      membershipModel: "single_user_implicit",
+    }));
+    expect(readJson(path.join(tmpDir, "server-node.json")).serverId).toBe("server_partial");
+    expect(readJson(path.join(tmpDir, "users.json")).defaultUserId).toBe("user_partial");
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("fails explicitly and keeps migration version unchanged when identity registries are invalid", () => {
+    fs.writeFileSync(path.join(tmpDir, "users.json"), "{ broken json", "utf-8");
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 17 });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      runMigrations({
+        hanakoHome: tmpDir,
+        agentsDir,
+        prefs,
+        providerRegistry: makeRegistry([]),
+        log: () => {},
+      });
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("[migrations] #18 失败:"));
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(prefs.getPreferences()._dataVersion).toBe(17);
+    expect(fs.existsSync(path.join(tmpDir, "server-node.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "spaces.json"))).toBe(false);
+  });
+});
+
+describe("migration #19 — migrate legacy API-key auth to provider config", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = path.join(tmpDir, "user");
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeAuth(data) {
+    writeJson(path.join(tmpDir, "auth.json"), data);
+  }
+
+  function writeAddedModels(data) {
+    fs.writeFileSync(
+      path.join(tmpDir, "added-models.yaml"),
+      YAML.dump(data, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '"' }),
+      "utf-8",
+    );
+  }
+
+  function readAddedModels() {
+    return YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
+  }
+
+  function makeProviderRegistry() {
+    return {
+      reload: vi.fn(),
+      get(id) {
+        if (id === "deepseek") {
+          return {
+            id: "deepseek",
+            authType: "api-key",
+            baseUrl: "https://api.deepseek.com",
+            api: "openai-completions",
+            authJsonKey: "deepseek",
+          };
+        }
+        if (id === "openai-codex-oauth") {
+          return {
+            id: "openai-codex-oauth",
+            authType: "oauth",
+            baseUrl: "",
+            api: "openai-codex-responses",
+            authJsonKey: "openai-codex",
+          };
+        }
+        if (id === "openai-codex") {
+          return {
+            id: "openai-codex-oauth",
+            authType: "oauth",
+            baseUrl: "",
+            api: "openai-codex-responses",
+            authJsonKey: "openai-codex",
+          };
+        }
+        if (id === "ollama") {
+          return {
+            id: "ollama",
+            authType: "none",
+            baseUrl: "http://localhost:11434/v1",
+            api: "openai-completions",
+            authJsonKey: "ollama",
+          };
+        }
+        return null;
+      },
+      getDefaultModels(id) {
+        return id === "deepseek" ? ["deepseek-v4-pro", "deepseek-v4-flash"] : [];
+      },
+    };
+  }
+
+  function runFrom18(providerRegistry = makeProviderRegistry()) {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 18 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry,
+      log: () => {},
+    });
+    return prefs;
+  }
+
+  it("moves legacy DeepSeek API key into existing added-models provider before auth cleanup", () => {
+    writeAuth({
+      deepseek: { type: "api_key", key: "sk-legacy-4d2a" },
+      "openai-codex": { type: "oauth", access: "oauth-access-token" },
+    });
+    writeAddedModels({
+      providers: {
+        deepseek: {
+          models: ["deepseek-v4-flash"],
+        },
+      },
+    });
+
+    const prefs = runFrom18();
+
+    const providers = readAddedModels().providers;
+    expect(providers.deepseek).toEqual({
+      api_key: "sk-legacy-4d2a",
+      base_url: "https://api.deepseek.com",
+      api: "openai-completions",
+      models: ["deepseek-v4-flash"],
+    });
+    expect(providers["openai-codex-oauth"]).toBeUndefined();
+    expect(readJson(path.join(tmpDir, "auth.json"))["openai-codex"].access).toBe("oauth-access-token");
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("recreates a missing known provider from legacy auth and models.json", () => {
+    writeAuth({
+      deepseek: { type: "api_key", key: "sk-legacy-4d2a" },
+    });
+    writeAddedModels({ providers: {} });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com",
+          api: "openai-completions",
+          models: [
+            { id: "deepseek-v4-pro" },
+            { id: "deepseek-v4-flash" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.deepseek).toEqual({
+      api_key: "sk-legacy-4d2a",
+      base_url: "https://api.deepseek.com",
+      api: "openai-completions",
+      models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    });
+  });
+
+  it("recovers a legacy key from models.json after auth.json has already been cleaned", () => {
+    writeAuth({});
+    writeAddedModels({
+      providers: {
+        deepseek: {
+          models: ["deepseek-v4-flash"],
+        },
+      },
+    });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com",
+          api: "openai-completions",
+          apiKey: "sk-projected-6ad1",
+          models: [
+            { id: "deepseek-v4-flash" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.deepseek).toEqual({
+      api_key: "sk-projected-6ad1",
+      base_url: "https://api.deepseek.com",
+      api: "openai-completions",
+      models: ["deepseek-v4-flash"],
+    });
+  });
+
+  it("does not persist the synthetic local API key from no-auth provider projections", () => {
+    writeAuth({});
+    writeAddedModels({
+      providers: {
+        ollama: {
+          base_url: "http://localhost:11434/v1",
+          api: "openai-completions",
+          models: ["llama3.2"],
+        },
+      },
+    });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        ollama: {
+          baseUrl: "http://localhost:11434/v1",
+          api: "openai-completions",
+          apiKey: "local",
+          models: [
+            { id: "llama3.2" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.ollama).toEqual({
+      base_url: "http://localhost:11434/v1",
+      api: "openai-completions",
+      models: ["llama3.2"],
+    });
+  });
+
+  it("does not overwrite an explicit added-models API key, including an intentional clear", () => {
+    writeAuth({
+      deepseek: { type: "api_key", key: "sk-old-3ffa" },
+    });
+    writeAddedModels({
+      providers: {
+        deepseek: {
+          api_key: "",
+          base_url: "https://api.deepseek.com",
+          api: "openai-completions",
+          models: ["deepseek-v4-pro"],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readAddedModels().providers.deepseek.api_key).toBe("");
   });
 });

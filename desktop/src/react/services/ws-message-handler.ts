@@ -504,9 +504,11 @@ export function handleServerMessage(msg: any): void {
     case 'context_usage': {
       const sp = msg.sessionPath;
       if (!sp) { console.warn('[ws] event missing sessionPath:', msg.type); break; }
-      if (msg.tokens != null && msg.contextWindow != null) {
+      const existingWindow = useStore.getState().contextBySession[sp]?.window ?? null;
+      const window = msg.contextWindow ?? existingWindow;
+      if (msg.tokens != null || window != null || msg.percent != null) {
         updateKeyed('contextBySession', sp,
-          { tokens: msg.tokens ?? null, window: msg.contextWindow ?? null, percent: msg.percent ?? null },
+          { tokens: msg.tokens ?? null, window, percent: msg.percent ?? null },
           (_s, d) => ({ contextTokens: d.tokens, contextWindow: d.window, contextPercent: d.percent }),
         );
       }

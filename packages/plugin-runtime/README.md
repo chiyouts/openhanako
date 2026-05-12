@@ -52,7 +52,18 @@ export const bridgeSend = defineBusHandler<
 
 export default definePlugin({
   async onload(ctx, { register }) {
-    register(ctx.bus.handle(bridgeSend.type, (payload) => bridgeSend.handle(payload as any, ctx as any)));
+    register(ctx.bus.handle(bridgeSend.type, (payload) => bridgeSend.handle(payload as any, ctx as any), {
+      capability: {
+        title: 'Bridge send',
+        description: 'Send text to a bridge platform.',
+        inputSchema: { type: 'object' },
+        outputSchema: { type: 'object' },
+        permission: 'bridge.send',
+        errors: ['NO_HANDLER', 'TIMEOUT'],
+        owner: 'plugin:example',
+        stability: 'experimental',
+      },
+    }));
 
     await requestBus(ctx, 'session:send', { text: 'Plugin loaded' }, { timeout: 5000 });
   },
@@ -60,6 +71,9 @@ export default definePlugin({
 ```
 
 `HANA_BUS_SKIP` is the shared skip sentinel used by the host `EventBus.SKIP`, so SDK-authored handlers can participate in chained handlers without importing host internals.
+
+Use `ctx.bus.listCapabilities?.()` or `ctx.bus.getCapability?.(type)` to inspect
+the host EventBus capability directory before making optional requests.
 
 ## SessionFile media helpers
 

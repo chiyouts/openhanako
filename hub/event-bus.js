@@ -5,6 +5,7 @@
  * 支持带过滤的订阅：按 sessionPath / event type 过滤。
  * 支持 request/handle 请求响应模式，供 plugin 间通信使用。
  */
+import { EventBusCapabilityDirectory } from "./event-bus-capabilities.js";
 
 export class BusNoHandlerError extends Error {
   constructor(type) {
@@ -29,6 +30,7 @@ export class EventBus {
     this._nextId = 0;
     /** @type {Map<string, Function[]>} request/handle 模式 */
     this._handlers = new Map();
+    this._capabilities = new EventBusCapabilityDirectory();
 
     // ── emit 索引 ──
     // 无 sessionPath 过滤的订阅者（"广播订阅者"），每次 emit 都要检查
@@ -118,15 +120,21 @@ export class EventBus {
    * @param {Function} handler      async (payload) => result | EventBus.SKIP
    * @returns {Function} unhandle
    */
-  handle(type, handler) {
+  handle(type, handler, options = {}) {
     if (!this._handlers.has(type)) this._handlers.set(type, []);
     this._handlers.get(type).push(handler);
+    if (options.capability) {
+      this.registerCapability({ ...options.capability, type });
+    }
     return () => {
       const arr = this._handlers.get(type);
       if (!arr) return;
       const idx = arr.indexOf(handler);
       if (idx !== -1) arr.splice(idx, 1);
       if (arr.length === 0) this._handlers.delete(type);
+      if (options.capability && options.unregisterCapability !== false) {
+        this.unregisterCapability(type);
+      }
     };
   }
 
@@ -174,5 +182,25 @@ export class EventBus {
   hasHandler(type) {
     const arr = this._handlers.get(type);
     return arr != null && arr.length > 0;
+  }
+
+  registerCapability(capability) {
+    return this._capabilities.register(capability);
+  }
+
+  unregisterCapability(type) {
+    this._capabilities.unregister(type);
+  }
+
+  getCapability(type) {
+    const capability = this._capabilities.get(type);
+    return capability ? { ...capability, available: this.hasHandler(type) } : null;
+  }
+
+  listCapabilities() {
+    return this._capabilities.list().map((capability) => ({
+      ...capability,
+      available: this.hasHandler(capability.type),
+    }));
   }
 }

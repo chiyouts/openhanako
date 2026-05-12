@@ -64,6 +64,14 @@
     "unpin": "取消置頂",
     "pinFailed": "置頂 session 失敗",
     "unpinFailed": "取消置頂失敗",
+    "archive": "封存",
+    "summary": {
+      "title": "Session 摘要",
+      "open": "摘要",
+      "loading": "正在讀取摘要…",
+      "empty": "暫無摘要",
+      "loadFailed": "摘要讀取失敗"
+    },
     "archived": {
       "entry": "已封存的對話",
       "title": "已封存的對話",
@@ -113,7 +121,7 @@
     "screenshotFailed": "截圖儲存失敗",
     "selectedCount": "已選 {count} 則",
     "allDone": "全部完成",
-    "completeAndDismiss": "完成並收起"
+    "markAllComplete": "全部標記為已完成"
   },
   "chat": {
     "send": "傳送",
@@ -122,7 +130,12 @@
     "browserScreenshot": "瀏覽器截圖",
     "compacting": "上下文壓縮中",
     "visionAuxiliary": "輔助視覺",
-    "fileExpired": "檔案已過期"
+    "fileExpired": "檔案已過期",
+    "fileActions": {
+      "more": "更多檔案操作",
+      "revealInFinder": "在 Finder 中顯示",
+      "copyPath": "複製檔案路徑"
+    }
   },
   "time": {
     "justNow": "剛剛",
@@ -164,6 +177,8 @@
     "pastedImage": "貼上圖片",
     "textModelImageBlocked": "目前模型是文字模型，不能直接傳送圖片。請在設定中調整模型能力，或設定並啟用輔助視覺。",
     "textModelVideoBlocked": "目前模型不支援影片輸入。請在設定中開啟影片能力，或切換到支援影片的模型。",
+    "imageReadFailed": "圖片讀取失敗，訊息沒有傳送。請重新貼上或重新加入圖片。",
+    "videoReadFailed": "影片讀取失敗，訊息沒有傳送。請重新加入影片。",
     "openModelSettings": "開啟模型設定",
     "attachFiles": "新增檔案",
     "commandMenu": "命令選單",
@@ -206,7 +221,30 @@
     "memoryOn": "記憶",
     "memoryOff": "此次聊天不參考記憶",
     "memoryDisabled": "記憶已關閉",
-    "agentSelector": "選擇助手"
+    "agentSelector": "選擇助手",
+    "placeholderTips": [
+      "試試輸入 / 喚起命令選單",
+      "輸入 @ 可以引用工作空間裡的檔案",
+      "把檔案直接拖進輸入框，就能附帶傳送",
+      "貼上圖片可以直接傳出去",
+      "選取頁面任意文字，會浮出一個臨時輸入框",
+      "頭像下方那枚菱形按鈕，控制本次對話是否被記住",
+      "工作空間按鈕可以切換或新增資料夾",
+      "右側「箋」面板，放著這次會話的筆記與上下文",
+      "在頭像下方點不同的小圓點，可以切換助手",
+      "「操作前詢問」模式讓助手在動手前先徵求你同意",
+      "試試 /rc，在手機上操作你的電腦",
+      "在設定裡開啟「輔助視覺」，文字模型也能看懂圖片",
+      "想要一些新發現？試試外掛市集！",
+      "檔案備份功能可以解決一些安全上的顧慮",
+      "工作場景下用 subagent 讓 Agent 協作，頻道留給遊玩",
+      "每個 Agent 可以配置自己獨立的 Skills",
+      "試試晴天模式的日光浴！",
+      "工作區裡的 Markdown 檔案打開可以直接編輯",
+      "和助手相處一段時間後，試試日記功能吧！",
+      "日記和截圖都保存在主助手的工作目錄",
+      "不同助手可以設定不同工作空間，開啟巡檢後會在那裡自主行動"
+    ]
   },
   "yuan": {
     "types": {
@@ -596,6 +634,7 @@
       "serifFontHint": "使用襯線體顯示正文內容",
       "paperTexture": "紙質紋理",
       "paperTextureHint": "為背景添加宣紙質感",
+      "paperTextureDarkDisabledHint": "黑夜模式不支援紙質紋理，切回淺色主題後會按原設定恢復",
       "leavesOverlay": "晴天模式",
       "leavesOverlayHint": "沒事兒曬曬太陽"
     },
@@ -641,6 +680,8 @@
       "publicIshikiHint": "出於隱私考量，助手與訪客對話時無法存取記憶、你的個人資訊，以及電腦上的任何檔案與工具。\n你可以在這裡設定助手對訪客說話時的回覆風格以及注意事項。",
       "chatModel": "Ta 的模型",
       "chatModelHint": "Ta 在對話與工作中使用的模型",
+      "modelUnavailable": "目前不可用：{model}",
+      "modelUnavailableHint": "目前模型已不在可用列表中，請重新選擇模型，或到供應商頁面重新儲存設定並讀取模型。",
       "addAgent": "新建助手",
       "createTitle": "新建助手",
       "namePlaceholder": "起個名字",
@@ -778,6 +819,8 @@
       "verifySuccess": "驗證通過",
       "verifyFailed": "驗證失敗",
       "setupHint": "輸入 API Key 以啟用此供應商",
+      "configInvalid": "此供應商設定損壞，已被暫時略過。請重新儲存設定，或刪除後重建。",
+      "configIncomplete": "此供應商設定不完整，請補齊 API Key、Base URL，並新增或讀取模型。",
       "selectHint": "選擇一個供應商查看詳情",
       "addCustom": "新增自訂供應商",
       "noKey": "未設定",
@@ -1048,7 +1091,37 @@
       "installError": "插件安裝失敗",
       "invalidPlugin": "不是有效的插件目錄",
       "pluginsDir": "插件目錄：{path}",
-      "needsFullAccess": "請先開啟「允許全權插件」"
+      "needsFullAccess": "請先開啟「允許全權插件」",
+      "configure": "設定「{name}」",
+      "configTitle": "「{name}」設定",
+      "configLoadError": "插件設定載入失敗",
+      "sensitiveHint": "已儲存的值會被隱藏。輸入新值即可替換。",
+      "invalidJson": "JSON 格式不正確",
+      "showDiagnostics": "查看插件診斷",
+      "diagnosticsTitle": "插件診斷",
+      "diagnosticsLoadError": "插件診斷載入失敗",
+      "diagnosticsSummary": "能力 {capabilities}/{total} · 任務 {tasks} · 排程 {schedules}",
+      "noDiagnostics": "暫無診斷資料",
+      "diagnosticActivation": "激活：{state}",
+      "diagnosticRoutes": "頁面 {pages} · 元件 {widgets} · 設定頁 {settingsTabs}",
+      "diagnosticTools": "工具 {count}",
+      "diagnosticCommands": "命令 {count}",
+      "diagnosticConfig": "配置項 {count}",
+      "openMarketplace": "打開插件市場",
+      "marketBack": "返回插件管理",
+      "marketplaceTitle": "插件市場",
+      "marketplaceHint": "瀏覽可安裝插件，查看 README、權限和貢獻類型。",
+      "marketplaceCount": "{count} 個插件",
+      "marketplaceNoSource": "未配置市場源",
+      "marketplaceEmpty": "暫無可瀏覽插件",
+      "marketLoading": "正在讀取插件市場…",
+      "marketLoadError": "插件市場載入失敗",
+      "marketReadmeLoadError": "README 載入失敗",
+      "marketInstalled": "已安裝",
+      "marketInstall": "安裝",
+      "marketUpdate": "更新",
+      "marketReadmeLoading": "正在讀取 README…",
+      "marketSelectPlugin": "選擇一個插件查看 README"
     },
     "mcp": {
       "masterTitle": "總開關",

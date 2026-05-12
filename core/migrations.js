@@ -11,6 +11,7 @@ import fs from "fs";
 import path from "path";
 import YAML from "js-yaml";
 import { safeReadYAMLSync } from "../shared/safe-fs.js";
+import { ensureLocalIdentityRegistries } from "./server-identity.js";
 import { saveConfig } from "../lib/memory/config-loader.js";
 import {
   getSubagentSessionMetaPath,
@@ -24,6 +25,7 @@ import { getInvalidProviderModelIds } from "../shared/provider-model-validation.
 import { normalizeThinkingLevelForModel } from "./session-thinking-level.js";
 import { lookupKnown } from "../shared/known-models.js";
 import { SESSION_PREFIX_MAP } from "../lib/bridge/session-key.js";
+import { migrateLegacyApiKeyAuthToProviders } from "./provider-auth-migration.js";
 
 // ── 迁移表 ──────────────────────────────────────────────────────────────────
 
@@ -65,6 +67,14 @@ const migrations = {
   16: migrateVideoCapabilityProjection,
   // bridge sessionKey 引入 @agentId 后，修补旧 index 中无 agent 维度的 key
   17: migrateBridgeSessionKeysToAgentScoped,
+  // Space 基础身份：为旧 HANA_HOME 补齐 server / legacy owner / default Space registry
+  18: migrateLocalIdentityRegistries,
+  // API-key provider 凭证真相源迁移：auth.json → added-models.yaml
+  19: migrateLegacyApiKeyAuthEntriesToProviders,
+  // Pi SDK 0.70+ 严格限制 model.input，只允许 text/image；Hana 视频能力迁入 compat
+  20: migratePiInputSchemaVideoCompat,
+  // 刷新高确定性视频模型能力；补齐已升级用户 models.json 里的 Hana compat
+  21: refreshVideoCapabilityProjection,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -1169,11 +1179,12 @@ function backfillLegacySessionFiles(ctx) {
  *
  * v0.142.x 连续收紧了两个运行时契约：
  *   1. 官方 DeepSeek provider 不能把 provider id "deepseek" 当作模型 id；
- *   2. 新建 agent 的 memory.enabled 默认关闭。
+ *   2. v0.142.x 时新建 agent 的 memory.enabled 曾改为默认关闭。
  *
  * 老数据里这两处都可能靠“隐式旧语义”存活：DeepSeek 旧列表可能含非法 id；
  * 老 agent 缺 memory.enabled 时，旧运行时一直按开启处理。迁移只修磁盘真相源，
  * 不把兼容判断散落到同步模型、Agent 初始化或前端读配置路径里。
+ * 当前版本的新写入路径重新默认开启，迁移仍不覆盖已有显式用户选择。
  */
 function normalizeRecentLegacyCompatibilityState(ctx) {
   const deepseekPatched = repairLegacyDeepSeekProviderModelIds(ctx);
@@ -1287,18 +1298,43 @@ function repairLegacySessionSidecarThinkingLevels(ctx) {
 }
 
 /**
- * #16 — 视频输入能力进入 model.input 后的老数据修补
+ * #16 — 视频输入能力投影的老数据修补
  *
  * 覆盖两类旧状态：
  *   1. models.json 是投影文件，老版本里已存在的已知视频模型可能只有 ["text","image"]；
  *   2. 少量手写 agent config.models.overrides 可能已经带 video，需要提升到 added-models.yaml。
  *
- * 幂等：只追加缺失的 input 项，未知模型默认不打开 video；运行期模型对象不保留 video 字段。
+ * 幂等：视频能力写入 Hana compat，Pi-facing input 只保留 text/image；运行期模型对象不保留 video 字段。
  */
 function migrateVideoCapabilityProjection(ctx) {
-  const modelsPatched = repairModelsJsonVideoInputs(ctx);
+  const modelsPatched = repairModelsJsonPiInputSchema(ctx);
   const overridesPatched = promoteAgentVideoOverrides(ctx);
   ctx.log?.(`[migrations] #16: video capability projected (models=${modelsPatched}, overrides=${overridesPatched})`);
+}
+
+/**
+ * #20 — 修复已运行过 #16 或新版本投影留下的非法 Pi input 模态
+ *
+ * Pi SDK models.json 的 input 是外部契约，只允许 text/image。Hana 自己的
+ * video 能力必须放在 compat.hanaVideoInput，避免 ModelRegistry 因单个非法
+ * 模型把整张模型表判空。
+ */
+function migratePiInputSchemaVideoCompat(ctx) {
+  const patched = repairModelsJsonPiInputSchema(ctx);
+  ctx.log?.(`[migrations] #20: Pi input schema sanitized (patched=${patched})`);
+}
+
+/**
+ * #21 — 视频传输能力抽象落地后的投影刷新
+ *
+ * 这次变更把"模型会看视频"与"provider 协议能直传视频"拆开。新增的已知
+ * 视频模型仍复用 compat.hanaVideoInput 表示语义能力，传输能力由运行时根据
+ * provider/api/baseUrl 推导。老用户已存在的 models.json 需要重跑一次投影修补，
+ * 否则新增的 Kimi 等模型不会拿到 Hana 视频能力字段。
+ */
+function refreshVideoCapabilityProjection(ctx) {
+  const patched = repairModelsJsonPiInputSchema(ctx);
+  ctx.log?.(`[migrations] #21: video capability projection refreshed (patched=${patched})`);
 }
 
 /**
@@ -1421,7 +1457,7 @@ function serializeBridgeIndexEntryForMigration(previousRaw, entry) {
   return entry;
 }
 
-function repairModelsJsonVideoInputs(ctx) {
+function repairModelsJsonPiInputSchema(ctx) {
   const modelsJsonPath = path.join(ctx.hanakoHome, "models.json");
   let raw;
   try {
@@ -1433,18 +1469,15 @@ function repairModelsJsonVideoInputs(ctx) {
 
   let patched = 0;
   for (const [providerId, provider] of Object.entries(raw.providers)) {
-    if (!provider || !Array.isArray(provider.models)) continue;
-    for (const model of provider.models) {
-      if (!model || typeof model !== "object" || Array.isArray(model)) continue;
-      const hadRuntimeVideoField = Object.prototype.hasOwnProperty.call(model, "video");
-      const shouldEnableVideo = migrationModelHasVideoCapability(providerId, model);
-      if (shouldEnableVideo && !migrationInputIncludes(model.input, "video")) {
-        model.input = migrationInputWith(model.input, "video");
-        patched++;
+    if (!provider || typeof provider !== "object") continue;
+    if (Array.isArray(provider.models)) {
+      for (const model of provider.models) {
+        patched += repairPiModelInputRecord(providerId, model, model?.id);
       }
-      if (hadRuntimeVideoField) {
-        delete model.video;
-        patched++;
+    }
+    if (provider.modelOverrides && typeof provider.modelOverrides === "object" && !Array.isArray(provider.modelOverrides)) {
+      for (const [modelId, override] of Object.entries(provider.modelOverrides)) {
+        patched += repairPiModelInputRecord(providerId, override, modelId);
       }
     }
   }
@@ -1457,10 +1490,31 @@ function repairModelsJsonVideoInputs(ctx) {
   return patched;
 }
 
-function migrationModelHasVideoCapability(providerId, model) {
+function repairPiModelInputRecord(providerId, record, fallbackModelId) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return 0;
+
+  let patched = 0;
+  const hadRuntimeVideoField = Object.prototype.hasOwnProperty.call(record, "video");
+  const hadInputVideo = migrationInputIncludes(record.input, "video");
+  const shouldEnableVideo = migrationModelHasVideoCapability(providerId, record, fallbackModelId, hadInputVideo);
+  const sanitizedInput = sanitizePiInputModalities(record.input);
+  if (sanitizedInput.changed) {
+    record.input = sanitizedInput.input;
+    patched++;
+  }
+  if (shouldEnableVideo && ensureHanaVideoInputCompat(record)) patched++;
+  if (hadRuntimeVideoField) {
+    delete record.video;
+    patched++;
+  }
+  return patched;
+}
+
+function migrationModelHasVideoCapability(providerId, model, fallbackModelId, hadInputVideo = false) {
   if (model?.video === true) return true;
   if (model?.video === false) return false;
-  const known = lookupKnown(providerId, model?.id);
+  if (hadInputVideo) return true;
+  const known = lookupKnown(providerId, model?.id || fallbackModelId);
   return known?.video === true;
 }
 
@@ -1468,11 +1522,31 @@ function migrationInputIncludes(input, modality) {
   return Array.isArray(input) && input.includes(modality);
 }
 
-function migrationInputWith(input, modality) {
-  const next = Array.isArray(input) ? [...input] : ["text"];
-  if (!next.includes("text")) next.unshift("text");
-  if (!next.includes(modality)) next.push(modality);
-  return next;
+function sanitizePiInputModalities(input) {
+  if (input === undefined) return { input, changed: false };
+
+  const source = Array.isArray(input) ? input : [];
+  const next = ["text"];
+  if (source.includes("image")) next.push("image");
+
+  return {
+    input: next,
+    changed: !Array.isArray(input)
+      || input.length !== next.length
+      || input.some((item, index) => item !== next[index]),
+  };
+}
+
+function ensureHanaVideoInputCompat(record) {
+  const compat = record.compat && typeof record.compat === "object" && !Array.isArray(record.compat)
+    ? record.compat
+    : {};
+  if (compat.hanaVideoInput === true && record.compat === compat) return false;
+  record.compat = {
+    ...compat,
+    hanaVideoInput: true,
+  };
+  return true;
 }
 
 function promoteAgentVideoOverrides(ctx) {
@@ -1947,4 +2021,15 @@ function legacyBrowserScreenshot(msg) {
     base64,
     mimeType: image?.mimeType || msg.details?.mimeType || "image/png",
   };
+}
+
+function migrateLocalIdentityRegistries(ctx) {
+  const { hanakoHome, log } = ctx;
+  const { created } = ensureLocalIdentityRegistries(hanakoHome);
+  log?.(`[migrations] #18: local identity registries ready${created.length ? ` (created=${created.join(",")})` : ""}`);
+}
+
+function migrateLegacyApiKeyAuthEntriesToProviders(ctx) {
+  const result = migrateLegacyApiKeyAuthToProviders(ctx);
+  ctx.log?.(`[migrations] #19: legacy API-key auth migrated (${result.providers.join(", ") || "none"})`);
 }

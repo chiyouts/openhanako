@@ -1,30 +1,13 @@
-import fs from "fs";
 import path from "path";
 import { serializeSessionFile } from "../lib/session-files/session-file-response.js";
+import { createPluginConfigStore } from "./plugin-config.js";
 
 /**
  * Create a PluginContext for a plugin.
- * @param {{ pluginId: string, pluginDir: string, dataDir: string, bus: object, accessLevel?: "full-access" | "restricted", registerSessionFile?: Function }} opts
+ * @param {{ pluginId: string, pluginDir: string, dataDir: string, bus: object, accessLevel?: "full-access" | "restricted", registerSessionFile?: Function, configSchema?: object }} opts
  */
-export function createPluginContext({ pluginId, pluginDir, dataDir, bus, accessLevel, registerSessionFile: registerSessionFileImpl }) {
-  const configPath = path.join(dataDir, "config.json");
-
-  const config = {
-    get(key) {
-      try {
-        const data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-        return key ? data[key] : data;
-      } catch {
-        return key ? undefined : {};
-      }
-    },
-    set(key, value) {
-      fs.mkdirSync(dataDir, { recursive: true });
-      const data = config.get() || {};
-      data[key] = value;
-      fs.writeFileSync(configPath, JSON.stringify(data, null, 2), "utf-8");
-    },
-  };
+export function createPluginContext({ pluginId, pluginDir, dataDir, bus, accessLevel, registerSessionFile: registerSessionFileImpl, configSchema }) {
+  const config = createPluginConfigStore({ dataDir, schema: configSchema });
 
   const resolvedAccess = accessLevel || "restricted";
   const pluginBus = resolvedAccess === "full-access"
@@ -34,6 +17,8 @@ export function createPluginContext({ pluginId, pluginDir, dataDir, bus, accessL
         subscribe: bus.subscribe.bind(bus),
         request: bus.request.bind(bus),
         hasHandler: bus.hasHandler.bind(bus),
+        listCapabilities: typeof bus.listCapabilities === "function" ? bus.listCapabilities.bind(bus) : () => [],
+        getCapability: typeof bus.getCapability === "function" ? bus.getCapability.bind(bus) : () => null,
       });
 
   const prefix = `[plugin:${pluginId}]`;

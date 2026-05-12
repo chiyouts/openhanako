@@ -64,6 +64,14 @@
     "unpin": "ピン留めを解除",
     "pinFailed": "セッションのピン留めに失敗しました",
     "unpinFailed": "ピン留め解除に失敗しました",
+    "archive": "アーカイブ",
+    "summary": {
+      "title": "セッション要約",
+      "open": "セッション要約",
+      "loading": "要約を読み込み中…",
+      "empty": "要約はまだありません",
+      "loadFailed": "要約の読み込みに失敗しました"
+    },
     "archived": {
       "entry": "アーカイブ済み",
       "title": "アーカイブ済みチャット",
@@ -113,7 +121,7 @@
     "screenshotFailed": "スクリーンショットの保存に失敗しました",
     "selectedCount": "{count} 件選択中",
     "allDone": "すべて完了",
-    "completeAndDismiss": "完了して閉じる"
+    "markAllComplete": "すべて完了にする"
   },
   "chat": {
     "send": "送信",
@@ -122,7 +130,12 @@
     "browserScreenshot": "ブラウザスクリーンショット",
     "compacting": "コンテキスト圧縮中",
     "visionAuxiliary": "補助ビジョン",
-    "fileExpired": "ファイル期限切れ"
+    "fileExpired": "ファイル期限切れ",
+    "fileActions": {
+      "more": "その他のファイル操作",
+      "revealInFinder": "ファイルマネージャーで表示",
+      "copyPath": "ファイルパスをコピー"
+    }
   },
   "time": {
     "justNow": "たった今",
@@ -164,6 +177,8 @@
     "pastedImage": "貼り付け画像",
     "textModelImageBlocked": "現在のモデルはテキスト専用のため、画像を直接送信できません。設定でモデル能力を調整するか、補助ビジョンを設定して有効にしてください。",
     "textModelVideoBlocked": "現在のモデルは動画入力に対応していません。設定で動画能力を有効にするか、動画対応モデルに切り替えてください。",
+    "imageReadFailed": "画像を読み取れなかったため、メッセージは送信されませんでした。もう一度貼り付けるか添付してください。",
+    "videoReadFailed": "動画を読み取れなかったため、メッセージは送信されませんでした。もう一度添付してください。",
     "openModelSettings": "モデル設定を開く",
     "attachFiles": "ファイルを追加",
     "commandMenu": "コマンドメニュー",
@@ -206,7 +221,30 @@
     "memoryOn": "記憶",
     "memoryOff": "このチャットでは記憶を使用しません",
     "memoryDisabled": "記憶はオフです",
-    "agentSelector": "エージェントを選択"
+    "agentSelector": "エージェントを選択",
+    "placeholderTips": [
+      "/ を入力するとコマンドメニューが開きます",
+      "@ でワークスペース内のファイルを参照できます",
+      "ファイルを直接ドロップして送信できます",
+      "画像を貼り付けるとそのまま送信されます",
+      "ページ上のテキストを選択すると、フローティング入力欄が現れます",
+      "アバター下のひし形ボタンで、この会話を記憶するか切り替えられます",
+      "ワークスペースボタンでフォルダを切り替えたり追加したりできます",
+      "右側の「笺」パネルには、この会話のメモとコンテキストが保存されます",
+      "アバター下の小さな点をタップするとアシスタントを切り替えられます",
+      "「操作前確認」モードは、アシスタントが行動する前に承認を求めます",
+      "/rc を試してみて — スマホからパソコンを操作できます",
+      "設定で「ビジョン補助」を有効にすると、テキストモデルも画像を理解できます",
+      "新しい発見が欲しいですか？プラグインマーケットを覗いてみてください",
+      "ファイルバックアップ機能で、安全面の不安を解消できます",
+      "仕事ではサブエージェントで Agent を連携、チャンネルは遊び用に",
+      "Agent ごとに専用の Skills を設定できます",
+      "晴れモードで日光浴を試してみて！",
+      "ワークスペース内の Markdown ファイルは開いてそのまま編集できます",
+      "アシスタントとしばらく過ごしたら、日記機能を試してみて！",
+      "日記とスクリーンショットはメインアシスタントの作業ディレクトリに保存されます",
+      "アシスタントごとに異なるワークスペースを設定できます。巡回をオンにすると、そこで自律的に動きます"
+    ]
   },
   "drop": {
     "hint": "ドロップして {name} にファイルを送る"
@@ -596,6 +634,7 @@
       "serifFontHint": "本文に明朝体を使用する",
       "paperTexture": "和紙の質感",
       "paperTextureHint": "背景に和紙のテクスチャを追加する",
+      "paperTextureDarkDisabledHint": "夜間テーマでは和紙の質感は使えません。明るいテーマに戻すと保存済みの設定で復帰します",
       "leavesOverlay": "晴れモード",
       "leavesOverlayHint": "たまには日向ぼっこしよう"
     },
@@ -641,6 +680,8 @@
       "publicIshikiHint": "プライバシー保護のため、訪問者との会話ではアシスタントは記憶、個人情報、コンピュータ上のファイルやツールにアクセスできません。\nここで訪問者向けの応答スタイルとガイドラインを設定できます。",
       "chatModel": "モデル",
       "chatModelHint": "会話とタスクに使用するモデル",
+      "modelUnavailable": "利用不可: {model}",
+      "modelUnavailableHint": "現在のモデルは利用可能リストにありません。別のモデルを選ぶか、プロバイダーページで設定を保存し直してモデルを取得してください。",
       "addAgent": "新しいエージェント",
       "createTitle": "新しいエージェント",
       "namePlaceholder": "名前をつけてください",
@@ -778,6 +819,8 @@
       "verifySuccess": "接続を確認しました",
       "verifyFailed": "検証に失敗しました",
       "setupHint": "API Key を入力してこのプロバイダーを有効にしてください",
+      "configInvalid": "このプロバイダー設定は壊れているため、一時的にスキップしました。設定を保存し直すか、削除して作り直してください。",
+      "configIncomplete": "このプロバイダー設定は未完了です。API Key、Base URL を入力し、モデルを追加または取得してください。",
       "selectHint": "プロバイダーを選択して詳細を表示",
       "addCustom": "カスタムプロバイダーを追加",
       "noKey": "未設定",
@@ -1048,7 +1091,37 @@
       "installError": "プラグインのインストールに失敗しました",
       "invalidPlugin": "有効なプラグインディレクトリではありません",
       "pluginsDir": "プラグインディレクトリ：{path}",
-      "needsFullAccess": "このプラグインを使用するには「フルアクセスプラグインを許可」を有効にしてください"
+      "needsFullAccess": "このプラグインを使用するには「フルアクセスプラグインを許可」を有効にしてください",
+      "configure": "{name} を設定",
+      "configTitle": "{name} 設定",
+      "configLoadError": "プラグイン設定の読み込みに失敗しました",
+      "sensitiveHint": "保存済みの値は非表示です。新しい値を入力すると置き換えます。",
+      "invalidJson": "JSON 形式が正しくありません",
+      "showDiagnostics": "プラグイン診断を表示",
+      "diagnosticsTitle": "プラグイン診断",
+      "diagnosticsLoadError": "プラグイン診断の読み込みに失敗しました",
+      "diagnosticsSummary": "機能 {capabilities}/{total} · タスク {tasks} · スケジュール {schedules}",
+      "noDiagnostics": "診断データはまだありません",
+      "diagnosticActivation": "起動：{state}",
+      "diagnosticRoutes": "ページ {pages} · ウィジェット {widgets} · 設定 {settingsTabs}",
+      "diagnosticTools": "ツール {count}",
+      "diagnosticCommands": "コマンド {count}",
+      "diagnosticConfig": "設定 {count}",
+      "openMarketplace": "プラグインマーケットを開く",
+      "marketBack": "プラグイン管理に戻る",
+      "marketplaceTitle": "プラグインマーケット",
+      "marketplaceHint": "インストール可能なプラグイン、README、権限、貢献タイプを確認できます。",
+      "marketplaceCount": "{count} 件のプラグイン",
+      "marketplaceNoSource": "マーケットソース未設定",
+      "marketplaceEmpty": "閲覧できるプラグインはありません",
+      "marketLoading": "プラグインマーケットを読み込み中…",
+      "marketLoadError": "プラグインマーケットの読み込みに失敗しました",
+      "marketReadmeLoadError": "README の読み込みに失敗しました",
+      "marketInstalled": "インストール済み",
+      "marketInstall": "インストール",
+      "marketUpdate": "更新",
+      "marketReadmeLoading": "README を読み込み中…",
+      "marketSelectPlugin": "プラグインを選択して README を表示"
     },
     "mcp": {
       "masterTitle": "Master Switch",

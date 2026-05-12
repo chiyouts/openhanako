@@ -10,6 +10,12 @@ export interface ChatImageModel {
   id?: string;
   provider?: string;
   input?: readonly string[];
+  video?: boolean;
+  videoTransport?: string | null;
+  videoTransportSupported?: boolean;
+  compat?: {
+    hanaVideoInput?: boolean;
+  } | null;
 }
 
 export interface VisionAuxiliaryConfig {
@@ -72,6 +78,17 @@ export function getModelImageInputMode(model: ChatImageModel | null | undefined)
 }
 
 export function getModelVideoInputMode(model: ChatImageModel | null | undefined): ModelVideoInputMode {
+  const explicitVideo = model?.video === true || model?.compat?.hanaVideoInput === true;
+  const transport = model?.videoTransport;
+  if (explicitVideo) {
+    if (model.videoTransportSupported === false || transport === 'unsupported' || transport === 'none') {
+      return 'no-native-video';
+    }
+    if (model.videoTransportSupported === true || transport === 'gemini-inline-data' || transport === 'openai-video-url') {
+      return 'native-video';
+    }
+    return 'native-video';
+  }
   const input = model?.input;
   if (!Array.isArray(input)) return 'unknown';
   return input.includes('video') ? 'native-video' : 'no-native-video';

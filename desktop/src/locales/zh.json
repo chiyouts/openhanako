@@ -65,6 +65,14 @@
     "unpin": "取消置顶",
     "pinFailed": "置顶 session 失败",
     "unpinFailed": "取消置顶失败",
+    "archive": "归档",
+    "summary": {
+      "title": "Session 摘要",
+      "open": "摘要",
+      "loading": "正在读取摘要…",
+      "empty": "暂无摘要",
+      "loadFailed": "摘要读取失败"
+    },
     "archived": {
       "entry": "已归档的聊天",
       "title": "已归档的聊天",
@@ -114,7 +122,7 @@
     "screenshotFailed": "截图保存失败",
     "selectedCount": "已选 {count} 条",
     "allDone": "全部完成",
-    "completeAndDismiss": "完成并收起"
+    "markAllComplete": "全部标记为已完成"
   },
   "chat": {
     "send": "发送",
@@ -123,7 +131,12 @@
     "browserScreenshot": "浏览器截图",
     "compacting": "上下文压缩中",
     "visionAuxiliary": "辅助视觉",
-    "fileExpired": "文件已过期"
+    "fileExpired": "文件已过期",
+    "fileActions": {
+      "more": "更多文件操作",
+      "revealInFinder": "在访达中显示",
+      "copyPath": "复制文件路径"
+    }
   },
   "time": {
     "justNow": "刚刚",
@@ -165,6 +178,8 @@
     "pastedImage": "粘贴图片",
     "textModelImageBlocked": "当前模型为文本模型，不能直接发送图片。请在设置里调整模型能力，或配置并启用辅助视觉。",
     "textModelVideoBlocked": "当前模型不支持视频输入。请在设置里开启视频能力，或切换到支持视频的模型。",
+    "imageReadFailed": "图片读取失败，消息没有发送。请重新粘贴或重新添加图片。",
+    "videoReadFailed": "视频读取失败，消息没有发送。请重新添加视频。",
     "openModelSettings": "打开模型设置",
     "attachFiles": "添加文件",
     "commandMenu": "命令菜单",
@@ -207,7 +222,30 @@
     "memoryOn": "记忆",
     "memoryOff": "此次聊天不参考记忆",
     "memoryDisabled": "记忆已关闭",
-    "agentSelector": "选择助手"
+    "agentSelector": "选择助手",
+    "placeholderTips": [
+      "试试输入 / 唤起命令菜单",
+      "输入 @ 可以引用工作空间里的文件",
+      "把文件直接拖进输入框，就能附带发送",
+      "粘贴图片可以直接发出去",
+      "选中页面任意文字，会浮出一个临时输入框",
+      "头像下方那枚菱形按钮，控制本次对话是否被记住",
+      "工作空间按钮可以切换或新增文件夹",
+      "右侧「笺」面板，放着这次会话的笔记与上下文",
+      "在头像下方点不同的小圆点，可以切换助手",
+      "「操作前询问」模式让助手在动手前先征求你同意",
+      "试试 /rc，在手机上操作你的电脑",
+      "在设置里开启「辅助视觉」，文本模型也能看懂图片",
+      "想要一些新发现？试试插件市场！",
+      "文件备份功能可以解决一些安全上的顾虑",
+      "工作场景下用 subagent 让 Agent 协作，频道留给游玩",
+      "每个 Agent 可以配置自己独立的 Skills",
+      "试试晴天模式的日光浴！",
+      "工作区里的 Markdown 文件打开可以直接编辑",
+      "和助手相处一段时间后，试试日记功能吧！",
+      "日记和截图都保存在主助手的工作目录",
+      "不同助手可以设置不同工作空间，开启巡检后会在那里自主行动"
+    ]
   },
   "yuan": {
     "types": {
@@ -581,6 +619,7 @@
       "serifFontHint": "使用衬线体显示正文内容",
       "paperTexture": "纸质纹理",
       "paperTextureHint": "为背景添加宣纸质感",
+      "paperTextureDarkDisabledHint": "黑夜模式不支持纸质纹理，切回浅色主题后会按原设置恢复",
       "leavesOverlay": "晴天模式",
       "leavesOverlayHint": "没事儿晒晒太阳"
     },
@@ -649,6 +688,8 @@
       "publicIshikiHint": "出于隐私考虑，助手与访客对话时无法访问记忆、你的个人信息，以及电脑上的任何文件与工具。\n你可以在这里设定助手对访客说话时的回复风格以及注意事项。",
       "chatModel": "Ta 的模型",
       "chatModelHint": "Ta 在对话与工作中使用的模型",
+      "modelUnavailable": "当前不可用：{model}",
+      "modelUnavailableHint": "当前模型已不在可用列表中，请重新选择模型，或去供应商页面重新保存配置并读取模型。",
       "imageModel": "图片模型",
       "imageModelHint": "Ta 在图片生成时使用的模型",
       "addAgent": "新建助手",
@@ -788,6 +829,8 @@
       "verifySuccess": "验证通过",
       "verifyFailed": "验证失败",
       "setupHint": "输入 API Key 以启用此供应商",
+      "configInvalid": "该供应商配置损坏，已被暂时跳过。请重新保存配置，或删除后重建。",
+      "configIncomplete": "该供应商配置不完整，请补全 API Key、Base URL，并添加或读取模型。",
       "selectHint": "选择一个供应商查看详情",
       "addCustom": "添加自定义供应商",
       "noKey": "未配置",
@@ -1084,7 +1127,37 @@
       "installError": "插件安装失败",
       "invalidPlugin": "不是有效的插件目录",
       "pluginsDir": "插件目录：{path}",
-      "needsFullAccess": "请先开启「允许全权插件」"
+      "needsFullAccess": "请先开启「允许全权插件」",
+      "configure": "配置「{name}」",
+      "configTitle": "「{name}」设置",
+      "configLoadError": "插件设置加载失败",
+      "sensitiveHint": "已保存的值会被隐藏。输入新值即可替换。",
+      "invalidJson": "JSON 格式不正确",
+      "showDiagnostics": "查看插件诊断",
+      "diagnosticsTitle": "插件诊断",
+      "diagnosticsLoadError": "插件诊断加载失败",
+      "diagnosticsSummary": "能力 {capabilities}/{total} · 任务 {tasks} · 计划 {schedules}",
+      "noDiagnostics": "暂无诊断数据",
+      "diagnosticActivation": "激活：{state}",
+      "diagnosticRoutes": "页面 {pages} · 组件 {widgets} · 设置页 {settingsTabs}",
+      "diagnosticTools": "工具 {count}",
+      "diagnosticCommands": "命令 {count}",
+      "diagnosticConfig": "配置项 {count}",
+      "openMarketplace": "打开插件市场",
+      "marketBack": "返回插件管理",
+      "marketplaceTitle": "插件市场",
+      "marketplaceHint": "浏览可安装插件，查看 README、权限和贡献类型。",
+      "marketplaceCount": "{count} 个插件",
+      "marketplaceNoSource": "未配置市场源",
+      "marketplaceEmpty": "暂无可浏览插件",
+      "marketLoading": "正在读取插件市场…",
+      "marketLoadError": "插件市场加载失败",
+      "marketReadmeLoadError": "README 加载失败",
+      "marketInstalled": "已安装",
+      "marketInstall": "安装",
+      "marketUpdate": "更新",
+      "marketReadmeLoading": "正在读取 README…",
+      "marketSelectPlugin": "选择一个插件查看 README"
     },
     "mcp": {
       "masterTitle": "总开关",

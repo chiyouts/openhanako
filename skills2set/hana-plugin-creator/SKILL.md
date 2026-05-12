@@ -47,7 +47,7 @@ Current boundaries: iframe UI is the stable extension surface. Native renderer c
 ## Workflow
 
 1. Find the Hana repo root. Prefer the current workspace if it contains `PLUGIN_SDK.md`, `PLUGINS.md`, and `packages/plugin-runtime`.
-2. Read `PLUGIN_SDK.md` and relevant sections of `PLUGINS.md` before changing plugin code. For React UI, also read `packages/plugin-sdk/README.md` and `packages/plugin-components/README.md`.
+2. Read `.docs/PLUGIN-DEVELOPMENT.md`, `PLUGIN_SDK.md`, and relevant sections of `PLUGINS.md` before changing plugin code. For React UI, also read `packages/plugin-sdk/README.md` and `packages/plugin-components/README.md`.
 3. Pick a template:
    - `direct`: no npm install, no build step, best for a beginner's first runnable plugin.
    - `guided-react`: React/Vite/SDK starter with shared Hana components and a gentler README.
@@ -57,7 +57,8 @@ Current boundaries: iframe UI is the stable extension surface. Native renderer c
    - Example or template plugin: `examples/plugins/<plugin-id>`.
    - User-installed plugin: the directory reported by `/api/plugins/settings` or `${HANA_HOME}/plugins`.
 5. Generate the scaffold with the bundled script, then adjust names, descriptions, tools, routes, capabilities, and UI to the user's request.
-6. Run focused verification. When editing this skill, at minimum validate the skill and run the scaffold script against a temp directory.
+6. If the user wants marketplace publication, add or update the `OH-Plugins/plugins/<plugin-id>.json` entry and README source after the plugin works locally.
+7. Run focused verification. When editing this skill, at minimum validate the skill and run the scaffold script against a temp directory.
 
 ## Scaffold Commands
 
@@ -91,6 +92,15 @@ Useful options:
 - Declare only the iframe host capabilities actually used.
 - EventBus handlers should return `HANA_BUS_SKIP` for payloads that do not belong to them.
 - Keep iframe UI self-contained. Do not import renderer internals from `desktop/src/react`.
+
+## Marketplace Rules
+
+- Marketplace metadata lives in the `OH-Plugins` repository, not inside `project-hana`.
+- Official source plugins may live in `OH-Plugins/official-plugins/<plugin-id>/` with a matching `plugins/<plugin-id>.json`.
+- Each marketplace entry needs one README source: `readme`, `readmePath`, or `readmeUrl`. Use `readmePath` only for local file marketplaces; use inline `readme` or HTTPS `readmeUrl` for URL marketplaces.
+- Local file marketplaces can install `distribution.kind = "source"` entries because paths resolve on disk.
+- URL marketplaces currently browse entries and show README content. Remote release package download, sha256 verification, and one-click install are future app work.
+- Before pushing `OH-Plugins`, run privacy-push and wait for explicit user confirmation.
 
 ## UI Rules
 

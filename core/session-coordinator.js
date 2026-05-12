@@ -12,6 +12,7 @@ import { createAgentSession, SessionManager, estimateTokens, findCutPoint, gener
 import { createDefaultSettings } from "./session-defaults.js";
 import { computeHardTruncation } from "./compaction-utils.js";
 import { teardownSessionResources } from "./session-teardown.js";
+import { evaluateSessionHealth } from "./session-health.js";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { BrowserManager } from "../lib/browser/browser-manager.js";
 import { t, getLocale } from "../server/i18n.js";
@@ -23,12 +24,13 @@ import {
   normalizeSessionPermissionMode,
 } from "./session-permission-mode.js";
 import { findModel } from "../shared/model-ref.js";
-import { computeToolSnapshot, DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.js";
+import { computeToolSnapshot, DEFAULT_DISABLED_TOOL_NAMES, uniqueToolNames } from "../shared/tool-categories.js";
 import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { requireVisionAuxiliaryEnabled } from "./vision-auxiliary-policy.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
+import { modelSupportsDirectVideoInput, modelSupportsVideoInput } from "../shared/model-capabilities.js";
 import {
   normalizeSessionThinkingLevel,
   normalizeThinkingLevelForModel,
@@ -51,9 +53,11 @@ function getSteerPrefix() {
 
 function assertVideoInputSupported(model, videos) {
   if (!videos?.length) return;
-  const input = model?.input;
-  if (!Array.isArray(input) || !input.includes("video")) {
+  if (!modelSupportsVideoInput(model)) {
     throw new Error("current model does not support video input");
+  }
+  if (!modelSupportsDirectVideoInput(model)) {
+    throw new Error("current provider does not support direct video input");
   }
 }
 
@@ -99,6 +103,13 @@ function computeRuntimeDisabledToolNames(tools, agentConfig, context = {}) {
     }
   }
   return disabled;
+}
+
+function toolNamesFromObjects(tools, { includePluginTools = true } = {}) {
+  return (tools || [])
+    .filter((tool) => includePluginTools || !tool?._pluginId)
+    .map((tool) => tool?.name)
+    .filter(Boolean);
 }
 
 function freezeSkillsResult(value) {
@@ -588,50 +599,50 @@ export class SessionCoordinator {
     // customs + plugin tools from sessionCustomTools. Using only agent.tools
     // would silently drop SDK built-ins and plugin tools when
     // setActiveToolsByName is applied.
-    const allToolNames = [
-      ...(sessionTools || []).map((t) => t.name).filter(Boolean),
-      ...(sessionCustomTools || []).map((t) => t.name).filter(Boolean),
-    ];
     const allToolObjects = [
       ...(sessionTools || []),
       ...(sessionCustomTools || []),
     ];
+    const allToolNames = toolNamesFromObjects(allToolObjects);
+    const stableRestoreToolNames = toolNamesFromObjects(allToolObjects, {
+      includePluginTools: false,
+    });
     const runtimeDisabledToolNames = computeRuntimeDisabledToolNames(
       allToolObjects,
       agent.config,
       { agentId: creatingAgentId, restore },
     );
     let snapshotToolNames = null;  // null signals "do not call setActiveToolsByName"
+    let shouldPersistRestoredToolNames = false;
 
     if (restore) {
       if (sessionPath) {
         const metaPathForRestore = path.join(agent.sessionDir, "session-meta.json");
         let metaEntry = null;
-        let metaReadFailed = false;
         try {
           const raw = await fsp.readFile(metaPathForRestore, "utf-8");
           const meta = JSON.parse(raw);
           metaEntry = meta[path.basename(sessionPath)];
         } catch (err) {
           if (err.code !== "ENOENT") {
-            metaReadFailed = true;
             log.warn(`session-meta read for tool-snapshot restore failed, recomputing from current agent config: ${err.message}`);
           }
         }
         if (metaEntry && Array.isArray(metaEntry.toolNames)) {
-          snapshotToolNames = metaEntry.toolNames;  // Case A
-        } else if (metaReadFailed) {
-          // Fallback when meta file exists but is unreadable/corrupt: recompute
-          // the snapshot from current agent config. Safer than silent Case B
-          // (which would re-enable every disabled tool). Cannot perfectly
-          // preserve the historical snapshot, but honors the user's current
-          // disabled-tool intent.
+          const restoredToolNames = uniqueToolNames(metaEntry.toolNames);
+          snapshotToolNames = restoredToolNames;  // Case A
+          shouldPersistRestoredToolNames = restoredToolNames.length !== metaEntry.toolNames.length
+            || restoredToolNames.some((name, index) => name !== metaEntry.toolNames[index]);
+        } else {
+          // Legacy sessions created before tool snapshots had no stable tool
+          // identity boundary. Establish one on first restore so future plugin
+          // or dynamic tool registrations only affect newly created sessions.
           const disabled = agent.config?.tools?.disabled ?? DEFAULT_DISABLED_TOOL_NAMES;
-          snapshotToolNames = computeToolSnapshot(allToolNames, disabled, {
+          snapshotToolNames = computeToolSnapshot(stableRestoreToolNames, disabled, {
             extraDisabled: runtimeDisabledToolNames,
           });
+          shouldPersistRestoredToolNames = true;
         }
-        // else Case B (meta absent via ENOENT): snapshotToolNames stays null
       }
     } else {
       // Case C. Fresh agents (and agents upgrading from a pre-feature version)
@@ -676,11 +687,11 @@ export class SessionCoordinator {
       ? { ...promptSnapshotForPersist, finalSystemPrompt }
       : promptSnapshotForPersist;
 
-    // Persist snapshot for Case C only. Case A already had it in meta; Case B
-    // intentionally leaves meta untouched (adding a toolNames field to a legacy
-    // session's meta would lock it into the current tool list, breaking
-    // "upgrade is zero-noise"). writeSessionMeta is serialized and never
-    // rejects; awaiting gives createSession a clean post-return state.
+    // Persist fresh snapshots and repair/establish restored snapshots. Restored
+    // legacy sessions with missing toolNames get a baseline on first restore,
+    // so later plugin/dynamic tool registrations do not drift into old history.
+    // writeSessionMeta is serialized and never rejects; awaiting gives
+    // createSession a clean post-return state.
     if (!restore && sessionPath) {
       const metaPatch = {
         memoryEnabled: frozenMemoryEnabled,
@@ -694,12 +705,15 @@ export class SessionCoordinator {
       };
       if (snapshotToolNames !== null) metaPatch.toolNames = snapshotToolNames;
       await this.writeSessionMeta(sessionPath, metaPatch);
-    } else if (restore && sessionPath && !restoredPromptSnapshot) {
-      // Legacy sessions have no creation-time snapshot. The first cold restore
-      // establishes a stable baseline so subsequent restores do not drift again.
-      await this.writeSessionMeta(sessionPath, {
-        promptSnapshot: promptSnapshotToWrite,
-      });
+    } else if (restore && sessionPath) {
+      const metaPatch = {};
+      if (!restoredPromptSnapshot) metaPatch.promptSnapshot = promptSnapshotToWrite;
+      if (shouldPersistRestoredToolNames && snapshotToolNames !== null) {
+        metaPatch.toolNames = snapshotToolNames;
+      }
+      if (Object.keys(metaPatch).length > 0) {
+        await this.writeSessionMeta(sessionPath, metaPatch);
+      }
     }
 
     // LRU 淘汰：按 lastTouchedAt 排序，跳过 streaming 和焦点 session
@@ -795,6 +809,11 @@ export class SessionCoordinator {
         );
       }
     }
+    // #521: 在恢复前扫描会话尾部，若最近 N 条 assistant 大量 stopReason=error
+    // 说明用户已经撞到了"反复 empty_stream"循环，给前端发警告事件让 UI 提示用户
+    // 新建会话或修复。restore 本身仍然继续，避免破坏用户预期。
+    this._emitSessionHealthWarning(sessionPath);
+
     // 冷启动恢复：model 由 PI SDK 从 session JSONL 恢复（单一数据源），不从 session-meta.json 读
     const sessionMgr = SessionManager.open(sessionPath, this._d.getAgent().sessionDir);
     const cwd = sessionMgr.getCwd?.() || undefined;
@@ -804,6 +823,27 @@ export class SessionCoordinator {
       agentId: targetAgentId || this._d.getActiveAgentId(),
     });
     return result.session;
+  }
+
+  /** @private 检查 session 健康度并在 unhealthy 时 log + emit 事件，不抛错 */
+  _emitSessionHealthWarning(sessionPath) {
+    try {
+      const health = evaluateSessionHealth(sessionPath);
+      if (health.healthy) return;
+      log.warn(
+        `session restore: ${path.basename(sessionPath)} unhealthy (`
+        + `${health.recentErrors}/${health.totalChecked} recent assistant messages had stopReason=error). `
+        + `User may need to start a new session — see #521.`
+      );
+      this._d.emitEvent?.({
+        type: "session_unhealthy_warning",
+        recentErrors: health.recentErrors,
+        totalChecked: health.totalChecked,
+      }, sessionPath);
+    } catch (err) {
+      // 健康度检查不能阻塞 restore，吃掉所有错误
+      log.warn(`session health check failed for ${path.basename(sessionPath)}: ${err.message}`);
+    }
   }
 
   async prompt(text, opts) {
@@ -1515,6 +1555,8 @@ export class SessionCoordinator {
     const prevFocus = this._session;
     const prevSessionStarted = this._sessionStarted;
     try {
+      // #521: attach 路径同样要做健康度评估，否则 bridge / RC 自动恢复时也会反复失败
+      this._emitSessionHealthWarning(sessionPath);
       const sessionMgr = SessionManager.open(sessionPath, agent.sessionDir);
       const cwd = sessionMgr.getCwd?.() || undefined;
       await this.createSession(sessionMgr, cwd, memoryEnabled, null, {

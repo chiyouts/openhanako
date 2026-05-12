@@ -71,6 +71,17 @@ describe('SettingsModalShell', () => {
     expect(screen.getByTestId('settings-content')).toHaveAttribute('data-variant', 'modal');
   });
 
+  it('widens the settings dialog for the plugin marketplace subpage', async () => {
+    const { SettingsModalShell } = await import('../../components/SettingsModalShell');
+    useStore.setState({
+      settingsModal: { open: true, activeTab: 'plugin-marketplace' },
+    } as never);
+
+    render(<SettingsModalShell />);
+
+    expect(screen.getByRole('dialog', { name: '设置' })).toHaveAttribute('data-wide', 'true');
+  });
+
   it('animates from opening to open on the next frame', async () => {
     const { SettingsModalShell } = await import('../../components/SettingsModalShell');
     vi.useFakeTimers();

@@ -10,17 +10,44 @@ import chokidar from "chokidar";
 import { parseSkillMetadata } from "../lib/skills/skill-metadata.js";
 import { sourceIdentityForSkill } from "../lib/skills/skill-file-identity.js";
 
+// 重型目录名：watcher 必须主动跳过，否则一个带 npm 依赖的 skill 就能撑爆 fd
+// 上限（macOS 默认 256），触发 EMFILE → 错误日志雪崩 → server OOM/SIGKILL。
+// 详见 #765 / #787 根因分析。
+const HEAVY_DIR_NAMES = new Set([
+  "node_modules", "target", "build", "dist", "out",
+  "__pycache__", "coverage", "venv", ".venv",
+]);
+
 // chokidar 默认会对"绝对路径里任意段带点"判定为隐藏，而用户的 skill 根
 // （~/.hanako/skills、workspace 下的 .agents/... 等）自身就住在隐藏目录里，
-// 用全局 regex 会把整棵树吞掉。这里改为相对 watch 根做判断，只屏蔽根以下
-// 的隐藏文件和编辑器临时文件（.DS_Store / .swp / foo~ / #foo# 等）。
-function createRelativeDotIgnore(rootDir) {
+// 用全局 regex 会把整棵树吞掉。这里改为相对 watch 根做判断：
+//   1. 屏蔽根以下的隐藏文件和编辑器临时文件（.DS_Store / .swp / foo~ / #foo#）
+//   2. 屏蔽 skill 内部的 HEAVY_DIR_NAMES（node_modules 等递归会爆 fd）
+//
+// HEAVY 检查只对"skill 内部"生效（segments index >= 1）。第 0 段是 skill 名本身，
+// 即使叫 "build" / "dist" / "target" 也合法，必须保留——否则用户写一个名为 build 的
+// skill 会被 watcher 跳过、保存后不触发 reload。
+function createSkillWatchIgnore(rootDir) {
   return (absPath) => {
     const rel = path.relative(rootDir, absPath);
     if (!rel) return false;
-    return /(^|[/\\])\./.test(rel) || /[~#]$/.test(rel);
+    if (/(^|[/\\])\./.test(rel)) return true;
+    if (/[~#]$/.test(rel)) return true;
+    const segments = rel.split(/[/\\]/);
+    for (let i = 1; i < segments.length; i++) {
+      if (HEAVY_DIR_NAMES.has(segments[i])) return true;
+    }
+    return false;
   };
 }
+
+// 限制 chokidar 递归深度。Skill 通常住在 `<root>/<skill-name>/SKILL.md` 或
+// `<root>/<skill-name>/references/...`，3 层足够覆盖；更深的目录树（典型是
+// 误打入的 node_modules 或源码 vendor 目录）不该被监控。
+const SKILL_WATCH_DEPTH = 3;
+
+// 内部测试用：暴露 ignore/depth 工厂，方便 unit test 验证规则行为。
+export const __test = { createSkillWatchIgnore, HEAVY_DIR_NAMES, SKILL_WATCH_DEPTH };
 
 function readSkillFileMetadata(skill) {
   if (!skill?.filePath) return null;
@@ -81,17 +108,32 @@ export class SkillManager {
     this._appendExternalSkills();
   }
 
+  /**
+   * 按 agent 过滤 _allSkills：learned skill 只对归属 agent 可见。
+   * 所有对外消费方法都基于此方法，agentId 隔离逻辑只写这一处。
+   */
+  _skillsVisibleToAgent(agent, { includePlugin = false, includeWorkspace = false } = {}) {
+    const agentId = agent?.id || null;
+    return this._allSkills.filter(s => {
+      if (s._agentId && s._agentId !== agentId) return false;
+      if (!includePlugin && s._pluginSkill) return false;
+      if (!includeWorkspace && s._workspaceSkill) return false;
+      return true;
+    });
+  }
+
   /** 将 agent 启用的 skill 同步到 agent 的 system prompt */
   syncAgentSkills(agent) {
     const enabled = new Set(agent?.config?.skills?.enabled || []);
-    const skills = this._allSkills.filter(s => this._isRuntimeEnabledForAgent(s, enabled));
+    const skills = this._skillsVisibleToAgent(agent, { includePlugin: true, includeWorkspace: true })
+      .filter(s => this._isRuntimeEnabledForAgent(s, enabled));
     agent.setEnabledSkills(skills);
   }
 
   /** 返回全量 skill 列表（供 API 使用），附带指定 agent 的 enabled 状态。Plugin skill 不返回（UI 不显示） */
   getAllSkills(agent) {
     const enabled = new Set(agent?.config?.skills?.enabled || []);
-    return this._allSkills.filter(s => !s._pluginSkill && !s._workspaceSkill).map(s => ({
+    return this._skillsVisibleToAgent(agent).map(s => ({
       name: s.name,
       description: s.description,
       filePath: s.filePath,
@@ -109,7 +151,7 @@ export class SkillManager {
   /** 返回运行时 skill 列表（含 workspace skill），供 desk / slash 等 session 视图使用 */
   getRuntimeSkillInfos(agent) {
     const enabled = new Set(agent?.config?.skills?.enabled || []);
-    return this._allSkills.filter(s => !s._pluginSkill).map(s => ({
+    return this._skillsVisibleToAgent(agent, { includeWorkspace: true }).map(s => ({
       name: s.name,
       description: s.description,
       filePath: s.filePath,
@@ -125,15 +167,12 @@ export class SkillManager {
     }));
   }
 
-  /** 按 agent 过滤可用 skills（learned skills 有 per-agent 隔离） */
+  /** 按 agent 过滤可用 skills，供 Pi SDK resourceLoader.getSkills() 使用 */
   getSkillsForAgent(targetAgent) {
     const enabled = new Set(targetAgent?.config?.skills?.enabled || []);
-    const agentId = targetAgent?.id || null;
     return {
-      skills: this._allSkills.filter(s =>
-        this._isRuntimeEnabledForAgent(s, enabled)
-        && (!s._agentId || s._agentId === agentId)
-      ),
+      skills: this._skillsVisibleToAgent(targetAgent, { includePlugin: true, includeWorkspace: true })
+        .filter(s => this._isRuntimeEnabledForAgent(s, enabled)),
       diagnostics: [],
     };
   }
@@ -182,7 +221,8 @@ export class SkillManager {
     try {
       this._watcher = chokidar.watch(this.skillsDir, {
         ignoreInitial: true,
-        ignored: createRelativeDotIgnore(this.skillsDir),
+        ignored: createSkillWatchIgnore(this.skillsDir),
+        depth: SKILL_WATCH_DEPTH,
         persistent: true,
       });
       this._watcher.on("all", () => {
@@ -307,7 +347,8 @@ export class SkillManager {
       try {
         const w = chokidar.watch(dirPath, {
           ignoreInitial: true,
-          ignored: createRelativeDotIgnore(dirPath),
+          ignored: createSkillWatchIgnore(dirPath),
+          depth: SKILL_WATCH_DEPTH,
           persistent: true,
         });
         w.on("all", () => {

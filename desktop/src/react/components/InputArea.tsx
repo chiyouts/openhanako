@@ -71,13 +71,28 @@ function chatVideoMimeTypeForName(name: string, fallback?: string): string {
   return mimeMap[ext] || 'video/mp4';
 }
 
+function chatImageMimeTypeForName(name: string, fallback?: string): string {
+  if (fallback?.startsWith('image/')) return fallback;
+  const ext = name.toLowerCase().replace(/^.*\./, '');
+  const mimeMap: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+  };
+  return mimeMap[ext] || 'image/png';
+}
+
 interface FileMentionRange {
   from: number;
   to: number;
   query: string;
 }
 
-function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string): SessionConfirmationBlock | null {
+function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string, pendingOnly?: boolean): SessionConfirmationBlock | null {
   if (!items) return null;
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
@@ -87,6 +102,7 @@ function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, c
       const block = blocks[j];
       if (block.type !== 'session_confirmation' || block.surface !== 'input') continue;
       if (confirmId && block.confirmId !== confirmId) continue;
+      if (pendingOnly && block.status !== 'pending') continue;
       return block;
     }
   }
@@ -140,7 +156,7 @@ interface InputAreaInnerProps {
 }
 
 function InputAreaInner({ cardRef }: InputAreaInnerProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   // Zustand state
   const isStreaming = useStore(s => s.streamingSessions.includes(s.currentSessionPath || ''));
@@ -162,6 +178,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const previewOpen = useStore(s => s.previewOpen);
   const models = useStore(s => s.models);
   const agentYuan = useStore(s => s.agentYuan);
+  const welcomeVisible = useStore(s => s.welcomeVisible);
   const thinkingLevel = useStore(s => s.thinkingLevel);
   const setThinkingLevel = useStore(s => s.setThinkingLevel);
   const addToast = useStore(s => s.addToast);
@@ -175,8 +192,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const modelSwitching = useStore(s => s.modelSwitching);
   const currentSessionItems = useStore(s => s.currentSessionPath ? s.chatSessions[s.currentSessionPath]?.items : undefined);
   const pendingSessionConfirmation = useMemo(() => {
-    const latest = findLatestInputSessionConfirmation(currentSessionItems);
-    return latest?.status === 'pending' ? latest : null;
+    return findLatestInputSessionConfirmation(currentSessionItems, undefined, true);
   }, [currentSessionItems]);
 
   // Local state
@@ -237,15 +253,53 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     return () => window.removeEventListener('hana-inline-notice', handler);
   }, []);
 
+  // ── Welcome 模式 placeholder tip（mount、i18n ready、每次 welcome 重新激活时随机一条） ──
+  const pickRandomWelcomeTip = useCallback((): string => {
+    const tipsRaw: unknown = t('welcome.placeholderTips');
+    const tips = Array.isArray(tipsRaw)
+      ? tipsRaw.filter((tip): tip is string => typeof tip === 'string' && tip.length > 0)
+      : [];
+    if (tips.length === 0) return '';
+    return tips[Math.floor(Math.random() * tips.length)];
+  }, [t]);
+
+  const [welcomeTip, setWelcomeTip] = useState<string>(() =>
+    welcomeVisible ? pickRandomWelcomeTip() : '',
+  );
+
+  const prevWelcomeVisibleRef = useRef(welcomeVisible);
+  const prevLocaleRef = useRef(locale);
+  useEffect(() => {
+    const wasVisible = prevWelcomeVisibleRef.current;
+    const previousLocale = prevLocaleRef.current;
+    prevWelcomeVisibleRef.current = welcomeVisible;
+    prevLocaleRef.current = locale;
+
+    if (!welcomeVisible) {
+      if (welcomeTip) setWelcomeTip('');
+      return;
+    }
+
+    // false→true（重新进入欢迎页）、locale ready/切换，或 mount 时 i18n 还没 ready 现在能拿到
+    if (!wasVisible || previousLocale !== locale || !welcomeTip) {
+      const tip = pickRandomWelcomeTip();
+      if (tip) setWelcomeTip(tip);
+    }
+  }, [welcomeVisible, locale, welcomeTip, pickRandomWelcomeTip]);
+
   // ── Placeholder ──
+  const placeholderRef = useRef('');
+  const getEditorPlaceholder = useCallback(() => placeholderRef.current, []);
   const placeholder = (() => {
+    if (welcomeVisible && welcomeTip) return welcomeTip;
     const yuanPh = t(`yuan.placeholder.${agentYuan}`);
     return (yuanPh && !yuanPh.startsWith('yuan.')) ? yuanPh : t('input.placeholder');
   })();
+  placeholderRef.current = placeholder;
 
   // ── TipTap editor ──
   const editor = useEditor({
-    extensions: createInputEditorExtensions(placeholder),
+    extensions: createInputEditorExtensions(getEditorPlaceholder),
     editorProps: {
       attributes: {
         class: styles['input-box'],
@@ -254,6 +308,11 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
       },
     },
   });
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta('input-placeholder-refresh', placeholder));
+  }, [editor, placeholder]);
 
   // Focus trigger from store
   const inputFocusTrigger = useStore(s => s.inputFocusTrigger);
@@ -566,9 +625,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   }, [addAttachedFile, editor, t]);
 
   // ── Load thinking level once server port is ready + listen for plan mode sync ──
-  const serverPort = useStore(s => s.serverPort);
+  const activeServerConnection = useStore(s => s.activeServerConnection);
   useEffect(() => {
-    if (serverPort) {
+    if (activeServerConnection) {
       fetchConfig()
         .then(d => { if (d.thinking_level) setThinkingLevel(d.thinking_level as ThinkingLevel); })
         .catch((err: unknown) => console.warn('[InputArea] load config failed', err));
@@ -580,7 +639,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     };
     window.addEventListener('hana-plan-mode', handler);
     return () => window.removeEventListener('hana-plan-mode', handler);
-  }, [serverPort, setThinkingLevel]);
+  }, [activeServerConnection, setThinkingLevel]);
 
   // ── Handle slash selection (builtin vs skill) ──
   const handleSlashSelect = useCallback((item: SlashItem) => {
@@ -692,8 +751,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         finalText = text ? `${text}\n\n${fileBlock}` : fileBlock;
       }
 
-      // 图片读 base64
-      const hana = window.hana;
+      // 图片 / 视频读 base64。统一走 platform 层：Electron 里 platform 代理到 hana，
+      // Web/PWA 里 platform 代理到 HTTP fallback。
+      const platform = window.platform;
       const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
       const videos: Array<{ type: 'video'; data: string; mimeType: string }> = [];
       const imageBase64Map = new Map<string, { base64Data: string; mimeType: string }>();
@@ -702,18 +762,22 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         try {
           if (img.base64Data && img.mimeType) {
             images.push({ type: 'image', data: img.base64Data, mimeType: img.mimeType });
-          } else if (hana?.readFileBase64) {
-            const base64 = await hana.readFileBase64(img.path);
+          } else {
+            const base64 = await platform?.readFileBase64?.(img.path);
             if (base64) {
-              const ext = img.name.toLowerCase().replace(/^.*\./, '');
-              const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml' };
-              const mimeType = mimeMap[ext] || 'image/png';
+              const mimeType = chatImageMimeTypeForName(img.name, img.mimeType);
               imageBase64Map.set(img.path, { base64Data: base64, mimeType });
               images.push({ type: 'image', data: base64, mimeType });
+            } else {
+              throw new Error(`failed to read image attachment: ${img.path}`);
             }
           }
-        } catch {
-          finalText = finalText ? `${finalText}\n\n[附件] ${img.path}` : `[附件] ${img.path}`;
+        } catch (err) {
+          console.warn('[input] failed to read image attachment', err);
+          useStore.getState().addToast(t('input.imageReadFailed'), 'error', 6000, {
+            dedupeKey: `image-read-failed:${img.path}`,
+          });
+          return;
         }
       }
       for (const video of videoFiles) {
@@ -721,16 +785,22 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
           if (video.base64Data && video.mimeType) {
             const mimeType = chatVideoMimeTypeForName(video.name, video.mimeType);
             videos.push({ type: 'video', data: video.base64Data, mimeType });
-          } else if (hana?.readFileBase64) {
-            const base64 = await hana.readFileBase64(video.path);
+          } else {
+            const base64 = await platform?.readFileBase64?.(video.path);
             if (base64) {
               const mimeType = chatVideoMimeTypeForName(video.name, video.mimeType);
               videoBase64Map.set(video.path, { base64Data: base64, mimeType });
               videos.push({ type: 'video', data: base64, mimeType });
+            } else {
+              throw new Error(`failed to read video attachment: ${video.path}`);
             }
           }
-        } catch {
-          finalText = finalText ? `${finalText}\n\n[附件] ${video.path}` : `[附件] ${video.path}`;
+        } catch (err) {
+          console.warn('[input] failed to read video attachment', err);
+          useStore.getState().addToast(t('input.videoReadFailed'), 'error', 6000, {
+            dedupeKey: `video-read-failed:${video.path}`,
+          });
+          return;
         }
       }
 

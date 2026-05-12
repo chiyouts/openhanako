@@ -41,6 +41,9 @@ describe("modelSupportsVideo", () => {
   it("input 含 video → true", () => {
     expect(modelSupportsVideo({ input: ["text", "video"] })).toBe(true);
   });
+  it("Hana compat 标记视频能力 → true", () => {
+    expect(modelSupportsVideo({ input: ["text", "image"], compat: { hanaVideoInput: true } })).toBe(true);
+  });
   it("input 缺失或只有 image → false", () => {
     expect(modelSupportsVideo({ input: ["text", "image"] })).toBe(false);
     expect(modelSupportsVideo({})).toBe(false);
@@ -50,7 +53,13 @@ describe("modelSupportsVideo", () => {
 describe("sanitizeMessagesForModel", () => {
   const textOnlyModel = { input: ["text"] };
   const imageModel = { input: ["text", "image"] };
-  const videoModel = { input: ["text", "video"] };
+  const videoModel = {
+    id: "qwen3-vl-plus",
+    provider: "dashscope",
+    api: "openai-completions",
+    input: ["text"],
+    compat: { hanaVideoInput: true },
+  };
 
   it("支持 image 的模型：放行不改", () => {
     const messages = [
@@ -101,6 +110,27 @@ describe("sanitizeMessagesForModel", () => {
     expect(res.messages[0].content).toEqual([
       { type: "text", text: "[图片已省略：当前模型不支持图像输入]" },
       VIDEO_BLOCK,
+    ]);
+  });
+
+  it("视频语义能力存在但 provider 传输不支持时仍剥离 video", () => {
+    const unsupportedTransportModel = {
+      id: "kimi-for-coding",
+      provider: "kimi-coding",
+      api: "anthropic-messages",
+      input: ["text", "image"],
+      compat: { hanaVideoInput: true },
+    };
+    const messages = [
+      { role: "user", content: [VIDEO_BLOCK] },
+    ];
+
+    const res = sanitizeMessagesForModel(messages, unsupportedTransportModel);
+
+    expect(res.stripped).toBe(1);
+    expect(res.strippedVideos).toBe(1);
+    expect(res.messages[0].content).toEqual([
+      { type: "text", text: "[视频已省略：当前模型不支持视频输入]" },
     ]);
   });
 
