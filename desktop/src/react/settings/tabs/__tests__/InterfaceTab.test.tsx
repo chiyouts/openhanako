@@ -5,6 +5,7 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InterfaceTab } from '../InterfaceTab';
 import { useSettingsStore } from '../../store';
+import registry from '../../../../shared/theme-registry';
 
 type AppearanceGlobals = typeof globalThis & {
   setTheme?: (theme: string) => void;
@@ -15,7 +16,7 @@ type AppearanceGlobals = typeof globalThis & {
 function setAppearanceGlobals() {
   (globalThis as AppearanceGlobals).setTheme = vi.fn((theme: string) => {
     localStorage.setItem('hana-theme', theme);
-    document.documentElement.setAttribute('data-theme', theme === 'auto' ? 'warm-paper' : theme);
+    document.documentElement.setAttribute('data-theme', theme === 'auto' ? registry.DEFAULT_THEME : theme);
   });
   (globalThis as AppearanceGlobals).setSerifFont = vi.fn((enabled: boolean) => {
     localStorage.setItem('hana-font-serif', enabled ? '1' : '0');
@@ -44,7 +45,7 @@ describe('InterfaceTab appearance state', () => {
     vi.clearAllMocks();
     localStorage.clear();
     document.body.className = '';
-    document.documentElement.setAttribute('data-theme', 'warm-paper');
+    document.documentElement.setAttribute('data-theme', registry.DEFAULT_THEME);
     window.t = ((key: string) => key) as typeof window.t;
     window.platform = {
       settingsChanged: vi.fn(),
@@ -66,7 +67,7 @@ describe('InterfaceTab appearance state', () => {
   });
 
   it('recomputes paper texture availability when the selected theme changes', () => {
-    localStorage.setItem('hana-theme', 'warm-paper');
+    localStorage.setItem('hana-theme', registry.DEFAULT_THEME);
     localStorage.setItem('hana-paper-texture', '1');
 
     render(React.createElement(InterfaceTab));
