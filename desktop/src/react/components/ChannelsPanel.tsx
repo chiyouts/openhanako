@@ -16,6 +16,7 @@ import {
 } from '../stores/channel-actions';
 import { loadMessages } from '../stores/session-actions';
 import { subscribeStreamKey } from '../services/stream-key-dispatcher';
+import { useContinuousBottomScroll } from '../hooks/use-continuous-bottom-scroll';
 import { resolveChannelMember, buildAgentMap, formatChannelTime, MemberAvatar } from './channels/ChannelList';
 import type { MemberInfo } from './channels/ChannelList';
 import { ChatTranscript } from './chat/ChatTranscript';
@@ -359,13 +360,21 @@ export function AgentPhoneSessionPreview({ sessionPath, agentId, agentYuan }: {
   const [streamRevision, setStreamRevision] = useState(0);
   const streamTurnRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const bottomScroll = useContinuousBottomScroll({
+    scrollRef,
+    contentRef,
+    active: !!sessionPath,
+    stickyThreshold: 32,
+  });
   const moodYuan = agentYuan || 'hanako';
 
   useEffect(() => {
+    bottomScroll.scrollToBottom({ mode: 'instant', forceSticky: true });
     streamTurnRef.current = 0;
     setStreamMessage(null);
     setStreamRevision(0);
-  }, [sessionPath]);
+  }, [bottomScroll, sessionPath]);
 
   useEffect(() => {
     if (!sessionPath || items.length > 0 || loading) return;
@@ -380,13 +389,8 @@ export function AgentPhoneSessionPreview({ sessionPath, agentId, agentYuan }: {
   }, [items.length, loading, sessionPath]);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const raf = window.requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [items.length, streamRevision]);
+    bottomScroll.followBottom();
+  }, [bottomScroll, items.length, loading, streamRevision]);
 
   useEffect(() => {
     if (!sessionPath) return;
@@ -559,21 +563,23 @@ export function AgentPhoneSessionPreview({ sessionPath, agentId, agentYuan }: {
 
   return (
     <div ref={scrollRef} className={`${styles.agentActivityTranscriptScroll} ${chatStyles.subagentPreviewTranscript}`}>
-      {!sessionPath ? (
-        <div className={styles.agentActivityEmpty}>{t('channel.agentIdle')}</div>
-      ) : loading && displayItems.length === 0 ? (
-        <div className={styles.agentActivityEmpty}>{t('common.loading')}</div>
-      ) : displayItems.length === 0 ? (
-        <div className={styles.agentActivityEmpty}>{t('channel.agentIdle')}</div>
-      ) : (
-        <ChatTranscript
-          items={displayItems}
-          sessionPath={sessionPath}
-          agentId={agentId}
-          readOnly
-          hideUserIdentity
-        />
-      )}
+      <div ref={contentRef}>
+        {!sessionPath ? (
+          <div className={styles.agentActivityEmpty}>{t('channel.agentIdle')}</div>
+        ) : loading && displayItems.length === 0 ? (
+          <div className={styles.agentActivityEmpty}>{t('common.loading')}</div>
+        ) : displayItems.length === 0 ? (
+          <div className={styles.agentActivityEmpty}>{t('channel.agentIdle')}</div>
+        ) : (
+          <ChatTranscript
+            items={displayItems}
+            sessionPath={sessionPath}
+            agentId={agentId}
+            readOnly
+            hideUserIdentity
+          />
+        )}
+      </div>
     </div>
   );
 }

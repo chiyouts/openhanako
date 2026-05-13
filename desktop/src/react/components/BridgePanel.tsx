@@ -6,6 +6,7 @@ import { formatSessionDate } from '../utils/format';
 import { AgentAvatar, resolveAgentDisplayInfo } from '../utils/agent-display';
 import { openSettingsModal } from '../stores/settings-modal-actions';
 import { loadMessages } from '../stores/session-actions';
+import { useContinuousBottomScroll } from '../hooks/use-continuous-bottom-scroll';
 import type { ChatListItem } from '../stores/chat-types';
 import { ChatTranscript } from './chat/ChatTranscript';
 import fp from './FloatingPanels.module.css';
@@ -462,7 +463,7 @@ function ContactAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string }
 const EMPTY_ITEMS: ChatListItem[] = [];
 const BRIDGE_SCROLL_THRESHOLD = 50;
 
-function BridgeChatTranscript({
+export function BridgeChatTranscript({
   sessionPath,
   agentId,
   contactName,
@@ -481,42 +482,20 @@ function BridgeChatTranscript({
   const isStreaming = useStore(s => s.streamingSessions.includes(sessionPath));
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const isAtBottom = useRef(true);
-
-  const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      isAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < BRIDGE_SCROLL_THRESHOLD;
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-    return () => el.removeEventListener('scroll', onScroll);
-  }, [sessionPath]);
+  const bottomScroll = useContinuousBottomScroll({
+    scrollRef,
+    contentRef,
+    active: true,
+    stickyThreshold: BRIDGE_SCROLL_THRESHOLD,
+  });
 
   useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    const ro = new ResizeObserver(() => {
-      if (isAtBottom.current) scrollToBottom();
-    });
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, [scrollToBottom, sessionPath]);
+    bottomScroll.scrollToBottom({ mode: 'instant', forceSticky: true });
+  }, [bottomScroll, sessionPath]);
 
   useEffect(() => {
-    isAtBottom.current = true;
-    requestAnimationFrame(scrollToBottom);
-  }, [scrollToBottom, sessionPath]);
-
-  useEffect(() => {
-    if (isAtBottom.current) requestAnimationFrame(scrollToBottom);
-  }, [items.length, isStreaming, scrollToBottom]);
+    bottomScroll.followBottom();
+  }, [bottomScroll, items.length, isStreaming]);
 
   const userIdentity = useSystemUserIdentity
     ? undefined
