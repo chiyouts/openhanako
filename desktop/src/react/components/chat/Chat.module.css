@@ -245,21 +245,17 @@
 }
 
 .streamTailChar {
-    display: inline-block;
-    --slide-y: 0.18em;
     animation: stream-tail-fade 180ms var(--ease-out) both;
     animation-delay: calc(var(--stream-tail-index, 0) * 14ms);
-    will-change: opacity, transform;
+    will-change: opacity;
 }
 
 @keyframes stream-tail-fade {
     from {
         opacity: 0.15;
-        transform: translateY(0.12em);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
     }
 }
 

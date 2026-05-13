@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import React from 'react';
+import fs from 'node:fs';
+import path from 'node:path';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StreamingMarkdownContent } from '../../components/chat/StreamingMarkdownContent';
@@ -54,6 +56,14 @@ describe('StreamingMarkdownContent', () => {
     expect(container.querySelectorAll('[data-stream-tail-char="true"]').length).toBeGreaterThan(0);
   });
 
+  it('marks six visible tail graphemes for fade when prose is long enough', () => {
+    const { container } = render(
+      <StreamingMarkdownContent source="这是一段足够长的普通正文" html="<p>这是一段足够长的普通正文</p>" active />,
+    );
+
+    expect(container.querySelectorAll('[data-stream-tail-char="true"]').length).toBe(6);
+  });
+
   it('does not typewriter complex markdown blocks', () => {
     const source = '```ts\nconst x = 1;\n```';
     const html = '<pre><code>const x = 1;</code></pre>';
@@ -64,5 +74,21 @@ describe('StreamingMarkdownContent', () => {
 
     expect(container.textContent).toContain('const x = 1;');
     expect(container.querySelector('[data-stream-tail-char="true"]')).toBeNull();
+  });
+
+  it('keeps tail fade characters on the text baseline without transform offsets', () => {
+    const css = fs.readFileSync(
+      path.join(process.cwd(), 'desktop/src/react/components/chat/Chat.module.css'),
+      'utf8',
+    );
+    const fadeBlock = css.match(/\.streamTailChar\s*\{(?<body>[^}]*)\}/)?.groups?.body || '';
+    const fadeKeyframes = css.slice(
+      css.indexOf('@keyframes stream-tail-fade'),
+      css.indexOf('@media (prefers-reduced-motion: reduce)'),
+    );
+
+    expect(css).toContain('stream-tail-fade');
+    expect(fadeBlock).not.toMatch(/inline-block/);
+    expect(fadeKeyframes).not.toMatch(/translateY/);
   });
 });

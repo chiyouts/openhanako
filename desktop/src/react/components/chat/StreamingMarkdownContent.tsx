@@ -47,7 +47,7 @@ export const StreamingMarkdownContent = memo(function StreamingMarkdownContent({
     <MarkdownContent
       html={visibleHtml}
       className={className}
-      tailFadeCount={shouldType ? 4 : 0}
+      tailFadeCount={shouldType ? 6 : 0}
     />
   );
 });
