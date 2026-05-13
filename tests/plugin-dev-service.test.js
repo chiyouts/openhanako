@@ -152,4 +152,31 @@ describe("PluginDevService", () => {
       .rejects.toThrow(/outside allowed plugin dev roots/i);
     expect(fs.existsSync(path.join(devPluginsDir, "outside-dev"))).toBe(false);
   });
+
+  it("registers EventBus dev capabilities and request handlers", async () => {
+    const { EventBus } = await import("../hub/event-bus.js");
+    const eventBus = new EventBus();
+    const sourcePath = writeDevPlugin(sourceRoot, "bus-dev", { prefix: "Bus" });
+
+    const unregister = service.registerEventBusHandlers(eventBus);
+
+    expect(eventBus.getCapability("plugin.dev.install")).toMatchObject({
+      type: "plugin.dev.install",
+      available: true,
+      owner: "system",
+    });
+
+    const install = await eventBus.request("plugin.dev.install", { sourcePath });
+    const invocation = await eventBus.request("plugin.dev.invokeTool", {
+      pluginId: "bus-dev",
+      toolName: "echo",
+      input: { text: "ok" },
+    });
+
+    expect(install.plugin.id).toBe("bus-dev");
+    expect(invocation.result.content[0].text).toBe("Bus ok");
+
+    unregister();
+    expect(eventBus.getCapability("plugin.dev.install")).toBeNull();
+  });
 });

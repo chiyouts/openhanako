@@ -5,6 +5,121 @@ import crypto from "crypto";
 const DEFAULT_LOG_LIMIT = 200;
 const SAFE_PLUGIN_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const REDACT_KEY_RE = /api[-_]?key|token|secret|password|authorization|credential/i;
+const OBJECT_SCHEMA = Object.freeze({ type: "object", additionalProperties: true });
+
+export const PLUGIN_DEV_EVENT_BUS_CAPABILITIES = Object.freeze([
+  {
+    type: "plugin.dev.install",
+    title: "Install dev plugin",
+    description: "Copy a plugin source directory into the dev plugin install slot and load it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sourcePath: { type: "string" },
+        path: { type: "string" },
+        pluginId: { type: "string" },
+        allowFullAccess: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.write",
+    errors: ["NO_HANDLER", "TIMEOUT", "INVALID_PAYLOAD", "FORBIDDEN", "NOT_FOUND", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.reload",
+    title: "Reload dev plugin",
+    description: "Reload a previously installed dev plugin from its registered source slot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        allowFullAccess: { type: "boolean" },
+      },
+      required: ["pluginId"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.write",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.invokeTool",
+    title: "Invoke dev plugin tool",
+    description: "Invoke one loaded plugin tool with explicit input for debug loops.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        toolName: { type: "string" },
+        input: { type: "object" },
+        sessionPath: { type: "string" },
+        agentId: { type: "string" },
+      },
+      required: ["pluginId", "toolName"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.execute",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.diagnostics",
+    title: "Read dev plugin diagnostics",
+    description: "Read dev slots, plugin diagnostics, logs, and surfaces.",
+    inputSchema: {
+      type: "object",
+      properties: { pluginId: { type: "string" } },
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.read",
+    errors: ["NO_HANDLER", "TIMEOUT", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.listSurfaces",
+    title: "List plugin UI surfaces",
+    description: "List page and widget surfaces available for plugin UI debugging.",
+    inputSchema: {
+      type: "object",
+      properties: { pluginId: { type: "string" } },
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.read",
+    errors: ["NO_HANDLER", "TIMEOUT", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.describeSurfaceDebug",
+    title: "Describe plugin UI debug surface",
+    description: "Return an element-first debug descriptor for one plugin UI surface.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        kind: { type: "string" },
+        route: { type: "string" },
+      },
+      required: ["pluginId"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.read",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+]);
 
 function createDevError(message, status = 400, code = "PLUGIN_DEV_ERROR") {
   const err = new Error(message);
@@ -99,6 +214,7 @@ export class PluginDevService {
     this._logs = [];
     this._logLimit = Number.isFinite(logLimit) && logLimit > 0 ? logLimit : DEFAULT_LOG_LIMIT;
     this._allowedSourceRoots = allowedSourceRoots.map((root) => this._normalizeRoot(root));
+    this._eventBusDisposers = [];
   }
 
   _normalizeRoot(root) {
@@ -367,5 +483,37 @@ export class PluginDevService {
       logs: this.getLogs(pluginId),
       surfaces: this.listSurfaces(pluginId),
     };
+  }
+
+  registerEventBusHandlers(bus) {
+    if (!bus || typeof bus.handle !== "function") {
+      throw new Error("PluginDevService.registerEventBusHandlers requires EventBus.handle");
+    }
+    this.unregisterEventBusHandlers();
+    const handlers = [
+      ["plugin.dev.install", (payload = {}) => this.installFromSource({
+        sourcePath: payload.sourcePath || payload.path,
+        pluginId: payload.pluginId,
+        allowFullAccess: !!payload.allowFullAccess,
+      })],
+      ["plugin.dev.reload", (payload = {}) => this.reloadPlugin(payload.pluginId, {
+        allowFullAccess: payload.allowFullAccess,
+      })],
+      ["plugin.dev.invokeTool", (payload = {}) => this.invokeTool(payload)],
+      ["plugin.dev.diagnostics", (payload = {}) => this.getDiagnostics(payload.pluginId)],
+      ["plugin.dev.listSurfaces", (payload = {}) => this.listSurfaces(payload.pluginId)],
+      ["plugin.dev.describeSurfaceDebug", (payload = {}) => this.describeSurfaceDebug(payload)],
+    ];
+    const capabilityByType = new Map(PLUGIN_DEV_EVENT_BUS_CAPABILITIES.map((capability) => [capability.type, capability]));
+    this._eventBusDisposers = handlers.map(([type, handler]) => (
+      bus.handle(type, handler, { capability: capabilityByType.get(type) })
+    ));
+    return () => this.unregisterEventBusHandlers();
+  }
+
+  unregisterEventBusHandlers() {
+    for (const dispose of this._eventBusDisposers.splice(0)) {
+      try { dispose(); } catch {}
+    }
   }
 }

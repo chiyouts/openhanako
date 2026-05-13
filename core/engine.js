@@ -23,6 +23,7 @@ import { findModel } from "../shared/model-ref.js";
 import { resolveWorkspaceSkillPaths } from "../shared/workspace-skill-paths.js";
 import { resolveHanaPiAgentDir, resolveHanaPiProjectDir } from "../shared/hana-runtime-paths.js";
 import { PluginManager } from "./plugin-manager.js";
+import { PluginDevService } from "./plugin-dev-service.js";
 import { DefaultResourceLoader, SettingsManager } from "../lib/pi-sdk/index.js";
 import { loadLocale } from "../server/i18n.js";
 
@@ -264,6 +265,8 @@ export class HanaEngine {
 
     // ── Plugin Manager ──
     this._pluginManager = null;  // initialized async in initPlugins()
+    this._pluginDevService = null;
+    this._pluginDevEventBusCleanup = null;
 
     // Pi SDK resources（init 时填充）
     this._resourceLoader = null;
@@ -1095,6 +1098,8 @@ export class HanaEngine {
         }
       }
     }
+    this._pluginDevEventBusCleanup?.();
+    this._pluginDevEventBusCleanup = null;
     this._skills?.unwatch();
     await this._agentMgr.disposeAll(this._sessionCoord);
     await this._sessionCoord.cleanupSession();
@@ -1111,7 +1116,11 @@ export class HanaEngine {
   async initPlugins(bus) {
     const builtinPluginsDir = path.join(this.productDir, "..", "plugins");
     const userPluginsDir = path.join(this.hanakoHome, "plugins");
+    const devPluginsDir = path.join(this.hanakoHome, "plugins-dev");
+    const pluginDevRunsDir = path.join(this.hanakoHome, "plugin-dev-runs");
+    const pluginDevSourcesDir = path.join(this.hanakoHome, "plugin-dev-sources");
     const pluginDataDir = path.join(this.hanakoHome, "plugin-data");
+    fs.mkdirSync(pluginDevSourcesDir, { recursive: true });
 
     // Read app version for plugin compatibility check
     let appVersion = "0.0.0";
@@ -1129,7 +1138,23 @@ export class HanaEngine {
       getSessionPath: () => this.currentSessionPath,
       registerSessionFile: (entry) => this.registerSessionFile(entry),
       slashRegistry: this._slashSystem?.registry ?? null,
+      logSink: (entry) => this._pluginDevService?.recordLog(entry),
     });
+    const allowedPluginDevSourceRoots = [
+      pluginDevSourcesDir,
+      this.homeCwd,
+      process.cwd(),
+      path.resolve(this.productDir, ".."),
+    ].filter((dir) => typeof dir === "string" && dir.trim());
+    this._pluginDevService = new PluginDevService({
+      pluginManager: this._pluginManager,
+      devPluginsDir,
+      runDataDir: pluginDevRunsDir,
+      allowedSourceRoots: allowedPluginDevSourceRoots,
+      syncPluginExtensions: () => this.syncPluginExtensions(),
+    });
+    this._pluginDevEventBusCleanup?.();
+    this._pluginDevEventBusCleanup = this._pluginDevService.registerEventBusHandlers(bus);
     this._pluginManager.scan();
     await this._pluginManager.loadAll();
 
@@ -1184,6 +1209,7 @@ export class HanaEngine {
   }
 
   get pluginManager() { return this._pluginManager; }
+  get pluginDevService() { return this._pluginDevService; }
 
   /** 插件热操作后调用，同步 extension factories 到 ResourceLoader */
   async syncPluginExtensions() {

@@ -227,6 +227,26 @@ function isMarketplacePluginInstallable(plugin, marketplace) {
   return false;
 }
 
+function pluginDevServiceOrError(engine, c) {
+  const service = engine.pluginDevService;
+  if (!service) {
+    return {
+      errorResponse: c.json({
+        error: "Plugin dev service not available",
+        code: "PLUGIN_DEV_SERVICE_UNAVAILABLE",
+      }, 500),
+    };
+  }
+  return { service };
+}
+
+function pluginDevErrorResponse(c, err) {
+  return c.json({
+    error: err?.message || String(err),
+    ...(err?.code ? { code: err.code } : {}),
+  }, err?.status || 500);
+}
+
 function sanitizeMarketplacePluginForClient(plugin) {
   const {
     readme: _readme,
@@ -307,6 +327,77 @@ export function createPluginsRoute(engine) {
       tasks: typeof engine.taskRegistry?.listAll === "function" ? engine.taskRegistry.listAll() : [],
       schedules: typeof engine.taskRegistry?.listSchedules === "function" ? engine.taskRegistry.listSchedules() : [],
     });
+  });
+
+  // ── Plugin dev loop endpoints ──
+
+  route.post("/plugins/dev/install", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    const sourcePath = body.sourcePath || body.path;
+    try {
+      return c.json(await service.installFromSource({
+        sourcePath,
+        pluginId: body.pluginId,
+        allowFullAccess: !!body.allowFullAccess,
+      }));
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
+  });
+
+  route.post("/plugins/dev/:id/reload", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(await service.reloadPlugin(c.req.param("id"), {
+        allowFullAccess: body.allowFullAccess,
+      }));
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
+  });
+
+  route.post("/plugins/dev/:id/tools/:toolName/invoke", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(await service.invokeTool({
+        pluginId: c.req.param("id"),
+        toolName: c.req.param("toolName"),
+        input: body.input || {},
+        sessionPath: body.sessionPath,
+        agentId: body.agentId,
+      }));
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
+  });
+
+  route.get("/plugins/dev/diagnostics", (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    return c.json(service.getDiagnostics(c.req.query("pluginId") || undefined));
+  });
+
+  route.get("/plugins/dev/surfaces", (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    return c.json(service.listSurfaces(c.req.query("pluginId") || undefined));
+  });
+
+  route.post("/plugins/dev/surfaces/describe", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(service.describeSurfaceDebug(body));
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
   });
 
   function getMarketplace() {
