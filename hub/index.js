@@ -295,6 +295,10 @@ export class Hub {
     return this._channelRouter.toggle(enabled);
   }
 
+  refreshChannelProactiveSchedule() {
+    return this._channelRouter.refreshProactiveSchedule();
+  }
+
   // ──────────── 生命周期 ────────────
 
   async dispose() {

@@ -670,6 +670,7 @@ export function ChannelAgentSettingsPanel() {
   const toolMode = useStore(s => s.channelAgentPhoneToolMode);
   const replyMinChars = useStore(s => s.channelAgentReplyMinChars);
   const replyMaxChars = useStore(s => s.channelAgentReplyMaxChars);
+  const proactiveEnabled = useStore(s => s.channelAgentProactiveEnabled);
   const reminderIntervalMinutes = useStore(s => s.channelAgentReminderIntervalMinutes);
   const guardLimit = useStore(s => s.channelAgentGuardLimit);
   const modelOverrideEnabled = useStore(s => s.channelAgentModelOverrideEnabled);
@@ -745,6 +746,11 @@ export function ChannelAgentSettingsPanel() {
     void saveSettings({ mode });
   };
 
+  const changeProactiveEnabled = (enabled: boolean) => {
+    if (saving || enabled === proactiveEnabled) return;
+    void saveSettings({ proactiveEnabled: enabled });
+  };
+
   const changeModelOverrideEnabled = (enabled: boolean) => {
     if (saving || enabled === modelOverrideEnabled) return;
     if (!enabled) {
@@ -813,20 +819,6 @@ export function ChannelAgentSettingsPanel() {
           </div>
           {!isDM && (
             <div className={styles.agentSettingsField}>
-              <div className={styles.agentSettingsLabel}>{t('channel.reminderInterval')}</div>
-              <input
-                className={styles.agentReplyRangeInput}
-                inputMode="numeric"
-                placeholder="31"
-                value={draftReminder}
-                onChange={(event) => setDraftReminder(event.target.value.replace(/[^\d]/g, ''))}
-                onBlur={commitTextSettings}
-                disabled={saving}
-              />
-            </div>
-          )}
-          {!isDM && (
-            <div className={styles.agentSettingsField}>
               <div className={styles.agentSettingsLabel}>{t('channel.guardLimit')}</div>
               <input
                 className={styles.agentReplyRangeInput}
@@ -840,6 +832,43 @@ export function ChannelAgentSettingsPanel() {
             </div>
           )}
         </div>
+        {!isDM && (
+          <div className={`${styles.agentSettingsInlineGrid} ${styles.agentSettingsInlineGridSpaced}`}>
+            <div className={styles.agentSettingsField}>
+              <div className={styles.agentSettingsLabel}>{t('channel.proactiveInitiation')}</div>
+              <div className={`${styles.agentToolModeToggle} ${styles.agentToolModeToggleFill}`}>
+                <button
+                  type="button"
+                  className={`${styles.agentToolModeButton}${!proactiveEnabled ? ` ${styles.agentToolModeButtonActive}` : ''}`}
+                  disabled={saving}
+                  onClick={() => changeProactiveEnabled(false)}
+                >
+                  {t('channel.proactiveOff')}
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.agentToolModeButton}${proactiveEnabled ? ` ${styles.agentToolModeButtonActive}` : ''}`}
+                  disabled={saving}
+                  onClick={() => changeProactiveEnabled(true)}
+                >
+                  {t('channel.proactiveOn')}
+                </button>
+              </div>
+            </div>
+            <div className={styles.agentSettingsField}>
+              <div className={styles.agentSettingsLabel}>{t('channel.proactiveInterval')}</div>
+              <input
+                className={styles.agentReplyRangeInput}
+                inputMode="numeric"
+                placeholder="31"
+                value={draftReminder}
+                onChange={(event) => setDraftReminder(event.target.value.replace(/[^\d]/g, ''))}
+                onBlur={commitTextSettings}
+                disabled={saving || !proactiveEnabled}
+              />
+            </div>
+          </div>
+        )}
         <div className={styles.agentSettingsField}>
           <div className={styles.agentSettingsLabel}>{t('channel.replyRange')}</div>
           <div className={styles.agentReplyRangeRow}>
