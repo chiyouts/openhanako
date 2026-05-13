@@ -117,7 +117,7 @@ export default function registerCardRoute(app, ctx) {
           return '<button class="media-btn image-wrap" type="button" data-kind="image" data-file="' + esc(file) + '" data-url="' + esc(mediaUrl) + '" onclick="openMediaFromNode(this)"><img src="' + mediaUrl + '" alt="' + esc(file) + '"></button>';
         }
         if (task.status === "failed") {
-          return '<div class="failed">' + esc(task.failReason || 'generation failed') + '</div>';
+          return '<div class="failed">' + esc(task.failReason || "generation failed") + '</div>';
         }
         return '<div class="skeleton"></div>';
       }

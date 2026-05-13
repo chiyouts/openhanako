@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { saveImageToDir } from "../lib/download.js";
+import { resolveModelId } from "../lib/model-catalog.js";
 
 const FORMAT_TO_MIME = {
   png: "image/png",
@@ -35,14 +36,16 @@ function resolveSize(size, aspectRatio, providerDefaults) {
   const effectiveRatio = aspectRatio || providerDefaults?.aspect_ratio;
   const effectiveSize = size || providerDefaults?.size || "2K";
 
-  if (!effectiveRatio) return effectiveSize;
-  const tier = SIZE_TABLE[effectiveSize.toUpperCase()] || SIZE_TABLE["2K"];
-  return tier[effectiveRatio] || effectiveSize;
+  if (effectiveRatio) {
+    const tier = SIZE_TABLE[effectiveSize.toUpperCase()] || SIZE_TABLE["2K"];
+    return tier[effectiveRatio] || effectiveSize;
+  }
+  return effectiveSize;
 }
 
 export const volcengineImageAdapter = {
   id: "volcengine",
-  name: "Volcengine Seedream",
+  name: "火山引擎 Seedream",
   types: ["image"],
   capabilities: {
     ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"],
@@ -53,7 +56,7 @@ export const volcengineImageAdapter = {
     try {
       const creds = await ctx.bus.request("provider:credentials", { providerId: "volcengine" });
       if (creds.error || !creds.apiKey) {
-        return { ok: false, message: creds.error || "API key is not configured" };
+        return { ok: false, message: creds.error || "未配置 API Key" };
       }
       return { ok: true };
     } catch (err) {
@@ -68,12 +71,13 @@ export const volcengineImageAdapter = {
       if (!fallback.error && fallback.apiKey) {
         creds = fallback;
       } else {
-        throw new Error('Provider "volcengine" is not configured with an API key.');
+        throw new Error(`Provider "volcengine" 未配置 API Key。请在设置 → Providers 中配置。`);
       }
     }
 
     const { apiKey, baseUrl } = creds;
-    const modelId = params.model || ctx.config?.get?.("defaultImageModel")?.id || "seedream-3-0";
+    const rawModel = params.model || ctx.config?.get?.("defaultImageModel")?.id;
+    const modelId = resolveModelId("volcengine", rawModel);
 
     const allDefaults = ctx.config?.get?.("providerDefaults") || {};
     const providerDefaults = allDefaults.volcengine || {};

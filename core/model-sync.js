@@ -200,7 +200,7 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
   }
 
   const videoAwareEntry = video === true ? withHanaVideoInputCompat(entry, true) : entry;
-  return withThinkingFormatCompat(videoAwareEntry, { provider, api });
+  return withThinkingFormatCompat(videoAwareEntry, { provider, api, baseUrl });
 }
 
 function filterChatModelEntries(provider, models) {
@@ -227,6 +227,7 @@ export function syncModels(providers, opts = {}) {
   const modelsJsonPath = opts.modelsJsonPath;
   const authJsonPath = opts.authJsonPath;
   const oauthKeyMap = opts.oauthKeyMap || {};
+  const chatProjectionMap = opts.chatProjectionMap || {};
 
   // 鎳掑姞杞?auth.json锛堝彧鍦ㄩ渶瑕佹椂璇讳竴娆★級
   let _authJson;
@@ -245,6 +246,8 @@ export function syncModels(providers, opts = {}) {
   const newProviders = {};
 
   for (const [name, p] of Object.entries(providers || {})) {
+    const projection = chatProjectionMap[name] || "models-json";
+    if (projection === "sdk-auth-alias" || projection === "none") continue;
     if (!p.base_url) continue;
     if (!p.models || p.models.length === 0) continue;
     validateProviderModels(name, p.models, { baseUrl: p.base_url });

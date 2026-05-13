@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execFile } from "child_process";
 import {
   findGeneratedFile,
   recordOutputDirHistory,
@@ -50,6 +51,22 @@ function catalogKeyForProvider(entry) {
   if (entry.id === "openai") return "openai";
   if (!entry.isBuiltin && isOpenAIImageProvider(entry)) return "openai";
   return null;
+}
+
+/** Open a file with the system default application (cross-platform). */
+function openWithSystem(filePath) {
+  return new Promise((resolve, reject) => {
+    const p = process.platform;
+    let cmd; let args;
+    if (p === "darwin") {
+      cmd = "open"; args = [filePath];
+    } else if (p === "win32") {
+      cmd = "cmd"; args = ["/c", "start", "", filePath];
+    } else {
+      cmd = "xdg-open"; args = [filePath];
+    }
+    execFile(cmd, args, (err) => (err ? reject(err) : resolve()));
+  });
 }
 
 export default function registerMediaRoutes(app, ctx) {
@@ -109,6 +126,27 @@ export default function registerMediaRoutes(app, ctx) {
         "Cache-Control": "public, max-age=86400",
       },
     });
+  });
+
+  app.post("/media/open/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
+      return c.json({ error: "invalid filename" }, 400);
+    }
+    const filePath = path.join(ctx.dataDir, "generated", filename);
+
+    try {
+      fs.statSync(filePath);
+    } catch {
+      return c.json({ error: "not found" }, 404);
+    }
+
+    try {
+      await openWithSystem(filePath);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: err.message || "failed to open file" }, 500);
+    }
   });
 
   app.get("/providers", async (c) => {
@@ -178,7 +216,7 @@ export default function registerMediaRoutes(app, ctx) {
   app.put("/config", async (c) => {
     try {
       const body = await c.req.json();
-      const next = { ...(body || {}) };
+      const next = { ...(body?.values && typeof body.values === "object" && !Array.isArray(body.values) ? body.values : body || {}) };
       const agentId = c.req.query("agentId") || undefined;
 
       if (Object.prototype.hasOwnProperty.call(next, "outputDir")) {
@@ -196,7 +234,7 @@ export default function registerMediaRoutes(app, ctx) {
       }
 
       for (const [key, value] of Object.entries(next)) {
-        ctx.config.set(key, value);
+        ctx.config.set(key, value === null ? undefined : value);
       }
 
       return c.json({

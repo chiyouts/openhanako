@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { saveImageToDir } from "../lib/download.js";
+import { resolveModelId } from "../lib/model-catalog.js";
 
 const FORMAT_TO_MIME = {
   png: "image/png",
@@ -52,7 +53,8 @@ export const openaiImageAdapter = {
     }
 
     const { apiKey, baseUrl } = creds;
-    const modelId = params.model || ctx.config?.get?.("defaultImageModel")?.id || "gpt-image-1";
+    const rawModel = params.model || ctx.config?.get?.("defaultImageModel")?.id;
+    const modelId = resolveModelId("openai", rawModel);
 
     const allDefaults = ctx.config?.get?.("providerDefaults") || {};
     const providerDefaults = allDefaults[providerId] || allDefaults.openai || {};

@@ -52,7 +52,7 @@
     "name": "DeepSeek V4 Pro",
     "context": 1000000,
     "maxOutput": 384000,
-    "image": true,
+    "image": false,
     "reasoning": true,
     "xhigh": true
   },
