@@ -64,8 +64,11 @@ Current boundaries: iframe UI is the stable extension surface. Native renderer c
    - User-installed plugin: the directory reported by `/api/plugins/settings` or `${HANA_HOME}/plugins`.
 6. Generate the scaffold with the bundled script, then adjust names, descriptions, tools, routes, capabilities, and UI to the user's request.
 7. Use the Plugin Dev Loop when available:
+   - confirm the user has enabled Settings -> Plugins -> "Allow Agent plugin dev tools";
    - install source with `plugin.dev.install`;
    - reload with `plugin.dev.reload` after edits;
+   - keep the returned `devRunId` and pass it to lifecycle controls when available;
+   - enable, disable, reset, or uninstall only through `plugin.dev.enable`, `plugin.dev.disable`, `plugin.dev.reset`, and `plugin.dev.uninstall`;
    - inspect `plugin.dev.diagnostics`;
    - smoke-test tools with `plugin.dev.invokeTool`;
    - list UI surfaces with `plugin.dev.listSurfaces`;
@@ -112,6 +115,7 @@ python3 skills2set/hana-plugin-creator/scripts/create_hana_plugin.py "Jimeng Pro
 
 - Static `tools/*.js` must export `name`, `description`, `parameters`, and `execute`.
 - React templates may use `@hana/plugin-runtime`, `@hana/plugin-sdk`, and `@hana/plugin-components`.
+- Dev authority is not a manifest permission. Hana grants it from the remembered dev install slot under `${HANA_HOME}/plugins-dev/`, and Agent dev tools are hidden until the user enables the dev tools setting.
 - Local files returned to users must go through `toolCtx.stageFile({ sessionPath, filePath, label })`, then media details. Do not hand-build local `MEDIA:` or `file://` output.
 - Page and widget contributions require `"trust": "full-access"` and route-backed iframe UI.
 - Declare only the iframe host capabilities actually used.

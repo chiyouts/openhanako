@@ -123,6 +123,62 @@ describe("PluginDevService", () => {
     expect(syncPluginExtensions).toHaveBeenCalledTimes(2);
   });
 
+  it("disables, enables, resets, and uninstalls only the remembered dev slot", async () => {
+    const sourcePath = writeDevPlugin(sourceRoot, "dev-life", { prefix: "Life" });
+    const install = await service.installFromSource({ sourcePath });
+
+    const disabled = await service.disablePlugin("dev-life");
+    expect(disabled.plugin).toMatchObject({ id: "dev-life", status: "disabled", source: "dev" });
+    expect(pluginManager.getPlugin("dev-life").status).toBe("disabled");
+
+    const enabled = await service.enablePlugin("dev-life", { devRunId: install.devRunId });
+    expect(enabled.plugin).toMatchObject({ id: "dev-life", status: "loaded", source: "dev" });
+
+    const reset = await service.resetPlugin("dev-life", { devRunId: install.devRunId });
+    expect(reset.plugin).toMatchObject({ id: "dev-life", status: "loaded", source: "dev" });
+    expect(reset.devRunId).not.toBe(install.devRunId);
+
+    const removed = await service.uninstallPlugin("dev-life", { devRunId: reset.devRunId });
+    expect(removed).toMatchObject({ ok: true, pluginId: "dev-life" });
+    expect(pluginManager.getPlugin("dev-life")).toBeNull();
+    expect(service.getDevSlot("dev-life")).toBeNull();
+    expect(fs.existsSync(path.join(devPluginsDir, "dev-life"))).toBe(false);
+    expect(syncPluginExtensions).toHaveBeenCalledTimes(5);
+  });
+
+  it("refuses to uninstall a normal community plugin through the dev service", async () => {
+    const communityDir = writeDevPlugin(sourceRoot, "normal-plugin");
+    await pluginManager.installPlugin(communityDir);
+
+    await expect(service.uninstallPlugin("normal-plugin"))
+      .rejects.toMatchObject({ code: "PLUGIN_DEV_SLOT_NOT_FOUND", status: 404 });
+    expect(pluginManager.getPlugin("normal-plugin")).toBeTruthy();
+  });
+
+  it("keeps dev full-access plugins restricted when re-enabled without dev permission", async () => {
+    const sourcePath = writeDevPlugin(sourceRoot, "dev-full-toggle", {
+      trust: "full-access",
+      lifecycle: `
+        export default class DevFullToggle {
+          async onload() { globalThis.__hanaDevFullToggleLoaded = true; }
+        }
+      `,
+    });
+    const install = await service.installFromSource({ sourcePath, allowFullAccess: true });
+    expect(pluginManager.getPlugin("dev-full-toggle").status).toBe("loaded");
+
+    await service.disablePlugin("dev-full-toggle");
+    const slot = service.getDevSlot("dev-full-toggle");
+    slot.allowFullAccess = false;
+    service._slots.set("dev-full-toggle", slot);
+    delete globalThis.__hanaDevFullToggleLoaded;
+
+    const enabled = await service.enablePlugin("dev-full-toggle", { devRunId: install.devRunId });
+
+    expect(enabled.plugin).toMatchObject({ id: "dev-full-toggle", status: "restricted" });
+    expect(globalThis.__hanaDevFullToggleLoaded).toBeUndefined();
+  });
+
   it("keeps full-access dev plugins restricted without explicit dev permission", async () => {
     const sourcePath = writeDevPlugin(sourceRoot, "dev-full", {
       trust: "full-access",
@@ -179,6 +235,11 @@ describe("PluginDevService", () => {
       available: true,
       owner: "system",
     });
+    expect(eventBus.getCapability("plugin.dev.uninstall")).toMatchObject({
+      type: "plugin.dev.uninstall",
+      available: true,
+      owner: "system",
+    });
 
     const install = await eventBus.request("plugin.dev.install", { sourcePath });
     const invocation = await eventBus.request("plugin.dev.invokeTool", {
@@ -191,11 +252,26 @@ describe("PluginDevService", () => {
       pluginId: "bus-dev",
       scenarioId: "bus-smoke",
     });
+    const disabled = await eventBus.request("plugin.dev.disable", {
+      pluginId: "bus-dev",
+      devRunId: install.devRunId,
+    });
+    const enabled = await eventBus.request("plugin.dev.enable", {
+      pluginId: "bus-dev",
+      devRunId: install.devRunId,
+    });
+    const removed = await eventBus.request("plugin.dev.uninstall", {
+      pluginId: "bus-dev",
+      devRunId: install.devRunId,
+    });
 
     expect(install.plugin.id).toBe("bus-dev");
     expect(invocation.result.content[0].text).toBe("Bus ok");
     expect(scenarios[0].id).toBe("bus-smoke");
     expect(scenarioRun.status).toBe("passed");
+    expect(disabled.plugin.status).toBe("disabled");
+    expect(enabled.plugin.status).toBe("loaded");
+    expect(removed).toMatchObject({ ok: true, pluginId: "bus-dev" });
 
     unregister();
     expect(eventBus.getCapability("plugin.dev.install")).toBeNull();

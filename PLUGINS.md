@@ -57,10 +57,15 @@ python3 skills2set/hana-plugin-creator/scripts/create_hana_plugin.py "My Plugin"
 1. 插件源码放在当前工作区，或 `${HANA_HOME}/plugin-dev-sources/`。
 2. 调用 EventBus `plugin.dev.install` 或 HTTP `POST /api/plugins/dev/install`，把源码复制到 `${HANA_HOME}/plugins-dev/<pluginId>` 并加载。
 3. 修改源码后调用 `plugin.dev.reload` 或 `POST /api/plugins/dev/:id/reload`。
-4. 工具插件用 `plugin.dev.invokeTool` 或 `POST /api/plugins/dev/:id/tools/:toolName/invoke` 做 smoke test。
-5. 诊断用 `plugin.dev.diagnostics` 或 `GET /api/plugins/dev/diagnostics`。
+4. 需要控制生命周期时调用 `plugin.dev.disable`、`plugin.dev.enable`、`plugin.dev.reset`、`plugin.dev.uninstall`，或对应 HTTP：`PUT /api/plugins/dev/:id/enabled`、`POST /api/plugins/dev/:id/reset`、`DELETE /api/plugins/dev/:id`。
+5. 工具插件用 `plugin.dev.invokeTool` 或 `POST /api/plugins/dev/:id/tools/:toolName/invoke` 做 smoke test。
+6. 诊断用 `plugin.dev.diagnostics` 或 `GET /api/plugins/dev/diagnostics`。
 
-dev 安装不会写入 `${HANA_HOME}/plugins/`。`full-access` dev 插件也必须显式传 `allowFullAccess: true`，全局社区插件开关不会自动授权开发态插件。
+Agent 可见的 dev 工具默认关闭。用户需要在设置 → 插件 → 权限中开启"允许 Agent 插件开发工具"，开启后 Agent 才会看到 `plugin_dev_install`、`plugin_dev_reload`、`plugin_dev_disable`、`plugin_dev_enable`、`plugin_dev_reset`、`plugin_dev_uninstall`、`plugin_dev_invoke_tool`、`plugin_dev_diagnostics`、`plugin_dev_list_surfaces`、`plugin_dev_describe_surface`、`plugin_dev_run_scenario`。
+
+开发态权限来自 Hana 记住的 dev slot，而不是 manifest 自己声明。`devRunId` 是一次 dev install/reload 的运行护栏，调用 enable/disable/reset/uninstall 时建议带上，避免旧上下文误操作新的开发槽。dev 操作只允许作用于 `${HANA_HOME}/plugins-dev/` 中的 runtime copy，不会写入 `${HANA_HOME}/plugins/`，也不会污染正式插件的禁用偏好。
+
+`full-access` dev 插件必须显式传 `allowFullAccess: true`，全局社区插件开关不会自动授权开发态插件。
 
 UI 插件调试时，先用 `plugin.dev.listSurfaces` 找到 page / widget，再用 `plugin.dev.describeSurfaceDebug` 获取 element-first 调试说明。Agent 应先读取可访问性树、文本、role、label 等语义元素并直接点击/输入，截图只用于视觉确认、布局检查，或语义信息不足时兜底。
 

@@ -24,6 +24,7 @@ import { resolveWorkspaceSkillPaths } from "../shared/workspace-skill-paths.js";
 import { resolveHanaPiAgentDir, resolveHanaPiProjectDir } from "../shared/hana-runtime-paths.js";
 import { PluginManager } from "./plugin-manager.js";
 import { PluginDevService } from "./plugin-dev-service.js";
+import { createPluginDevTools } from "./plugin-dev-tools.js";
 import { DefaultResourceLoader, SettingsManager } from "../lib/pi-sdk/index.js";
 import { loadLocale } from "../server/i18n.js";
 
@@ -642,6 +643,8 @@ export class HanaEngine {
   setWorkspaceUiState(workspaceRoot, state) { return this._prefs.setWorkspaceUiState(workspaceRoot, state); }
   getPluginUiPrefs() { return this._prefs.getPluginUiPrefs(); }
   setPluginUiPrefs(partial) { return this._prefs.setPluginUiPrefs(partial); }
+  getPluginDevToolsEnabled() { return this._prefs.getPluginDevToolsEnabled(); }
+  setPluginDevToolsEnabled(value) { return this._prefs.setPluginDevToolsEnabled(value); }
   getTimezone() { return this._prefs.getTimezone(); }
   setTimezone(tz) { this._prefs.setTimezone(tz); }
   getUpdateChannel() { return this._prefs.getUpdateChannel(); }
@@ -1245,7 +1248,13 @@ export class HanaEngine {
       ...t,
       execute: (toolCallId, params, runtimeCtx) => t.execute(toolCallId, params, { ...runtimeCtx, agentId }),
     }));
-    const allTools = [...ct, ...wrappedPluginTools];
+    const pluginDevTools = this._pluginDevService && this._prefs.getPluginDevToolsEnabled?.() === true
+      ? createPluginDevTools({
+          pluginDevService: this._pluginDevService,
+          getAgentId: () => agentId,
+        })
+      : [];
+    const allTools = [...ct, ...wrappedPluginTools, ...pluginDevTools];
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;

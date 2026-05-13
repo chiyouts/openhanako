@@ -1113,6 +1113,8 @@
       "statusDisabled": "已停用",
       "fullAccessToggle": "允許全權插件",
       "fullAccessDesc": "開啟後，宣告 full-access 的插件將獲得完整系統權限（路由、鉤子、Provider 等）",
+      "devToolsToggle": "允許 Agent 插件開發工具",
+      "devToolsDesc": "開啟後，Agent 可以安裝、重載、啟停和移除開發態插件。只作用於開發插件目錄，不影響正式安裝的插件。",
       "dropzone": "拖入插件資料夾或 .zip 安裝，或點擊選擇",
       "statusRestricted": "需要全權許可",
       "deleteConfirm": "移除插件「{name}」？插件資料將保留。",

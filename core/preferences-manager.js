@@ -339,6 +339,22 @@ export class PreferencesManager {
     this.savePreferences(prefs);
   }
 
+  /** 读取 Agent 插件开发工具开关（全局，默认关闭） */
+  getPluginDevToolsEnabled() {
+    return this._cache.plugin_dev_tools?.enabled === true;
+  }
+
+  /** 保存 Agent 插件开发工具开关 */
+  setPluginDevToolsEnabled(value) {
+    const prefs = this._mutableCopy();
+    prefs.plugin_dev_tools = {
+      ...(prefs.plugin_dev_tools || {}),
+      enabled: value === true,
+    };
+    this.savePreferences(prefs);
+    return prefs.plugin_dev_tools.enabled;
+  }
+
   /** 读取用户手动禁用的插件 ID 列表 */
   getDisabledPlugins() {
     return this._cache.disabled_plugins || [];

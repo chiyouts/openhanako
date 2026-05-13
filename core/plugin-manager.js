@@ -877,7 +877,7 @@ export class PluginManager {
     });
   }
 
-  async removePlugin(pluginId) {
+  async removePlugin(pluginId, options = {}) {
     return this._enqueue(async () => {
       const entry = this._plugins.get(pluginId);
       if (!entry) throw new Error(`Plugin "${pluginId}" not found`);
@@ -886,7 +886,10 @@ export class PluginManager {
         await this.unloadPlugin(pluginId);
       }
       this._plugins.delete(pluginId);
-      if (this._preferencesManager) {
+      if (entry.source === "dev" || options.persist === false) {
+        // Dev plugin removal is scoped to the dev slot and must not mutate the
+        // user's persisted disabled community plugin list.
+      } else if (this._preferencesManager) {
         const disabled = this._preferencesManager.getDisabledPlugins();
         this._preferencesManager.setDisabledPlugins(
           disabled.filter(id => id !== pluginId)
@@ -899,7 +902,7 @@ export class PluginManager {
     });
   }
 
-  async disablePlugin(pluginId) {
+  async disablePlugin(pluginId, options = {}) {
     return this._enqueue(async () => {
       const entry = this._plugins.get(pluginId);
       if (!entry) throw new Error(`Plugin "${pluginId}" not found`);
@@ -908,7 +911,10 @@ export class PluginManager {
         await this.unloadPlugin(pluginId);
       }
       entry.status = "disabled";
-      if (this._preferencesManager) {
+      if (entry.source === "dev" || options.persist === false) {
+        // Dev plugin enablement is scoped to the dev slot and must not pollute
+        // the user's persisted disabled community plugin list.
+      } else if (this._preferencesManager) {
         const disabled = this._preferencesManager.getDisabledPlugins();
         if (!disabled.includes(pluginId)) {
           this._preferencesManager.setDisabledPlugins([...disabled, pluginId]);
@@ -920,13 +926,16 @@ export class PluginManager {
     });
   }
 
-  async enablePlugin(pluginId) {
+  async enablePlugin(pluginId, options = {}) {
     return this._enqueue(async () => {
       const entry = this._plugins.get(pluginId);
       if (!entry) throw new Error(`Plugin "${pluginId}" not found`);
       // builtin 插件始终 loaded，跳过偏好写入
       if (entry.source === "builtin") return;
-      if (this._preferencesManager) {
+      if (entry.source === "dev" || options.persist === false) {
+        // Dev plugin enablement is scoped to the dev slot and must not pollute
+        // the user's persisted disabled community plugin list.
+      } else if (this._preferencesManager) {
         const disabled = this._preferencesManager.getDisabledPlugins();
         this._preferencesManager.setDisabledPlugins(
           disabled.filter(id => id !== pluginId)
@@ -934,13 +943,10 @@ export class PluginManager {
       } else {
         console.warn("[plugin-manager] enablePlugin: preferencesManager unavailable, preference not persisted");
       }
-      if (entry.trust === "full-access" && entry.source === "community") {
-        const allowed = this._preferencesManager?.getAllowFullAccessPlugins() || false;
-        if (!allowed) {
-          entry.status = "restricted";
-          this._bus?.emit({ type: "plugin_ui_changed" });
-          return;
-        }
+      if (entry.trust === "full-access" && !this._isFullAccessAllowed(entry, options)) {
+        entry.status = "restricted";
+        this._bus?.emit({ type: "plugin_ui_changed" });
+        return entry;
       }
       // Guard: unload before re-loading to prevent duplicate tool/command/route registration
       if (entry.status === "loaded") {
@@ -955,6 +961,7 @@ export class PluginManager {
         entry.error = err.message;
       }
       this._bus?.emit({ type: "plugin_ui_changed" });
+      return entry;
     });
   }
 

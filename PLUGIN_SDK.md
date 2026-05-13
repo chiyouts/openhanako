@@ -38,9 +38,14 @@ Agent-assisted plugin work should use Hana's dev loop instead of copying work-in
 - Source stays in the workspace or `${HANA_HOME}/plugin-dev-sources/`.
 - `plugin.dev.install` copies the source into `${HANA_HOME}/plugins-dev/<pluginId>` and loads it through the normal `PluginManager`.
 - `plugin.dev.reload` replaces the dev copy from the same source slot.
+- `plugin.dev.disable`, `plugin.dev.enable`, `plugin.dev.reset`, and `plugin.dev.uninstall` control only the remembered dev slot. They do not write normal plugin preferences and do not remove community installs.
 - `plugin.dev.invokeTool` runs a tool smoke test with explicit input.
 - `plugin.dev.diagnostics` returns dev slots, load status, logs, surfaces, and plugin diagnostics.
 - `plugin.dev.listSurfaces` and `plugin.dev.describeSurfaceDebug` drive UI debugging.
+
+Agent-callable dev tools are opt-in. The user must enable "Allow Agent plugin dev tools" in Settings -> Plugins before the Agent sees `plugin_dev_install`, `plugin_dev_reload`, `plugin_dev_disable`, `plugin_dev_enable`, `plugin_dev_reset`, `plugin_dev_uninstall`, `plugin_dev_invoke_tool`, `plugin_dev_diagnostics`, `plugin_dev_list_surfaces`, `plugin_dev_describe_surface`, or `plugin_dev_run_scenario`.
+
+The trusted development identity comes from Hana's install record and the `${HANA_HOME}/plugins-dev/` slot, not from a manifest field. Pass `devRunId` when controlling lifecycle if the Agent has one, so stale tool calls cannot accidentally act on a newer dev run.
 
 UI debugging is element-first. A capable Agent should inspect accessible elements, text, roles, labels, and stable locators before asking for screenshots. Screenshots are still useful for visual polish, clipping, theme contrast, and blank-state checks, but they are no longer the first source of truth when Hana can expose semantic UI structure.
 

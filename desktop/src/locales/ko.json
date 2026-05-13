@@ -1113,6 +1113,8 @@
       "statusDisabled": "비활성화",
       "fullAccessToggle": "전체 권한 플러그인 허용",
       "fullAccessDesc": "활성화하면 full-access를 선언한 플러그인이 시스템 수준 API(라우트, 훅, Provider 등)를 사용할 수 있어요",
+      "devToolsToggle": "Agent 플러그인 개발 도구 허용",
+      "devToolsDesc": "활성화하면 Agent가 개발 플러그인을 설치, 다시 로드, 활성화, 비활성화, 제거할 수 있어요. 일반 설치 플러그인에는 영향을 주지 않아요.",
       "dropzone": "플러그인 폴더 또는 .zip을 여기에 끌어다 설치하거나 클릭하여 선택",
       "statusRestricted": "전체 권한 필요",
       "deleteConfirm": "플러그인 \"{name}\"을 제거할까요? 플러그인 데이터는 보존됩니다.",

@@ -36,6 +36,7 @@ export const PLUGIN_DEV_EVENT_BUS_CAPABILITIES = Object.freeze([
       type: "object",
       properties: {
         pluginId: { type: "string" },
+        devRunId: { type: "string" },
         allowFullAccess: { type: "boolean" },
       },
       required: ["pluginId"],
@@ -44,6 +45,84 @@ export const PLUGIN_DEV_EVENT_BUS_CAPABILITIES = Object.freeze([
     outputSchema: OBJECT_SCHEMA,
     permission: "plugin.dev.write",
     errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.disable",
+    title: "Disable dev plugin",
+    description: "Disable a loaded dev plugin without writing to the user's normal plugin preferences.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        devRunId: { type: "string" },
+      },
+      required: ["pluginId"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.write",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "CONFLICT", "FORBIDDEN", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.enable",
+    title: "Enable dev plugin",
+    description: "Enable a dev plugin from its remembered dev slot without writing normal plugin preferences.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        devRunId: { type: "string" },
+        allowFullAccess: { type: "boolean" },
+      },
+      required: ["pluginId"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.write",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "CONFLICT", "FORBIDDEN", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.reset",
+    title: "Reset dev plugin",
+    description: "Reload a dev plugin from its remembered source slot and create a fresh dev run.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        devRunId: { type: "string" },
+        allowFullAccess: { type: "boolean" },
+      },
+      required: ["pluginId"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.write",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "CONFLICT", "FORBIDDEN", "INTERNAL_ERROR"],
+    stability: "experimental",
+    owner: "system",
+  },
+  {
+    type: "plugin.dev.uninstall",
+    title: "Uninstall dev plugin",
+    description: "Remove a dev plugin from the dev plugin directory and forget its dev slot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pluginId: { type: "string" },
+        devRunId: { type: "string" },
+      },
+      required: ["pluginId"],
+      additionalProperties: false,
+    },
+    outputSchema: OBJECT_SCHEMA,
+    permission: "plugin.dev.write",
+    errors: ["NO_HANDLER", "TIMEOUT", "NOT_FOUND", "CONFLICT", "FORBIDDEN", "INTERNAL_ERROR"],
     stability: "experimental",
     owner: "system",
   },
@@ -244,6 +323,13 @@ function extractToolResultText(invocation) {
   return JSON.stringify(result ?? "");
 }
 
+function assertInsideDir(childPath, parentDir) {
+  const child = path.resolve(childPath);
+  const parent = path.resolve(parentDir);
+  const parentWithSep = parent.endsWith(path.sep) ? parent : `${parent}${path.sep}`;
+  return child === parent || child.startsWith(parentWithSep);
+}
+
 export class PluginDevService {
   constructor({
     pluginManager,
@@ -357,6 +443,47 @@ export class PluginDevService {
     });
   }
 
+  _forgetSlot(pluginId) {
+    this._slots.delete(pluginId);
+  }
+
+  _requireDevSlot(pluginId, options = {}) {
+    if (!pluginId) throw createDevError("pluginId is required", 400, "PLUGIN_DEV_PLUGIN_ID_REQUIRED");
+    const slot = this._slots.get(pluginId);
+    if (!slot) {
+      throw createDevError(`No dev source slot registered for plugin "${pluginId}"`, 404, "PLUGIN_DEV_SLOT_NOT_FOUND");
+    }
+    if (options.devRunId && slot.lastDevRunId !== options.devRunId) {
+      throw createDevError(
+        `devRunId does not match the active dev slot for plugin "${pluginId}"`,
+        409,
+        "PLUGIN_DEV_RUN_ID_MISMATCH",
+      );
+    }
+    const entry = this._pluginManager.getPlugin(pluginId);
+    if (!entry) {
+      throw createDevError(`Plugin "${pluginId}" not found`, 404, "PLUGIN_DEV_PLUGIN_NOT_FOUND");
+    }
+    if (entry.source !== "dev") {
+      throw createDevError(`Plugin "${pluginId}" is not a dev plugin`, 403, "PLUGIN_DEV_NOT_DEV_PLUGIN");
+    }
+    if (!entry.pluginDir || !assertInsideDir(entry.pluginDir, this._devPluginsDir)) {
+      throw createDevError(
+        `Plugin "${pluginId}" is outside the dev plugin directory`,
+        403,
+        "PLUGIN_DEV_TARGET_OUTSIDE_DEV_DIR",
+      );
+    }
+    if (!slot.targetDir || !assertInsideDir(slot.targetDir, this._devPluginsDir)) {
+      throw createDevError(
+        `Plugin "${pluginId}" dev slot points outside the dev plugin directory`,
+        403,
+        "PLUGIN_DEV_SLOT_OUTSIDE_DEV_DIR",
+      );
+    }
+    return { slot, entry };
+  }
+
   async _installDescriptor({ sourcePath, desc, allowFullAccess = false }) {
     const devRunId = `dev_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
     const startedAt = new Date().toISOString();
@@ -408,10 +535,7 @@ export class PluginDevService {
   }
 
   async reloadPlugin(pluginId, options = {}) {
-    const slot = this._slots.get(pluginId);
-    if (!slot) {
-      throw createDevError(`No dev source slot registered for plugin "${pluginId}"`, 404, "PLUGIN_DEV_SLOT_NOT_FOUND");
-    }
+    const { slot } = this._requireDevSlot(pluginId, options);
     const realSourcePath = this._resolveAllowedSourceDir(slot.sourcePath);
     const desc = this._readAndValidateDescriptor(realSourcePath, pluginId);
     return this._installDescriptor({
@@ -419,6 +543,54 @@ export class PluginDevService {
       desc,
       allowFullAccess: options.allowFullAccess ?? slot.allowFullAccess,
     });
+  }
+
+  async disablePlugin(pluginId, options = {}) {
+    this._requireDevSlot(pluginId, options);
+    await this._pluginManager.disablePlugin(pluginId, { persist: false });
+    await this._syncPluginExtensions();
+    return {
+      ok: true,
+      pluginId,
+      plugin: summarizePlugin(this._pluginManager.getPlugin(pluginId)),
+      slot: this.getDevSlot(pluginId),
+    };
+  }
+
+  async enablePlugin(pluginId, options = {}) {
+    const { slot } = this._requireDevSlot(pluginId, options);
+    await this._pluginManager.enablePlugin(pluginId, {
+      persist: false,
+      allowFullAccess: options.allowFullAccess ?? slot.allowFullAccess,
+    });
+    await this._syncPluginExtensions();
+    return {
+      ok: this._pluginManager.getPlugin(pluginId)?.status === "loaded",
+      pluginId,
+      plugin: summarizePlugin(this._pluginManager.getPlugin(pluginId)),
+      slot: this.getDevSlot(pluginId),
+    };
+  }
+
+  async resetPlugin(pluginId, options = {}) {
+    this._requireDevSlot(pluginId, options);
+    return this.reloadPlugin(pluginId, options);
+  }
+
+  async uninstallPlugin(pluginId, options = {}) {
+    const { slot } = this._requireDevSlot(pluginId, options);
+    const pluginDir = await this._pluginManager.removePlugin(pluginId, { persist: false });
+    const removeTarget = slot.targetDir || pluginDir;
+    if (removeTarget && assertInsideDir(removeTarget, this._devPluginsDir)) {
+      fs.rmSync(removeTarget, { recursive: true, force: true });
+    }
+    this._forgetSlot(pluginId);
+    await this._syncPluginExtensions();
+    return {
+      ok: true,
+      pluginId,
+      removedDir: removeTarget,
+    };
   }
 
   async invokeTool({ pluginId, toolName, input = {}, sessionPath, agentId } = {}) {
@@ -662,7 +834,22 @@ export class PluginDevService {
         allowFullAccess: !!payload.allowFullAccess,
       })],
       ["plugin.dev.reload", (payload = {}) => this.reloadPlugin(payload.pluginId, {
+        devRunId: payload.devRunId,
         allowFullAccess: payload.allowFullAccess,
+      })],
+      ["plugin.dev.disable", (payload = {}) => this.disablePlugin(payload.pluginId, {
+        devRunId: payload.devRunId,
+      })],
+      ["plugin.dev.enable", (payload = {}) => this.enablePlugin(payload.pluginId, {
+        devRunId: payload.devRunId,
+        allowFullAccess: payload.allowFullAccess,
+      })],
+      ["plugin.dev.reset", (payload = {}) => this.resetPlugin(payload.pluginId, {
+        devRunId: payload.devRunId,
+        allowFullAccess: payload.allowFullAccess,
+      })],
+      ["plugin.dev.uninstall", (payload = {}) => this.uninstallPlugin(payload.pluginId, {
+        devRunId: payload.devRunId,
       })],
       ["plugin.dev.invokeTool", (payload = {}) => this.invokeTool(payload)],
       ["plugin.dev.diagnostics", (payload = {}) => this.getDiagnostics(payload.pluginId)],

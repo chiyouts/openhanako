@@ -1139,6 +1139,8 @@
       "statusDisabled": "disabled",
       "fullAccessToggle": "Allow full-access plugins",
       "fullAccessDesc": "When enabled, plugins that declare full-access can use system-level APIs (routes, hooks, providers, etc.)",
+      "devToolsToggle": "Allow Agent plugin dev tools",
+      "devToolsDesc": "When enabled, the Agent can install, reload, enable, disable, and uninstall development plugins. This only affects the development plugin directory, not normally installed plugins.",
       "dropzone": "Drag plugin folder or .zip here to install, or click to select",
       "statusRestricted": "needs full access",
       "deleteConfirm": "Remove plugin \"{name}\"? Plugin data will be preserved.",

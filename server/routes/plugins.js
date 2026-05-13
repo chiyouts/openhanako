@@ -353,7 +353,52 @@ export function createPluginsRoute(engine) {
     const body = await c.req.json().catch(() => ({}));
     try {
       return c.json(await service.reloadPlugin(c.req.param("id"), {
+        devRunId: body.devRunId,
         allowFullAccess: body.allowFullAccess,
+      }));
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
+  });
+
+  route.put("/plugins/dev/:id/enabled", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const result = body.enabled === false
+        ? await service.disablePlugin(c.req.param("id"), { devRunId: body.devRunId })
+        : await service.enablePlugin(c.req.param("id"), {
+            devRunId: body.devRunId,
+            allowFullAccess: body.allowFullAccess,
+          });
+      return c.json(result);
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
+  });
+
+  route.post("/plugins/dev/:id/reset", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(await service.resetPlugin(c.req.param("id"), {
+        devRunId: body.devRunId,
+        allowFullAccess: body.allowFullAccess,
+      }));
+    } catch (err) {
+      return pluginDevErrorResponse(c, err);
+    }
+  });
+
+  route.delete("/plugins/dev/:id", async (c) => {
+    const { service, errorResponse } = pluginDevServiceOrError(engine, c);
+    if (errorResponse) return errorResponse;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      return c.json(await service.uninstallPlugin(c.req.param("id"), {
+        devRunId: body.devRunId,
       }));
     } catch (err) {
       return pluginDevErrorResponse(c, err);
@@ -577,6 +622,9 @@ export function createPluginsRoute(engine) {
     const pm = engine.pluginManager;
     return c.json({
       allow_full_access: pm?.getAllowFullAccess() || false,
+      plugin_dev_tools_enabled: typeof engine.getPluginDevToolsEnabled === "function"
+        ? engine.getPluginDevToolsEnabled()
+        : false,
       plugins_dir: pm?.getUserPluginsDir() || "",
     });
   });
@@ -584,10 +632,13 @@ export function createPluginsRoute(engine) {
   route.put("/plugins/settings", async (c) => {
     const pm = engine.pluginManager;
     if (!pm) return c.json({ error: "Plugin manager not available" }, 500);
-    const { allow_full_access } = await c.req.json();
+    const { allow_full_access, plugin_dev_tools_enabled } = await c.req.json();
     if (typeof allow_full_access === "boolean") {
       await pm.setFullAccess(allow_full_access);
       await engine.syncPluginExtensions();
+    }
+    if (typeof plugin_dev_tools_enabled === "boolean" && typeof engine.setPluginDevToolsEnabled === "function") {
+      engine.setPluginDevToolsEnabled(plugin_dev_tools_enabled);
     }
     return c.json(visiblePlugins(pm, { source: "community" }));
   });

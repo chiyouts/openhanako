@@ -1113,6 +1113,8 @@
       "statusDisabled": "無効",
       "fullAccessToggle": "フルアクセスプラグインを許可",
       "fullAccessDesc": "有効にすると、full-access を宣言したプラグインがシステムレベルの API（ルート、フック、Provider 等）を使用できます",
+      "devToolsToggle": "Agent のプラグイン開発ツールを許可",
+      "devToolsDesc": "有効にすると、Agent は開発用プラグインのインストール、再読み込み、有効化、無効化、削除を実行できます。通常インストールされたプラグインには影響しません。",
       "dropzone": "プラグインフォルダまたは .zip をここにドラッグしてインストール、またはクリックして選択",
       "statusRestricted": "フルアクセスが必要",
       "deleteConfirm": "プラグイン「{name}」を削除しますか？プラグインのデータは保持されます。",

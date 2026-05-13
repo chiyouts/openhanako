@@ -74,6 +74,8 @@ function mockEngine(overrides = {}) {
     hanakoHome: overrides.hanakoHome,
     getEventBus: overrides.getEventBus || (() => overrides.eventBus || null),
     pluginDevService: overrides.pluginDevService,
+    getPluginDevToolsEnabled: overrides.getPluginDevToolsEnabled || (() => overrides.pluginDevToolsEnabled === true),
+    setPluginDevToolsEnabled: overrides.setPluginDevToolsEnabled || vi.fn(),
   };
 }
 
@@ -294,6 +296,14 @@ describe("plugin management API", () => {
       const res = await app.request("/api/plugins/settings");
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ allow_full_access: false });
+    });
+
+    it("returns plugin dev tools as disabled by default", async () => {
+      const engine = mockEngine();
+      const app = createApp(engine);
+      const res = await app.request("/api/plugins/settings");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ plugin_dev_tools_enabled: false });
     });
   });
 
@@ -640,6 +650,21 @@ describe("plugin management API", () => {
       expect(body[0].trust).toBe("restricted");
       expect(setFn).toHaveBeenCalledWith(true);
     });
+
+    it("persists the Agent plugin dev tools setting", async () => {
+      const setPluginDevToolsEnabled = vi.fn();
+      const engine = mockEngine({ setPluginDevToolsEnabled });
+      const app = createApp(engine);
+
+      const res = await app.request("/api/plugins/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plugin_dev_tools_enabled: true }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(setPluginDevToolsEnabled).toHaveBeenCalledWith(true);
+    });
   });
 
   describe("plugin config routes", () => {
@@ -886,6 +911,80 @@ describe("plugin management API", () => {
         sessionPath: "/tmp/s.jsonl",
         agentId: undefined,
       });
+    });
+
+    it("enables and disables a dev plugin through PluginDevService", async () => {
+      const enablePlugin = vi.fn(async () => ({
+        ok: true,
+        plugin: { id: "demo", status: "loaded", source: "dev" },
+      }));
+      const disablePlugin = vi.fn(async () => ({
+        ok: true,
+        plugin: { id: "demo", status: "disabled", source: "dev" },
+      }));
+      const engine = mockEngine({
+        pluginDevService: { enablePlugin, disablePlugin },
+      });
+      const app = createApp(engine);
+
+      const disableRes = await app.request("/api/plugins/dev/demo/enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false, devRunId: "dev_1" }),
+      });
+      const enableRes = await app.request("/api/plugins/dev/demo/enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true, devRunId: "dev_1", allowFullAccess: true }),
+      });
+
+      expect(disableRes.status).toBe(200);
+      expect(await disableRes.json()).toMatchObject({ plugin: { status: "disabled" } });
+      expect(enableRes.status).toBe(200);
+      expect(await enableRes.json()).toMatchObject({ plugin: { status: "loaded" } });
+      expect(disablePlugin).toHaveBeenCalledWith("demo", { devRunId: "dev_1" });
+      expect(enablePlugin).toHaveBeenCalledWith("demo", {
+        devRunId: "dev_1",
+        allowFullAccess: true,
+      });
+    });
+
+    it("resets and uninstalls a dev plugin through PluginDevService", async () => {
+      const resetPlugin = vi.fn(async () => ({
+        ok: true,
+        devRunId: "dev_2",
+        plugin: { id: "demo", status: "loaded", source: "dev" },
+      }));
+      const uninstallPlugin = vi.fn(async () => ({
+        ok: true,
+        pluginId: "demo",
+        removedDir: "/hana/plugins-dev/demo",
+      }));
+      const engine = mockEngine({
+        pluginDevService: { resetPlugin, uninstallPlugin },
+      });
+      const app = createApp(engine);
+
+      const resetRes = await app.request("/api/plugins/dev/demo/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ devRunId: "dev_1", allowFullAccess: true }),
+      });
+      const uninstallRes = await app.request("/api/plugins/dev/demo", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ devRunId: "dev_2" }),
+      });
+
+      expect(resetRes.status).toBe(200);
+      expect(await resetRes.json()).toMatchObject({ devRunId: "dev_2" });
+      expect(uninstallRes.status).toBe(200);
+      expect(await uninstallRes.json()).toMatchObject({ ok: true, pluginId: "demo" });
+      expect(resetPlugin).toHaveBeenCalledWith("demo", {
+        devRunId: "dev_1",
+        allowFullAccess: true,
+      });
+      expect(uninstallPlugin).toHaveBeenCalledWith("demo", { devRunId: "dev_2" });
     });
 
     it("maps PluginDevService errors to their status code", async () => {
