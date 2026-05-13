@@ -53,7 +53,23 @@ describe('StreamingMarkdownContent', () => {
     const text = container.textContent || '';
     expect(text.length).toBeGreaterThan('旧正文'.length);
     expect(text.length).toBeLessThan('旧正文新正文继续出现'.length);
-    expect(container.querySelectorAll('[data-stream-tail-char="true"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-stream-tail-char="true"]').length).toBe(1);
+  });
+
+  it('does not replay the tail fade when the stream target advances before visible text does', () => {
+    const source = '这是一段足够长的普通正文';
+    const { container, rerender } = render(
+      <StreamingMarkdownContent source={source} html={`<p>${source}</p>`} active />,
+    );
+
+    expect(container.querySelectorAll('[data-stream-tail-char="true"]').length).toBe(6);
+
+    rerender(
+      <StreamingMarkdownContent source={`${source}追加`} html={`<p>${source}追加</p>`} active />,
+    );
+
+    expect(container.textContent?.trim()).toBe(source);
+    expect(container.querySelector('[data-stream-tail-char="true"]')).toBeNull();
   });
 
   it('marks six visible tail graphemes for fade when prose is long enough', () => {

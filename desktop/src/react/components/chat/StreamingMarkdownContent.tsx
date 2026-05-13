@@ -1,5 +1,5 @@
-import { memo, useMemo } from 'react';
-import { useTypewriterText } from '../../hooks/use-typewriter-text';
+import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { splitGraphemes, useTypewriterText } from '../../hooks/use-typewriter-text';
 import { renderMarkdown } from '../../utils/markdown';
 import { MarkdownContent } from './MarkdownContent';
 
@@ -18,10 +18,19 @@ const COMPLEX_MARKDOWN_PATTERNS = [
   /(^|\n)\s{4,}\S/,
   /(^|\n)\s*<[^>\n]+>/,
 ];
+const MAX_TAIL_FADE_COUNT = 6;
 
 export function isTypewriterEligibleMarkdownSource(source: string): boolean {
   if (!source.trim()) return false;
   return !COMPLEX_MARKDOWN_PATTERNS.some((pattern) => pattern.test(source));
+}
+
+function countNewTailGraphemes(previous: string | null, current: string): number {
+  if (!current) return 0;
+  const newText = previous && current.startsWith(previous)
+    ? current.slice(previous.length)
+    : current;
+  return Math.min(MAX_TAIL_FADE_COUNT, splitGraphemes(newText).length);
 }
 
 export const StreamingMarkdownContent = memo(function StreamingMarkdownContent({
@@ -31,6 +40,7 @@ export const StreamingMarkdownContent = memo(function StreamingMarkdownContent({
   className,
 }: Props) {
   const shouldType = !!source && active && isTypewriterEligibleMarkdownSource(source);
+  const previousVisibleSourceRef = useRef<string | null>(null);
   const visibleSource = useTypewriterText(source || '', {
     active: shouldType,
     displayFps: 30,
@@ -42,12 +52,22 @@ export const StreamingMarkdownContent = memo(function StreamingMarkdownContent({
     () => shouldType ? renderMarkdown(visibleSource) : html,
     [html, shouldType, visibleSource],
   );
+  const tailFadeCount = useMemo(
+    () => shouldType
+      ? countNewTailGraphemes(previousVisibleSourceRef.current, visibleSource)
+      : 0,
+    [shouldType, source, visibleSource],
+  );
+
+  useLayoutEffect(() => {
+    previousVisibleSourceRef.current = shouldType ? visibleSource : null;
+  }, [shouldType, visibleSource]);
 
   return (
     <MarkdownContent
       html={visibleHtml}
       className={className}
-      tailFadeCount={shouldType ? 6 : 0}
+      tailFadeCount={tailFadeCount}
     />
   );
 });

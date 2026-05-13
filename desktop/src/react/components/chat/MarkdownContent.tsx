@@ -5,7 +5,7 @@
  * useEffect 注入代码块复制按钮。
  */
 
-import { memo, useRef, useEffect } from 'react';
+import { memo, useRef, useEffect, useLayoutEffect } from 'react';
 import { injectCopyButtons } from '../../utils/format';
 import { useMermaidDiagrams } from '../../hooks/use-mermaid-diagrams';
 import { splitGraphemes } from '../../hooks/use-typewriter-text';
@@ -22,7 +22,16 @@ function shouldSkipTailFadeNode(node: Text): boolean {
   return !parent || !!parent.closest('pre, code, table, .katex, .mermaid, svg, button');
 }
 
+function clearTailFade(root: HTMLElement): void {
+  const tailSpans = Array.from(root.querySelectorAll<HTMLElement>('[data-stream-tail-char="true"]'));
+  for (const span of tailSpans) {
+    span.replaceWith(document.createTextNode(span.textContent || ''));
+  }
+  if (tailSpans.length > 0) root.normalize();
+}
+
 function applyTailFade(root: HTMLElement, count: number): void {
+  clearTailFade(root);
   if (count <= 0) return;
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -71,11 +80,15 @@ export const MarkdownContent = memo(function MarkdownContent({ html, className, 
   const ref = useRef<HTMLDivElement>(null);
   const classes = className ? `md-content ${className}` : 'md-content';
 
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    applyTailFade(ref.current, tailFadeCount);
+  }, [html, tailFadeCount]);
+
   useEffect(() => {
     if (!ref.current) return;
     injectCopyButtons(ref.current);
-    applyTailFade(ref.current, tailFadeCount);
-  }, [html, tailFadeCount]);
+  }, [html]);
   useMermaidDiagrams(ref, [html]);
 
   return (
