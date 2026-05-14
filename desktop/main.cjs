@@ -2879,7 +2879,12 @@ wrapIpcHandler("screenshot-render", (_event, payload) => {
       const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
       const base = payload.saveDir || path.join(os.homedir(), "Desktop");
       const dir = path.join(base, "截图");
-      const filePath = path.join(dir, `hanako-${timestamp}.png`);
+      const segmentTotal = Number(payload.segmentTotal);
+      const segmentIndex = Number(payload.segmentIndex);
+      const segmentSuffix = Number.isInteger(segmentTotal) && segmentTotal > 1 && Number.isInteger(segmentIndex) && segmentIndex > 0
+        ? `-${String(segmentIndex).padStart(2, "0")}-of-${String(segmentTotal).padStart(2, "0")}`
+        : "";
+      const filePath = path.join(dir, `hanako-${timestamp}${segmentSuffix}.png`);
 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(filePath, pngBuffer);

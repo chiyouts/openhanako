@@ -173,6 +173,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const pendingSessionSwitchPath = useStore(s => s.pendingSessionSwitchPath);
   const currentSessionPath = useStore(s => s.currentSessionPath);
   const compacting = useStore(s => currentSessionPath ? s.compactingSessions.includes(currentSessionPath) : false);
+  const screenshotBusy = useStore(s => s.screenshotTaskCount > 0);
+  const screenshotProgress = useStore(s => s.screenshotProgress);
   const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? null);
   const sessionTodos = useStore(s => (s.currentSessionPath && s.todosBySession[s.currentSessionPath]) || EMPTY_TODOS);
   const sessionFiles = useStore(s => (s.currentSessionPath ? selectSessionFiles(s, s.currentSessionPath) : EMPTY_FILE_REFS));
@@ -1009,6 +1011,15 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         slashBusyLabel={slashCommands.find(c => c.name === slashBusy)?.busyLabel || t('common.executing')}
         compacting={compacting}
         compactingLabel={t('chat.compacting')}
+        screenshotBusy={screenshotBusy}
+        screenshotLabel={t('common.screenshotInProgress')}
+        screenshotPageLabel={screenshotProgress && screenshotProgress.totalPages > 0
+          ? t('common.screenshotProgressPage', {
+            current: screenshotProgress.currentPage,
+            total: screenshotProgress.totalPages,
+          })
+          : null}
+        screenshotProgress={screenshotProgress}
         inlineError={inlineError}
         slashResult={slashResult}
         onResultClick={slashResult?.deskDir ? handleSlashResultClick : undefined}

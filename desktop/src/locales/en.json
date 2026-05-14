@@ -147,7 +147,11 @@
     "edit": "Edit",
     "screenshot": "Screenshot",
     "selectMessage": "Select message",
+    "selectAllMessages": "Select all messages",
+    "screenshotInProgress": "Taking screenshot",
+    "screenshotProgressPage": "Taking screenshot, page {current}/{total}",
     "screenshotSaved": "Screenshot saved to the \"截图\" folder in your working directory",
+    "screenshotSavedMultiple": "Saved {count} screenshot segments to the \"截图\" folder in your working directory",
     "screenshotFailed": "Screenshot save failed",
     "selectedCount": "{count} selected",
     "allDone": "All done",
@@ -1259,7 +1263,11 @@
       "mobileTitle": "Mobile Layout",
       "mobileDesc": "Tall image, ideal for phone sharing",
       "desktopTitle": "Desktop Layout",
-      "desktopDesc": "Wider, for desktop saving & sharing"
+      "desktopDesc": "Wider, for desktop saving & sharing",
+      "segmentTitle": "Auto Segmentation",
+      "segmentLimitLabel": "Characters per page",
+      "segmentLimitHint": "When visible text exceeds this limit, the next screenshot starts at a full conversation-round boundary. Default is 10000 characters.",
+      "segmentLimitUnit": "chars"
     },
     "bridge": {
       "agent": "Agent",

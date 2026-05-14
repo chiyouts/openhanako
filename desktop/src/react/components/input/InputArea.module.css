@@ -848,6 +848,36 @@
     animation: hana-pulse 1.2s ease-in-out infinite;
 }
 
+.screenshot-busy-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.screenshot-busy-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.screenshot-progress-track {
+    position: relative;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.14);
+}
+
+.screenshot-progress-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width var(--duration-slow) var(--ease-out);
+}
+
 .slash-error-dot {
     width: 6px;
     height: 6px;
