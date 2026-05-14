@@ -311,6 +311,51 @@ describe("skills route", () => {
     expect(store.bundles).toEqual([]);
   });
 
+  it("persists skill bundle ordering through the skills route", async () => {
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    const engine = {
+      hanakoHome: tempRoot,
+      agentsDir: tempRoot,
+      emitEvent: vi.fn(),
+      getAllSkills: vi.fn(() => [
+        { name: "writer", enabled: false, source: "user" },
+        { name: "reader", enabled: false, source: "user" },
+      ]),
+    };
+
+    app.route("/api", createSkillsRoute(engine));
+
+    await app.request("/api/skills/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "First Bundle", skillNames: ["writer"] }),
+    });
+    await app.request("/api/skills/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Second Bundle", skillNames: ["reader"] }),
+    });
+
+    const orderRes = await app.request("/api/skills/bundles/order", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bundleIds: ["second-bundle", "first-bundle"] }),
+    });
+
+    expect(orderRes.status).toBe(200);
+    expect(await orderRes.json()).toMatchObject({
+      ok: true,
+      bundles: [
+        { id: "second-bundle", skillNames: ["reader"] },
+        { id: "first-bundle", skillNames: ["writer"] },
+      ],
+    });
+    const store = JSON.parse(fs.readFileSync(path.join(tempRoot, "skill-bundles.json"), "utf-8"));
+    expect(store.bundles.map(bundle => bundle.id)).toEqual(["second-bundle", "first-bundle"]);
+    expectAppEvent(engine.emitEvent, "skills-changed", { agentId: null });
+  });
+
   it("rejects bundle membership for skills that are not installed", async () => {
     const { createSkillsRoute } = await import("../server/routes/skills.js");
     const app = new Hono();

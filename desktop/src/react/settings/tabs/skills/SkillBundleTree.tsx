@@ -32,7 +32,8 @@ interface SkillBundleTreeProps {
   onCreateBundle?: () => void;
   onRenameBundle?: (bundle: SkillBundleInfo) => void;
   onDeleteBundle?: (bundle: SkillBundleInfo) => void;
-  onMoveSkillToBundle?: (skillName: string, bundle: SkillBundleInfo) => void;
+  onReorderBundles?: (bundleIds: string[]) => void;
+  onMoveSkillToBundle?: (skillName: string, bundle: SkillBundleInfo, index?: number) => void;
   onRemoveSkillFromBundles?: (skillName: string) => void;
 }
 
@@ -40,13 +41,26 @@ function skillDragType() {
   return 'application/x-hana-skill-name';
 }
 
+function bundleDragType() {
+  return 'application/x-hana-skill-bundle-id';
+}
+
 function startSkillDrag(event: React.DragEvent<HTMLDivElement>, skillName: string) {
   event.dataTransfer.setData(skillDragType(), skillName);
   event.dataTransfer.effectAllowed = 'move';
 }
 
+function startBundleDrag(event: React.DragEvent<HTMLDivElement>, bundleId: string) {
+  event.dataTransfer.setData(bundleDragType(), bundleId);
+  event.dataTransfer.effectAllowed = 'move';
+}
+
 function skillFromDrop(event: React.DragEvent) {
   return event.dataTransfer.getData(skillDragType()).trim();
+}
+
+function bundleFromDrop(event: React.DragEvent) {
+  return event.dataTransfer.getData(bundleDragType()).trim();
 }
 
 function bundleEnabledState(bundle: SkillBundleInfo, skillByName: Map<string, SkillInfo>) {
@@ -72,6 +86,7 @@ export function SkillBundleTree({
   onCreateBundle,
   onRenameBundle,
   onDeleteBundle,
+  onReorderBundles,
   onMoveSkillToBundle,
   onRemoveSkillFromBundles,
 }: SkillBundleTreeProps) {
@@ -83,16 +98,50 @@ export function SkillBundleTree({
 
   const canManage = mode === 'manage';
 
-  const dropOnBundle = (event: React.DragEvent, bundle: SkillBundleInfo) => {
+  const moveBundleBefore = (draggedId: string, targetId: string) => {
+    if (!canManage || draggedId === targetId) return;
+    const ids = bundles.map(bundle => bundle.id);
+    const next = ids.filter(id => id !== draggedId);
+    const targetIndex = next.indexOf(targetId);
+    if (targetIndex === -1) return;
+    next.splice(targetIndex, 0, draggedId);
+    onReorderBundles?.(next);
+  };
+
+  const moveBundleToEnd = (draggedId: string) => {
+    if (!canManage) return;
+    const ids = bundles.map(bundle => bundle.id);
+    if (ids[ids.length - 1] === draggedId) return;
+    onReorderBundles?.([...ids.filter(id => id !== draggedId), draggedId]);
+  };
+
+  const dropOnBundle = (event: React.DragEvent, bundle: SkillBundleInfo, index?: number) => {
     if (!canManage) return;
     event.preventDefault();
+    event.stopPropagation();
     const skillName = skillFromDrop(event);
-    if (skillName) onMoveSkillToBundle?.(skillName, bundle);
+    if (skillName) onMoveSkillToBundle?.(skillName, bundle, index);
+  };
+
+  const dropOnBundleHeader = (event: React.DragEvent, bundle: SkillBundleInfo) => {
+    if (!canManage) return;
+    event.preventDefault();
+    const draggedBundleId = bundleFromDrop(event);
+    if (draggedBundleId) {
+      moveBundleBefore(draggedBundleId, bundle.id);
+      return;
+    }
+    dropOnBundle(event, bundle);
   };
 
   const dropOnLoose = (event: React.DragEvent) => {
     if (!canManage) return;
     event.preventDefault();
+    const draggedBundleId = bundleFromDrop(event);
+    if (draggedBundleId) {
+      moveBundleToEnd(draggedBundleId);
+      return;
+    }
     const skillName = skillFromDrop(event);
     if (skillName) onRemoveSkillFromBundles?.(skillName);
   };
@@ -142,8 +191,11 @@ export function SkillBundleTree({
             <div className={styles['skill-bundle-group']} key={bundle.id}>
               <div
                 className={styles['skill-bundle-header']}
+                data-testid={`skill-bundle-header-${bundle.id}`}
+                draggable={canManage}
+                onDragStart={(event) => startBundleDrag(event, bundle.id)}
                 onDragOver={(event) => { if (canManage) event.preventDefault(); }}
-                onDrop={(event) => dropOnBundle(event, bundle)}
+                onDrop={(event) => dropOnBundleHeader(event, bundle)}
               >
                 <button
                   className={styles['skill-bundle-caret']}
@@ -202,7 +254,7 @@ export function SkillBundleTree({
                 <div className={styles['skill-bundle-children']}>
                   {bundle.skillNames.length === 0 ? (
                     <div className={styles['skill-bundle-empty']}>空 Bundle</div>
-                  ) : bundle.skillNames.map((skillName) => {
+                  ) : bundle.skillNames.map((skillName, index) => {
                     const skill = skillByName.get(skillName) || {
                       name: skillName,
                       description: '这个 Skill 已不存在',
@@ -219,6 +271,8 @@ export function SkillBundleTree({
                         onDragStart={startSkillDrag}
                         onDelete={canManage ? onDeleteSkill : undefined}
                         onToggle={mode === 'agent' ? onToggleSkill : undefined}
+                        onDragOver={(event) => { if (canManage) event.preventDefault(); }}
+                        onDrop={(event) => dropOnBundle(event, bundle, index)}
                         className={styles['skill-bundle-child-row']}
                         extraActions={canManage ? (
                           <button

@@ -23,6 +23,8 @@ interface SkillRowProps {
   /** 传了就渲染 toggle 按钮。Section 3 "Agent 配置" 传；Section 1 "技能管理" 不传。 */
   onToggle?: (name: string, enabled: boolean) => void;
   onDragStart?: (event: React.DragEvent<HTMLDivElement>, name: string) => void;
+  onDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
 }
 
 export function SkillRow({
@@ -35,6 +37,8 @@ export function SkillRow({
   onDelete,
   onToggle,
   onDragStart,
+  onDragOver,
+  onDrop,
 }: SkillRowProps) {
   const displayDesc = truncateDesc(skill.description || '');
 
@@ -43,6 +47,8 @@ export function SkillRow({
       className={`${styles['skills-list-item']} ${className}`.trim()}
       draggable={draggable}
       onDragStart={(event) => onDragStart?.(event, skill.name)}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       onClick={() => {
         if (skill.baseDir) {
           window.platform?.openSkillViewer?.({

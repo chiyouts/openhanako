@@ -70,14 +70,33 @@ vi.mock('../bridge/AgentSelect', () => ({
 vi.mock('../skills/SkillRow', () => ({
   SkillRow: ({
     skill,
+    draggable,
+    extraActions,
     onToggle,
     onDelete,
+    onDragStart,
+    onDragOver,
+    onDrop,
   }: {
     skill: { name: string; enabled: boolean };
+    draggable?: boolean;
+    extraActions?: React.ReactNode;
     onToggle?: (name: string, enabled: boolean) => void;
     onDelete?: (name: string) => void;
+    onDragStart?: (event: React.DragEvent<HTMLDivElement>, name: string) => void;
+    onDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+    onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
   }) => (
-    <div data-skill-name={skill.name} data-enabled={String(skill.enabled)}>
+    <div
+      data-testid={`skill-row-${skill.name}`}
+      data-skill-name={skill.name}
+      data-enabled={String(skill.enabled)}
+      draggable={draggable}
+      onDragStart={(event) => onDragStart?.(event, skill.name)}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {extraActions}
       {onToggle && (
         <button
           data-testid={`skill-toggle-${skill.name}`}
@@ -174,6 +193,15 @@ async function flushMicrotasks(ticks = 3) {
       await Promise.resolve();
     }
   });
+}
+
+function createDragData() {
+  const data = new Map<string, string>();
+  return {
+    effectAllowed: '',
+    setData: (type: string, value: string) => { data.set(type, value); },
+    getData: (type: string) => data.get(type) || '',
+  } as unknown as DataTransfer;
 }
 
 /** Default fetch routing for tests that don't need agent-specific responses. */
@@ -553,5 +581,161 @@ describe('SkillsTab — sticky skillsViewAgentId & toggleSkill race guard', () =
     expect(JSON.parse(String((putCall?.[1] as RequestInit)?.body))).toEqual({
       enabled: ['writer', 'reader'],
     });
+  });
+
+  it('manages bundles through in-panel dialogs instead of browser prompts', async () => {
+    seedStore({ currentAgentId: 'agent-a' });
+    const promptSpy = vi.spyOn(window, 'prompt');
+    const confirmSpy = vi.spyOn(window, 'confirm');
+
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
+      if (url.includes('/api/skills/external-paths')) {
+        return Promise.resolve(jsonResponse({ configured: [], discovered: [] }));
+      }
+      if (url.includes('/api/skills/bundles')) {
+        return Promise.resolve(jsonResponse({
+          bundles: [
+            {
+              id: 'writing-bundle',
+              name: 'Writing Bundle',
+              skillNames: ['writer'],
+              source: 'user',
+              agentId: null,
+              sourcePackage: null,
+              skills: [{ name: 'writer', enabled: false, source: 'user', missing: false }],
+            },
+          ],
+        }));
+      }
+      if (url.includes('/api/skills?agentId=agent-a')) {
+        return Promise.resolve(jsonResponse({
+          skills: [{ name: 'writer', enabled: false, source: 'user' }],
+        }));
+      }
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    render(<SkillsTab />);
+    await flushMicrotasks(6);
+
+    fireEvent.click(screen.getByRole('button', { name: '新建 Skill Bundle' }));
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '新建 Bundle' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Bundle 名字'), { target: { value: 'Research Bundle' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建' }));
+    await flushMicrotasks(6);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/skills/bundles?agentId=agent-a'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'Research Bundle', skillNames: [] }),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重命名 Writing Bundle' }));
+    expect(screen.getByRole('dialog', { name: '重命名 Bundle' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Bundle 名字'), { target: { value: 'Writing Pack' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await flushMicrotasks(6);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/skills/bundles/writing-bundle?agentId=agent-a'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ name: 'Writing Pack' }),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打散 Writing Bundle' }));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '打散 Bundle' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '打散' }));
+    await flushMicrotasks(6);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/skills/bundles/writing-bundle'),
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+
+    promptSpy.mockRestore();
+    confirmSpy.mockRestore();
+  });
+
+  it('persists bundle and bundled-skill order after drag and drop', async () => {
+    seedStore({ currentAgentId: 'agent-a' });
+
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
+      if (url.includes('/api/skills/external-paths')) {
+        return Promise.resolve(jsonResponse({ configured: [], discovered: [] }));
+      }
+      if (url.includes('/api/skills/bundles')) {
+        return Promise.resolve(jsonResponse({
+          bundles: [
+            {
+              id: 'first-bundle',
+              name: 'First Bundle',
+              skillNames: ['writer', 'reader'],
+              source: 'user',
+              agentId: null,
+              sourcePackage: null,
+              skills: [
+                { name: 'writer', enabled: false, source: 'user', missing: false },
+                { name: 'reader', enabled: false, source: 'user', missing: false },
+              ],
+            },
+            {
+              id: 'second-bundle',
+              name: 'Second Bundle',
+              skillNames: ['debugger'],
+              source: 'user',
+              agentId: null,
+              sourcePackage: null,
+              skills: [{ name: 'debugger', enabled: false, source: 'user', missing: false }],
+            },
+          ],
+        }));
+      }
+      if (url.includes('/api/skills?agentId=agent-a')) {
+        return Promise.resolve(jsonResponse({
+          skills: [
+            { name: 'writer', enabled: false, source: 'user' },
+            { name: 'reader', enabled: false, source: 'user' },
+            { name: 'debugger', enabled: false, source: 'user' },
+          ],
+        }));
+      }
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    render(<SkillsTab />);
+    await flushMicrotasks(6);
+
+    const bundleDrag = createDragData();
+    fireEvent.dragStart(screen.getAllByTestId('skill-bundle-header-second-bundle')[0], {
+      dataTransfer: bundleDrag,
+    });
+    fireEvent.drop(screen.getAllByTestId('skill-bundle-header-first-bundle')[0], {
+      dataTransfer: bundleDrag,
+    });
+    await flushMicrotasks(6);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/skills/bundles/order?agentId=agent-a'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ bundleIds: ['second-bundle', 'first-bundle'] }),
+      }),
+    );
+
+    const skillDrag = createDragData();
+    fireEvent.dragStart(screen.getAllByTestId('skill-row-reader')[0], { dataTransfer: skillDrag });
+    fireEvent.drop(screen.getAllByTestId('skill-row-writer')[0], { dataTransfer: skillDrag });
+    await flushMicrotasks(6);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/skills/bundles/first-bundle?agentId=agent-a'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ skillNames: ['reader', 'writer'] }),
+      }),
+    );
   });
 });

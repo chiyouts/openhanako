@@ -12,6 +12,11 @@ import styles from '../Settings.module.css';
 
 const platform = window.platform;
 
+type BundleDialogState =
+  | { type: 'create'; name: string }
+  | { type: 'rename'; bundle: SkillBundleInfo; name: string }
+  | { type: 'delete'; bundle: SkillBundleInfo };
+
 interface ExternalPathsData {
   configured: string[];
   discovered: { dirPath: string; label: string; exists: boolean }[];
@@ -29,6 +34,7 @@ export function SkillsTab() {
 
   const [skillsList, setSkillsList] = useState<SkillInfo[]>([]);
   const [skillBundles, setSkillBundles] = useState<SkillBundleInfo[]>([]);
+  const [bundleDialog, setBundleDialog] = useState<BundleDialogState | null>(null);
 
   useEffect(() => {
     if (skillsViewAgentId) return;
@@ -149,11 +155,13 @@ export function SkillsTab() {
     }
   };
 
-  const createBundle = async () => {
+  const createBundle = () => {
+    setBundleDialog({ type: 'create', name: 'New Bundle' });
+  };
+
+  const submitCreateBundle = async (name: string) => {
     const agentId = skillsViewAgentIdRef.current;
     if (!agentId) return;
-    const name = window.prompt('Bundle 名字', 'New Bundle')?.trim();
-    if (!name) return;
     try {
       const res = await hanaFetch(`/api/skills/bundles?agentId=${encodeURIComponent(agentId)}`, {
         method: 'POST',
@@ -162,6 +170,7 @@ export function SkillsTab() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      setBundleDialog(null);
       showToast(t('settings.autoSaved'), 'success');
       await loadSkills();
     } catch (err: unknown) {
@@ -169,10 +178,13 @@ export function SkillsTab() {
     }
   };
 
-  const renameBundle = async (bundle: SkillBundleInfo) => {
+  const renameBundle = (bundle: SkillBundleInfo) => {
+    setBundleDialog({ type: 'rename', bundle, name: bundle.name });
+  };
+
+  const submitRenameBundle = async (bundle: SkillBundleInfo, name: string) => {
     const agentId = skillsViewAgentIdRef.current;
     if (!agentId) return;
-    const name = window.prompt('Bundle 名字', bundle.name)?.trim();
     if (!name || name === bundle.name) return;
     try {
       const res = await hanaFetch(`/api/skills/bundles/${encodeURIComponent(bundle.id)}?agentId=${encodeURIComponent(agentId)}`, {
@@ -182,6 +194,7 @@ export function SkillsTab() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      setBundleDialog(null);
       showToast(t('settings.autoSaved'), 'success');
       await loadSkills();
     } catch (err: unknown) {
@@ -189,14 +202,18 @@ export function SkillsTab() {
     }
   };
 
-  const deleteBundle = async (bundle: SkillBundleInfo) => {
-    if (!confirm(`打散 ${bundle.name}？Skill 会保留在公共库里。`)) return;
+  const deleteBundle = (bundle: SkillBundleInfo) => {
+    setBundleDialog({ type: 'delete', bundle });
+  };
+
+  const submitDeleteBundle = async (bundle: SkillBundleInfo) => {
     try {
       const res = await hanaFetch(`/api/skills/bundles/${encodeURIComponent(bundle.id)}`, {
         method: 'DELETE',
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      setBundleDialog(null);
       showToast(t('settings.autoSaved'), 'success');
       await loadSkills();
     } catch (err: unknown) {
@@ -216,15 +233,47 @@ export function SkillsTab() {
     if (data.error) throw new Error(data.error);
   };
 
-  const moveSkillToBundle = async (skillName: string, targetBundle: SkillBundleInfo) => {
+  const reorderBundles = async (bundleIds: string[]) => {
+    const agentId = skillsViewAgentIdRef.current;
+    if (!agentId) return;
+    try {
+      const res = await hanaFetch(`/api/skills/bundles/order?agentId=${encodeURIComponent(agentId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bundleIds }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setSkillBundles(data.bundles || []);
+      showToast(t('settings.autoSaved'), 'success');
+      await loadSkills();
+    } catch (err: unknown) {
+      showToast(t('settings.saveFailed') + ': ' + (err instanceof Error ? err.message : String(err)), 'error');
+      await loadSkills();
+    }
+  };
+
+  const moveSkillToBundle = async (skillName: string, targetBundle: SkillBundleInfo, targetIndex?: number) => {
     try {
       const updates: Promise<void>[] = [];
       for (const bundle of skillBundles) {
         const hasSkill = bundle.skillNames.includes(skillName);
+        const withoutSkill = bundle.skillNames.filter(name => name !== skillName);
+        let nextSkillNames = withoutSkill;
         if (bundle.id === targetBundle.id) {
-          if (!hasSkill) updates.push(updateBundleSkillNames(bundle, [...bundle.skillNames, skillName]));
-        } else if (hasSkill) {
-          updates.push(updateBundleSkillNames(bundle, bundle.skillNames.filter(name => name !== skillName)));
+          const insertAt = typeof targetIndex === 'number'
+            ? Math.max(0, Math.min(targetIndex, withoutSkill.length))
+            : withoutSkill.length;
+          nextSkillNames = [
+            ...withoutSkill.slice(0, insertAt),
+            skillName,
+            ...withoutSkill.slice(insertAt),
+          ];
+        }
+        if (hasSkill || bundle.id === targetBundle.id) {
+          const changed = nextSkillNames.length !== bundle.skillNames.length
+            || nextSkillNames.some((name, index) => name !== bundle.skillNames[index]);
+          if (changed) updates.push(updateBundleSkillNames(bundle, nextSkillNames));
         }
       }
       await Promise.all(updates);
@@ -233,6 +282,22 @@ export function SkillsTab() {
     } catch (err: unknown) {
       showToast(t('settings.saveFailed') + ': ' + (err instanceof Error ? err.message : String(err)), 'error');
     }
+  };
+
+  const submitBundleDialog = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!bundleDialog) return;
+    if (bundleDialog.type === 'delete') {
+      await submitDeleteBundle(bundleDialog.bundle);
+      return;
+    }
+    const name = bundleDialog.name.trim();
+    if (!name) return;
+    if (bundleDialog.type === 'create') {
+      await submitCreateBundle(name);
+      return;
+    }
+    await submitRenameBundle(bundleDialog.bundle, name);
   };
 
   const removeSkillFromBundles = async (skillName: string) => {
@@ -415,6 +480,7 @@ export function SkillsTab() {
             onCreateBundle={createBundle}
             onRenameBundle={renameBundle}
             onDeleteBundle={deleteBundle}
+            onReorderBundles={reorderBundles}
             onMoveSkillToBundle={moveSkillToBundle}
             onRemoveSkillFromBundles={removeSkillFromBundles}
           />
@@ -509,6 +575,76 @@ export function SkillsTab() {
           </button>
         </div>
       </SettingsSection>
+
+      {bundleDialog ? (
+        <div
+          className={styles['skill-bundle-dialog-backdrop']}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setBundleDialog(null);
+          }}
+        >
+          <form
+            className={styles['skill-bundle-dialog']}
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              bundleDialog.type === 'create'
+                ? '新建 Bundle'
+                : bundleDialog.type === 'rename'
+                  ? '重命名 Bundle'
+                  : '打散 Bundle'
+            }
+            onSubmit={submitBundleDialog}
+          >
+            <div className={styles['skill-bundle-dialog-header']}>
+              <h3>
+                {bundleDialog.type === 'create'
+                  ? '新建 Bundle'
+                  : bundleDialog.type === 'rename'
+                    ? '重命名 Bundle'
+                    : '打散 Bundle'}
+              </h3>
+              <button
+                type="button"
+                title="取消"
+                aria-label="取消"
+                onClick={() => setBundleDialog(null)}
+              >
+                ×
+              </button>
+            </div>
+            {bundleDialog.type === 'delete' ? (
+              <p className={styles['skill-bundle-dialog-text']}>
+                打散 {bundleDialog.bundle.name}？Skill 会保留在公共库里，并显示为散装 Skill。
+              </p>
+            ) : (
+              <label className={styles['skill-bundle-dialog-field']}>
+                <span>Bundle 名字</span>
+                <input
+                  value={bundleDialog.name}
+                  autoFocus
+                  onChange={(event) => setBundleDialog(prev => {
+                    if (!prev || prev.type === 'delete') return prev;
+                    return { ...prev, name: event.target.value };
+                  })}
+                />
+              </label>
+            )}
+            <div className={styles['skill-bundle-dialog-actions']}>
+              <button type="button" onClick={() => setBundleDialog(null)}>
+                取消
+              </button>
+              <button type="submit" className={styles['skill-bundle-dialog-primary']}>
+                {bundleDialog.type === 'create'
+                  ? '创建'
+                  : bundleDialog.type === 'rename'
+                    ? '保存'
+                    : '打散'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
     </div>
   );

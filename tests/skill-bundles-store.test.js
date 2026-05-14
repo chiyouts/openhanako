@@ -9,6 +9,7 @@ import {
   detachAgentFromBundles,
   loadSkillBundleStore,
   removeSkillsFromBundles,
+  reorderSkillBundles,
   updateSkillBundle,
 } from "../lib/skill-bundles/store.js";
 
@@ -94,5 +95,22 @@ describe("skill bundle store", () => {
       source: "character-card-import",
       sourcePackage: "hanako-charactercard.zip",
     });
+  });
+
+  it("persists bundle order without changing bundle membership", () => {
+    const first = createSkillBundle(engine, {
+      name: "First Bundle",
+      skillNames: ["writer"],
+    });
+    const second = createSkillBundle(engine, {
+      name: "Second Bundle",
+      skillNames: ["reader"],
+    });
+
+    const reordered = reorderSkillBundles(engine, [second.id, first.id]);
+
+    expect(reordered.bundles.map(bundle => bundle.id)).toEqual([second.id, first.id]);
+    expect(reordered.bundles.map(bundle => bundle.skillNames)).toEqual([["reader"], ["writer"]]);
+    expect(loadSkillBundleStore(engine).bundles.map(bundle => bundle.id)).toEqual([second.id, first.id]);
   });
 });

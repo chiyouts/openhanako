@@ -1956,6 +1956,14 @@
     transition: background var(--duration-fast);
 }
 
+.skill-bundle-header[draggable="true"] {
+    cursor: grab;
+}
+
+.skill-bundle-header[draggable="true"]:active {
+    cursor: grabbing;
+}
+
 .skill-bundle-header:hover {
     background: var(--bg-hover, color-mix(in srgb, var(--bg-card) 90%, transparent));
 }
@@ -2025,6 +2033,104 @@
 .skill-bundle-loose-zone .skills-list-item + .skills-list-item,
 .skill-bundle-children .skills-list-item + .skills-list-item {
     border-top: 1px solid var(--border);
+}
+
+.skill-bundle-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xl);
+    background: rgba(21, 23, 24, 0.24);
+    backdrop-filter: blur(8px);
+}
+
+.skill-bundle-dialog {
+    width: min(360px, calc(100vw - 48px));
+    padding: var(--space-lg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    box-shadow: 0 12px 48px var(--shadow);
+}
+
+.skill-bundle-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.skill-bundle-dialog-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.skill-bundle-dialog-header button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input, 4px);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.skill-bundle-dialog-field {
+    display: grid;
+    gap: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.skill-bundle-dialog-field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input, 4px);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.skill-bundle-dialog-text {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.6;
+}
+
+.skill-bundle-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-top: var(--space-lg);
+}
+
+.skill-bundle-dialog-actions button {
+    min-width: 72px;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input, 4px);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.skill-bundle-dialog-actions .skill-bundle-dialog-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: white;
 }
 
 :global(.hana-toggle.bundle-mixed) {
@@ -2334,20 +2440,20 @@
 
 /* 缩小版 toggle */
 :global(.hana-toggle.mini) {
-    width: 28px;
-    height: 16px;
+    width: 36px;
+    height: 20px;
     flex-shrink: 0;
 }
 
 :global(.hana-toggle.mini)::after {
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
     top: 3px;
     left: 3px;
 }
 
 :global(.hana-toggle.mini.on)::after {
-    left: 15px;
+    transform: translateX(16px);
 }
 
 /* 文件夹选择器 */

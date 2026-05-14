@@ -25,6 +25,7 @@ import {
   deleteSkillBundle,
   loadSkillBundleStore,
   removeSkillsFromBundles,
+  reorderSkillBundles,
   updateSkillBundle,
 } from "../../lib/skill-bundles/store.js";
 
@@ -140,6 +141,22 @@ export function createSkillsRoute(engine) {
       return c.json({ ok: true, bundle: bundleForResponse(bundle, skillByName) });
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
+    }
+  });
+
+  route.put("/skills/bundles/order", async (c) => {
+    try {
+      const body = await safeJson(c);
+      if (!Array.isArray(body.bundleIds)) {
+        return c.json({ error: "bundleIds must be an array" }, 400);
+      }
+      const { skillByName } = resolveBundleSkillView(c);
+      const store = reorderSkillBundles(engine, body.bundleIds);
+      emitAppEvent(engine, "skills-changed", { agentId: null });
+      return c.json({ ok: true, bundles: store.bundles.map(bundle => bundleForResponse(bundle, skillByName)) });
+    } catch (err) {
+      const status = /^(bundleIds must|unknown skill bundle)/.test(err.message) ? 400 : 500;
+      return c.json({ error: err.message }, err.status || status);
     }
   });
 
