@@ -469,6 +469,9 @@ export class HanaEngine {
   async abortBridgeSession(key) { return this._bridge?.abortSession(key) ?? false; }
   steerBridgeSession(key, text) { return this._bridge?.steerSession(key, text) ?? false; }
   get bridgeSessionManager() { return this._bridge; }
+  getBridgeContextForSessionPath(sessionPath, opts = {}) {
+    return this._bridge?.getBridgeContextForSessionPath?.(sessionPath, opts) || null;
+  }
   async deliverNotification(payload, opts = {}) {
     return this._notifications.notify(payload, opts);
   }
