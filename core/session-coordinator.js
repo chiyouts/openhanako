@@ -80,6 +80,62 @@ function buildPromptMediaOptions(opts) {
   };
 }
 
+function collectAssistantTextFromMessage(message) {
+  if (!message) return "";
+  if (typeof message.text === "string") return message.text;
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+  return message.content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      if (typeof part.text === "string") return part.text;
+      if (typeof part.content === "string") return part.content;
+      return "";
+    })
+    .filter(Boolean)
+    .join("");
+}
+
+function addUniqueSessionFile(target, file) {
+  if (!file || typeof file !== "object") return;
+  const key = file.id || file.fileId || file.filePath || file.path || file.realPath || JSON.stringify(file);
+  if (target.some((existing) => (
+    (existing.id || existing.fileId || existing.filePath || existing.path || existing.realPath || JSON.stringify(existing)) === key
+  ))) {
+    return;
+  }
+  target.push(file);
+}
+
+function collectSessionFilesFromToolResult(result) {
+  const files = [];
+  const details = result?.details;
+  addUniqueSessionFile(files, details?.sessionFile);
+  if (Array.isArray(details?.sessionFiles)) {
+    for (const file of details.sessionFiles) addUniqueSessionFile(files, file);
+  }
+  return files;
+}
+
+function toolErrorSummary(event) {
+  const toolName = event?.toolName || event?.name || "tool";
+  const raw = event?.error || event?.result?.error || event?.result?.message || event?.message;
+  const message = typeof raw === "string" ? raw : raw?.message || "";
+  return message ? `${toolName}: ${message}` : `${toolName}: failed`;
+}
+
+function isolatedCompletionError(stopReason, errorMessage) {
+  if (!stopReason || stopReason === "stop") return null;
+  const message = typeof errorMessage === "string" ? errorMessage : errorMessage?.message;
+  if (stopReason === "error") {
+    return message || "assistant message ended with stopReason=error";
+  }
+  if (stopReason === "length") {
+    return "assistant message ended with stopReason=length (output limit reached)";
+  }
+  return `assistant message ended with stopReason=${stopReason}`;
+}
+
 const MAX_CACHED_SESSIONS = 20;
 const SESSION_PROMPT_SNAPSHOT_VERSION = 1;
 const MiB = 1024 * 1024;
@@ -2280,9 +2336,12 @@ export class SessionCoordinator {
       fs.mkdirSync(sessionDir, { recursive: true });
 
       const execCwd = opts.cwd || this._d.getHomeCwd(targetAgent.id) || process.cwd();
+      const workspaceSourceSessionPath = typeof opts.parentSessionPath === "string" && opts.parentSessionPath.trim()
+        ? opts.parentSessionPath
+        : this.currentSessionPath;
       const inheritedWorkspaceFolders = Array.isArray(opts.workspaceFolders)
         ? opts.workspaceFolders
-        : this.getSessionWorkspaceFolders(this.currentSessionPath);
+        : this.getSessionWorkspaceFolders(workspaceSourceSessionPath);
       const execWorkspaceScope = normalizeWorkspaceScope({
         primaryCwd: execCwd,
         workspaceFolders: inheritedWorkspaceFolders,
@@ -2358,7 +2417,7 @@ export class SessionCoordinator {
       if (opts.subagentContext) {
         // Subagent 专用 prompt：跳过长期记忆、pinned、记忆规则、团队 agent 名单。
         // 不走 cached systemPrompt getter，因为它返回"完整 prompt"的缓存。
-        isolatedPrompt = targetAgent.buildSystemPrompt({ forSubagent: true });
+        isolatedPrompt = targetAgent.buildSystemPrompt({ forSubagent: true, cwdOverride: execCwd });
       } else {
         // 非 session 路径（巡检/cron 等）统一用 master 版本的 systemPrompt cache。
         // per-session 开关只管该 session 自己的对话窗口，不影响这里。
@@ -2406,11 +2465,30 @@ export class SessionCoordinator {
       try { opts.onSessionReady?.(childSessionPath); } catch {}
 
       let replyText = "";
+      let finalAssistantText = "";
+      let finalStopReason = null;
+      let finalErrorMessage = null;
+      const sessionFiles = [];
+      const toolErrors = [];
       const unsub = session.subscribe((event) => {
         if (event.type === "message_update") {
           const sub = event.assistantMessageEvent;
           if (sub?.type === "text_delta") {
             replyText += sub.delta || "";
+          }
+        }
+        if (event.type === "message_end" && event.message?.role === "assistant") {
+          finalStopReason = event.message.stopReason ?? null;
+          finalErrorMessage = event.message.errorMessage || event.message.error || null;
+          finalAssistantText = collectAssistantTextFromMessage(event.message) || finalAssistantText;
+        }
+        if (event.type === "tool_execution_end") {
+          if (event.isError) {
+            toolErrors.push(toolErrorSummary(event));
+          } else {
+            for (const file of collectSessionFilesFromToolResult(event.result)) {
+              addUniqueSessionFile(sessionFiles, file);
+            }
           }
         }
         if (opts.emitEvents && childSessionPath) {
@@ -2448,13 +2526,29 @@ export class SessionCoordinator {
       }
 
       const sessionPath = session.sessionManager?.getSessionFile?.() || null;
+      const finalReplyText = replyText || finalAssistantText;
+      const completionError = isolatedCompletionError(finalStopReason, finalErrorMessage);
 
       if (!opts.persist && sessionPath) {
         try { fs.unlinkSync(sessionPath); } catch {}
-        return { sessionPath: null, replyText, error: null };
+        return {
+          sessionPath: null,
+          replyText: finalReplyText,
+          error: completionError,
+          stopReason: finalStopReason,
+          sessionFiles,
+          toolErrors,
+        };
       }
 
-      return { sessionPath, replyText, error: null };
+      return {
+        sessionPath,
+        replyText: finalReplyText,
+        error: completionError,
+        stopReason: finalStopReason,
+        sessionFiles,
+        toolErrors,
+      };
     } catch (err) {
       log.error(`isolated execution failed: ${err.message}`);
       if (!opts.persist && tempSessionMgr) {
