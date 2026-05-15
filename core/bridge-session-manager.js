@@ -14,6 +14,7 @@ import { safeReadJSON } from "../shared/safe-fs.js";
 import { findModel } from "../shared/model-ref.js";
 import { teardownSessionResources } from "./session-teardown.js";
 import { isAbortLikeError, prepareVisionInputForTextOnlyModel } from "./vision-prepare.js";
+import { prepareModelImageInputsForPrompt } from "./model-image-preprocess.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
 import { SESSION_PERMISSION_MODES } from "./session-permission-mode.js";
 import { collectMediaItems } from "../lib/tools/media-details.js";
@@ -603,6 +604,11 @@ export class BridgeSessionManager {
             isVisionAuxiliaryEnabled: this._deps.isVisionAuxiliaryEnabled,
           },
           warn: (msg) => console.warn(`[bridge-session] ${msg}`),
+          signal: abortController.signal,
+        }));
+        ({ text: promptText, opts } = await prepareModelImageInputsForPrompt({
+          text: promptText,
+          opts,
           signal: abortController.signal,
         }));
         if (this._prePromptAbortControllers.get(sessionKey) === abortController) {

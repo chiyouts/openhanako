@@ -34,6 +34,7 @@ import { isActiveSessionPath } from "./message-utils.js";
 import { formatWorkspaceScopePrompt, normalizeWorkspaceScope } from "../shared/workspace-scope.js";
 import { getProviderPromptPatches } from "./provider-prompt-patches.js";
 import { prepareVisionInputForTextOnlyModel } from "./vision-prepare.js";
+import { prepareModelImageInputsForPrompt } from "./model-image-preprocess.js";
 import { adaptVisualContextMessages } from "./visual-context-pipeline.js";
 import { modelSupportsDirectVideoInput, modelSupportsVideoInput } from "../shared/model-capabilities.js";
 import {
@@ -856,6 +857,7 @@ export class SessionCoordinator {
       visionPolicyTarget: engine,
       warn: (msg) => (engine?.log || console).warn?.(`[session] ${msg}`),
     }));
+    ({ text, opts } = await prepareModelImageInputsForPrompt({ text, opts }));
     assertVideoInputSupported(this._session.model, opts?.videos);
     const promptOpts = buildPromptMediaOptions(opts);
     await this._session.prompt(text, promptOpts);
@@ -913,6 +915,11 @@ export class SessionCoordinator {
         getVisionBridge: () => engine?.getVisionBridge?.(),
         visionPolicyTarget: engine,
         warn: (msg) => (engine?.log || console).warn?.(`[session] ${msg}`),
+        signal: abortController.signal,
+      }));
+      ({ text, opts } = await prepareModelImageInputsForPrompt({
+        text,
+        opts,
         signal: abortController.signal,
       }));
     } finally {

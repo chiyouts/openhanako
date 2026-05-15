@@ -26,6 +26,16 @@ vi.mock("../lib/pi-sdk/index.js", async (importOriginal) => {
       open: (...args) => sessionManagerOpenMock(...args),
     },
     emitSessionShutdown: (...args) => emitSessionShutdownMock(...args),
+    resizeModelImageInput: async (image) => ({
+      data: image.data,
+      mimeType: image.mimeType,
+      originalWidth: 1,
+      originalHeight: 1,
+      width: 1,
+      height: 1,
+      wasResized: false,
+    }),
+    formatModelImageDimensionNote: () => undefined,
   };
 });
 
