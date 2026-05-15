@@ -109,6 +109,7 @@ import { wrapWithCheckpoint } from "../lib/checkpoint-wrapper.js";
 import { wrapWithSessionPermission } from "../lib/tools/session-permission-wrapper.js";
 import { filterToolObjectsByAvailability } from "./tool-availability.js";
 import { TaskRegistry } from "../lib/task-registry.js";
+import { TerminalSessionManager } from "../lib/terminal/terminal-session-manager.js";
 import { PluginInstallRecords } from "../lib/plugin-install-records.js";
 import { ComputerHost } from "./computer-use/computer-host.js";
 import { ComputerProviderRegistry } from "./computer-use/provider-registry.js";
@@ -206,6 +207,8 @@ export class HanaEngine {
       getDeferredResultStore: () => this._deferredResultStore,
       getTaskRegistry: () => this._taskRegistry,
       getEngine: () => this,
+      closeTerminalsForSession: (sessionPath) => this._terminalSessions.closeForSession(sessionPath),
+      closeAllTerminals: () => this._terminalSessions.closeAll(),
       onBeforeSessionCreate: async (cwd) => {
         await this.syncWorkspaceSkillPaths(cwd, { reload: true, emitEvent: false });
       },
@@ -275,6 +278,11 @@ export class HanaEngine {
         const ctrl = this._subagentControllers.get(taskId);
         if (ctrl) ctrl.abort();
       },
+    });
+
+    this._terminalSessions = new TerminalSessionManager({
+      hanakoHome: this.hanakoHome,
+      emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
     });
 
     // Checkpoint 备份存储
@@ -357,6 +365,10 @@ export class HanaEngine {
 
   get taskRegistry() {
     return this._taskRegistry;
+  }
+
+  get terminalSessions() {
+    return this._terminalSessions;
   }
 
   registerSessionFile(entry) { return this._sessionFiles.registerFile(entry); }

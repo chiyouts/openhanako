@@ -1443,6 +1443,13 @@ export class SessionCoordinator {
       this._d.getConfirmStore?.()?.abortBySession(sessionPath);
       this._d.getDeferredResultStore?.()?.clearBySession(sessionPath);
     }
+    if (sessionPath) {
+      try {
+        this._d.closeTerminalsForSession?.(sessionPath);
+      } catch (err) {
+        log.warn(`closeSession ${path.basename(sessionPath)}: close terminals failed: ${err.message}`);
+      }
+    }
     if (sessionPath === this.currentSessionPath) {
       this._session = null;
     }
@@ -1460,6 +1467,11 @@ export class SessionCoordinator {
       // pending confirmation 必须 abort, pending deferred task 必须 clear
       this._d.getConfirmStore?.()?.abortBySession(sessionPath);
       this._d.getDeferredResultStore?.()?.clearBySession(sessionPath);
+    }
+    try {
+      this._d.closeAllTerminals?.();
+    } catch (err) {
+      log.warn(`closeAllSessions: close terminals failed: ${err.message}`);
     }
     this._sessions.clear();
     this._session = null;
