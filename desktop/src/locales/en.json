@@ -747,7 +747,7 @@
       "yuanHint": "\"Yuan\" is the agent's subconscious. Build your unique companion from this foundation.",
       "tools": {
         "title": "Tools",
-        "description": "Changes apply to new conversations only. Active conversations continue using the tool set they started with.",
+        "description": "Tool switches take effect after restarting or starting a conversation. Active conversations keep using the tool set they started with.",
         "items": {
           "browser": { "label": "Browser", "summary": "Control a headless browser to navigate web pages" },
           "computer": { "label": "Computer Use", "summary": "Control approved desktop apps with a visible action overlay" },
