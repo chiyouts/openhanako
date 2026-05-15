@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { extractZip } from "../lib/extract-zip.js";
 
 function expectAppEvent(emitEvent, type, payload) {
   expect(emitEvent).toHaveBeenCalledWith({
@@ -193,6 +194,278 @@ describe("skills route", () => {
       "zh",
       { agentId, skills },
     );
+  });
+
+  it("lists skill bundles with the requested agent's enabled state", async () => {
+    const agentId = "hana";
+    const agentDir = path.join(tempRoot, agentId);
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, "config.yaml"), "agent:\n  name: Hana\n", "utf-8");
+    fs.writeFileSync(path.join(tempRoot, "skill-bundles.json"), JSON.stringify({
+      schemaVersion: 1,
+      bundles: [
+        {
+          id: "coding",
+          name: "Coding Bundle",
+          skillNames: ["writer", "reader", "missing-skill"],
+          source: "character-card-import",
+          agentId,
+          sourcePackage: "coding.zip",
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+        },
+      ],
+    }, null, 2), "utf-8");
+
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    const engine = {
+      hanakoHome: tempRoot,
+      agentsDir: tempRoot,
+      getAllSkills: vi.fn(() => [
+        { name: "writer", enabled: true, source: "user" },
+        { name: "reader", enabled: false, source: "user" },
+      ]),
+    };
+
+    app.route("/api", createSkillsRoute(engine));
+
+    const res = await app.request(`/api/skills/bundles?agentId=${agentId}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      bundles: [
+        {
+          id: "coding",
+          name: "Coding Bundle",
+          skillNames: ["writer", "reader", "missing-skill"],
+          source: "character-card-import",
+          agentId,
+          sourcePackage: "coding.zip",
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+          skills: [
+            { name: "writer", enabled: true, source: "user", missing: false },
+            { name: "reader", enabled: false, source: "user", missing: false },
+            { name: "missing-skill", enabled: false, source: null, missing: true },
+          ],
+        },
+      ],
+    });
+    expect(engine.getAllSkills).toHaveBeenCalledWith(agentId);
+  });
+
+  it("creates, updates, and deletes skill bundles through the skills route", async () => {
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    const engine = {
+      hanakoHome: tempRoot,
+      agentsDir: tempRoot,
+      emitEvent: vi.fn(),
+      getAllSkills: vi.fn(() => [
+        { name: "writer", enabled: false, source: "user" },
+        { name: "reader", enabled: false, source: "user" },
+      ]),
+    };
+
+    app.route("/api", createSkillsRoute(engine));
+
+    const createRes = await app.request("/api/skills/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Writing Bundle",
+        skillNames: ["writer", "writer"],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const created = await createRes.json();
+    expect(created.bundle).toMatchObject({
+      id: "writing-bundle",
+      name: "Writing Bundle",
+      skillNames: ["writer"],
+      source: "user",
+    });
+    expectAppEvent(engine.emitEvent, "skills-changed", { agentId: null });
+
+    const updateRes = await app.request("/api/skills/bundles/writing-bundle", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Writing Pack",
+        skillNames: ["writer", "reader"],
+      }),
+    });
+    expect(updateRes.status).toBe(200);
+    expect(await updateRes.json()).toMatchObject({
+      ok: true,
+      bundle: {
+        id: "writing-bundle",
+        name: "Writing Pack",
+        skillNames: ["writer", "reader"],
+      },
+    });
+
+    const deleteRes = await app.request("/api/skills/bundles/writing-bundle", { method: "DELETE" });
+    expect(deleteRes.status).toBe(200);
+    expect(await deleteRes.json()).toEqual({ ok: true });
+    const store = JSON.parse(fs.readFileSync(path.join(tempRoot, "skill-bundles.json"), "utf-8"));
+    expect(store.bundles).toEqual([]);
+  });
+
+  it("persists skill bundle ordering through the skills route", async () => {
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    const engine = {
+      hanakoHome: tempRoot,
+      agentsDir: tempRoot,
+      emitEvent: vi.fn(),
+      getAllSkills: vi.fn(() => [
+        { name: "writer", enabled: false, source: "user" },
+        { name: "reader", enabled: false, source: "user" },
+      ]),
+    };
+
+    app.route("/api", createSkillsRoute(engine));
+
+    await app.request("/api/skills/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "First Bundle", skillNames: ["writer"] }),
+    });
+    await app.request("/api/skills/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Second Bundle", skillNames: ["reader"] }),
+    });
+
+    const orderRes = await app.request("/api/skills/bundles/order", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bundleIds: ["second-bundle", "first-bundle"] }),
+    });
+
+    expect(orderRes.status).toBe(200);
+    expect(await orderRes.json()).toMatchObject({
+      ok: true,
+      bundles: [
+        { id: "second-bundle", skillNames: ["reader"] },
+        { id: "first-bundle", skillNames: ["writer"] },
+      ],
+    });
+    const store = JSON.parse(fs.readFileSync(path.join(tempRoot, "skill-bundles.json"), "utf-8"));
+    expect(store.bundles.map(bundle => bundle.id)).toEqual(["second-bundle", "first-bundle"]);
+    expectAppEvent(engine.emitEvent, "skills-changed", { agentId: null });
+  });
+
+  it("exports a skill bundle as a zip with only resolvable public skills", async () => {
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    const userSkillsDir = path.join(tempRoot, "user-skills");
+    const exportsDir = path.join(tempRoot, "exports");
+    fs.mkdirSync(path.join(userSkillsDir, "writer"), { recursive: true });
+    fs.writeFileSync(
+      path.join(userSkillsDir, "writer", "SKILL.md"),
+      "---\nname: writer\n---\n# Writer\n",
+      "utf-8",
+    );
+    fs.writeFileSync(path.join(userSkillsDir, "writer", "notes.txt"), "public skill asset\n", "utf-8");
+    fs.writeFileSync(path.join(tempRoot, "skill-bundles.json"), JSON.stringify({
+      schemaVersion: 1,
+      bundles: [
+        {
+          id: "writing-bundle",
+          name: "Writing Bundle",
+          skillNames: ["writer", "missing-skill"],
+          source: "user",
+          agentId: null,
+          sourcePackage: null,
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+        },
+      ],
+    }), "utf-8");
+    const engine = {
+      hanakoHome: tempRoot,
+      userSkillsDir,
+      skillsDir: userSkillsDir,
+      cwd: exportsDir,
+      agentsDir: tempRoot,
+      getAllSkills: vi.fn(() => [
+        {
+          name: "writer",
+          source: "user",
+          enabled: false,
+          baseDir: path.join(userSkillsDir, "writer"),
+          filePath: path.join(userSkillsDir, "writer", "SKILL.md"),
+        },
+      ]),
+    };
+
+    app.route("/api", createSkillsRoute(engine));
+
+    const res = await app.request("/api/skills/bundles/writing-bundle/export", { method: "POST" });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toMatchObject({
+      ok: true,
+      fileName: "writing-bundle-skillbundle.zip",
+      warnings: [{ type: "missing-skill", name: "missing-skill" }],
+    });
+    expect(data.filePath).toBe(path.join(exportsDir, "writing-bundle-skillbundle.zip"));
+
+    const outDir = path.join(tempRoot, "unzipped-skill-bundle");
+    fs.mkdirSync(outDir);
+    await extractZip(data.filePath, outDir);
+    const manifest = JSON.parse(fs.readFileSync(path.join(outDir, "bundle.json"), "utf-8"));
+    expect(manifest).toMatchObject({
+      kind: "SkillBundle",
+      schemaVersion: 1,
+      package: {
+        name: data.fileName,
+      },
+      bundle: {
+        name: "Writing Bundle",
+        source: "user",
+      },
+      skills: {
+        bundles: [
+          {
+            name: "Writing Bundle",
+            skills: [{ name: "writer", path: "skills/writer" }],
+          },
+        ],
+      },
+    });
+    expect(fs.readFileSync(path.join(outDir, "skills", "writer", "SKILL.md"), "utf-8")).toContain("name: writer");
+    expect(fs.readFileSync(path.join(outDir, "skills", "writer", "notes.txt"), "utf-8")).toBe("public skill asset\n");
+    expect(fs.existsSync(path.join(outDir, "skills", "missing-skill"))).toBe(false);
+  });
+
+  it("rejects bundle membership for skills that are not installed", async () => {
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    const engine = {
+      hanakoHome: tempRoot,
+      agentsDir: tempRoot,
+      getAllSkills: vi.fn(() => [{ name: "writer", enabled: false, source: "user" }]),
+      emitEvent: vi.fn(),
+    };
+
+    app.route("/api", createSkillsRoute(engine));
+
+    const res = await app.request("/api/skills/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Broken Bundle",
+        skillNames: ["writer", "ghost-skill"],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "unknown skill in bundle: ghost-skill" });
+    expect(engine.emitEvent).not.toHaveBeenCalled();
   });
 
   it("registers a session-scoped skill install source before installing", async () => {
@@ -426,6 +699,55 @@ describe("DELETE /skills/:name — per-agent target selection", () => {
     expect(enabledB).not.toContain("globalskill");
     expect(enabledA).toContain("other");
     expect(enabledB).toContain("other");
+  });
+
+  it("删除用户级 skill 时同步清理 skill bundle 元数据里的引用和空 bundle", async () => {
+    const engine = buildEngine({
+      agents: ["agent-a"],
+      currentAgentId: "agent-a",
+    });
+    engine.hanakoHome = tempRoot;
+    writeUserSkill("bundled-skill");
+    fs.writeFileSync(path.join(tempRoot, "skill-bundles.json"), JSON.stringify({
+      schemaVersion: 1,
+      bundles: [
+        {
+          id: "coding",
+          name: "Coding Bundle",
+          skillNames: ["bundled-skill", "keep-skill"],
+          source: "character-card-import",
+          agentId: "agent-a",
+          sourcePackage: "coding.zip",
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+        },
+        {
+          id: "empty-after-delete",
+          name: "Empty After Delete",
+          skillNames: ["bundled-skill"],
+          source: "character-card-import",
+          agentId: "agent-a",
+          sourcePackage: "coding.zip",
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+        },
+      ],
+    }, null, 2), "utf-8");
+
+    const { createSkillsRoute } = await import("../server/routes/skills.js");
+    const app = new Hono();
+    app.route("/api", createSkillsRoute(engine));
+
+    const res = await app.request("/api/skills/bundled-skill?agentId=agent-a", { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const store = JSON.parse(fs.readFileSync(path.join(tempRoot, "skill-bundles.json"), "utf-8"));
+    expect(store.bundles).toHaveLength(1);
+    expect(store.bundles[0]).toMatchObject({
+      id: "coding",
+      name: "Coding Bundle",
+      skillNames: ["keep-skill"],
+    });
   });
 
   it("显式 agentId 不存在时返回 404 agent not found", async () => {

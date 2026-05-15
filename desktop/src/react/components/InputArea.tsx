@@ -92,6 +92,14 @@ interface FileMentionRange {
   query: string;
 }
 
+interface InputKeyEvent {
+  key: string;
+  shiftKey: boolean;
+  defaultPrevented?: boolean;
+  isComposing?: boolean;
+  preventDefault: () => void;
+}
+
 function findLatestInputSessionConfirmation(items: ChatListItem[] | undefined, confirmId?: string, pendingOnly?: boolean): SessionConfirmationBlock | null {
   if (!items) return null;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -162,8 +170,11 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const isStreaming = useStore(s => s.streamingSessions.includes(s.currentSessionPath || ''));
   const connected = useStore(s => s.connected);
   const pendingNewSession = useStore(s => s.pendingNewSession);
+  const pendingSessionSwitchPath = useStore(s => s.pendingSessionSwitchPath);
   const currentSessionPath = useStore(s => s.currentSessionPath);
   const compacting = useStore(s => currentSessionPath ? s.compactingSessions.includes(currentSessionPath) : false);
+  const screenshotBusy = useStore(s => s.screenshotTaskCount > 0);
+  const screenshotProgress = useStore(s => s.screenshotProgress);
   const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? null);
   const sessionTodos = useStore(s => (s.currentSessionPath && s.todosBySession[s.currentSessionPath]) || EMPTY_TODOS);
   const sessionFiles = useStore(s => (s.currentSessionPath ? selectSessionFiles(s, s.currentSessionPath) : EMPTY_FILE_REFS));
@@ -207,6 +218,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
 
   const isComposing = useRef(false);
   const pasteHandlerRef = useRef<(event: ClipboardEvent) => boolean>(() => false);
+  const keyDownHandlerRef = useRef<(event: KeyboardEvent) => boolean>(() => false);
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const slashBtnRef = useRef<HTMLButtonElement>(null);
@@ -316,6 +328,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         spellcheck: 'false',
       },
       handlePaste: (_view, event) => pasteHandlerRef.current(event),
+      handleKeyDown: (_view, event) => keyDownHandlerRef.current(event),
     },
   });
 
@@ -351,6 +364,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const _s = useStore.getState();
     if (_s.streamingSessions.includes(_s.currentSessionPath || '')) return false;
+    if (_s.pendingSessionSwitchPath) return false;
 
     if (pendingNewSession) {
       const ok = await ensureSession();
@@ -564,7 +578,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   const hasContent = inputText.trim().length > 0 || attachedFiles.length > 0 || docContextAttached || !!quotedSelection
     || editorHasInlineNode(editor, 'skillBadge')
     || editorHasInlineNode(editor, 'fileBadge');
-  const canSend = hasContent && connected && !isStreaming && !modelSwitching;
+  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath;
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
     const res = await hanaFetch('/api/preferences/models');
@@ -716,6 +730,7 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     if (isStreaming) return;
     if (sending) return;
     if (modelSwitching) return;
+    if (useStore.getState().pendingSessionSwitchPath) return;
     setSending(true);
 
     try {
@@ -902,45 +917,48 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
   }, [isStreaming]);
 
   // ── Key handler ──
-  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent) => {
+  const handleEditorKeyDown = useCallback((e: InputKeyEvent): boolean => {
+    if (e.defaultPrevented) return false;
     if (fileMenuOpen && (fileMentionItems.length > 0 || fileMentionBusy)) {
       if (e.key === 'ArrowDown' && fileMentionItems.length > 0) {
         e.preventDefault();
         setFileSelected(i => (i + 1) % fileMentionItems.length);
-        return;
+        return true;
       }
       if (e.key === 'ArrowUp' && fileMentionItems.length > 0) {
         e.preventDefault();
         setFileSelected(i => (i - 1 + fileMentionItems.length) % fileMentionItems.length);
-        return;
+        return true;
       }
       if ((e.key === 'Tab' || e.key === 'Enter') && fileMentionItems.length > 0) {
         e.preventDefault();
         const item = fileMentionItems[fileSelected];
         if (item) handleFileMentionSelect(item);
-        return;
+        return true;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
         setFileMenuOpen(false);
-        return;
+        return true;
       }
     }
     if (slashMenuOpen && filteredCommands.length > 0) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelected(i => (i + 1) % filteredCommands.length); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelected(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelected(i => (i + 1) % filteredCommands.length); return true; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelected(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return true; }
       if (e.key === 'Tab' || e.key === 'Enter') {
         e.preventDefault();
         const cmd = filteredCommands[slashSelected] || filteredCommands[0];
         if (cmd) handleSlashSelect(cmd);
-        return;
+        return true;
       }
-      if (e.key === 'Escape') { e.preventDefault(); dismissSlashMenu(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); dismissSlashMenu(); return true; }
     }
-    if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
       e.preventDefault();
       if (isStreaming && (editor?.getText().trim())) handleSteer(); else handleSend();
+      return true;
     }
+    return false;
   }, [
     dismissSlashMenu,
     fileMentionBusy,
@@ -957,6 +975,8 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
     slashMenuOpen,
     slashSelected,
   ]);
+
+  keyDownHandlerRef.current = handleEditorKeyDown as (event: KeyboardEvent) => boolean;
 
   const handleSlashResultClick = useCallback(() => {
     if (!slashResult?.deskDir) return;
@@ -991,6 +1011,15 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         slashBusyLabel={slashCommands.find(c => c.name === slashBusy)?.busyLabel || t('common.executing')}
         compacting={compacting}
         compactingLabel={t('chat.compacting')}
+        screenshotBusy={screenshotBusy}
+        screenshotLabel={t('common.screenshotInProgress')}
+        screenshotPageLabel={screenshotProgress && screenshotProgress.totalPages > 0
+          ? t('common.screenshotProgressPage', {
+            current: screenshotProgress.currentPage,
+            total: screenshotProgress.totalPages,
+          })
+          : null}
+        screenshotProgress={screenshotProgress}
         inlineError={inlineError}
         slashResult={slashResult}
         onResultClick={slashResult?.deskDir ? handleSlashResultClick : undefined}
@@ -1029,7 +1058,9 @@ function InputAreaInner({ cardRef }: InputAreaInnerProps) {
         )}
         <div className={styles['input-wrapper']} ref={cardRef}>
           <div
-            onKeyDown={handleEditorKeyDown}
+            onKeyDown={(event) => {
+              if (!event.defaultPrevented) handleEditorKeyDown(event);
+            }}
             onCompositionStart={() => { isComposing.current = true; }}
             onCompositionEnd={() => { isComposing.current = false; }}
           >

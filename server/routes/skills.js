@@ -13,13 +13,22 @@ import { emitAppEvent } from "../app-events.js";
 import { safeJson } from "../hono-helpers.js";
 import { extractZip } from "../../lib/extract-zip.js";
 import { saveConfig } from "../../lib/memory/config-loader.js";
-import { sanitizeSkillName, safetyReview } from "../../lib/tools/install-skill.js";
+import { sanitizeSkillName } from "../../lib/tools/install-skill.js";
 import { t } from "../i18n.js";
 import { safeCopyDir } from "../../shared/safe-fs.js";
 import { resolveAgent } from "../utils/resolve-agent.js";
 import { validateId, agentExists } from "../utils/validation.js";
 import { registerSessionFileFromRequest } from "../../lib/session-files/session-file-response.js";
 import { createSkillSourceIdentity } from "../../lib/skills/skill-file-identity.js";
+import {
+  createSkillBundle,
+  deleteSkillBundle,
+  loadSkillBundleStore,
+  removeSkillsFromBundles,
+  reorderSkillBundles,
+  updateSkillBundle,
+} from "../../lib/skill-bundles/store.js";
+import { exportSkillBundlePackage } from "../../lib/skill-bundles/package-service.js";
 
 /** 从 SKILL.md frontmatter 解析 name */
 function parseSkillName(skillMdPath) {
@@ -50,6 +59,145 @@ export function createSkillsRoute(engine) {
     _installLock = new Promise(r => { resolve = r; });
     return prev.then(fn).finally(resolve);
   }
+
+  function bundleForResponse(bundle, skillByName = new Map()) {
+    return {
+      ...bundle,
+      skills: bundle.skillNames.map((name) => {
+        const skill = skillByName.get(name);
+        if (!skill) {
+          return { name, enabled: false, source: null, missing: true };
+        }
+        return {
+          name,
+          enabled: !!skill.enabled,
+          source: skill.source || null,
+          missing: false,
+        };
+      }),
+    };
+  }
+
+  function resolveBundleSkillView(c) {
+    const agentId = c.req.query("agentId") || engine.currentAgentId || "";
+    if (agentId) {
+      if (!validateId(agentId) || !agentExists(engine, agentId)) {
+        const err = new Error("agent not found");
+        err.status = 404;
+        throw err;
+      }
+      const skills = engine.getAllSkills(agentId) || [];
+      return { agentId, skills, skillByName: new Map(skills.map(skill => [skill.name, skill])) };
+    }
+    let skills = [];
+    try {
+      skills = engine.getAllSkills?.() || [];
+    } catch {
+      skills = [];
+    }
+    if (skills.length === 0) {
+      const skillsDir = engine.userSkillsDir || engine.skillsDir;
+      if (skillsDir && fs.existsSync(skillsDir)) {
+        skills = fs.readdirSync(skillsDir, { withFileTypes: true })
+          .filter(entry => entry.isDirectory() && fs.existsSync(path.join(skillsDir, entry.name, "SKILL.md")))
+          .map(entry => ({ name: entry.name, enabled: false, source: "user" }));
+      }
+    }
+    return { agentId: null, skills, skillByName: new Map(skills.map(skill => [skill.name, skill])) };
+  }
+
+  function assertBundleSkillsInstalled(skillNames, skillByName) {
+    const names = Array.isArray(skillNames) ? skillNames : [];
+    for (const name of names) {
+      const normalized = typeof name === "string" ? name.trim() : "";
+      if (normalized && !skillByName.has(normalized)) {
+        const err = new Error(`unknown skill in bundle: ${normalized}`);
+        err.status = 400;
+        throw err;
+      }
+    }
+  }
+
+  route.get("/skills/bundles", async (c) => {
+    try {
+      const { skillByName } = resolveBundleSkillView(c);
+      const store = loadSkillBundleStore(engine);
+      const bundles = store.bundles.map(bundle => bundleForResponse(bundle, skillByName));
+      return c.json({ bundles });
+    } catch (err) {
+      return c.json({ error: err.message }, err.status || 500);
+    }
+  });
+
+  route.post("/skills/bundles", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const { skillByName } = resolveBundleSkillView(c);
+      assertBundleSkillsInstalled(body.skillNames, skillByName);
+      const bundle = createSkillBundle(engine, {
+        name: body.name,
+        skillNames: body.skillNames,
+      });
+      emitAppEvent(engine, "skills-changed", { agentId: null });
+      return c.json({ ok: true, bundle: bundleForResponse(bundle, skillByName) });
+    } catch (err) {
+      return c.json({ error: err.message }, err.status || 500);
+    }
+  });
+
+  route.put("/skills/bundles/order", async (c) => {
+    try {
+      const body = await safeJson(c);
+      if (!Array.isArray(body.bundleIds)) {
+        return c.json({ error: "bundleIds must be an array" }, 400);
+      }
+      const { skillByName } = resolveBundleSkillView(c);
+      const store = reorderSkillBundles(engine, body.bundleIds);
+      emitAppEvent(engine, "skills-changed", { agentId: null });
+      return c.json({ ok: true, bundles: store.bundles.map(bundle => bundleForResponse(bundle, skillByName)) });
+    } catch (err) {
+      const status = /^(bundleIds must|unknown skill bundle)/.test(err.message) ? 400 : 500;
+      return c.json({ error: err.message }, err.status || status);
+    }
+  });
+
+  route.put("/skills/bundles/:id", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const { skillByName } = resolveBundleSkillView(c);
+      if (Array.isArray(body.skillNames)) {
+        assertBundleSkillsInstalled(body.skillNames, skillByName);
+      }
+      const bundle = updateSkillBundle(engine, c.req.param("id"), {
+        name: body.name,
+        skillNames: body.skillNames,
+      });
+      emitAppEvent(engine, "skills-changed", { agentId: null });
+      return c.json({ ok: true, bundle: bundleForResponse(bundle, skillByName) });
+    } catch (err) {
+      return c.json({ error: err.message }, err.status || (err.message === "skill bundle not found" ? 404 : 500));
+    }
+  });
+
+  route.delete("/skills/bundles/:id", async (c) => {
+    try {
+      const deleted = deleteSkillBundle(engine, c.req.param("id"));
+      if (!deleted) return c.json({ error: "skill bundle not found" }, 404);
+      emitAppEvent(engine, "skills-changed", { agentId: null });
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: err.message }, err.status || 500);
+    }
+  });
+
+  route.post("/skills/bundles/:id/export", async (c) => {
+    try {
+      const result = await exportSkillBundlePackage(engine, c.req.param("id"));
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err.message }, err.status || 500);
+    }
+  });
 
   route.get("/skills", async (c) => {
     try {
@@ -200,10 +348,6 @@ export function createSkillsRoute(engine) {
         // zip 解压模式：移动（从临时目录）
         if (fs.existsSync(dstDir)) rmDirSync(dstDir);
         fs.renameSync(skillDir, dstDir);
-        // 清理临时目录残留
-        const tmpParent = skillDir.includes(".tmp-install-")
-          ? (path.dirname(skillDir).includes(".tmp-install-") ? path.dirname(skillDir) : null)
-          : path.dirname(skillDir);
         // 简单处理：找到 .tmp-install- 前缀的目录并清理
         for (const entry of fs.readdirSync(userDir)) {
           if (entry.startsWith(".tmp-install-")) {
@@ -360,6 +504,9 @@ export function createSkillsRoute(engine) {
 
       // 重新加载 skills
       await engine.reloadSkills();
+      if (engine.hanakoHome) {
+        removeSkillsFromBundles(engine, [name]);
+      }
 
       emitAppEvent(engine, "skills-changed", { agentId: targetAgentId || null });
       return c.json({ ok: true });
