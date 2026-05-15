@@ -58,6 +58,23 @@ function getProviderMessageEndError(event) {
   return event.message.errorMessage || event.message.error?.message || "Unknown error";
 }
 
+function zeroUsage() {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  };
+}
+
 function withVisionExtension(resourceLoader, getBridge, getSessionPath, isEnabled, warn, resolveSessionFile) {
   return Object.create(resourceLoader, {
     getExtensions: {
@@ -639,10 +656,7 @@ export class BridgeSessionManager {
         }
       }
 
-      mgr.appendMessage({
-        role: "assistant",
-        content: [{ type: "text", text }],
-      });
+      mgr.appendMessage(this._buildRecordedAssistantMessage(agent, text));
 
       if (sessionPath) {
         const { changed } = this._syncIndexEntry(index, sessionKey, raw, {
@@ -666,6 +680,29 @@ export class BridgeSessionManager {
    */
   injectMessage(sessionKey, text, opts = {}) {
     return this.recordAssistantMessage(sessionKey, text, { ...opts, createIfMissing: false });
+  }
+
+  _buildRecordedAssistantMessage(agent, text) {
+    const mm = this._deps.getModelManager();
+    const chatRef = agent.config?.models?.chat;
+    const ref = (typeof chatRef === "object" && chatRef?.id && chatRef?.provider) ? chatRef : null;
+    if (!ref) {
+      throw new Error(t("error.bridgeAgentNoChatModel", { name: agent.agentName }));
+    }
+    const chatModel = findModel(mm.availableModels, ref.id, ref.provider);
+    if (!chatModel) {
+      throw new Error(t("error.bridgeAgentModelNotAvailable", { name: agent.agentName, model: `${ref.provider}/${ref.id}` }));
+    }
+    return {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      api: chatModel.api || "openai-completions",
+      provider: chatModel.provider,
+      model: chatModel.id,
+      usage: zeroUsage(),
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
   }
 
   /**

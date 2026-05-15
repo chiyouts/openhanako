@@ -834,10 +834,23 @@ describe("BridgeSessionManager teardown", () => {
       rootCwd,
       path.join(agent.sessionDir, "bridge", "owner"),
     );
-    expect(appendMessage).toHaveBeenCalledWith({
+    expect(appendMessage).toHaveBeenCalledWith(expect.objectContaining({
       role: "assistant",
       content: [{ type: "text", text: "AI 日报\n\n今天有三条新闻。" }],
-    });
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o",
+      stopReason: "stop",
+      timestamp: expect.any(Number),
+      usage: expect.objectContaining({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: expect.objectContaining({ total: 0 }),
+      }),
+    }));
     expect(manager.readIndex(agent)["wx_dm_owner@agent-a"]).toMatchObject({
       file: "owner/proactive.jsonl",
       userId: "owner",
