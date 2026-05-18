@@ -54,6 +54,42 @@ export interface SessionRegistryFile {
   operations?: string[];
   createdAt?: number;
   isDirectory?: boolean;
+  resource?: ResourceEnvelope;
+}
+
+export interface ResourceEnvelope {
+  schemaVersion: 1;
+  resourceId: string;
+  name: string;
+  studioId: string;
+  type: 'file' | string;
+  source: 'session_file' | string;
+  sourceId?: string;
+  fileId?: string;
+  displayName?: string;
+  filename?: string;
+  ext?: string | null;
+  mime?: string;
+  size?: number | null;
+  kind?: string;
+  isDirectory?: boolean;
+  origin?: string;
+  operations?: string[];
+  createdAt?: number | string;
+  mtimeMs?: number;
+  lifecycle: {
+    status: 'available' | 'expired' | string;
+    missingAt: number | string | null;
+  };
+  storage: {
+    provider: 'session_file' | string;
+    storageKind?: string;
+    localOnly?: boolean;
+  };
+  links: {
+    self: string;
+    content?: string;
+  };
 }
 
 // ── 内容块 ──
@@ -118,6 +154,7 @@ export type ContentBlock = TextDecorator | RichBlock;
 
 export interface ChatMessage {
   id: string;              // 服务端返回的稳定 ID（JSONL 行号）
+  sourceEntryId?: string;  // Pi SDK session entry id，用于 branch-aware 的重新生成/编辑
   role: 'user' | 'assistant';
   // User
   text?: string;

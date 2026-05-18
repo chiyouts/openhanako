@@ -17,10 +17,11 @@ import {
   normalizeEditorTypography,
 } from "../shared/editor-typography.js";
 import {
-  normalizeWorkspaceUiState,
+  getWorkspaceUiStateEntry,
   upsertWorkspaceUiState,
 } from "../shared/workspace-ui-state.js";
 import { normalizeWorkspacePath } from "../shared/workspace-history.js";
+import { normalizeNetworkProxyConfig } from "../shared/network-proxy.js";
 
 export class PreferencesManager {
   /**
@@ -167,6 +168,19 @@ export class PreferencesManager {
     this.savePreferences(prefs);
   }
 
+  /** 读取全局出站代理设置。 */
+  getNetworkProxy() {
+    return normalizeNetworkProxyConfig(this._cache.network_proxy);
+  }
+
+  /** 保存全局出站代理设置。 */
+  setNetworkProxy(partial) {
+    const prefs = this._mutableCopy();
+    prefs.network_proxy = normalizeNetworkProxyConfig(partial, { strict: true });
+    this.savePreferences(prefs);
+    return prefs.network_proxy;
+  }
+
   /** 读取 Bridge 媒体临时公网 base URL。空值表示回退到启动环境变量。 */
   getBridgeMediaPublicBaseUrl() {
     return normalizeBridgeMediaPublicBaseUrl(this._cache.bridge?.mediaPublicBaseUrl || "");
@@ -256,16 +270,31 @@ export class PreferencesManager {
     return prefs.editor;
   }
 
-  /** 读取指定工作区的 UI 状态（文件夹展开、预览 tabs 等）。 */
-  getWorkspaceUiState(workspaceRoot) {
-    const workspace = normalizeWorkspacePath(workspaceRoot);
-    if (!workspace) return null;
-    const state = normalizeWorkspaceUiState(this._cache.workspace_ui_state || {});
-    return structuredClone(state.workspaces[workspace] || null);
+  /** 读取跨前端同步的外观偏好。 */
+  getAppearance() {
+    return normalizeAppearance(this._cache.appearance || {});
   }
 
-  /** 写入指定工作区的 UI 状态，状态按 workspace root keyed。 */
-  setWorkspaceUiState(workspaceRoot, entry) {
+  /** 合并写入跨前端同步的外观偏好。 */
+  setAppearance(partial) {
+    const prefs = this._mutableCopy();
+    prefs.appearance = normalizeAppearance({
+      ...(prefs.appearance || {}),
+      ...(partial || {}),
+    });
+    this.savePreferences(prefs);
+    return prefs.appearance;
+  }
+
+  /** 读取指定工作区的 UI 状态（文件夹展开、预览 tabs 等）。 */
+  getWorkspaceUiState(workspaceRoot, surface) {
+    const workspace = normalizeWorkspacePath(workspaceRoot);
+    if (!workspace) return null;
+    return getWorkspaceUiStateEntry(this._cache.workspace_ui_state || {}, workspace, { surface });
+  }
+
+  /** 写入指定工作区的 UI 状态，状态按 workspace root + surface class keyed。 */
+  setWorkspaceUiState(workspaceRoot, surface, entry) {
     const workspace = normalizeWorkspacePath(workspaceRoot);
     if (!workspace) return null;
     const prefs = this._mutableCopy();
@@ -273,9 +302,10 @@ export class PreferencesManager {
       prefs.workspace_ui_state || {},
       workspace,
       entry,
+      { surface },
     );
     this.savePreferences(prefs);
-    return structuredClone(prefs.workspace_ui_state.workspaces[workspace] || null);
+    return getWorkspaceUiStateEntry(prefs.workspace_ui_state, workspace, { surface });
   }
 
   /** 读取时区偏好（全局） */
@@ -472,4 +502,14 @@ function normalizeBridgeMediaPublicBaseUrl(value) {
     throw new Error("bridge media public base URL must not include query or hash");
   }
   return raw.replace(/\/+$/, "");
+}
+
+function normalizeAppearance(value) {
+  const src = value && typeof value === "object" ? value : {};
+  const out = {};
+  if (typeof src.theme === "string" && src.theme.trim()) out.theme = src.theme.trim();
+  if (typeof src.serif === "boolean") out.serif = src.serif;
+  if (typeof src.paperTexture === "boolean") out.paperTexture = src.paperTexture;
+  if (typeof src.leavesOverlay === "boolean") out.leavesOverlay = src.leavesOverlay;
+  return out;
 }

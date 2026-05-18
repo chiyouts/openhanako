@@ -94,6 +94,96 @@
     margin-bottom: 0;
 }
 
+.messageUserEditing {
+    width: min(520px, 78vw);
+    max-width: 92%;
+    padding: 0;
+    overflow: hidden;
+}
+
+.userEditTextarea {
+    display: block;
+    width: 100%;
+    min-height: 78px;
+    max-height: 240px;
+    resize: vertical;
+    box-sizing: border-box;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    line-height: 1.65;
+    padding: var(--space-sm) var(--space-md);
+}
+
+.userActionRow {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-height: 20px;
+    margin-top: 2px;
+    padding-right: 5px;
+    color: var(--text-muted);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.messageGroupUser:hover .userActionRow,
+.userActionRow:focus-within,
+.userActionRowVisible {
+    opacity: 0.72;
+    pointer-events: auto;
+}
+
+.userActionRow:hover {
+    opacity: 1;
+}
+
+.userMessageTime {
+    font-size: 0.64rem;
+    line-height: 1;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.userActionBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color var(--duration-instant), background var(--duration-instant), opacity var(--duration-instant);
+}
+
+.userActionBtn svg {
+    width: 12px;
+    height: 12px;
+}
+
+.userActionBtn:hover {
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.06);
+}
+
+.userActionBtn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.userActionBtnActive {
+    color: var(--accent);
+    background: transparent;
+}
+
 /* 用户附件 */
 .userAttachments {
     display: flex;
@@ -762,7 +852,7 @@
 /* ── 文件输出卡片 ── */
 
 .fileOutputCard {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: var(--space-md);
     min-width: 300px;
@@ -887,6 +977,7 @@
     font: inherit;
     font-size: 0.72rem;
     text-align: left;
+    text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
     transition: background var(--duration-instant) var(--ease-out);
@@ -903,6 +994,7 @@
 .imageOutputCard {
     display: inline-flex;
     flex-direction: column;
+    position: relative;
     max-width: 100%;
     margin: var(--space-sm) 0;
     padding: 0.3rem;
@@ -915,6 +1007,33 @@
 
 .imageOutputCard:hover {
     border-color: var(--text-muted, rgba(0,0,0,0.2));
+}
+
+.imageOutputDownloadButton {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    z-index: 1;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    background: var(--bg-card, var(--bg));
+    border: 1px solid var(--border, rgba(0,0,0,0.1));
+    border-radius: var(--radius-chat-card);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    opacity: 0.84;
+    transition: opacity var(--duration-fast), color var(--duration-fast), background var(--duration-fast);
+}
+
+.imageOutputDownloadButton:hover,
+.imageOutputDownloadButton:focus-visible {
+    opacity: 1;
+    color: var(--text);
+    background: var(--bg);
+    outline: none;
 }
 
 .imageOutputPreview {
@@ -1039,12 +1158,12 @@
 /* ── Session Panel ── */
 
 .sessionShell {
-    --chat-scrollbar-bottom-inset: calc(var(--input-card-h, 0px) / 2);
+    --chat-scrollbar-bottom-inset: var(--input-card-bottom-inset, calc(var(--input-card-h, 0px) / 2));
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    bottom: calc(var(--input-card-h, 0px) / 2 + var(--space-lg));
+    bottom: calc(var(--chat-scrollbar-bottom-inset) + var(--space-lg));
     overflow: hidden;
 }
 
@@ -1072,7 +1191,7 @@
 }
 
 .sessionMessages {
-    max-width: 800px;
+    max-width: var(--chat-column-width);
     margin: 0 auto;
     display: flex;
     flex-direction: column;
@@ -1244,8 +1363,8 @@
 }
 
 .sessionFooter {
-    /* 和 sessionPanel 的切点对齐：遮挡发生在输入卡片中部，同时在滚到底时额外多留约三行呼吸空间。 */
-    height: calc(var(--input-card-h, 0px) / 2 + var(--space-lg) + 8rem);
+    /* 和 sessionPanel 的切点对齐：遮挡发生在输入卡片中部，同时在滚到底时额外留一行左右呼吸空间。 */
+    height: calc(var(--chat-scrollbar-bottom-inset) + var(--space-lg) + 5rem);
     flex-shrink: 0;
 }
 

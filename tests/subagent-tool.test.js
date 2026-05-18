@@ -4,8 +4,11 @@ import { createSubagentTool } from "../lib/tools/subagent-tool.js";
 // ---- helpers ----------------------------------------------------------------
 
 /** Mock Pi SDK ctx with sessionManager */
-const mockCtx = (sp = "/test/session.jsonl") => ({
-  sessionManager: { getSessionFile: () => sp },
+const mockCtx = (sp = "/test/session.jsonl", cwd = undefined) => ({
+  sessionManager: {
+    getSessionFile: () => sp,
+    ...(cwd ? { getCwd: () => cwd } : {}),
+  },
 });
 
 /**
@@ -44,6 +47,7 @@ function makeDeps(overrides = {}) {
     agentDir: "/test/agents/hana",
     emitEvent: vi.fn(),
     persistSubagentSessionMeta: vi.fn(async () => {}),
+    getSubagentRunStore: () => null,
     ...overrides,
   };
 }
@@ -136,6 +140,48 @@ describe("subagent-tool (executeIsolated 原子模式)", () => {
     });
   });
 
+  it("records the subagent run in the durable run store across dispatch, session ready, and completion", async () => {
+    const runStore = {
+      register: vi.fn(),
+      attachSession: vi.fn(),
+      resolve: vi.fn(),
+      fail: vi.fn(),
+      abort: vi.fn(),
+    };
+    const tool = createSubagentTool(makeDeps({
+      getDeferredStore: () => mockStore,
+      getSubagentRunStore: () => runStore,
+    }));
+
+    const result = await tool.execute("call_1", { task: "写一份校准报告" }, null, null, mockCtx());
+    const { taskId } = result.details;
+
+    expect(runStore.register).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({
+        parentSessionPath: "/test/session.jsonl",
+        summary: "写一份校准报告",
+        requestedAgentId: "hana",
+        requestedAgentNameSnapshot: "Hana",
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(runStore.attachSession).toHaveBeenCalledWith(
+        taskId,
+        "/test/child.jsonl",
+        expect.objectContaining({
+          executorAgentId: "hana",
+          executorAgentNameSnapshot: "Hana",
+        }),
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(runStore.resolve).toHaveBeenCalledWith(taskId, "done");
+    });
+  });
+
   it("uses the original first line as taskTitle and dispatches task unchanged", async () => {
     const executeIsolated = makeExecuteIsolated();
     const tool = createSubagentTool(makeDeps({
@@ -162,6 +208,104 @@ describe("subagent-tool (executeIsolated 原子模式)", () => {
       expect(mockStore.resolve).toHaveBeenCalledWith(
         expect.stringMatching(/^subagent-/),
         "done",
+      );
+    });
+    expect(mockStore.fail).not.toHaveBeenCalled();
+  });
+
+  it("inherits cwd and parent session identity from the tool execution ctx", async () => {
+    const captureExecute = makeExecuteIsolated({ replyText: "done", error: null, sessionPath: "/test/child.jsonl" });
+    const tool = createSubagentTool(makeDeps({
+      executeIsolated: captureExecute,
+      getDeferredStore: () => mockStore,
+      getParentCwd: () => "/focused/cwd",
+    }));
+
+    await tool.execute(
+      "call_1",
+      { task: "在当前会话目录写文件" },
+      null,
+      null,
+      mockCtx("/test/parent.jsonl", "/actual/parent/cwd"),
+    );
+
+    expect(captureExecute).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        cwd: "/actual/parent/cwd",
+        parentSessionPath: "/test/parent.jsonl",
+        fileReadSessionPaths: ["/test/parent.jsonl"],
+      }),
+    );
+  });
+
+  it("fails deferred store when the run finishes without text or produced files", async () => {
+    const emptyExecute = makeExecuteIsolated({
+      replyText: "",
+      error: null,
+      sessionPath: "/test/child.jsonl",
+      stopReason: "stop",
+      sessionFiles: [],
+    });
+    const tool = createSubagentTool(makeDeps({
+      executeIsolated: emptyExecute,
+      getDeferredStore: () => mockStore,
+    }));
+
+    await tool.execute("call_1", { task: "需要产物的任务" }, null, null, mockCtx());
+
+    await vi.waitFor(() => {
+      expect(mockStore.fail).toHaveBeenCalledWith(
+        expect.stringMatching(/^subagent-/),
+        expect.any(String),
+      );
+    });
+    expect(mockStore.resolve).not.toHaveBeenCalled();
+  });
+
+  it("fails deferred store when the final assistant message did not finish cleanly", async () => {
+    const truncatedExecute = makeExecuteIsolated({
+      replyText: "partial answer",
+      error: null,
+      sessionPath: "/test/child.jsonl",
+      stopReason: "length",
+      sessionFiles: [],
+    });
+    const tool = createSubagentTool(makeDeps({
+      executeIsolated: truncatedExecute,
+      getDeferredStore: () => mockStore,
+    }));
+
+    await tool.execute("call_1", { task: "长输出任务" }, null, null, mockCtx());
+
+    await vi.waitFor(() => {
+      expect(mockStore.fail).toHaveBeenCalledWith(
+        expect.stringMatching(/^subagent-/),
+        expect.stringMatching(/length|limit|未完成|截断/),
+      );
+    });
+    expect(mockStore.resolve).not.toHaveBeenCalled();
+  });
+
+  it("resolves with produced file summary when file output exists without final text", async () => {
+    const fileExecute = makeExecuteIsolated({
+      replyText: "",
+      error: null,
+      sessionPath: "/test/child.jsonl",
+      stopReason: "stop",
+      sessionFiles: [{ filePath: "/workspace/report.md", label: "report.md" }],
+    });
+    const tool = createSubagentTool(makeDeps({
+      executeIsolated: fileExecute,
+      getDeferredStore: () => mockStore,
+    }));
+
+    await tool.execute("call_1", { task: "生成报告文件" }, null, null, mockCtx());
+
+    await vi.waitFor(() => {
+      expect(mockStore.resolve).toHaveBeenCalledWith(
+        expect.stringMatching(/^subagent-/),
+        expect.stringContaining("/workspace/report.md"),
       );
     });
     expect(mockStore.fail).not.toHaveBeenCalled();

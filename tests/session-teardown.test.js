@@ -32,7 +32,7 @@ function makeMockEntry({ hasShutdownHandlers = true } = {}) {
   };
 }
 
-function makeCoordinator() {
+function makeCoordinator(overrides = {}) {
   // _teardownSessionEntry 只依赖 entry + log, 无需真实 deps
   // 通过最小 stub 构造实例
   return new SessionCoordinator({
@@ -53,6 +53,7 @@ function makeCoordinator() {
     getAgentById: () => ({ id: "test-agent" }),
     listAgents: () => [],
     getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+    ...overrides,
   });
 }
 
@@ -119,5 +120,40 @@ describe("SessionCoordinator._teardownSessionEntry", () => {
       coord._teardownSessionEntry(entry, "/tmp/fake/session.jsonl", "test"),
     ).resolves.toBeUndefined();
     expect(entry.unsub).toHaveBeenCalledOnce();
+  });
+
+  it("closeSession 清理同 session 的 terminal 资源", async () => {
+    const closeTerminalsForSession = vi.fn();
+    coord = makeCoordinator({ closeTerminalsForSession });
+    const sessionPath = "/tmp/fake/session.jsonl";
+
+    await coord.closeSession(sessionPath);
+
+    expect(closeTerminalsForSession).toHaveBeenCalledWith(sessionPath);
+  });
+
+  it("closeAllSessions 清理所有 terminal 资源", async () => {
+    const closeAllTerminals = vi.fn();
+    coord = makeCoordinator({ closeAllTerminals });
+
+    await coord.closeAllSessions();
+
+    expect(closeAllTerminals).toHaveBeenCalledOnce();
+  });
+
+  it("closeAllSessions 不清理后台任务结果，避免卸载 runtime 时丢 pending", async () => {
+    const clearBySession = vi.fn();
+    const deferredStore = { clearBySession };
+    coord = makeCoordinator({
+      getDeferredResultStore: () => deferredStore,
+    });
+    const sessionPath = "/tmp/fake/session.jsonl";
+    const { entry } = makeMockEntry();
+    entry.session.isStreaming = false;
+    coord.sessions.set(sessionPath, entry);
+
+    await coord.closeAllSessions();
+
+    expect(clearBySession).not.toHaveBeenCalled();
   });
 });

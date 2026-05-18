@@ -10,7 +10,7 @@ import { streamBufferManager } from '../hooks/use-stream-buffer';
 import { dispatchStreamKey } from './stream-key-dispatcher';
 import { useStore } from '../stores';
 import { updateKeyed } from '../stores/create-keyed-slice';
-import { loadSessions as loadSessionsAction } from '../stores/session-actions';
+import { scheduleSessionsRefresh } from './session-refresh-scheduler';
 import { handleLegacyArtifactBlock } from '../stores/preview-actions';
 import { loadDeskFiles } from '../stores/desk-actions';
 import {
@@ -72,6 +72,40 @@ function ensureCurrentSessionVisible(): void {
       cwd: null,
       _optimistic: true,
     }, ...state.sessions],
+  });
+}
+
+function upsertCreatedSession(msg: any): void {
+  const incoming = msg.session && typeof msg.session === 'object' ? msg.session : {};
+  const sessionPath = typeof incoming.path === 'string' && incoming.path.trim()
+    ? incoming.path
+    : typeof msg.sessionPath === 'string' && msg.sessionPath.trim()
+      ? msg.sessionPath
+      : null;
+  if (!sessionPath) return;
+
+  const state = useStore.getState();
+  const existing: any = state.sessions.find((s: any) => s.path === sessionPath) || {};
+  const now = new Date().toISOString();
+  const next = {
+    ...existing,
+    path: sessionPath,
+    title: typeof incoming.title === 'string' ? incoming.title : existing.title ?? null,
+    firstMessage: typeof incoming.firstMessage === 'string' ? incoming.firstMessage : existing.firstMessage ?? '',
+    modified: typeof incoming.modified === 'string' ? incoming.modified : existing.modified ?? now,
+    messageCount: Number.isFinite(incoming.messageCount) ? incoming.messageCount : existing.messageCount ?? 0,
+    agentId: typeof incoming.agentId === 'string' ? incoming.agentId : existing.agentId ?? state.currentAgentId ?? null,
+    agentName: typeof incoming.agentName === 'string' ? incoming.agentName : existing.agentName ?? state.agentName ?? null,
+    cwd: typeof incoming.cwd === 'string' ? incoming.cwd : existing.cwd ?? null,
+    pinnedAt: incoming.pinnedAt ?? existing.pinnedAt ?? null,
+    hasSummary: incoming.hasSummary ?? existing.hasSummary,
+    rcAttachment: incoming.rcAttachment ?? existing.rcAttachment ?? null,
+    _optimistic: false,
+  };
+
+  useStore.setState({
+    sessions: [next, ...state.sessions.filter((s: any) => s.path !== sessionPath)]
+      .sort((a: any, b: any) => new Date(b.modified || 0).getTime() - new Date(a.modified || 0).getTime()),
   });
 }
 
@@ -145,7 +179,7 @@ export function applyStreamingStatus(isStreaming: boolean, sessionPath: string |
   if (isStreaming) {
     ensureCurrentSessionVisible();
   } else if (hasOptimisticCurrentSession()) {
-    loadSessionsAction().catch(err => console.warn('[ws] loadSessions failed:', err));
+    scheduleSessionsRefresh('optimistic_session_settled');
   }
 }
 
@@ -238,7 +272,7 @@ export function handleServerMessage(msg: any): void {
     streamBufferManager.handle(msg);
     // turn_end 后仍需执行部分通用逻辑（loadSessions、context_usage）
     if (msg.type === 'turn_end') {
-      loadSessionsAction();
+      scheduleSessionsRefresh('turn_end');
       const turnSp = msg.sessionPath;
       if (turnSp) {
         requestContextUsage(turnSp);
@@ -261,6 +295,18 @@ export function handleServerMessage(msg: any): void {
 
   // 非聊天渲染事件走传统 switch
   switch (msg.type) {
+    case 'session_branch_reset': {
+      const sp = msg.sessionPath;
+      const targetId = msg.clientMessageId || msg.messageId;
+      if (!sp || !targetId) { console.warn('[ws] session_branch_reset missing sessionPath or message id'); break; }
+      const truncated = useStore.getState().truncateSessionFromMessage(sp, targetId);
+      bumpMessageLiveVersion(sp);
+      if (!truncated) {
+        console.warn('[ws] session_branch_reset target message not found:', sp, targetId);
+      }
+      break;
+    }
+
     case 'stream_resume':
       replayStreamResume(msg);
       break;
@@ -273,6 +319,11 @@ export function handleServerMessage(msg: any): void {
           ),
         });
       }
+      break;
+
+    case 'session_created':
+      upsertCreatedSession(msg);
+      scheduleSessionsRefresh('session_created');
       break;
 
     case 'desk_changed':
@@ -372,7 +423,7 @@ export function handleServerMessage(msg: any): void {
 
     case 'app_event':
       if (msg.event?.type) {
-        handleAppEvent(msg.event.type, msg.event.payload || {});
+        handleAppEvent(msg.event.type, msg.event.payload || {}, { source: msg.event.source || 'server' });
       }
       break;
 

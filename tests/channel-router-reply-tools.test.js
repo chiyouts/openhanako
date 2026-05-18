@@ -102,9 +102,54 @@ describe("ChannelRouter reply tool boundary", () => {
     expect(phonePrompt).not.toContain("</mood>");
     expect(phonePrompt).toContain("PULSE");
     expect(phonePrompt).toContain("<pulse>");
+    expect(phonePrompt).toContain("实际发到群聊的回复正文");
+    expect(phonePrompt).toContain("优先口语化");
+    expect(phonePrompt).toContain("内容很长");
     expect(phonePrompt).toContain("20");
     expect(phonePrompt).toContain("80");
     expect(runAgentPhoneSessionMock.mock.calls[0][2]).not.toHaveProperty("maxTokens");
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("guides non-mentioned channel members to avoid stealing an explicit mention", async () => {
+    runAgentPhoneSessionMock.mockClear();
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hana-channel-mentioned-prompt-"));
+    const channelsDir = path.join(root, "channels");
+    const agentsDir = path.join(root, "agents");
+    fs.mkdirSync(channelsDir, { recursive: true });
+    fs.mkdirSync(path.join(agentsDir, "hana"), { recursive: true });
+    fs.mkdirSync(path.join(agentsDir, "yui"), { recursive: true });
+    fs.writeFileSync(
+      path.join(channelsDir, "ch_crew.md"),
+      "---\nid: ch_crew\nmembers: [hana, yui]\n---\n",
+      "utf-8",
+    );
+
+    const router = new ChannelRouter({
+      hub: {
+        engine: {
+          marker: "engine",
+          channelsDir,
+          agentsDir,
+          getAgent: (id) => ({ id, agentName: id === "yui" ? "Yui" : "Hana", config: { agent: { yuan: "hanako" } } }),
+        },
+        eventBus: { emit: vi.fn() },
+      },
+    });
+
+    await router._executeReply(
+      "hana",
+      "ch_crew",
+      "user: @Yui 可以先看一下吗？",
+      { mentionedAgents: ["yui"], mentionTargeted: false },
+    );
+
+    const phonePrompt = runAgentPhoneSessionMock.mock.calls[0][1][0].text;
+    expect(phonePrompt).toContain("这轮消息明确 @ 了 Yui");
+    expect(phonePrompt).toContain("不要抢答");
+    expect(phonePrompt).toContain("channel_pass");
 
     fs.rmSync(root, { recursive: true, force: true });
   });

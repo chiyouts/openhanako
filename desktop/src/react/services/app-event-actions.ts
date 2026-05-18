@@ -23,6 +23,10 @@ declare const i18n: {
 let _agentSwitchVersion = 0;
 let requestContextUsage: (sessionPath: string) => void = () => {};
 
+interface AppEventOptions {
+  source?: string;
+}
+
 export function configureAppEventActions(options: {
   requestContextUsage?: (sessionPath: string) => void;
 }): void {
@@ -78,7 +82,7 @@ function handleAgentWorkspaceChanged(data: any): void {
   }
 }
 
-export function handleAppEvent(type: string, data: any = {}): void {
+export function handleAppEvent(type: string, data: any = {}, options: AppEventOptions = {}): void {
   switch (type) {
     case 'agent-switched': {
       const myVersion = ++_agentSwitchVersion;
@@ -197,6 +201,11 @@ export function handleAppEvent(type: string, data: any = {}): void {
       break;
     case 'editor-typography-changed':
       applyEditorTypography(data.editor ?? data);
+      break;
+    case 'network-proxy-changed':
+      if (options.source === 'server') {
+        window.platform?.settingsChanged?.('network-proxy-changed', data);
+      }
       break;
     case 'paper-texture-changed':
       window.setPaperTexture(data.enabled);

@@ -25,6 +25,8 @@ struct Grant {
 struct Options {
     std::wstring cwd;
     bool internetClient = false;
+    bool internetClientServer = false;
+    bool privateNetworkClientServer = false;
     std::vector<Grant> grants;
     std::wstring executable;
     std::vector<std::wstring> args;
@@ -93,11 +95,19 @@ static Options parseArgs(int argc, wchar_t** argv) {
                 opts.internetClient = true;
                 continue;
             }
+            if (value == L"internet-client-server") {
+                opts.internetClientServer = true;
+                continue;
+            }
+            if (value == L"private-network-client-server") {
+                opts.privateNetworkClientServer = true;
+                continue;
+            }
             throw std::runtime_error("unknown network capability");
         }
         if ((arg == L"--grant-read" || arg == L"--grant-read-optional" ||
              arg == L"--grant-write" || arg == L"--grant-write-optional" ||
-             arg == L"--deny-write") && i + 1 < argc) {
+             arg == L"--deny-read" || arg == L"--deny-write") && i + 1 < argc) {
             std::wstring target = argv[++i];
             if (arg == L"--grant-read" || arg == L"--grant-read-optional") {
                 opts.grants.push_back({
@@ -112,6 +122,13 @@ static Options parseArgs(int argc, wchar_t** argv) {
                     GRANT_ACCESS,
                     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE | FILE_DELETE_CHILD,
                     arg == L"--grant-write"
+                });
+            } else if (arg == L"--deny-read") {
+                opts.grants.push_back({
+                    target,
+                    DENY_ACCESS,
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    true
                 });
             } else {
                 opts.grants.push_back({
@@ -313,6 +330,20 @@ static int runSandboxed(const Options& opts, PSID appSid) {
     if (opts.internetClient) {
         // Well-known AppContainer capability SID for internetClient.
         if (!addCapabilitySid(L"S-1-15-3-1", capabilitySids, capabilityAttrs)) {
+            freeOwnedSids(capabilitySids);
+            return 1;
+        }
+    }
+    if (opts.internetClientServer) {
+        // Well-known AppContainer capability SID for internetClientServer.
+        if (!addCapabilitySid(L"S-1-15-3-2", capabilitySids, capabilityAttrs)) {
+            freeOwnedSids(capabilitySids);
+            return 1;
+        }
+    }
+    if (opts.privateNetworkClientServer) {
+        // Well-known AppContainer capability SID for privateNetworkClientServer.
+        if (!addCapabilitySid(L"S-1-15-3-3", capabilitySids, capabilityAttrs)) {
             freeOwnedSids(capabilitySids);
             return 1;
         }
