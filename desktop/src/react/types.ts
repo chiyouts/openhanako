@@ -82,6 +82,7 @@ export interface Channel {
   messageCount?: number;
   newMessageCount: number;
   isDM?: boolean;
+  dmOwnerId?: string;
   peerId?: string;
   peerName?: string;
 }
@@ -307,6 +308,7 @@ export interface PlatformApi {
   // ── Splash / Onboarding ──
   getAvatarPath?(role: string): Promise<string | null>;
   getSplashInfo?(): Promise<{ agentName?: string; locale?: string; yuan?: string } | null>;
+  reloadMainWindow?(): Promise<void>;
   onboardingComplete?(): Promise<void>;
 
   // ── Notification ──

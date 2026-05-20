@@ -11,12 +11,15 @@ import styles from '../Settings.module.css';
 
 export function BridgeTab() {
   const b = useBridgeState();
-  const tgInfo = b.status?.telegram || {};
-  const fsInfo = b.status?.feishu || {};
-  const qqInfo = b.status?.qq || {};
-  const wxInfo = b.status?.wechat || {};
-  const readOnly = !!b.status?.readOnly;
-  const receiptEnabled = b.status?.receiptEnabled !== false;
+  // 注意：不能用 `|| {}` 兜底——空对象会让 Toggle 的 `!!status?.enabled` 显示成"假关"。
+  // 传 undefined 让 Toggle 走加载态。
+  const tgInfo = b.status?.telegram;
+  const fsInfo = b.status?.feishu;
+  const qqInfo = b.status?.qq;
+  const wxInfo = b.status?.wechat;
+  const readOnly = b.status ? b.status.readOnly === true : undefined;
+  const receiptEnabled = b.status ? b.status.receiptEnabled !== false : undefined;
+  const globalSettingsPending = !b.status || b.globalSettingsSaving;
 
   return (
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="bridge">
@@ -28,6 +31,7 @@ export function BridgeTab() {
             <Toggle
               on={receiptEnabled}
               onChange={(on) => b.saveGlobalSettings({ receiptEnabled: on })}
+              disabled={globalSettingsPending}
             />
           }
         />
@@ -38,6 +42,7 @@ export function BridgeTab() {
             <Toggle
               on={readOnly}
               onChange={(on) => b.saveGlobalSettings({ readOnly: on })}
+              disabled={globalSettingsPending}
             />
           }
         />

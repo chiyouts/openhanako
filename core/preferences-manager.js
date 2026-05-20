@@ -34,6 +34,26 @@ export class PreferencesManager {
     this._agentsDir = agentsDir;
     this._path = path.join(userDir, "preferences.json");
     this._cache = this._readFromDisk();
+    this._migrateLegacyDefaults();
+  }
+
+  /**
+   * 一次性迁移：把历史版本"无脑写入"的旧默认值回退到"未表达偏好"。
+   *
+   * 51ecc435 把 sandbox_network 的 default 从关改成开（!== false），
+   * 但老用户 preferences.json 里仍有 `sandbox_network: false` —— 这是早期
+   * 默认时无脑写入的，不是用户的显式选择。本 migration 把它清掉一次，
+   * 让 getter 走新默认（开）。带 marker 防止重跑：用户之后显式关掉时
+   * 不会再被覆盖。
+   *
+   * @private
+   */
+  _migrateLegacyDefaults() {
+    if (this._cache._defaultsRelaxedMigrated) return;
+    const next = { ...this._cache };
+    if (next.sandbox_network === false) delete next.sandbox_network;
+    next._defaultsRelaxedMigrated = true;
+    this.savePreferences(next);
   }
 
   /** 读取全局 preferences（从内存缓存） */
@@ -81,15 +101,32 @@ export class PreferencesManager {
     this.savePreferences(prefs);
   }
 
-  /** 读取沙盒内命令是否允许出站联网。默认关闭。 */
+  /** 读取沙盒内命令是否允许出站联网。默认开启，避免沙盒破坏常规工具链。 */
   getSandboxNetwork() {
-    return this._cache.sandbox_network === true;
+    return this._cache.sandbox_network !== false;
   }
 
   /** 保存沙盒内命令出站联网偏好。 */
   setSandboxNetwork(enabled) {
     const prefs = this._mutableCopy();
     prefs.sandbox_network = typeof enabled === "string" ? enabled === "true" : !!enabled;
+    this.savePreferences(prefs);
+  }
+
+  /** 读取桌面硬件加速偏好。默认开启。 */
+  getHardwareAcceleration() {
+    return this._cache.hardware_acceleration !== false;
+  }
+
+  /** 保存桌面硬件加速偏好；主进程下次启动时生效。 */
+  setHardwareAcceleration(enabled) {
+    const prefs = this._mutableCopy();
+    if (typeof enabled === "string") {
+      const value = enabled.trim().toLowerCase();
+      prefs.hardware_acceleration = !["false", "0", "off", "no", "disabled"].includes(value);
+    } else {
+      prefs.hardware_acceleration = !!enabled;
+    }
     this.savePreferences(prefs);
   }
 
