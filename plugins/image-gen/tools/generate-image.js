@@ -1,3 +1,10 @@
+/**
+ * plugins/image-gen/tools/generate-image.js
+ *
+ * Non-blocking image generation. Registers local placeholder tasks first,
+ * then submits to the provider in the background. Completion is surfaced
+ * through Poller + DeferredResultStore.
+ */
 import { resolveImageProviderSelection } from "../lib/provider-resolution.js";
 
 export const name = "generate-image";
@@ -32,6 +39,32 @@ async function adapterIsAvailable(adapter, submitCtx) {
   }
 }
 
+function createTaskId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function errorMessage(err) {
+  return err?.message || String(err || "unknown error");
+}
+
+function normalizeSessionPath(ctx) {
+  const sessionPath = typeof ctx?.sessionPath === "string" ? ctx.sessionPath.trim() : "";
+  return sessionPath || null;
+}
+
+function bridgeDeliveryTarget(ctx) {
+  const bridge = ctx?.bridgeContext;
+  if (bridge?.isBridgeSession !== true || !bridge.platform || !bridge.chatId) return null;
+  return {
+    kind: "bridge",
+    platform: bridge.platform,
+    chatId: bridge.chatId,
+    ...(bridge.sessionKey ? { sessionKey: bridge.sessionKey } : {}),
+    ...(bridge.agentId ? { agentId: bridge.agentId } : {}),
+    ...(bridge.chatType ? { chatType: bridge.chatType } : {}),
+  };
+}
+
 export async function resolveImageAdapter(input, registry, resolved, submitCtx) {
   const explicitAdapter = typeof input.provider === "string" ? registry.get(input.provider) : null;
   if (explicitAdapter) return explicitAdapter;
@@ -55,10 +88,53 @@ export async function resolveImageAdapter(input, registry, resolved, submitCtx) 
   return adapters.at(-1) || null;
 }
 
+function markSubmitFailed({ taskId, err, store, ctx }) {
+  const message = errorMessage(err);
+  store.update(taskId, {
+    status: "failed",
+    failReason: message,
+    submitState: "failed",
+    completedAt: new Date().toISOString(),
+  });
+  ctx.bus.request("deferred:fail", { taskId, error: err }).catch(() => {});
+  ctx.bus.request("task:remove", { taskId }).catch(() => {});
+  ctx.log?.error?.(`[image-gen] submit failed for ${taskId}:`, message);
+}
+
+async function runSubmitInBackground({ taskId, adapter, params, submitCtx, store, poller, ctx }) {
+  try {
+    const result = await adapter.submit(params, submitCtx);
+    const hasProviderTaskId = typeof result?.taskId === "string" && result.taskId.trim();
+    const adapterTaskId = hasProviderTaskId ? result.taskId : taskId;
+    const files = Array.isArray(result?.files) ? result.files.filter(Boolean) : [];
+
+    if (!hasProviderTaskId && files.length === 0) {
+      throw new Error("Image generation provider returned neither taskId nor files");
+    }
+
+    store.update(taskId, {
+      submitState: "submitted",
+      adapterTaskId,
+      ...(files.length ? { files } : {}),
+    });
+
+    if (files.length && typeof poller.checkNow === "function") {
+      void poller.checkNow(taskId);
+    }
+  } catch (err) {
+    markSubmitFailed({ taskId, err, store, ctx });
+  }
+}
+
 export async function execute(input, ctx) {
   const { registry, store, poller, getWritableGeneratedDir } = ctx._mediaGen || {};
   if (!registry || !store || !poller || typeof getWritableGeneratedDir !== "function") {
     return buildUnavailableResult("Image generation plugin is not initialized.");
+  }
+
+  const sessionPath = normalizeSessionPath(ctx);
+  if (!sessionPath) {
+    return buildUnavailableResult("Image generation requires a concrete sessionPath for task ownership.");
   }
 
   const generatedDir = await getWritableGeneratedDir({ agentId: ctx.agentId });
@@ -79,93 +155,92 @@ export async function execute(input, ctx) {
   submitCtx.providerId ||= adapter.id;
 
   const count = Math.min(Math.max(input.count || 1, 1), 9);
-  const batchId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const batchId = createTaskId();
+  const modelId = resolved?.modelId || input.model;
 
   const params = {
     type: "image",
     prompt: input.prompt,
     ...(input.ratio && { ratio: input.ratio }),
     ...(input.resolution && { resolution: input.resolution }),
-    ...((resolved?.modelId || input.model) && { model: resolved?.modelId || input.model }),
+    ...(modelId && { model: modelId }),
     ...(input.image && { image: input.image }),
     ...(resolved?.providerId && { providerId: resolved.providerId }),
   };
 
-  const results = await Promise.all(
-    Array.from({ length: count }, () =>
-      adapter.submit(params, submitCtx).catch((err) => ({ _error: err })),
-    ),
-  );
+  const submitted = [];
+  const deliveryTarget = bridgeDeliveryTarget(ctx);
+  const deferredMeta = {
+    type: "image-generation",
+    mediaKind: "image",
+    deliveryIntent: "ui_only",
+    triggerParentTurn: false,
+    prompt: input.prompt,
+    ...(deliveryTarget ? { deliveryTarget } : {}),
+  };
 
-  const succeeded = [];
-  let failCount = 0;
-
-  for (const result of results) {
-    if (result._error || !result.taskId) {
-      failCount += 1;
-      continue;
-    }
-
-    succeeded.push(result);
-
+  for (let i = 0; i < count; i++) {
+    const taskId = createTaskId();
     store.add({
-      taskId: result.taskId,
+      taskId,
       adapterId: adapter.id,
       batchId,
       type: "image",
       prompt: input.prompt,
       params,
-      sessionPath: ctx.sessionPath,
+      sessionPath,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
+      submitState: "submitting",
+      adapterTaskId: null,
       generatedDir,
     });
 
-    if (result.files?.length) {
-      store.update(result.taskId, { files: result.files });
-    }
-
     try {
       await ctx.bus.request("deferred:register", {
-        taskId: result.taskId,
-        sessionPath: ctx.sessionPath,
-        meta: { type: "image-generation", prompt: input.prompt },
+        taskId,
+        sessionPath,
+        meta: deferredMeta,
       });
     } catch (err) {
-      ctx.log.warn(`deferred:register failed for ${result.taskId}:`, err);
+      ctx.log.warn(`deferred:register failed for ${taskId}:`, err);
     }
 
     try {
       await ctx.bus.request("task:register", {
-        taskId: result.taskId,
+        taskId,
         type: "media-generation",
-        parentSessionPath: ctx.sessionPath,
-        meta: { type: "image-generation", prompt: input.prompt },
+        parentSessionPath: sessionPath,
+        meta: deferredMeta,
       });
     } catch {
       // best effort
     }
 
-    poller.add(result.taskId);
-  }
+    poller.add(taskId);
+    submitted.push({ taskId });
 
-  if (succeeded.length === 0) {
-    const firstErr = results.find((item) => item._error)?._error;
-    return buildUnavailableResult(`Image submission failed: ${firstErr?.message || "unknown error"}`);
-  }
-
-  let text = `Submitted ${succeeded.length} image generation task(s). The result card will update automatically.`;
-  if (failCount > 0) {
-    text += ` ${failCount} submission(s) failed.`;
+    void runSubmitInBackground({
+      taskId,
+      adapter,
+      params,
+      submitCtx,
+      store,
+      poller,
+      ctx,
+    });
   }
 
   return {
-    content: [{ type: "text", text }],
+    content: [{
+      type: "text",
+      text: `Submitted ${submitted.length} image generation task(s). Results will appear automatically below.`,
+    }],
     details: {
-      card: {
-        type: "iframe",
-        route: `/card?batch=${batchId}`,
-        title: "Image Generation",
-        description: `${input.prompt.slice(0, 60)} (${succeeded.length})`,
-        aspectRatio: input.ratio || "1:1",
+      mediaGeneration: {
+        kind: "image",
+        batchId,
+        prompt: input.prompt,
+        tasks: submitted,
       },
     },
   };

@@ -32,8 +32,18 @@ function writePrefs(hanakoHome, prefs) {
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2) + "\n", "utf-8");
 }
 
+function writeGpuState(hanakoHome, state) {
+  const statePath = path.join(hanakoHome, "user", "gpu-startup.json");
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+}
+
 function readPrefs(hanakoHome) {
-  return readJson(path.join(hanakoHome, "user", "preferences.json"));
+  try {
+    return readJson(path.join(hanakoHome, "user", "preferences.json"));
+  } catch {
+    return {};
+  }
 }
 
 describe("desktop GPU startup policy", () => {
@@ -76,7 +86,39 @@ describe("desktop GPU startup policy", () => {
     expect(policy.reason).toBe("preference");
   });
 
-  it("turns on safe mode on Windows after an incomplete early startup", () => {
+  it("migrates legacy automatic safe mode preferences into GPU sandbox compatibility", () => {
+    const hanakoHome = makeHome();
+    writePrefs(hanakoHome, { locale: "zh-CN", hardware_acceleration: false });
+    writeGpuState(hanakoHome, {
+      version: 1,
+      safeMode: {
+        enabled: true,
+        reason: "previous-startup-incomplete",
+        previousStartup: { status: "pending", phase: "launching-splash" },
+        updatedAt: "2026-05-19T01:00:00.000Z",
+      },
+    });
+
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe"],
+      env: {},
+      now: "2026-05-21T01:00:00.000Z",
+    });
+
+    expect(policy.mode).toBe("gpu-sandbox-compat");
+    expect(policy.hardwareAccelerationEnabled).toBe(true);
+    expect(policy.reason).toBe("legacy-auto-safe-mode-migration");
+    expect(readPrefs(hanakoHome)).toEqual({ locale: "zh-CN" });
+    expect(readJson(path.join(hanakoHome, "user", "gpu-startup.json")).autoGpuMode).toMatchObject({
+      mode: "gpu-sandbox-compat",
+      reason: "legacy-auto-safe-mode-migration",
+      previousMode: "software-safe",
+    });
+  });
+
+  it("turns on GPU sandbox compatibility on Windows after an incomplete early startup", () => {
     const hanakoHome = makeHome();
     markGpuStartupPending({
       hanakoHome,
@@ -94,9 +136,140 @@ describe("desktop GPU startup policy", () => {
       now: "2026-05-19T01:01:00.000Z",
     });
 
+    expect(policy.hardwareAccelerationEnabled).toBe(true);
+    expect(policy.shouldDisableHardwareAcceleration).toBe(false);
+    expect(policy.shouldApplyGpuSandboxCompatSwitches).toBe(true);
+    expect(policy.mode).toBe("gpu-sandbox-compat");
+    expect(policy.reason).toBe("previous-startup-incomplete");
+    expect(readPrefs(hanakoHome).hardware_acceleration).toBeUndefined();
+    const state = readJson(path.join(hanakoHome, "user", "gpu-startup.json"));
+    expect(state.autoGpuMode).toMatchObject({
+      mode: "gpu-sandbox-compat",
+      reason: "previous-startup-incomplete",
+    });
+  });
+
+  it("turns on GPU sandbox compatibility after any stale pending Windows startup", () => {
+    const hanakoHome = makeHome();
+    markGpuStartupPending({
+      hanakoHome,
+      platform: "win32",
+      phase: "electron-starting",
+      startupId: "previous-launch",
+      now: "2026-05-19T01:00:00.000Z",
+    });
+    const statePath = path.join(hanakoHome, "user", "gpu-startup.json");
+    const state = readJson(statePath);
+    state.startup.phase = "server-starting";
+    writeGpuState(hanakoHome, state);
+
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe"],
+      env: {},
+      now: "2026-05-19T01:01:00.000Z",
+    });
+
+    expect(policy.mode).toBe("gpu-sandbox-compat");
+    expect(policy.hardwareAccelerationEnabled).toBe(true);
+    expect(policy.reason).toBe("previous-startup-incomplete");
+    expect(readJson(statePath).autoGpuMode).toMatchObject({
+      mode: "gpu-sandbox-compat",
+      reason: "previous-startup-incomplete",
+      previousStartup: expect.objectContaining({
+        status: "pending",
+        phase: "server-starting",
+      }),
+    });
+  });
+
+  it("escalates a stale pending Windows startup from the recorded launch policy", () => {
+    const hanakoHome = makeHome();
+    const compatPolicy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe", "--hana-gpu-sandbox-compat"],
+      env: {},
+    });
+
+    markGpuStartupPending({
+      hanakoHome,
+      platform: "win32",
+      phase: "electron-starting",
+      startupId: "compat-launch",
+      policy: compatPolicy,
+      now: "2026-05-19T01:00:00.000Z",
+    });
+
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe"],
+      env: {},
+      now: "2026-05-19T01:01:00.000Z",
+    });
+
+    expect(policy.mode).toBe("software-safe");
     expect(policy.hardwareAccelerationEnabled).toBe(false);
     expect(policy.reason).toBe("previous-startup-incomplete");
-    expect(readPrefs(hanakoHome).hardware_acceleration).toBe(false);
+    expect(readJson(path.join(hanakoHome, "user", "gpu-startup.json")).autoGpuMode).toMatchObject({
+      mode: "software-safe",
+      reason: "previous-startup-incomplete",
+      previousMode: "gpu-sandbox-compat",
+      previousStartup: expect.objectContaining({
+        policy: expect.objectContaining({
+          mode: "gpu-sandbox-compat",
+        }),
+      }),
+    });
+  });
+
+  it("escalates a stale deep compatibility startup into diagnostic failed mode", () => {
+    const hanakoHome = makeHome();
+    writeGpuState(hanakoHome, {
+      version: 2,
+      autoGpuMode: {
+        mode: "deep-compat",
+        reason: "gpu-child-process-gone",
+        previousMode: "software-safe",
+        updatedAt: "2026-05-19T01:00:00.000Z",
+      },
+      startup: {
+        status: "pending",
+        startupId: "deep-launch",
+        phase: "electron-starting",
+        platform: "win32",
+        startedAt: "2026-05-19T01:00:00.000Z",
+        updatedAt: "2026-05-19T01:00:00.000Z",
+        policy: {
+          mode: "deep-compat",
+          reason: "gpu-child-process-gone",
+          hardwareAccelerationEnabled: false,
+          shouldDisableHardwareAcceleration: true,
+          shouldApplyGpuSandboxCompatSwitches: false,
+          shouldApplyDeepCompatSwitches: true,
+          shouldApplyUnsafeNoSandboxSwitch: false,
+        },
+      },
+    });
+
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe"],
+      env: {},
+      now: "2026-05-19T01:01:00.000Z",
+    });
+
+    expect(policy.mode).toBe("diagnostic-failed");
+    expect(policy.hardwareAccelerationEnabled).toBe(false);
+    expect(policy.shouldApplyDeepCompatSwitches).toBe(true);
+    expect(readJson(path.join(hanakoHome, "user", "gpu-startup.json")).autoGpuMode).toMatchObject({
+      mode: "diagnostic-failed",
+      reason: "previous-startup-incomplete",
+      previousMode: "deep-compat",
+    });
   });
 
   it("does not auto-disable hardware acceleration for non-Windows stale startup markers", () => {
@@ -120,7 +293,7 @@ describe("desktop GPU startup policy", () => {
     expect(policy.shouldDisableHardwareAcceleration).toBe(false);
   });
 
-  it("records GPU child process crashes as next-launch safe mode", () => {
+  it("records GPU child process crashes as next-launch GPU sandbox compatibility", () => {
     const hanakoHome = makeHome();
 
     recordGpuChildProcessGone({
@@ -137,9 +310,48 @@ describe("desktop GPU startup policy", () => {
       env: {},
     });
 
-    expect(policy.hardwareAccelerationEnabled).toBe(false);
-    expect(policy.reason).toBe("preference");
+    expect(policy.hardwareAccelerationEnabled).toBe(true);
+    expect(policy.shouldDisableHardwareAcceleration).toBe(false);
+    expect(policy.shouldApplyGpuSandboxCompatSwitches).toBe(true);
+    expect(policy.reason).toBe("gpu-child-process-gone");
+    expect(policy.mode).toBe("gpu-sandbox-compat");
+    expect(readPrefs(hanakoHome).hardware_acceleration).toBeUndefined();
+  });
+
+  it("escalates a software-safe GPU crash to deep compatibility without changing the user preference", () => {
+    const hanakoHome = makeHome();
+    writePrefs(hanakoHome, { hardware_acceleration: false });
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe"],
+      env: {},
+    });
+
+    recordGpuChildProcessGone({
+      hanakoHome,
+      platform: "win32",
+      policy,
+      details: { type: "GPU", reason: "crashed", exitCode: -2147483645 },
+      now: "2026-05-19T01:02:00.000Z",
+    });
+
+    const nextPolicy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe"],
+      env: {},
+    });
+
+    expect(nextPolicy.hardwareAccelerationEnabled).toBe(false);
+    expect(nextPolicy.mode).toBe("deep-compat");
+    expect(nextPolicy.shouldApplyDeepCompatSwitches).toBe(true);
     expect(readPrefs(hanakoHome).hardware_acceleration).toBe(false);
+    expect(readJson(path.join(hanakoHome, "user", "gpu-startup.json")).autoGpuMode).toMatchObject({
+      mode: "deep-compat",
+      reason: "gpu-child-process-gone",
+      previousMode: "software-safe",
+    });
   });
 
   it("clears the pending marker when startup reaches app-ready", () => {
@@ -202,7 +414,97 @@ describe("desktop GPU startup policy", () => {
 
     expect(app.disableHardwareAcceleration).toHaveBeenCalledTimes(1);
     expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("disable-software-rasterizer", expect.anything());
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("disable-gpu-sandbox");
     expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("disable-gpu-sandbox", expect.anything());
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("no-sandbox");
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("no-sandbox", expect.anything());
+  });
+
+  it("applies GPU sandbox compatibility switches without disabling hardware acceleration or global sandbox", () => {
+    const app = {
+      disableHardwareAcceleration: vi.fn(),
+      commandLine: {
+        appendSwitch: vi.fn(),
+        hasSwitch: vi.fn((name) => name === "disable-features"),
+        getSwitchValue: vi.fn((name) => name === "disable-features" ? "Vulkan" : ""),
+      },
+    };
+
+    applyGpuStartupPolicy(app, {
+      mode: "gpu-sandbox-compat",
+      shouldApplyGpuSandboxCompatSwitches: true,
+      shouldDisableHardwareAcceleration: false,
+      reason: "gpu-child-process-gone",
+    });
+
+    expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-gpu-sandbox");
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-features", "Vulkan,GpuSandbox");
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("no-sandbox");
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("no-sandbox", expect.anything());
+  });
+
+  it("allows explicit GPU sandbox compatibility without global no-sandbox", () => {
+    const hanakoHome = makeHome();
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe", "--hana-gpu-sandbox-compat"],
+      env: {},
+    });
+
+    expect(policy.mode).toBe("gpu-sandbox-compat");
+    expect(policy.hardwareAccelerationEnabled).toBe(true);
+    expect(policy.shouldApplyGpuSandboxCompatSwitches).toBe(true);
+    expect(policy.shouldApplyUnsafeNoSandboxSwitch).toBe(false);
+  });
+
+  it("applies global no-sandbox only for explicit unsafe GPU diagnostics", () => {
+    const hanakoHome = makeHome();
+    const policy = resolveGpuStartupPolicy({
+      hanakoHome,
+      platform: "win32",
+      argv: ["Hanako.exe", "--hana-gpu-unsafe-no-sandbox"],
+      env: {},
+    });
+    const app = {
+      disableHardwareAcceleration: vi.fn(),
+      commandLine: { appendSwitch: vi.fn() },
+    };
+
+    applyGpuStartupPolicy(app, policy);
+
+    expect(policy.mode).toBe("gpu-sandbox-compat");
+    expect(policy.hardwareAccelerationEnabled).toBe(true);
+    expect(policy.shouldApplyGpuSandboxCompatSwitches).toBe(true);
+    expect(policy.shouldApplyUnsafeNoSandboxSwitch).toBe(true);
+    expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-gpu-sandbox");
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-features", "GpuSandbox");
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("no-sandbox");
+  });
+
+  it("applies deep compatibility switches without disabling software rasterizer or sandbox", () => {
+    const app = {
+      disableHardwareAcceleration: vi.fn(),
+      commandLine: { appendSwitch: vi.fn() },
+    };
+
+    applyGpuStartupPolicy(app, {
+      shouldDisableHardwareAcceleration: true,
+      shouldApplyDeepCompatSwitches: true,
+      mode: "deep-compat",
+      reason: "gpu-child-process-gone",
+    });
+
+    expect(app.disableHardwareAcceleration).toHaveBeenCalledTimes(1);
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-gpu");
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-gpu-compositing");
+    expect(app.commandLine.appendSwitch).toHaveBeenCalledWith("disable-gpu-rasterization");
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("disable-software-rasterizer", expect.anything());
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("disable-gpu-sandbox");
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("disable-gpu-sandbox", expect.anything());
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("no-sandbox");
     expect(app.commandLine.appendSwitch).not.toHaveBeenCalledWith("no-sandbox", expect.anything());
   });
 });

@@ -10,6 +10,7 @@ import { ToolGroupBlock } from './ToolGroupBlock';
 import { PluginCardBlock } from './PluginCardBlock';
 import { SubagentCard } from './SubagentCard';
 import { SettingsConfirmCard } from './SettingsConfirmCard';
+import { SettingsUpdateCard } from './SettingsUpdateCard';
 import { MessageActions } from './MessageActions';
 import { MessageFooterActions, formatMessageTime, type MessageFooterAction } from './MessageFooterActions';
 import { BLOCK_RENDERERS } from './block-renderers';
@@ -229,6 +230,8 @@ const ContentBlockView = memo(function ContentBlockView({ block, agentName, agen
           blockIdx={blockIdx}
         />
       );
+    case 'media_generation':
+      return <MediaGenerationBlock block={block} />;
     default: {
       const Renderer = BLOCK_RENDERERS[block.type];
       return Renderer ? <Renderer block={block} agentId={agentId} /> : null;
@@ -248,6 +251,29 @@ const EXT_LABELS: Record<string, string> = {
   csv: 'CSV', svg: 'SVG', skill: 'Skill',
   png: 'Image', jpg: 'Image', jpeg: 'Image', gif: 'Image', webp: 'Image',
 };
+
+const MediaGenerationBlock = memo(function MediaGenerationBlock({ block }: { block: any }) {
+  const failed = block.status === 'failed' || block.status === 'aborted';
+  const kindLabel = block.kind === 'video' ? '视频' : '图片';
+  const title = failed
+    ? `${kindLabel}生成失败`
+    : `${kindLabel}生成中...`;
+  const reason = typeof block.reason === 'string' ? block.reason : '';
+  const prompt = typeof block.prompt === 'string' ? block.prompt : '';
+
+  return (
+    <div className={`${styles.mediaGenerationCard}${failed ? ` ${styles.mediaGenerationCardFailed}` : ''}`}>
+      <div className={styles.mediaGenerationSurface}>
+        <div className={styles.mediaGenerationText}>
+          <div className={styles.mediaGenerationTitle}>{title}</div>
+          {(failed ? reason : prompt) && (
+            <div className={styles.mediaGenerationPrompt}>{failed ? reason : prompt}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 // file / image block
 
@@ -630,6 +656,10 @@ const SettingsConfirmBlock = memo(function SettingsConfirmBlock({ block }: { blo
   return <SettingsConfirmCard {...block} />;
 });
 
+const SettingsUpdateBlock = memo(function SettingsUpdateBlock({ block }: { block: any }) {
+  return <SettingsUpdateCard update={block.update} />;
+});
+
 // ── 注册所有物种 B 渲染器 ──
 // 注：`file` 与 `screenshot` 需 session 上下文（sessionPath/messageId/blockIdx），
 // 统一走 ContentBlockView 的 switch 内联分发，不注册到全局表中。
@@ -639,3 +669,4 @@ BLOCK_RENDERERS['plugin_card'] = PluginCardWrapper;
 BLOCK_RENDERERS['skill'] = SkillBlock;
 BLOCK_RENDERERS['cron_confirm'] = CronConfirmBlock;
 BLOCK_RENDERERS['settings_confirm'] = SettingsConfirmBlock;
+BLOCK_RENDERERS['settings_update'] = SettingsUpdateBlock;

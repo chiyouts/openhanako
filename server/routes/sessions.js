@@ -7,22 +7,31 @@ import path from "path";
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
 import { t } from "../i18n.js";
-import { extractBlocks } from "../block-extractors.js";
+import { extractBlocks, resolveMediaGenerationBlocks } from "../block-extractors.js";
 import { BrowserManager } from "../../lib/browser/browser-manager.js";
 import { sessionIdFromFilename } from "../../lib/session-jsonl.js";
+import {
+  DEFERRED_RESULT_MESSAGE_TYPE,
+  DEFERRED_RESULT_RECORD_TYPE,
+  buildDeferredResultRecord,
+  parseDeferredResultNotification,
+  parseDeferredResultRecord,
+} from "../../lib/deferred-result-notification.js";
 import {
   materializeExecutorIdentity,
   readSubagentSessionMetaSync,
 } from "../../lib/subagent-executor-metadata.js";
 import {
   extractTextContent,
+  filterUnreferencedInlineImages,
   loadSessionHistoryMessages,
   loadLatestAssistantSummaryFromSessionFile,
   isValidSessionPath,
-  isActiveSessionPath,
+  isActiveDesktopSessionPath,
+  isArchivedDesktopSessionPath,
 } from "../../core/message-utils.js";
 import {
-  loadLatestTodosFromSessionFile,
+  extractLatestTodos,
   loadLatestTodoSnapshotFromSessionFile,
 } from "../../lib/tools/todo-compat.js";
 import { SessionManager } from "../../lib/pi-sdk/index.js";
@@ -44,6 +53,14 @@ import {
 } from "../../shared/model-capabilities.js";
 import { replayLatestUserTurn } from "../../core/session-turn-actions.js";
 import { createRequestContext } from "../http/boundary.js";
+import { createModuleLogger } from "../../lib/debug-log.js";
+import { searchSessions } from "../../lib/search/session-search.js";
+import { SessionSearchTokenizerUnavailableError } from "../../lib/search/session-search-tokenizer.js";
+
+const log = createModuleLogger("sessions");
+const lifecycleLog = createModuleLogger("sessions/lifecycle");
+const switchLog = createModuleLogger("sessions/switch");
+const SESSION_SEARCH_QUERY_MAX_LENGTH = 512;
 
 function rcPlatformFromSessionKey(sessionKey) {
   const match = /^([a-z]+)_/i.exec(sessionKey || "");
@@ -80,6 +97,53 @@ function authorizeSessionRoute(requestContext, capability, target) {
 
 const TODO_COMPLETE_MESSAGE =
   "[Hana Todo] The user marked the current todo list as completed and removed it from the session UI. Treat every item in that list as completed. Create a new todo list only if new work needs tracking.";
+
+function stripInlineThinkText(text) {
+  return String(text || "").replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>\n*/g, "");
+}
+
+function hasInlineImageContent(content) {
+  if (!Array.isArray(content)) return false;
+  return content.some(block => block?.type === "image" && (block.data || block.source?.data));
+}
+
+function hasTextBlockContent(content, { stripThink = false } = {}) {
+  if (typeof content === "string") {
+    const text = stripThink ? stripInlineThinkText(content) : content;
+    return text.length > 0;
+  }
+  if (!Array.isArray(content)) return false;
+  return content.some(block => block?.type === "text" && block.text);
+}
+
+function hasToolUseContent(content) {
+  if (!Array.isArray(content)) return false;
+  return content.some(block => (block?.type === "tool_use" || block?.type === "toolCall") && !!block.name);
+}
+
+function isDisplayableHistoryMessage(message) {
+  if (!message || typeof message !== "object") return false;
+  if (message.role === "user") {
+    return hasTextBlockContent(message.content) || hasInlineImageContent(message.content);
+  }
+  if (message.role === "assistant") {
+    return hasTextBlockContent(message.content, { stripThink: true }) || hasToolUseContent(message.content);
+  }
+  return false;
+}
+
+function resolveHistoryPageBounds(sourceMessages, { beforeId, limit, forceAll }) {
+  let total = 0;
+  for (const message of sourceMessages) {
+    if (isDisplayableHistoryMessage(message)) total += 1;
+  }
+  if (forceAll) return { total, startIdx: 0, endIdx: total, hasMore: false };
+  const endIdx = (beforeId != null && beforeId > 0)
+    ? Math.min(beforeId, total)
+    : total;
+  const startIdx = Math.max(0, endIdx - limit);
+  return { total, startIdx, endIdx, hasMore: startIdx > 0 };
+}
 
 export function createSessionsRoute(engine, hub = null) {
   const route = new Hono();
@@ -238,6 +302,60 @@ export function createSessionsRoute(engine, hub = null) {
     }
   }
 
+  function archivedPathForActiveSession(sessionPath) {
+    return path.join(path.dirname(sessionPath), "archived", path.basename(sessionPath));
+  }
+
+  function activePathForArchivedSession(sessionPath) {
+    return path.join(path.dirname(path.dirname(sessionPath)), path.basename(sessionPath));
+  }
+
+  function uniqueLifecyclePaths(paths) {
+    return [...new Set((paths || []).filter((p) => typeof p === "string" && p.trim()))];
+  }
+
+  async function cleanupSessionLifecycle(sessionPaths, reason) {
+    const bm = BrowserManager.instance();
+    for (const sessionPath of uniqueLifecyclePaths(sessionPaths)) {
+      try {
+        engine.taskRegistry?.abortByParentSession?.(sessionPath, reason);
+      } catch (err) {
+        lifecycleLog.warn(`task cleanup failed for ${sessionPath}: ${err.message}`);
+      }
+      try {
+        engine.subagentRuns?.abortByParentSession?.(sessionPath, reason);
+      } catch (err) {
+        lifecycleLog.warn(`subagent run cleanup failed for ${sessionPath}: ${err.message}`);
+      }
+      try {
+        engine.deferredResults?.suppressBySession?.(sessionPath, reason);
+      } catch (err) {
+        lifecycleLog.warn(`deferred cleanup failed for ${sessionPath}: ${err.message}`);
+      }
+      try {
+        engine.confirmStore?.abortBySession?.(sessionPath);
+      } catch (err) {
+        lifecycleLog.warn(`confirm cleanup failed for ${sessionPath}: ${err.message}`);
+      }
+      try {
+        await engine.abortSessionByPath?.(sessionPath);
+      } catch (err) {
+        lifecycleLog.warn(`session abort failed for ${sessionPath}: ${err.message}`);
+      }
+      try {
+        await bm.closeBrowserForSession(sessionPath);
+      } catch (err) {
+        lifecycleLog.warn(`browser cleanup failed for ${sessionPath}: ${err.message}`);
+      }
+      try {
+        engine.terminalSessions?.closeForSession?.(sessionPath);
+      } catch (err) {
+        lifecycleLog.warn(`terminal cleanup failed for ${sessionPath}: ${err.message}`);
+      }
+      invalidateRcTarget(sessionPath);
+    }
+  }
+
   // 列出所有 agent 的历史 session
   route.get("/sessions", async (c) => {
     try {
@@ -279,6 +397,9 @@ export function createSessionsRoute(engine, hub = null) {
           agentName: s.agentName || null,
           modelId: s.modelId || null,
           modelProvider: s.modelProvider || null,
+          permissionMode: typeof engine.getSessionPermissionMode === "function"
+            ? engine.getSessionPermissionMode(s.path)
+            : engine.permissionMode || null,
           pinnedAt: s.pinnedAt || null,
           hasSummary: !!summaryRecord,
           rcAttachment: rcAttachmentByPath.get(s.path)
@@ -290,6 +411,62 @@ export function createSessionsRoute(engine, hub = null) {
         });
       }));
     } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  route.get("/sessions/search", async (c) => {
+    try {
+      const requestContext = createRequestContext(c, engine);
+      const auth = authorizeSessionRoute(requestContext, "sessions.read", {
+        kind: "studio",
+        studioId: requestContext.studioId,
+      });
+      if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
+      const runtimeStudioId = requestContext.runtimeContext?.studioId || null;
+      const principalStudioId = requestContext.authPrincipal?.studioId || null;
+      if (runtimeStudioId && principalStudioId && runtimeStudioId !== principalStudioId) {
+        return c.json({
+          error: "studio_scope_mismatch",
+          detail: "authenticated Studio does not match this server Studio",
+        }, 403);
+      }
+
+      const query = c.req.query("q") || "";
+      const phase = c.req.query("phase") === "content" ? "content" : "title";
+      const limit = c.req.query("limit");
+      const trimmedQuery = query.trim();
+      if (!trimmedQuery) return c.json({ query, phase, results: [] });
+      if ([...trimmedQuery].length > SESSION_SEARCH_QUERY_MAX_LENGTH) {
+        return c.json({
+          error: "query_too_long",
+          maxLength: SESSION_SEARCH_QUERY_MAX_LENGTH,
+        }, 400);
+      }
+
+      const sessions = await engine.listSessions();
+      const results = searchSessions(sessions, trimmedQuery, { phase, limit }).map((s) => ({
+        path: s.path,
+        title: s.title || null,
+        firstMessage: (s.firstMessage || "").slice(0, 100),
+        modified: s.modified?.toISOString?.() || s.modified || null,
+        messageCount: s.messageCount || 0,
+        cwd: s.cwd || null,
+        agentId: s.agentId || null,
+        agentName: s.agentName || null,
+        modelId: s.modelId || null,
+        modelProvider: s.modelProvider || null,
+        pinnedAt: s.pinnedAt || null,
+        matchKind: s.matchKind,
+        snippet: s.snippet || "",
+        score: s.score,
+      }));
+      return c.json({ query, phase, results });
+    } catch (err) {
+      if (err instanceof SessionSearchTokenizerUnavailableError) {
+        log.error("session search tokenizer unavailable", err.cause || err);
+        return c.json({ error: err.message }, 503);
+      }
       return c.json({ error: err.message }, 500);
     }
   });
@@ -361,37 +538,61 @@ export function createSessionsRoute(engine, hub = null) {
         sessionPath: queryPath || engine.currentSessionPath || null,
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
-      const sourceMessages = await loadSessionHistoryMessages(engine, queryPath);
+      const resolvedSessionPath = queryPath || engine.currentSessionPath || null;
+      const sourceMessages = await loadSessionHistoryMessages(engine, resolvedSessionPath);
 
       // 分页参数
       const beforeId = c.req.query("before") != null ? Number(c.req.query("before")) : null;
       const limit = Math.min(Number(c.req.query("limit")) || 50, 200);
 
-      // 提取可显示的消息（user/assistant 文本 + 文件/artifact 工具结果）
-      // 每条消息带稳定 id（原始 sourceMessages 索引）
-      const allMessages = [];
+      // all=1 强制全量返回（流式恢复等特殊场景）
+      const forceAll = c.req.query("all") === "1";
+      const pageBounds = resolveHistoryPageBounds(sourceMessages, { beforeId, limit, forceAll });
+
+      // 提取可显示的消息（user/assistant 文本 + 文件/artifact 工具结果）。
+      // 长会话只完整 hydrate 当前页面窗口；窗口外只做轻量可见性扫描，
+      // 避免旧消息的 markdown/block/sidecar 解析拖慢当前模型运行。
+      const messages = [];
       const blocks = [];
-      let globalIdx = 0;
+      const mediaGenerationResults = new Map();
+      const standaloneMediaGenerationResults = [];
+      const recordMediaGenerationResult = (parsed, afterIndex) => {
+        if (!parsed?.taskId || !isMediaGenerationDeferredResult(parsed)) return;
+        mediaGenerationResults.set(parsed.taskId, parsed);
+        if (parsed.status === "success") {
+          standaloneMediaGenerationResults.push({
+            ...parsed,
+            afterIndex,
+          });
+        }
+      };
+      let displayIdx = 0;
 
       for (const m of sourceMessages) {
         if (m.role === "user") {
-          const { text, images } = extractTextContent(m.content);
-          if (text || images.length) {
-            allMessages.push({
-              id: String(globalIdx),
+          if (!isDisplayableHistoryMessage(m)) continue;
+          const currentIndex = displayIdx;
+          displayIdx += 1;
+          if (currentIndex >= pageBounds.startIdx && currentIndex < pageBounds.endIdx) {
+            const { text, images } = extractTextContent(m.content);
+            const visibleImages = filterUnreferencedInlineImages(text, images);
+            messages.push({
+              id: String(currentIndex),
               ...(m.id ? { entryId: m.id } : {}),
               role: "user",
               content: text,
-              images: images.length ? images : undefined,
+              images: visibleImages.length ? visibleImages : undefined,
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),
             });
-            globalIdx++;
           }
         } else if (m.role === "assistant") {
-          const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
-          if (text || toolUses.length) {
-            allMessages.push({
-              id: String(globalIdx),
+          if (!isDisplayableHistoryMessage(m)) continue;
+          const currentIndex = displayIdx;
+          displayIdx += 1;
+          if (currentIndex >= pageBounds.startIdx && currentIndex < pageBounds.endIdx) {
+            const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
+            messages.push({
+              id: String(currentIndex),
               ...(m.id ? { entryId: m.id } : {}),
               role: "assistant",
               content: text,
@@ -399,39 +600,40 @@ export function createSessionsRoute(engine, hub = null) {
               toolCalls: toolUses.length ? toolUses : undefined,
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),
             });
-            globalIdx++;
           }
         } else if (m.role === "toolResult") {
-          const extracted = extractBlocks(m.toolName, m.details, m);
-          for (const b of extracted) {
-            blocks.push({ ...b, afterIndex: allMessages.length - 1 });
+          const afterIndex = displayIdx - 1;
+          if (afterIndex >= pageBounds.startIdx && afterIndex < pageBounds.endIdx) {
+            const extracted = extractBlocks(m.toolName, m.details, m);
+            for (const b of extracted) {
+              blocks.push({ ...b, afterIndex });
+            }
           }
+        } else if (m.role === "custom") {
+          recordMediaGenerationResult(parseHistoryDeferredResult(m), displayIdx - 1);
         }
       }
 
-      // 分页：before 参数指定游标，否则默认返回最后 limit 条
-      let messages;
-      let hasMore = false;
-      let slicedBlocks = blocks;
-
-      const total = allMessages.length;
-      // all=1 强制全量返回（流式恢复等特殊场景）
-      const forceAll = c.req.query("all") === "1";
-
-      if (forceAll) {
-        messages = allMessages;
-      } else {
-        const endIdx = (beforeId != null && beforeId > 0)
-          ? Math.min(beforeId, total)
-          : total;
-        const startIdx = Math.max(0, endIdx - limit);
-        messages = allMessages.slice(startIdx, endIdx);
-        hasMore = startIdx > 0;
-        // 重映射 afterIndex 到切片内偏移，过滤超出范围的
-        slicedBlocks = blocks
-          .filter(b => b.afterIndex >= startIdx && b.afterIndex < endIdx)
-          .map(b => ({ ...b, afterIndex: b.afterIndex - startIdx }));
+      const deferredStore = engine.deferredResults;
+      if (resolvedSessionPath && typeof deferredStore?.listBySession === "function") {
+        for (const task of deferredStore.listBySession(resolvedSessionPath)) {
+          if (!isTerminalDeferredTask(task)) continue;
+          recordMediaGenerationResult(buildDeferredResultRecord(task.taskId, task), pageBounds.total - 1);
+        }
       }
+      const resolvedBlocks = resolveMediaGenerationBlocks(
+        blocks,
+        mediaGenerationResults,
+        standaloneMediaGenerationResults,
+      );
+
+      // 重映射 afterIndex 到切片内偏移，过滤超出范围的
+      const slicedBlocks = forceAll
+        ? resolvedBlocks
+        : resolvedBlocks
+          .filter(b => b.afterIndex >= pageBounds.startIdx && b.afterIndex < pageBounds.endIdx)
+          .map(b => ({ ...b, afterIndex: b.afterIndex - pageBounds.startIdx }));
+      const hasMore = pageBounds.hasMore;
 
       // 修正 subagent blocks 的状态：优先从 durable run registry 读长期映射，
       // 再用 deferred store 作为实时投递队列。deferred 会清理，不再承担历史事实源。
@@ -504,13 +706,12 @@ export function createSessionsRoute(engine, hub = null) {
         }
       }
 
-      const resolvedSessionPath = queryPath || engine.currentSessionPath || null;
       patchSessionFileLifecycleBlocks(slicedBlocks, engine, resolvedSessionPath);
       const sessionFiles = listSessionRegistryFiles(engine, resolvedSessionPath);
 
       // 从历史中提取最新 todo 状态：branch-aware，沿当前 leaf 回溯到 root，
       // 只在当前分支路径上找最新合法快照。避免从抛弃的分支取到错误状态。
-      const todos = await loadLatestTodosFromSessionFile(queryPath);
+      const todos = extractLatestTodos(sourceMessages);
 
       return c.json({ messages, blocks: slicedBlocks, todos, hasMore, sessionFiles });
     } catch (err) {
@@ -532,7 +733,7 @@ export function createSessionsRoute(engine, hub = null) {
         sessionPath,
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
-      if (!isValidSessionPath(sessionPath, engine.agentsDir) || !isActiveSessionPath(sessionPath, engine.agentsDir)) {
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
       if (!(await pathExists(sessionPath))) {
@@ -571,7 +772,7 @@ export function createSessionsRoute(engine, hub = null) {
         sessionPath,
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
-      if (!isValidSessionPath(sessionPath, engine.agentsDir) || !isActiveSessionPath(sessionPath, engine.agentsDir)) {
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
       try {
@@ -622,11 +823,11 @@ export function createSessionsRoute(engine, hub = null) {
         ? body.workspaceFolders.filter(p => typeof p === "string" && p.trim())
         : [];
       const memFlag = memoryEnabled !== false; // 默认 true
-      console.log("[sessions] 新建 session", {
+      log.log(`新建 session ${JSON.stringify({
         hasCwd: !!cwd,
         memoryEnabled: memFlag,
         customAgent: !!agentId,
-      });
+      })}`);
 
       // 新建前挂起浏览器（保存当前 session 的浏览器状态）
       const bm = BrowserManager.instance();
@@ -660,7 +861,7 @@ export function createSessionsRoute(engine, hub = null) {
         await engine.updateConfig({ last_cwd: cwd, cwd_history: history });
       }
 
-      console.log("[sessions] session 创建完成");
+      log.log("session 创建完成");
       const response = {
         ok: true,
         path: newSessionPath,
@@ -692,10 +893,8 @@ export function createSessionsRoute(engine, hub = null) {
       if (!sessionPath) {
         return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
       }
-      // 必须是 agents/{id}/sessions/ 或 sessions/archived/ 下的对话文件，
-      // 拒绝 subagent-sessions/、activity/、.ephemeral/ 等旁路目录——那些是
-      // 运行态产物，不是用户可切换的对话焦点。
-      if (!isActiveSessionPath(sessionPath, engine.agentsDir)) {
+      // 运行路径只允许 active desktop session。归档会话必须先 restore。
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
       // 切换前挂起浏览器（保存当前 session 的浏览器状态）
@@ -754,7 +953,7 @@ export function createSessionsRoute(engine, hub = null) {
       });
     } catch (err) {
       const errDetail = `${err.message}\n${err.stack || ""}`;
-      console.error("[sessions/switch] error:", errDetail);
+      switchLog.error(`error: ${errDetail}`);
       try { appendFileSync(path.join(engine.hanakoHome, "switch-error.log"), `${new Date().toISOString()}\n${errDetail}\n---\n`); } catch {}
       return c.json({ error: err.message }, 500);
     }
@@ -825,13 +1024,13 @@ export function createSessionsRoute(engine, hub = null) {
           try {
             const stat = await fs.stat(fp);
             if (stat.mtime.getTime() < cutoff) {
+              const activeKey = path.join(agentsDir, agentId, "sessions", f);
+              await cleanupSessionLifecycle([activeKey, fp], "parent session deleted");
               await fs.unlink(fp);
               deleteSessionFileSidecarSync(fp);
               deleteSessionSkillSnapshotSync(fp);
               deleted++;
               // 清理 titles.json 孤儿（key = 对应的活跃路径）
-              const activeKey = path.join(agentsDir, agentId, "sessions", f);
-              invalidateRcTarget(activeKey);
               try { await engine.clearSessionTitle(activeKey); } catch {}
             }
           } catch {}
@@ -862,8 +1061,8 @@ export function createSessionsRoute(engine, hub = null) {
       if (!sessionPath) {
         return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
       }
-      // 校验路径在 agentsDir 范围内
-      if (!isValidSessionPath(sessionPath, engine.agentsDir)) {
+      // archive 是 lifecycle transition，只允许 active desktop session。
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
 
@@ -874,28 +1073,28 @@ export function createSessionsRoute(engine, hub = null) {
         return c.json({ error: t("error.sessionNotFound") }, 404);
       }
 
-      // 先从 engine 的 session map 中移除（如果正在后台跑会被 abort）
-      await engine.setSessionPinned(sessionPath, false);
-      await engine.closeSession(sessionPath);
-
       // 从 session 路径推导归档目录（同 agent 的 sessions/archived/）
-      const sessDir = path.dirname(sessionPath);
-      const archiveDir = path.join(sessDir, "archived");
-      await fs.mkdir(archiveDir, { recursive: true });
-
-      const fileName = path.basename(sessionPath);
-      const destPath = path.join(archiveDir, fileName);
+      const destPath = archivedPathForActiveSession(sessionPath);
+      const archiveDir = path.dirname(destPath);
+      if (await pathExists(destPath)) {
+        return c.json({ error: "Archived path already exists" }, 409);
+      }
       if (await pathExists(sessionFileSidecarPath(destPath))) {
         return c.json({ error: "Stage file sidecar destination already exists" }, 409);
       }
+      await cleanupSessionLifecycle([sessionPath, destPath], "parent session archived");
+
+      // 再从 engine 的 session map 中移除。
+      await engine.setSessionPinned(sessionPath, false);
+      await engine.closeSession(sessionPath);
+
+      await fs.mkdir(archiveDir, { recursive: true });
       await fs.rename(sessionPath, destPath);
       moveSessionFileSidecarSync(sessionPath, destPath);
 
       // 将 mtime 置为归档瞬间，使 cleanup 按"归档时间"而非"最后活动时间"判断
       const nowSec = Date.now() / 1000;
       await fs.utimes(destPath, nowSec, nowSec);
-
-      invalidateRcTarget(sessionPath);
 
       return c.json({ ok: true });
     } catch (err) {
@@ -911,7 +1110,7 @@ export function createSessionsRoute(engine, hub = null) {
       if (!sessionPath) {
         return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
       }
-      if (!isValidSessionPath(sessionPath, engine.agentsDir)) {
+      if (!isArchivedDesktopSessionPath(sessionPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
       // 必须位于 /archived/ 目录下，防止把活跃 session 当归档路径调用
@@ -953,13 +1152,15 @@ export function createSessionsRoute(engine, hub = null) {
       if (!sessionPath) {
         return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
       }
-      if (!isValidSessionPath(sessionPath, engine.agentsDir)) {
+      if (!isArchivedDesktopSessionPath(sessionPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
       const archDir = path.dirname(sessionPath);
       if (path.basename(archDir) !== "archived") {
         return c.json({ error: "Not an archived session path" }, 403);
       }
+      const activeKey = activePathForArchivedSession(sessionPath);
+      await cleanupSessionLifecycle([activeKey, sessionPath], "parent session deleted");
       try {
         await fs.unlink(sessionPath);
         deleteSessionFileSidecarSync(sessionPath);
@@ -971,8 +1172,6 @@ export function createSessionsRoute(engine, hub = null) {
         throw err;
       }
       // 清理 titles.json 孤儿（key = 对应的活跃路径）
-      const activeKey = path.join(path.dirname(archDir), path.basename(sessionPath));
-      invalidateRcTarget(activeKey);
       try { await engine.clearSessionTitle(activeKey); } catch {}
       return c.json({ ok: true });
     } catch (err) {
@@ -1006,7 +1205,7 @@ function patchSessionFileLifecycleBlocks(blocks, engine, sessionPath) {
       } catch {}
     }
     if (!file) continue;
-    const patch = sessionFileLifecycleFields(file);
+    const patch = sessionFileLifecycleFields(file, engine);
     Object.assign(block, patch);
     if (block.type === "skill" && block.installedFile) {
       block.installedFile = { ...block.installedFile, ...patch };
@@ -1024,17 +1223,40 @@ function listSessionRegistryFiles(engine, sessionPath) {
     .filter(Boolean);
 }
 
-function sessionFileLifecycleFields(file) {
-  const fileId = file.fileId || file.id || null;
+function isMediaGenerationDeferredResult(result) {
+  return result?.type === "image-generation" || result?.type === "video-generation";
+}
+
+function parseHistoryDeferredResult(message) {
+  if (message?.customType === DEFERRED_RESULT_RECORD_TYPE) {
+    return parseDeferredResultRecord(message.data);
+  }
+  if (message?.customType === DEFERRED_RESULT_MESSAGE_TYPE) {
+    return parseDeferredResultNotification(message.content);
+  }
+  return null;
+}
+
+function isTerminalDeferredTask(task) {
+  return task?.status === "resolved" || task?.status === "failed" || task?.status === "aborted";
+}
+
+function sessionFileLifecycleFields(file, engine) {
+  const serialized = typeof engine?.serializeSessionFile === "function"
+    ? engine.serializeSessionFile(file)
+    : file;
+  const source = serialized || file;
+  const fileId = source.fileId || source.id || file.fileId || file.id || null;
   return {
     ...(fileId ? { fileId } : {}),
-    ...(file.filePath ? { filePath: file.filePath } : {}),
-    ...(file.label || file.displayName ? { label: file.label || file.displayName } : {}),
-    ...(file.ext !== undefined ? { ext: file.ext } : {}),
-    ...(file.mime ? { mime: file.mime } : {}),
-    ...(file.kind ? { kind: file.kind } : {}),
-    ...(file.storageKind ? { storageKind: file.storageKind } : {}),
-    ...(file.status ? { status: file.status } : {}),
-    ...(file.missingAt !== undefined ? { missingAt: file.missingAt } : {}),
+    ...(source.filePath ? { filePath: source.filePath } : {}),
+    ...(source.label || source.displayName ? { label: source.label || source.displayName } : {}),
+    ...(source.ext !== undefined ? { ext: source.ext } : {}),
+    ...(source.mime ? { mime: source.mime } : {}),
+    ...(source.kind ? { kind: source.kind } : {}),
+    ...(source.storageKind ? { storageKind: source.storageKind } : {}),
+    ...(source.status ? { status: source.status } : {}),
+    ...(source.missingAt !== undefined ? { missingAt: source.missingAt } : {}),
+    ...(source.resource ? { resource: source.resource } : {}),
   };
 }

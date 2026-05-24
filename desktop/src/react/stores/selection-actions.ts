@@ -2,6 +2,34 @@ import { useStore } from './index';
 import type { PreviewItem } from '../types';
 import type { EditorView } from '@codemirror/view';
 import type { FloatingAnchorRect } from './input-slice';
+import type { ChatMessage } from './chat-types';
+
+const MAX_QUOTED_SELECTION_CHARS = 2000;
+
+let quotedSelectionLifecycle:
+  | { target: Document; cleanup: () => void }
+  | null = null;
+
+export function initQuotedSelectionLifecycle(target: Document = document): () => void {
+  if (quotedSelectionLifecycle?.target === target) {
+    return quotedSelectionLifecycle.cleanup;
+  }
+  quotedSelectionLifecycle?.cleanup();
+
+  const handleSelectionChange = () => {
+    clearSelectionIfNativeSelectionIsEmpty(target);
+  };
+  target.addEventListener('selectionchange', handleSelectionChange);
+
+  const cleanup = () => {
+    target.removeEventListener('selectionchange', handleSelectionChange);
+    if (quotedSelectionLifecycle?.target === target) {
+      quotedSelectionLifecycle = null;
+    }
+  };
+  quotedSelectionLifecycle = { target, cleanup };
+  return cleanup;
+}
 
 /**
  * 捕获 previewItem 中的文本选中。
@@ -37,6 +65,7 @@ function captureCMSelection(previewItem: PreviewItem, view: EditorView): void {
   useStore.getState().setQuotedSelection({
     text,
     sourceTitle: previewItem.title,
+    sourceKind: 'preview',
     sourceFilePath: previewItem.filePath,
     lineStart,
     lineEnd,
@@ -53,15 +82,79 @@ function captureDOMSelection(previewItem: PreviewItem): void {
     clearSelection();
     return;
   }
-  const clipped = text.length > 2000 ? text.slice(0, 2000) : text;
+  const clipped = clipQuotedText(text);
 
   useStore.getState().setQuotedSelection({
     text: clipped,
     sourceTitle: previewItem.title,
+    sourceKind: 'preview',
     charCount: text.length,
     anchorRect: sel && sel.rangeCount > 0 ? getRangeAnchorRect(sel.getRangeAt(0)) : undefined,
     updatedAt: Date.now(),
   });
+}
+
+export function captureChatSelection(sessionPath: string): void {
+  const sel = window.getSelection();
+  const text = sel?.toString().trim();
+  if (!sel || !text || sel.rangeCount === 0) {
+    clearSelection();
+    return;
+  }
+
+  const anchorElement = nodeElement(sel.anchorNode);
+  const focusElement = nodeElement(sel.focusNode);
+  if (!anchorElement || !focusElement) return;
+  if (isInteractiveSelectionElement(anchorElement) || isInteractiveSelectionElement(focusElement)) return;
+
+  const anchorMessage = closestMessageElement(anchorElement);
+  const focusMessage = closestMessageElement(focusElement);
+  if (!anchorMessage || !focusMessage || anchorMessage !== focusMessage) return;
+
+  const messageId = anchorMessage.dataset.messageId;
+  if (!messageId) return;
+
+  const message = findMessage(sessionPath, messageId);
+  if (!message) return;
+
+  useStore.getState().setQuotedSelection({
+    text: clipQuotedText(text),
+    sourceTitle: message.role === 'assistant' ? 'Assistant message' : 'User message',
+    sourceKind: 'chat',
+    sourceSessionPath: sessionPath,
+    sourceMessageId: message.id,
+    sourceRole: message.role,
+    charCount: text.length,
+    anchorRect: getRangeAnchorRect(sel.getRangeAt(0)),
+    updatedAt: Date.now(),
+  });
+}
+
+function clipQuotedText(text: string): string {
+  return text.length > MAX_QUOTED_SELECTION_CHARS ? text.slice(0, MAX_QUOTED_SELECTION_CHARS) : text;
+}
+
+function nodeElement(node: Node | null): Element | null {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) return node as Element;
+  return node.parentElement;
+}
+
+function closestMessageElement(element: Element): HTMLElement | null {
+  return element.closest<HTMLElement>('[data-message-id]');
+}
+
+function isInteractiveSelectionElement(element: Element): boolean {
+  return !!element.closest('input, textarea, select, button, [contenteditable="true"], [data-selection-ignore="true"], [data-mobile-gesture-ignore="true"]');
+}
+
+function findMessage(sessionPath: string, messageId: string): ChatMessage | null {
+  const session = useStore.getState().chatSessions[sessionPath];
+  if (!session) return null;
+  for (const item of session.items) {
+    if (item.type === 'message' && item.data.id === messageId) return item.data;
+  }
+  return null;
 }
 
 function toPlainRect(rect: DOMRect | ClientRect): FloatingAnchorRect {
@@ -118,4 +211,18 @@ function getCMSelectionAnchorRect(view: EditorView, from: number, to: number): F
 export function clearSelection(): void {
   const s = useStore.getState();
   if (s.quotedSelection) s.clearQuotedSelection();
+}
+
+function clearSelectionIfNativeSelectionIsEmpty(target: Document): void {
+  const sel = getNativeSelection(target);
+  const text = sel?.toString().trim();
+  if (sel && text && sel.rangeCount > 0) return;
+  clearSelection();
+}
+
+function getNativeSelection(target: Document): Selection | null {
+  if (typeof target.getSelection === 'function') {
+    return target.getSelection();
+  }
+  return target.defaultView?.getSelection?.() ?? window.getSelection();
 }

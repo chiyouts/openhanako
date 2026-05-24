@@ -17,6 +17,7 @@ import { createTodoTool } from "../lib/tools/todo.js";
 import { createDeskManager } from "../lib/desk/desk-manager.js";
 import { CronStore } from "../lib/desk/cron-store.js";
 import { createCronTool } from "../lib/tools/cron-tool.js";
+import { createAutomationTool } from "../lib/tools/automation-tool.js";
 import { createWebFetchTool } from "../lib/tools/web-fetch.js";
 import { createStageFilesTool } from "../lib/tools/output-file-tool.js";
 import { createArtifactTool } from "../lib/tools/artifact-tool.js";
@@ -38,6 +39,10 @@ import { createCurrentStatusTool } from "../lib/tools/current-status-tool.js";
 import { createTerminalTool } from "../lib/tools/terminal-tool.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 import { getPlatformPromptNote } from "./platform-prompt.js";
+import { assertAgentConfigPatchYuan, getAgentConfigRepairState } from "./yuan-registry.js";
+import { createModuleLogger } from "../lib/debug-log.js";
+
+const moduleLog = createModuleLogger("agent");
 
 export class Agent {
   /**
@@ -96,11 +101,13 @@ export class Agent {
     this._systemPrompt = "";
     this._descriptionRefreshHandler = null;
     this._runtimeInitialized = false;
+    this._repairState = null;
 
     // Desk 系统（与 memory 完全独立）
     this._deskManager = null;
     this._cronStore = null;
     this._cronTool = null;
+    this._automationTool = null;
     this._stageFilesTool = null;
     // Legacy compatibility only. Fresh sessions should write files and stage
     // them via stage_files; restored old sessions may still need this schema.
@@ -143,6 +150,7 @@ export class Agent {
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
     this._experienceEnabled = this._config.experience?.enabled === true;
+    this._refreshRepairState();
   }
 
   async init(log = () => {}, sharedModels = {}, resolveModel = null) {
@@ -166,6 +174,10 @@ export class Agent {
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
     this._experienceEnabled = this._config.experience?.enabled === true;
+    this._refreshRepairState();
+    if (this._repairState) {
+      throw new Error(`Agent config needs repair: ${this._repairState.message}`);
+    }
 
     // 3. 初始化各模块
     log(`  [agent] 3. 模块初始化完成`);
@@ -200,7 +212,7 @@ export class Agent {
         // 写迁移标记，防止重复迁移
         fs.writeFileSync(migrationDone, new Date().toISOString());
       } catch (err) {
-        console.error(`[agent] v1→v2 迁移失败（不影响启动）: ${err.message}`);
+        moduleLog.error(`v1→v2 迁移失败（不影响启动）: ${err.message}`);
         // 迁移失败也写标记，避免每次启动重试
         try { fs.writeFileSync(migrationDone, `failed: ${err.message}`); } catch {}
       }
@@ -217,10 +229,10 @@ export class Agent {
     this._memoryModel = userSetUtilityLarge || chatModelRef;
 
     if (!userSetUtility && chatModelRef) {
-      console.log(`[agent] utility 模型未配置，使用聊天模型作为工具模型`);
+      moduleLog.log(`utility 模型未配置，使用聊天模型作为工具模型`);
     }
     if (!userSetUtilityLarge && chatModelRef) {
-      console.log(`[agent] utility_large 模型未配置，使用聊天模型作为记忆模型`);
+      moduleLog.log(`utility_large 模型未配置，使用聊天模型作为记忆模型`);
     }
 
     // 保存解析函数：每次 tick 现场调用，拿到最新凭证。
@@ -233,11 +245,11 @@ export class Agent {
         this._resolveModel(this._memoryModel, this._config);
       } catch (err) {
         const src = userSetUtilityLarge ? "utility_large" : "聊天模型 fallback";
-        console.warn(`[memory] ${src} 解析失败，记忆系统暂不可用（改完凭证后 tick 会自动恢复） — ${err.message}`);
+        moduleLog.warn(`记忆系统暂不可用：${src} 解析失败（改完凭证后 tick 会自动恢复） — ${err.message}`);
         this._cb?.emitDevLog?.(`记忆系统暂不可用：${src} 解析失败 — ${err.message}`, "warn");
       }
     } else if (!this._memoryModel) {
-      console.warn("[memory] 记忆系统未启动：utility_large 未配置且无聊天模型可 fallback");
+      moduleLog.warn("记忆系统未启动：utility_large 未配置且无聊天模型可 fallback");
       this._cb?.emitDevLog?.("记忆系统未启动：未配置工具模型且无聊天模型可 fallback", "warn");
     }
 
@@ -256,7 +268,7 @@ export class Agent {
           // _systemPrompt 是非 session 路径（巡检/cron/频道/DM/bridge owner 新建）
           // 共享的 cache，必须按 master 构建，不被 per-session 开关污染。
           this._systemPrompt = this.buildSystemPrompt({ forceMemoryEnabled: this._memoryMasterEnabled });
-          console.log(`[${this.agentName}] 记忆编译完成，system prompt 已刷新`);
+          moduleLog.log(`${this.agentName} 记忆编译完成，system prompt 已刷新`);
         },
         sessionDir: this.sessionDir,
         memoryDir: path.dirname(this.memoryMdPath),
@@ -272,7 +284,7 @@ export class Agent {
       // 避免 agent runtime 初始化时直接抢前台 CPU。
       this._memoryTicker.start();
     } else {
-      console.warn(`[agent] ⚠ 未配置 utility 模型，记忆系统暂不可用（用户可在设置中配置后重启）`);
+      moduleLog.warn(`⚠ 未配置 utility 模型，记忆系统暂不可用（用户可在设置中配置后重启）`);
     }
 
     // 7. 创建工具（记忆 + 通用）
@@ -293,7 +305,7 @@ export class Agent {
     log(`  [agent] 8. Desk 系统...`);
     this._deskManager = createDeskManager(this.deskDir);
     this._deskManager.ensureDir();
-    this._cronStore = new CronStore(
+    this._cronStore = this._cb?.getStudioCronStore?.() || new CronStore(
       path.join(this.deskDir, "cron-jobs.json"),
       path.join(this.deskDir, "cron-runs"),
     );
@@ -302,6 +314,20 @@ export class Agent {
       confirmStore: this._cb?.getConfirmStore?.(),
       emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      getAgentId: () => this.id,
+      getSessionCwd: (sp) => this._cb?.getSessionCwd?.(sp),
+      getSessionWorkspaceFolders: (sp) => this._cb?.getSessionWorkspaceFolders?.(sp) || [],
+      getHomeCwd: (agentId) => this._cb?.getHomeCwd?.(agentId),
+    });
+    this._automationTool = createAutomationTool(this._cronStore, {
+      getAutoApprove: () => this._config?.desk?.cron_auto_approve !== false,
+      confirmStore: this._cb?.getConfirmStore?.(),
+      emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      getAgentId: () => this.id,
+      getSessionCwd: (sp) => this._cb?.getSessionCwd?.(sp),
+      getSessionWorkspaceFolders: (sp) => this._cb?.getSessionWorkspaceFolders?.(sp) || [],
+      getHomeCwd: (agentId) => this._cb?.getHomeCwd?.(agentId),
     });
     this._stageFilesTool = createStageFilesTool({
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
@@ -416,6 +442,7 @@ export class Agent {
         agentId,
         agentsDir: path.dirname(this.agentDir),
         listAgents,
+        isEnabled: () => this._cb?.isChannelsEnabled?.() ?? false,
         onDmSent: (fromId, toId) => this._dmSentHandler?.(fromId, toId),
       });
     }
@@ -547,6 +574,8 @@ export class Agent {
   get utilityModel() { return this._utilityModel; }
   get memoryModel() { return this._memoryModel; }
   get runtimeInitialized() { return this._runtimeInitialized; }
+  get needsRepair() { return !!this._repairState; }
+  get repairState() { return this._repairState ? { ...this._repairState } : null; }
   /**
    * 当前记忆模型凭证（现场 resolve，不缓存）
    * 用户改完 provider key/url/api 后这里立即反映最新值
@@ -603,6 +632,7 @@ export class Agent {
       this._webFetchTool,
       this._todoTool,
       this._cronTool,
+      this._automationTool,
       this._stageFilesTool,
       ...legacyArtifactTools,
       this._channelTool,
@@ -699,9 +729,14 @@ export class Agent {
    * @param {object} partial - 要合并的配置片段
    */
   updateConfig(partial, options = {}) {
+    assertAgentConfigPatchYuan(this.productDir, partial);
     // 写入磁盘 + 重新加载
     saveConfig(this.configPath, partial);
     this._config = loadConfig(this.configPath);
+    this._refreshRepairState();
+    if (this._repairState) {
+      throw new Error(`Agent config needs repair: ${this._repairState.message}`);
+    }
 
     // 更新身份
     const isZh = String(this._config.locale || "").startsWith("zh");
@@ -710,7 +745,7 @@ export class Agent {
 
     // yuan 切换只需更新 config，buildSystemPrompt 会实时读模板
     if (partial.agent?.yuan) {
-      console.log(`[agent] yuan type switched to: ${partial.agent.yuan}`);
+      moduleLog.log(`yuan type switched to: ${partial.agent.yuan}`);
     }
 
     // 记忆总开关
@@ -736,6 +771,10 @@ export class Agent {
     if (options.refreshDescription || partial.agent?.yuan) {
       this._descriptionRefreshHandler?.();
     }
+  }
+
+  _refreshRepairState() {
+    this._repairState = getAgentConfigRepairState(this._config, this.productDir);
   }
 
   // ════════════════════════════
@@ -1063,15 +1102,19 @@ export class Agent {
         "**Do not** launch the browser when web_search or web_fetch can do the job. Browser startup is expensive and opens a window that interrupts the user."
     );
 
-    // 设置工具路由
-    parts.push(isZh
-      ? "\n## 设置修改\n\n" +
-        "用户提到修改设置而未指明具体软件时，默认指本应用的设置。\n" +
-        "用户要求修改偏好设置（包括但不限于：外观主题、语言地区、模型选择、安全权限、记忆功能、个人信息、工作目录）时，使用 update_settings 工具。不要搜索网页，不要编辑配置文件。意图明确时直接 apply，不确定时先 search。"
-      : "\n## Settings Changes\n\n" +
-        "When the user mentions changing settings without specifying a particular application, assume they mean this application.\n" +
-        "When the user asks to change preferences (including but not limited to: appearance/theme, language/region, model selection, security/permissions, memory, personal info, working directory), use the update_settings tool. Do not search the web or edit config files. When intent is clear, apply directly; when unsure, search first."
-    );
+    // 设置工具路由只在工具可用时注入，用户关闭后 prompt 层也消失。
+    const disabledTools = Array.isArray(this._config?.tools?.disabled) ? this._config.tools.disabled : [];
+    const updateSettingsEnabled = !disabledTools.includes("update_settings");
+    if (updateSettingsEnabled) {
+      parts.push(isZh
+        ? "\n## 设置修改\n\n" +
+          "用户提到修改设置而未指明具体软件时，默认指本应用的设置。\n" +
+          "用户要求修改偏好设置（包括但不限于：外观主题、语言地区、模型选择、安全权限、记忆功能、个人信息、工作目录、MCP 连接器）时，使用 update_settings 工具。不要搜索网页，不要编辑配置文件。意图明确时直接 apply，执行后用一句话报告修改结果；不确定时先 search。"
+        : "\n## Settings Changes\n\n" +
+          "When the user mentions changing settings without specifying a particular application, assume they mean this application.\n" +
+          "When the user asks to change preferences (including but not limited to: appearance/theme, language/region, model selection, security/permissions, memory, personal info, working directory, MCP connectors), use the update_settings tool. Do not search the web or edit config files. When intent is clear, apply directly and report the result in one sentence; when unsure, search first."
+      );
+    }
 
     // 主动技能获取引导（仅在 allow_github_fetch 开启时注入）
     // learn_skills 从全局 preferences 读取
@@ -1165,6 +1208,19 @@ export class Agent {
         `When the user says "workspace", they mean the current working directory (cwd).` +
         (cwdPath ? `\nCurrent working directory: ${cwdPath}` : "") +
         `\nFiles and directories mentioned by the user should be searched in the current working directory first.`
+    );
+
+    parts.push(isZh
+      ? "\n## 文件与命令工具使用\n\n" +
+        "查看文件和目录时优先用 read/grep/find/ls。\n" +
+        "修改已有源码文件时优先用 edit，新建完整文件或全量替换时用 write。\n" +
+        "运行测试、构建、包脚本、生成器和命令行工具时用 shell。\n" +
+        "结构化文件工具可用时，避免用 shell 重定向修改源码文件。"
+      : "\n## Tool Use For Files And Commands\n\n" +
+        "Use read/grep/find/ls to inspect files.\n" +
+        "Use edit for source-code changes to existing files and write for new complete files.\n" +
+        "Use shell for builds, tests, package scripts, generators, and command-line tools.\n" +
+        "Avoid shell redirection to modify source files when structured file tools are available."
     );
 
     parts.push(isZh

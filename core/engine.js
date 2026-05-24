@@ -20,6 +20,7 @@ import { migrateToProvidersYaml } from "./migrate-providers.js";
 import { migrateProviderMediaConfig } from "./provider-media-config.js";
 import { runMigrations } from "./migrations.js";
 import { createServerRuntimeContext } from "./server-runtime-context.js";
+import { StudioCronService } from "./studio-cron-service.js";
 import { createRuntimeExecutionBoundary } from "./execution-boundary.js";
 import { ResourceAccessService } from "./resource-access-service.js";
 import { ResourceService } from "./resource-service.js";
@@ -32,6 +33,7 @@ import { PluginDevService } from "./plugin-dev-service.js";
 import { createPluginDevTools } from "./plugin-dev-tools.js";
 import { DefaultResourceLoader, SettingsManager } from "../lib/pi-sdk/index.js";
 import { DeferredResultCoordinator } from "../lib/deferred-result-coordinator.js";
+import { getToolSessionPath, normalizeToolRuntimeContext } from "../lib/tools/tool-session.js";
 import { loadLocale } from "../server/i18n.js";
 
 /** 已知的外部 AI 工具技能目录（相对 $HOME） */
@@ -92,7 +94,7 @@ import { SkillManager } from "./skill-manager.js";
 import { BridgeSessionManager } from "./bridge-session-manager.js";
 import { createSlashSystem } from "./slash-commands/index.js";
 import { AgentManager } from "./agent-manager.js";
-import { sanitizeMessagesForModel } from "./message-sanitizer.js";
+import { sanitizeMessagesForModel, stripHistoricalInlineMediaForReplay } from "./message-sanitizer.js";
 import { normalizeProviderContextMessages, normalizeProviderPayload } from "./provider-compat.js";
 import { VisionBridge } from "./vision-bridge.js";
 import { SessionCoordinator } from "./session-coordinator.js";
@@ -104,7 +106,7 @@ import {
   summarizeActivity as _summarizeActivity,
   summarizeActivityQuick as _summarizeActivityQuick,
 } from "./llm-utils.js";
-import { debugLog } from "../lib/debug-log.js";
+import { debugLog, createModuleLogger } from "../lib/debug-log.js";
 import { createSandboxedTools } from "../lib/sandbox/index.js";
 import { externalReadPathsFromSessionFiles } from "../lib/sandbox/win32-policy.js";
 import { t } from "../server/i18n.js";
@@ -134,6 +136,9 @@ import {
   translateSkillNamesWithCache,
 } from "../lib/skills/skill-name-translation-cache.js";
 
+const moduleLog = createModuleLogger("engine");
+const toolAvailabilityLog = createModuleLogger("tool-availability");
+
 export class HanaEngine {
   /**
    * @param {object} dirs
@@ -153,6 +158,15 @@ export class HanaEngine {
     this.userDir = path.join(hanakoHome, "user");
     this.channelsDir = path.join(hanakoHome, "channels");
     fs.mkdirSync(this.channelsDir, { recursive: true });
+    this._studioCronService = new StudioCronService({
+      hanakoHome: this.hanakoHome,
+      agentsDir: this.agentsDir,
+      getStudioId: () => {
+        const studioId = this._runtimeContext?.studioId;
+        if (!studioId) throw new Error("runtime studioId unavailable");
+        return studioId;
+      },
+    });
     this._sessionFiles = new SessionFileRegistry({
       managedCacheRoot: path.join(hanakoHome, "session-files"),
     });
@@ -360,6 +374,7 @@ export class HanaEngine {
   /** @ui-focus-only 返回 UI 焦点 agent 的 ID */
   get currentAgentId() { return this._agentMgr.activeAgentId; }
   get confirmStore() { return this._confirmStore; }
+  getStudioCronStore() { return this._studioCronService; }
 
   /** @deprecated 工具应通过 emitEvent(event, sessionPath) 传入显式 sessionPath */
   emitSessionEvent(event) {
@@ -383,6 +398,9 @@ export class HanaEngine {
       this._deferredResultCoordinator = new DeferredResultCoordinator({
         store,
         sessionCoordinator: this._sessionCoord,
+        recordCustomEntry: (sessionPath, customType, data) => (
+          this.recordSessionCustomEntry(sessionPath, customType, data)
+        ),
       });
       this._deferredResultCoordinator.start();
     }
@@ -545,6 +563,11 @@ export class HanaEngine {
   async abortBridgeSession(key) { return this._bridge?.abortSession(key) ?? false; }
   steerBridgeSession(key, text) { return this._bridge?.steerSession(key, text) ?? false; }
   get bridgeSessionManager() { return this._bridge; }
+  recordSessionCustomEntry(sessionPath, customType, data) {
+    const bridgeResult = this._bridge?.recordCustomEntryForSessionPath?.(sessionPath, customType, data);
+    if (bridgeResult?.ok) return bridgeResult;
+    return this._sessionCoord.recordCustomEntry(sessionPath, customType, data);
+  }
   getBridgeContextForSessionPath(sessionPath, opts = {}) {
     return this._bridge?.getBridgeContextForSessionPath?.(sessionPath, opts) || null;
   }
@@ -740,8 +763,17 @@ export class HanaEngine {
   setSessionThinkingLevel(sessionPath, level) { return this._sessionCoord.setSessionThinkingLevel(sessionPath, level); }
   getSandbox() { return this._prefs.getSandbox(); }
   setSandbox(v) { this._prefs.setSandbox(v); }
-  getSandboxNetwork() { return this._prefs.getSandboxNetwork(); }
-  setSandboxNetwork(v) { this._prefs.setSandboxNetwork(v); }
+  getSandboxNetwork() {
+    if (process.platform === "win32") return true;
+    return this._prefs.getSandboxNetwork();
+  }
+  setSandboxNetwork(v) {
+    const enabled = typeof v === "string" ? v === "true" : !!v;
+    if (process.platform === "win32" && !enabled) {
+      throw new Error("Windows command sandbox does not support network isolation; sandboxed commands keep network access.");
+    }
+    this._prefs.setSandboxNetwork(enabled);
+  }
   getHardwareAcceleration() { return this._prefs.getHardwareAcceleration(); }
   setHardwareAcceleration(v) { this._prefs.setHardwareAcceleration(v); }
   getFileBackup() { return this._prefs.getFileBackup(); }
@@ -769,6 +801,8 @@ export class HanaEngine {
   setLearnSkills(p) { this._prefs.setLearnSkills(p); }
   getLocale() { return this._prefs.getLocale(); }
   setLocale(l) { this._prefs.setLocale(l); }
+  getSetupComplete() { return this._prefs.getSetupComplete(); }
+  markSetupComplete() { return this._prefs.markSetupComplete(); }
   getEditor() { return this._prefs.getEditor(); }
   setEditor(p) { return this._prefs.setEditor(p); }
   getAppearance() { return this._prefs.getAppearance(); }
@@ -1130,8 +1164,9 @@ export class HanaEngine {
         pi.on("context", (event, ctx) => {
           const model = ctx?.model;
           if (!model) return;
-          const { messages, stripped, strippedImages, strippedVideos } = sanitizeMessagesForModel(event.messages, model);
-          if (stripped === 0) return;
+          const replaySafe = stripHistoricalInlineMediaForReplay(event.messages);
+          const { messages, stripped, strippedImages, strippedVideos } = sanitizeMessagesForModel(replaySafe.messages, model);
+          if (replaySafe.stripped === 0 && stripped === 0) return;
           const sessionPath = ctx?.sessionManager?.getSessionFile?.();
           if (sessionPath && strippedImages > 0 && !this._imageStripNotified.has(sessionPath)) {
             this._imageStripNotified.add(sessionPath);
@@ -1172,13 +1207,13 @@ export class HanaEngine {
 
     // 4. 模型发现
     log(`[init] 4/5 发现可用模型...`);
-    try { await this.syncModelsAndRefresh(); } catch {}
+    try { await this.syncModelsAndRefresh(); } catch (err) { moduleLog.warn(`[init] syncModelsAndRefresh failed: ${err?.message}`); }
     await this._models.refreshAvailable();
     this._configCoord.normalizeUtilityApiPreferences(log);
     const availableModels = this._models.availableModels;
     log(`[init] 4/5 找到 ${availableModels.length} 个模型: ${availableModels.map(m => `${m.provider}/${m.id}`).join(", ")}`);
     if (availableModels.length === 0) {
-      console.warn("[engine] ⚠ 未找到可用模型，请在设置中配置 API key");
+      moduleLog.warn("⚠ 未找到可用模型，请在设置中配置 API key");
       this._models.defaultModel = null;
     } else {
       // migrations #5 之后 models.chat 必为 {id, provider} 对象；
@@ -1187,12 +1222,12 @@ export class HanaEngine {
       const chatRef = this.agent.config.models?.chat;
       const ref = (typeof chatRef === "object" && chatRef?.id && chatRef?.provider) ? chatRef : null;
       if (!ref) {
-        console.warn("[engine] ⚠ 未配置 models.chat（或配置缺 provider），defaultModel 为 null");
+        moduleLog.warn("⚠ 未配置 models.chat（或配置缺 provider），defaultModel 为 null");
         this._models.defaultModel = null;
       } else {
         const model = findModel(availableModels, ref.id, ref.provider);
         if (!model) {
-          console.error(`[engine] ⚠ 配置的模型 "${ref.provider}/${ref.id}" 不在可用列表中，defaultModel 为 null`);
+          moduleLog.error(`⚠ 配置的模型 "${ref.provider}/${ref.id}" 不在可用列表中，defaultModel 为 null`);
           this._models.defaultModel = null;
         } else {
           this._models.defaultModel = model;
@@ -1210,7 +1245,7 @@ export class HanaEngine {
     });
 
     // 7. Bridge 孤儿清理
-    try { this._bridge.reconcile(); } catch {}
+    try { this._bridge.reconcile(); } catch (err) { moduleLog.warn(`[init] bridge reconcile failed: ${err?.message}`); }
 
     // 8. 沙盒日志
     const sandboxEnabled = this._readPreferences().sandbox !== false;
@@ -1239,10 +1274,14 @@ export class HanaEngine {
           try {
             const stat = fs.statSync(filePath);
             if (now - stat.mtimeMs > maxAge) fs.unlinkSync(filePath);
-          } catch { /* best effort */ }
+          } catch {
+            // 过期 ephemeral 文件清理 best-effort：单个文件 stat/unlink 失败跳过即可，下次启动再试。
+          }
         }
       }
-    } catch { /* best effort */ }
+    } catch {
+      // 整体清理 best-effort：扫描 agents 目录失败不应阻塞 init 后续步骤。
+    }
   }
 
   async dispose() {
@@ -1251,7 +1290,7 @@ export class HanaEngine {
       if (this._pluginManager) {
         for (const p of this._pluginManager.listPlugins()) {
           if (p.status === "loaded") {
-            await this._pluginManager.unloadPlugin(p.id);
+            await this._pluginManager.unloadPlugin(p.id, { pluginKey: p.pluginKey });
           }
         }
       }
@@ -1289,7 +1328,9 @@ export class HanaEngine {
     try {
       const pkgPath = path.join(this.productDir, "..", "package.json");
       appVersion = JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version || "0.0.0";
-    } catch {}
+    } catch {
+      // package.json 缺失/损坏时沿用上面的 "0.0.0" 默认值，仅用于插件兼容性检查。
+    }
     this.appVersion = appVersion;
 
     this._pluginManager = new PluginManager({
@@ -1407,6 +1448,10 @@ export class HanaEngine {
       agentId = opts.agentDir ? path.basename(opts.agentDir) : (this.agent?.id || "");
       toolAgent = opts.agentDir ? this.getAgent(agentId) : this.agent;
     }
+    const getSessionPath = typeof opts.getSessionPath === "function"
+      ? opts.getSessionPath
+      : (() => null);
+
     // Append plugin tools
     const pluginTools = this._pluginManager?.getAllTools() || [];
     const executionBoundary = this._runtimeContext
@@ -1417,11 +1462,21 @@ export class HanaEngine {
       : {};
     const wrappedPluginTools = pluginTools.map(t => ({
       ...t,
-      execute: (toolCallId, params, runtimeCtx) => t.execute(toolCallId, params, {
-        ...runtimeCtx,
-        agentId,
-        ...executionScope,
-      }),
+      execute: (toolCallId, params, signalOrRuntimeCtx, onUpdate, piCtx) => {
+        const { ctx: runtimeCtx } = normalizeToolRuntimeContext(signalOrRuntimeCtx, piCtx);
+        const sessionPath = runtimeCtx?.sessionPath
+          || getToolSessionPath(runtimeCtx)
+          || getSessionPath()
+          || null;
+        const mergedCtx = {
+          ...runtimeCtx,
+          ...(sessionPath ? { sessionPath } : {}),
+          ...(opts.bridgeContext ? { bridgeContext: opts.bridgeContext } : {}),
+          agentId,
+          ...executionScope,
+        };
+        return t.execute(toolCallId, params, signalOrRuntimeCtx, onUpdate, mergedCtx);
+      },
     }));
     const pluginDevTools = this._pluginDevService && this._prefs.getPluginDevToolsEnabled?.() === true
       ? createPluginDevTools({
@@ -1436,7 +1491,7 @@ export class HanaEngine {
         agentId,
         channelsEnabled: resolveChannelsEnabledForToolAvailability(this),
       },
-      { warn: (msg) => console.warn(`[tool-availability] ${msg}`) },
+      { warn: (msg) => toolAvailabilityLog.warn(msg) },
     );
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
@@ -1444,7 +1499,6 @@ export class HanaEngine {
     const extraReadOnlyPaths = this._getResolvedExternalSkillPaths(effectiveWorkspace)
       .map((entry) => entry.dirPath);
     const workspaceFolders = opts.workspaceFolders || [];
-    const getSessionPath = opts.getSessionPath || (() => null);
     const fileReadSessionPaths = Array.isArray(opts.fileReadSessionPaths)
       ? opts.fileReadSessionPaths.filter((sp) => typeof sp === "string" && sp.trim())
       : [];
@@ -1476,7 +1530,9 @@ export class HanaEngine {
       extraReadOnlyPaths,
       executionBoundary,
       getSandboxEnabled: () => this._readPreferences().sandbox !== false,
-      getSandboxNetworkEnabled: () => this._readPreferences().sandbox_network !== false,
+      getSandboxNetworkEnabled: () => process.platform === "win32"
+        ? true
+        : this._readPreferences().sandbox_network !== false,
       getExternalReadPaths,
       getSessionPath,
       recordFileOperation: (entry) => this.registerSessionFile(entry),
@@ -1545,6 +1601,10 @@ export class HanaEngine {
     if (callbacks?.hub) this._slashSystem?.dispatcher?.setHub(callbacks.hub);
   }
 
+  registerAgentPhoneAbortHandler(handler, meta = {}) {
+    return this._hubCallbacks?.registerAgentPhoneAbortHandler?.(handler, meta) || (() => {});
+  }
+
   setEventBus(bus) {
     for (const fn of this._listeners) bus.subscribe(fn);
     this._listeners.clear();
@@ -1566,7 +1626,8 @@ export class HanaEngine {
       this._eventBus.emit(event, sessionPath);
     } else {
       for (const fn of this._listeners) {
-        try { fn(event, sessionPath); } catch {}
+        // 单个 listener 抛错不能中断对其余 listener 的分发，但要记录避免静默漏处理事件。
+        try { fn(event, sessionPath); } catch (err) { moduleLog.warn(`event listener threw for ${event?.type}: ${err?.message}`); }
       }
     }
   }
@@ -1695,7 +1756,9 @@ export class HanaEngine {
         .map(e => {
           const fp = path.join(dir, e.name);
           let mtime = 0;
-          try { mtime = fs.statSync(fp).mtimeMs; } catch {}
+          try { mtime = fs.statSync(fp).mtimeMs; } catch {
+            // 文件在 readdir 之后被删 / 无权限时 stat 失败，mtime 保持 0 兜底。
+          }
           return { name: e.name, isDir: e.isDirectory(), mtime };
         });
     } catch {

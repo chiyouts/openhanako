@@ -20,7 +20,7 @@ import {
   formatMessagesForLLM,
 } from "../lib/channels/channel-store.js";
 import { runAgentPhoneSession } from "./agent-executor.js";
-import { debugLog } from "../lib/debug-log.js";
+import { debugLog, createModuleLogger } from "../lib/debug-log.js";
 import { getLocale } from "../server/i18n.js";
 import {
   getAgentPhoneProjectionPath,
@@ -34,6 +34,8 @@ import {
   positiveIntegerOrNull,
 } from "../lib/conversations/agent-phone-prompt.js";
 
+const log = createModuleLogger("dm-router");
+
 const MAX_ROUNDS = 3;
 const COOLDOWN_MS = 10_000;
 
@@ -45,6 +47,10 @@ export class DmRouter {
   }
 
   get _engine() { return this._hub.engine; }
+
+  _isPhoneEnabled() {
+    return this._engine.isChannelsEnabled?.() !== false;
+  }
 
   async _recordPhoneActivity(agentId, peerId, state, summary, details = {}) {
     try {
@@ -109,6 +115,8 @@ export class DmRouter {
    * @param {string} toId - 接收方 agent ID
    */
   async handleNewDm(fromId, toId) {
+    if (!this._isPhoneEnabled()) return;
+
     const key = `${fromId}→${toId}`;
 
     // 清理卡住的 entry（超过 5 分钟视为异常）
@@ -136,7 +144,7 @@ export class DmRouter {
     try {
       await this._processReply(fromId, toId);
     } catch (err) {
-      console.error(`[dm-router] ${key} failed: ${err.message}`);
+      log.error(`${key} failed: ${err.message}`);
     } finally {
       this._processing.delete(key);
     }
@@ -146,6 +154,8 @@ export class DmRouter {
    * 让 toId 读取聊天记录并回复，可能触发多轮
    */
   async _processReply(fromId, toId) {
+    if (!this._isPhoneEnabled()) return;
+
     const engine = this._engine;
     const agentsDir = engine.agentsDir;
 

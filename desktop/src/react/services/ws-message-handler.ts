@@ -16,6 +16,7 @@ import { loadDeskFiles } from '../stores/desk-actions';
 import {
   appendChannelMessage as appendChannelMessageAction,
   loadChannels as loadChannelsAction,
+  markChannelMessagesDirty as markChannelMessagesDirtyAction,
   openChannel as openChannelAction,
   upsertConversationAgentActivity as upsertConversationAgentActivityAction,
 } from '../stores/channel-actions';
@@ -159,6 +160,14 @@ function isKnownChatSession(sessionPath: string, state = useStore.getState()): b
   return !!state.chatSessions?.[sessionPath] || state.sessions.some((s: any) => s.path === sessionPath);
 }
 
+function requestInputFocusForCurrentSession(sessionPath: string | null): void {
+  if (!sessionPath) return;
+  const state = useStore.getState();
+  if (state.pendingNewSession) return;
+  if (state.currentSessionPath !== sessionPath) return;
+  state.requestInputFocus?.();
+}
+
 function applyCompactionLifecycle(msg: any): void {
   const sp = msg.sessionPath;
   if (!sp) return;
@@ -183,6 +192,7 @@ export function applyStreamingStatus(isStreaming: boolean, sessionPath: string |
   // 元数据层：把 isStreaming 视为 sessionPath 维度的权威信号，统一写回 streamingSessions。
   // 这一层不分焦点，任何来源（普通 status、stream_resume 恢复）都必须到达这里，
   // 否则重连后服务端说「已结束」前端却留着旧的 streaming 标记，UI 会卡在"思考中"。
+  const wasStreaming = !!sessionPath && useStore.getState().streamingSessions.includes(sessionPath);
   if (sessionPath) {
     if (isStreaming) {
       useStore.setState(s => ({
@@ -196,6 +206,10 @@ export function applyStreamingStatus(isStreaming: boolean, sessionPath: string |
         streamingSessions: s.streamingSessions.filter((p: string) => p !== sessionPath),
       }));
     }
+  }
+
+  if (!isStreaming && wasStreaming) {
+    requestInputFocusForCurrentSession(sessionPath);
   }
 
   // 渲染层：只有焦点 session 才影响 UI 占位 / sessions 列表。
@@ -289,6 +303,7 @@ export function handleServerMessage(msg: any): void {
     dispatchStreamKey(msg.sessionPath, msg);
     applyTodoToolEnd(msg);
     applyToolEndSessionFile(msg);
+    applyContentBlockSessionFile(msg);
     return;
   }
 
@@ -301,6 +316,7 @@ export function handleServerMessage(msg: any): void {
       const turnSp = msg.sessionPath;
       if (turnSp) {
         requestContextUsage(turnSp);
+        requestInputFocusForCurrentSession(turnSp);
       } else {
         console.warn('[ws] turn_end missing sessionPath, skipping context_usage request');
       }
@@ -310,6 +326,7 @@ export function handleServerMessage(msg: any): void {
     if (msg.type === 'tool_end') {
       applyToolEndSessionFile(msg);
     }
+    applyContentBlockSessionFile(msg);
     // COMPAT(create_artifact, remove no earlier than v0.133):
     // 旧 artifact block 进入当前 Preview 面板。
     if (msg.type === 'content_block' && msg.block?.type === 'artifact' && state.currentTab === 'chat') {
@@ -555,12 +572,17 @@ export function handleServerMessage(msg: any): void {
 
     case 'channel_new_message': {
       const store = useStore.getState();
-      const isViewing = store.currentTab === 'channels' && store.currentChannel === msg.channelName && document.visibilityState === 'visible';
-      if (msg.channelName && isViewing && msg.message) {
-        appendChannelMessageAction(msg.channelName, msg.message);
-      } else if (msg.channelName && isViewing) {
+      const isVisibleCurrentChannel =
+        store.currentTab === 'channels'
+        && store.currentChannel === msg.channelName
+        && document.visibilityState === 'visible';
+      if (msg.channelName && msg.message) {
+        appendChannelMessageAction(msg.channelName, msg.message, { markRead: isVisibleCurrentChannel });
+      } else if (msg.channelName && isVisibleCurrentChannel) {
+        markChannelMessagesDirtyAction(msg.channelName);
         openChannelAction(msg.channelName);
       } else if (msg.channelName) {
+        markChannelMessagesDirtyAction(msg.channelName);
         loadChannelsAction();
       }
       break;
@@ -685,4 +707,25 @@ function applyToolEndSessionFile(msg: any): void {
   const sessionFile = msg.details?.sessionFile;
   if (!sp || !sessionFile) return;
   useStore.getState().upsertSessionRegistryFile?.(sp, sessionFile);
+}
+
+function applyContentBlockSessionFile(msg: any): void {
+  const sp = msg.sessionPath;
+  const block = msg.block;
+  if (!sp || block?.type !== 'file') return;
+  useStore.getState().upsertSessionRegistryFile?.(sp, {
+    id: block.fileId,
+    fileId: block.fileId,
+    filePath: block.filePath,
+    label: block.label,
+    ext: block.ext,
+    mime: block.mime,
+    kind: block.kind,
+    storageKind: block.storageKind,
+    status: block.status,
+    missingAt: block.missingAt,
+    resource: block.resource,
+    origin: block.origin,
+    operations: block.operations,
+  });
 }

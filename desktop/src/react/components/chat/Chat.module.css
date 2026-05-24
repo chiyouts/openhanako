@@ -660,6 +660,82 @@
 
 .settingsConfirmStatusConfirmed { color: var(--accent); }
 
+/* ── 设置修改结果卡片 ── */
+
+.settingsUpdateCard {
+    margin: var(--space-md) 0;
+    padding: var(--space-md);
+    background: var(--bg-card, #fff);
+    border-radius: var(--radius-chat-card);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+    font-size: 0.86rem;
+    min-width: 300px;
+    max-width: 460px;
+}
+
+.settingsUpdateCardApplied {
+    border-left: 3px solid var(--accent);
+}
+
+.settingsUpdateCardFailed {
+    border-left: 3px solid var(--red, #b24a3b);
+}
+
+.settingsUpdateHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.settingsUpdateTitle {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+.settingsUpdateStatus {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0;
+}
+
+.settingsUpdateSummary {
+    margin-top: var(--space-xs);
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.settingsUpdateChanges {
+    margin-top: var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settingsUpdateChange {
+    display: grid;
+    grid-template-columns: minmax(88px, 0.38fr) minmax(0, 1fr);
+    gap: var(--space-sm);
+    align-items: center;
+    padding-top: 6px;
+    border-top: 1px solid var(--overlay-light, rgba(0,0,0,0.06));
+}
+
+.settingsUpdateChangeLabel {
+    color: var(--text-muted);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.settingsUpdateChangeValue {
+    color: var(--text);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 /* ── 工具调用折叠组 ── */
 
 .toolGroup {
@@ -996,6 +1072,77 @@
 .fileOutputActionMenuItem:focus-visible {
     background: var(--overlay-subtle);
     outline: none;
+}
+
+/* ── 媒体生成占位卡片 ── */
+
+.mediaGenerationCard {
+    display: inline-flex;
+    width: clamp(220px, 50%, 360px);
+    max-width: 100%;
+    aspect-ratio: 1 / 1;
+    margin: var(--space-sm) 0;
+    padding: 0.3rem;
+    background: var(--bg-card, var(--bg));
+    border: 0.5px solid var(--border, rgba(0,0,0,0.08));
+    border-radius: var(--radius-chat-card);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+}
+
+.mediaGenerationCardFailed {
+    border-style: dashed;
+}
+
+.mediaGenerationSurface {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-chat-card-inner);
+    background: linear-gradient(180deg, rgba(0,0,0,0.035), rgba(0,0,0,0.065)), var(--bg-card, var(--bg));
+    overflow: hidden;
+}
+
+.mediaGenerationSurface::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -45%;
+    width: 45%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.68), rgba(255,255,255,0.88), rgba(255,255,255,0.68), transparent);
+    animation: hana-media-shine calc(var(--duration-slow) * 7) var(--ease-standard) infinite;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.mediaGenerationText {
+    position: relative;
+    z-index: 1;
+    width: min(52%, 220px);
+    min-width: 0;
+    text-align: center;
+}
+
+.mediaGenerationTitle {
+    color: var(--text);
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.mediaGenerationPrompt {
+    margin-top: 0.22rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ── 图片输出卡片 ── */

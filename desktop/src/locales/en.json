@@ -81,7 +81,18 @@
     "bridge": "Social Platforms",
     "toggle": "Sidebar",
     "bridgeShort": "Bridge",
-    "pinned": "Pinned"
+    "pinned": "Pinned",
+    "searchPlaceholder": "Search chats",
+    "searchClear": "Clear search",
+    "searchTitleMatches": "Titles",
+    "searchContentMatches": "Content",
+    "searchingTitles": "Searching titles…",
+    "searchingContent": "Searching content…",
+    "searchNoResults": "No matching chats",
+    "searchFailed": "Search failed"
+  },
+  "titlebar": {
+    "currentChatTitle": "Current chat title"
   },
   "session": {
     "untitled": "New Chat",
@@ -151,8 +162,8 @@
     "selectAllMessages": "Select all messages",
     "screenshotInProgress": "Taking screenshot",
     "screenshotProgressPage": "Taking screenshot, page {current}/{total}",
-    "screenshotSaved": "Screenshot saved to the \"截图\" folder in your working directory",
-    "screenshotSavedMultiple": "Saved {count} screenshot segments to the \"截图\" folder in your working directory",
+    "screenshotSaved": "Screenshot saved under \"OH-Works\" in your working directory",
+    "screenshotSavedMultiple": "Saved {count} screenshot segments under \"OH-Works\" in your working directory",
     "screenshotFailed": "Screenshot save failed",
     "selectedCount": "{count} selected",
     "allDone": "All done",
@@ -237,7 +248,7 @@
   "slash": {
     "diary": "Write today's diary",
     "diaryBusy": "Writing diary...",
-    "diaryDone": "Diary saved to diary folder",
+    "diaryDone": "Diary saved under OH-Works",
     "diaryFailed": "Failed to write diary",
     "xing": "Create skill from conversation",
     "compact": "Compact context",
@@ -519,6 +530,11 @@
       "done": "🧭 Clone dispatched",
       "failed": "🧭 Clone ran into trouble"
     },
+    "wait": {
+      "running": "⏳ {name} is waiting for results",
+      "done": "⏳ Wait finished",
+      "failed": "⏳ Wait interrupted"
+    },
     "check_pending_tasks": {
       "running": "📋 {name} is checking unfinished business",
       "done": "📋 {name} all caught up",
@@ -749,7 +765,8 @@
       "deleteCancel": "Cancel",
       "deleted": "{name} deleted",
       "deleteFailed": "Delete failed",
-      "setActive": "Set as active",
+      "setPrimary": "Set as primary",
+      "setPrimaryFailed": "Set primary failed",
       "lastAgent": "Must keep at least one agent",
       "yuan": "Yuan",
       "yuanHint": "\"Yuan\" is the agent's subconscious. Build your unique companion from this foundation.",
@@ -757,6 +774,7 @@
         "title": "Tools",
         "description": "Tool switches take effect after restarting or starting a conversation. Active conversations keep using the tool set they started with.",
         "items": {
+          "automation": { "label": "Automation", "summary": "Let the agent create scheduled notifications and plugin actions" },
           "browser": { "label": "Browser", "summary": "Control a headless browser to navigate web pages" },
           "computer": { "label": "Computer Use", "summary": "Control approved desktop apps with a visible action overlay" },
           "cron": { "label": "Scheduled Tasks", "summary": "Run tasks automatically at specified times" },
@@ -883,6 +901,7 @@
       "sandboxNetwork": "Allow Sandbox Network",
       "sandboxNetworkDesc": "Allow sandboxed commands to reach the public internet while keeping filesystem write limits active",
       "sandboxNetworkDisabledDesc": "When the sandbox is off, commands already run as normal local processes; this only affects sandboxed commands",
+      "sandboxNetworkWin32Unsupported": "The Windows command sandbox isolates file writes only and does not support network isolation; commands keep the current user's network access",
       "networkProxy": "Outbound Proxy",
       "networkProxyMode": "Proxy Mode",
       "networkProxyModeDesc": "In-app APIs, OAuth, Bridge, and web requests use this outbound proxy",
@@ -897,6 +916,9 @@
       "networkProxyWss": "WSS proxy, optional",
       "networkProxyNoProxy": "Bypass proxy, for example localhost, 127.0.0.1, ::1",
       "networkProxySave": "Save Proxy Settings",
+      "archivedChats": "Archived Conversations",
+      "archivedChatsDesc": "Review archived chats, restore conversations you need again, or permanently delete records you no longer want",
+      "viewArchivedChats": "View Archived Conversations",
       "fileBackup": "File Backup",
       "fileBackupDesc": "Automatically save original file content before AI modifications or deletions",
       "retention": "Retention",
@@ -1043,7 +1065,7 @@
       "searchProviderField": "Search engine",
       "searchApiKey": "Search API Key",
       "searchApiKeyHint": "Enter the API key for the selected search provider",
-      "searchApiKeysAutoHint": "Auto uses configured Tavily, Brave, and Serper keys first, then falls back to browser search when quota, errors, empty results, or weak relevance get in the way.",
+      "searchApiKeysAutoHint": "Auto uses configured Tavily, Brave, and Serper keys first, then AnySearch free search, then browser search when quota, errors, empty results, or weak relevance get in the way.",
       "searchApiKeyNotRequired": "Browser search does not need an API key. It opens the search page locally in the background and structures the results.",
       "favorites": "Favorites",
       "searchModel": "Search models...",
@@ -1579,6 +1601,12 @@
     "title": "Scheduled Tasks",
     "empty": "No scheduled tasks yet.\nThe assistant will create them when needed.",
     "defaultModel": "Default model",
+    "executor": {
+      "agentSession": "Agent",
+      "notify": "Notify",
+      "pluginAction": "Plugin action",
+      "directAction": "Direct action"
+    },
     "edit": "Edit",
     "delete": "Delete"
   },
@@ -2184,7 +2212,7 @@
       "sandbox": "Sandbox Security",
       "sandboxDesc": "Restrict file system write scope",
       "sandboxNetwork": "Sandbox Network",
-      "sandboxNetworkDesc": "Allow sandboxed commands to access the public internet; commands are already unrestricted by Hana networking when the sandbox is off",
+      "sandboxNetworkDesc": "Allow sandboxed commands to access the public internet; Windows command sandboxing does not support network isolation and always keeps the current user's network access",
       "locale": "Language",
       "timezone": "Timezone",
       "timezoneDesc": "IANA timezone (e.g. Asia/Shanghai)",
@@ -2317,5 +2345,6 @@
   "preview.exitMarkdownPreview": "Back to editing",
   "preview.openInNewWindow": "Open in new window",
   "preview.openInNewWindowUnsupported": "Not supported for this type",
-  "preview.markdownEditorStatus": "Selected {selected} chars · Total {total} chars"
+  "preview.markdownEditorStatus": "Selected {selected} chars · Total {total} chars",
+  "preview.markdownAttachmentInsertFailed": "Failed to insert attachment"
 }
