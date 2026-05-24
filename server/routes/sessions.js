@@ -1257,6 +1257,9 @@ function sessionFileLifecycleFields(file, engine) {
     ...(source.storageKind ? { storageKind: source.storageKind } : {}),
     ...(source.status ? { status: source.status } : {}),
     ...(source.missingAt !== undefined ? { missingAt: source.missingAt } : {}),
+    ...(source.mtimeMs !== undefined ? { mtimeMs: source.mtimeMs } : {}),
+    ...(source.size !== undefined ? { size: source.size } : {}),
+    ...(source.version ? { version: source.version } : {}),
     ...(source.resource ? { resource: source.resource } : {}),
   };
 }

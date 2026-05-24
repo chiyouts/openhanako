@@ -292,6 +292,15 @@ describe('SessionList context menu', () => {
     expect(css).toMatch(/@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)\s*\{[\s\S]*\.sessionItem:hover \.sessionArchiveBtn\s*\{/);
   });
 
+  it('keeps the mobile session search input at 16px to avoid browser auto zoom', () => {
+    const css = fs.readFileSync(
+      path.join(__dirname, '../../components/SessionList.module.css'),
+      'utf-8',
+    );
+
+    expect(css).toMatch(/:global\(\.mobile-desktop-root\) \.sessionSearchInput\s*\{[\s\S]*font-size:\s*16px/);
+  });
+
   it('shows row action controls for the active or focused session without requiring hover', () => {
     const css = fs.readFileSync(
       path.join(__dirname, '../../components/SessionList.module.css'),

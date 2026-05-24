@@ -9,10 +9,17 @@
     -webkit-app-region: no-drag;
 }
 
+.sessionListScroller {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-app-region: no-drag;
+}
+
 .sessionSearchBox {
-    position: sticky;
-    top: 0;
-    z-index: 2;
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -59,6 +66,10 @@
 .sessionSearchInput::placeholder {
     color: var(--text-muted);
     opacity: 0.64;
+}
+
+:global(.mobile-desktop-root) .sessionSearchInput {
+    font-size: 16px;
 }
 
 .sessionSearchClear {

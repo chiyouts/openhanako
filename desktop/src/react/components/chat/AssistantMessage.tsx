@@ -255,9 +255,9 @@ const EXT_LABELS: Record<string, string> = {
 const MediaGenerationBlock = memo(function MediaGenerationBlock({ block }: { block: any }) {
   const failed = block.status === 'failed' || block.status === 'aborted';
   const kindLabel = block.kind === 'video' ? '视频' : '图片';
-  const title = failed
+  const titleText = failed
     ? `${kindLabel}生成失败`
-    : `${kindLabel}生成中...`;
+    : `${kindLabel}生成中`;
   const reason = typeof block.reason === 'string' ? block.reason : '';
   const prompt = typeof block.prompt === 'string' ? block.prompt : '';
 
@@ -265,7 +265,10 @@ const MediaGenerationBlock = memo(function MediaGenerationBlock({ block }: { blo
     <div className={`${styles.mediaGenerationCard}${failed ? ` ${styles.mediaGenerationCardFailed}` : ''}`}>
       <div className={styles.mediaGenerationSurface}>
         <div className={styles.mediaGenerationText}>
-          <div className={styles.mediaGenerationTitle}>{title}</div>
+          <div className={styles.mediaGenerationTitle} aria-label={failed ? titleText : `${titleText}...`}>
+            <span>{titleText}</span>
+            {!failed && <span className={styles.mediaGenerationDots} aria-hidden="true" />}
+          </div>
           {(failed ? reason : prompt) && (
             <div className={styles.mediaGenerationPrompt}>{failed ? reason : prompt}</div>
           )}

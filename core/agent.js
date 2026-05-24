@@ -362,6 +362,7 @@ export class Agent {
     this._currentStatusTool = createCurrentStatusTool({
       getTimezone: () => this._cb?.getTimezone?.() || "",
       getAgent: () => this,
+      getVisionBridge: () => this._cb?.getEngine?.()?.getVisionBridge?.() || null,
       getSessionModel: (sessionPath) => this._cb?.getEngine?.()?.getSessionByPath?.(sessionPath)?.model || null,
       getCurrentModel: () => this._cb?.getEngine?.()?.currentModel || null,
       getUiContext: (sessionPath) => this._cb?.getEngine?.()?.getUiContext?.(sessionPath) || null,

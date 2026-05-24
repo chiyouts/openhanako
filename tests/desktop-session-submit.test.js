@@ -46,6 +46,38 @@ function makeFakeSession({ replyText = "desktop reply", toolMedia = [], toolMedi
 }
 
 describe("submitDesktopSessionMessage", () => {
+  it("rejects concurrent submissions for the same session before streaming status is emitted", async () => {
+    const session = makeFakeSession();
+    const ready = Promise.withResolvers();
+    const engine = {
+      ensureSessionLoaded: vi.fn(() => ready.promise),
+      promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+      emitEvent: vi.fn(),
+      setUiContext: vi.fn(),
+      isSessionStreaming: vi.fn(() => false),
+    };
+
+    const first = submitDesktopSessionMessage(engine, {
+      sessionPath: "/tmp/desk.jsonl",
+      text: "first",
+      displayMessage: { text: "first" },
+    });
+    await Promise.resolve();
+
+    await expect(submitDesktopSessionMessage(engine, {
+      sessionPath: "/tmp/desk.jsonl",
+      text: "second",
+      displayMessage: { text: "second" },
+    })).rejects.toThrow("session_busy");
+
+    ready.resolve(session);
+    await expect(first).resolves.toMatchObject({ text: "desktop reply" });
+    expect(engine.emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "session_status", isStreaming: true }),
+      "/tmp/desk.jsonl",
+    );
+  });
+
   it("emits a session-scoped user message, toggles streaming status, and returns captured assistant output", async () => {
     const session = makeFakeSession({
       replyText: "desktop reply",

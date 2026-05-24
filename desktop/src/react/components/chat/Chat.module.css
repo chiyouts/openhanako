@@ -1108,19 +1108,6 @@
     overflow: hidden;
 }
 
-.mediaGenerationSurface::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -45%;
-    width: 45%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.68), rgba(255,255,255,0.88), rgba(255,255,255,0.68), transparent);
-    animation: hana-media-shine calc(var(--duration-slow) * 7) var(--ease-standard) infinite;
-    pointer-events: none;
-    z-index: 2;
-}
-
 .mediaGenerationText {
     position: relative;
     z-index: 1;
@@ -1133,6 +1120,17 @@
     color: var(--text);
     font-size: 0.82rem;
     line-height: 1.35;
+}
+
+.mediaGenerationDots {
+    display: inline-block;
+    min-width: 1.8em;
+    text-align: left;
+}
+
+.mediaGenerationDots::after {
+    content: '';
+    animation: hana-cycling-dots 1.4s steps(1, end) infinite;
 }
 
 .mediaGenerationPrompt {

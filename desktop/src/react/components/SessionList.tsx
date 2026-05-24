@@ -222,6 +222,56 @@ function SessionListInner() {
   const hasSearchResults = titleResults.length > 0 || visibleContentResults.length > 0;
   const isSearching = !!searchQueryTrimmed;
   const showEmptyState = sessions.length === 0 && !isSearching;
+  const content = showEmptyState ? (
+    <div className={styles.sessionEmpty}>{t('sidebar.empty')}</div>
+  ) : isSearching ? (
+    <SessionSearchResults
+      titleResults={titleResults}
+      contentResults={visibleContentResults}
+      status={searchStatus}
+      hasResults={hasSearchResults}
+      agents={agents}
+      activeSessionPath={activeSessionPath}
+      pendingNewSession={pendingNewSession}
+    />
+  ) : sections.map(section => {
+    const items = section.items.map(s => (
+      <SessionItem
+        key={s.path}
+        session={s}
+        isActive={!pendingNewSession && s.path === activeSessionPath}
+        isStreaming={streamingSessions.includes(s.path)}
+        isPinned={!!s.pinnedAt}
+        agents={agents}
+        browserState={browserSessions[s.path] || null}
+        onCloseBrowser={handleCloseBrowserSession}
+      />
+    ));
+
+    if (section.kind === 'pinned') {
+      return (
+        <section key={section.id} className={styles.pinnedSection}>
+          <div className={`${styles.sessionSectionTitle} ${styles.pinnedSectionTitle}`}>
+            <span>{t(section.titleKey)}</span>
+            <svg className={styles.pinnedTitleIcon} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 17v5" />
+              <path d="M5 17h14" />
+              <path d="M7 3h10l-2 9H9L7 3z" />
+              <path d="M9 12l-2 5h10l-2-5" />
+            </svg>
+          </div>
+          {items}
+        </section>
+      );
+    }
+
+    return (
+      <Fragment key={section.id}>
+        <div className={styles.sessionSectionTitle}>{t(section.titleKey)}</div>
+        {items}
+      </Fragment>
+    );
+  });
 
   return (
     <>
@@ -230,56 +280,9 @@ function SessionListInner() {
         onChange={setSearchQuery}
         onClear={() => setSearchQuery('')}
       />
-      {showEmptyState ? (
-        <div className={styles.sessionEmpty}>{t('sidebar.empty')}</div>
-      ) : isSearching ? (
-        <SessionSearchResults
-          titleResults={titleResults}
-          contentResults={visibleContentResults}
-          status={searchStatus}
-          hasResults={hasSearchResults}
-          agents={agents}
-          activeSessionPath={activeSessionPath}
-          pendingNewSession={pendingNewSession}
-        />
-      ) : sections.map(section => {
-        const items = section.items.map(s => (
-          <SessionItem
-            key={s.path}
-            session={s}
-            isActive={!pendingNewSession && s.path === activeSessionPath}
-            isStreaming={streamingSessions.includes(s.path)}
-            isPinned={!!s.pinnedAt}
-            agents={agents}
-            browserState={browserSessions[s.path] || null}
-            onCloseBrowser={handleCloseBrowserSession}
-          />
-        ));
-
-        if (section.kind === 'pinned') {
-          return (
-            <section key={section.id} className={styles.pinnedSection}>
-              <div className={`${styles.sessionSectionTitle} ${styles.pinnedSectionTitle}`}>
-                <span>{t(section.titleKey)}</span>
-                <svg className={styles.pinnedTitleIcon} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 17v5" />
-                  <path d="M5 17h14" />
-                  <path d="M7 3h10l-2 9H9L7 3z" />
-                  <path d="M9 12l-2 5h10l-2-5" />
-                </svg>
-              </div>
-              {items}
-            </section>
-          );
-        }
-
-        return (
-          <Fragment key={section.id}>
-            <div className={styles.sessionSectionTitle}>{t(section.titleKey)}</div>
-            {items}
-          </Fragment>
-        );
-      })}
+      <div className={styles.sessionListScroller}>
+        {content}
+      </div>
     </>
   );
 }
