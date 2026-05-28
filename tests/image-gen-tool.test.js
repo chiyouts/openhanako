@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-let execute;
-let name;
-let description;
-let parameters;
+// generate-image no longer imports adapter modules directly — adapters come
+// through ctx._mediaGen.registry.  We import the tool fresh each time so
+// module-level state doesn't leak between tests.
+
+let execute, name, description, parameters;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -13,6 +14,10 @@ beforeEach(async () => {
   description = mod.description;
   parameters = mod.parameters;
 });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function makeAdapter(overrides = {}) {
   return {
@@ -28,7 +33,9 @@ function makeMediaGen(adapterOverrides = {}) {
   const adapter = makeAdapter(adapterOverrides);
   const registry = {
     get: vi.fn((id) => (id === adapter.id ? adapter : undefined)),
-    getByType: vi.fn(() => [adapter]),
+    getProtocol: vi.fn(() => null),
+    getDefault: vi.fn((_type) => adapter),
+    getByType: vi.fn((_type) => [adapter]),
   };
   const store = {
     add: vi.fn(),
@@ -36,10 +43,8 @@ function makeMediaGen(adapterOverrides = {}) {
   };
   const poller = {
     add: vi.fn(),
-    checkNow: vi.fn(),
   };
-  const getWritableGeneratedDir = vi.fn(async () => "/tmp/generated");
-  return { registry, store, poller, adapter, getWritableGeneratedDir };
+  return { registry, store, poller, adapter };
 }
 
 function makeCtx(mediaGen, busOverrides = {}) {
@@ -47,13 +52,6 @@ function makeCtx(mediaGen, busOverrides = {}) {
     _mediaGen: mediaGen,
     dataDir: "/tmp/test-data",
     sessionPath: "/sessions/test.jsonl",
-    agentId: "agent-1",
-    config: {
-      get: vi.fn((key) => {
-        if (key === "defaultImageModel") return undefined;
-        return {};
-      }),
-    },
     bus: {
       request: vi.fn(async () => ({})),
       ...busOverrides,
@@ -72,6 +70,10 @@ async function flushBackgroundSubmits() {
   await Promise.resolve();
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe("generate-image tool — metadata", () => {
   it("exports correct name and required param", () => {
     expect(name).toBe("generate-image");
@@ -81,9 +83,16 @@ describe("generate-image tool — metadata", () => {
 });
 
 describe("generate-image tool — initialization guard", () => {
-  it("returns an initialization error when media plugin state is missing", async () => {
-    const result = await execute({ prompt: "a cat" }, makeCtx(null));
-    expect(result.content[0].text).toContain("not initialized");
+  it("returns error text when ctx._mediaGen is missing", async () => {
+    const ctx = makeCtx(null);
+    const result = await execute({ prompt: "a cat" }, ctx);
+    expect(result.content[0].text).toContain("未初始化");
+  });
+
+  it("returns error text when registry is missing from _mediaGen", async () => {
+    const ctx = makeCtx({ store: {}, poller: {} });
+    const result = await execute({ prompt: "a cat" }, ctx);
+    expect(result.content[0].text).toContain("未初始化");
   });
 
   it("requires an explicit sessionPath before starting a background task", async () => {
@@ -92,32 +101,106 @@ describe("generate-image tool — initialization guard", () => {
 
     const result = await execute({ prompt: "a cat" }, ctx);
 
-    expect(result.content[0].text).toContain("sessionPath");
+    expect(result.content[0].text).toContain("缺少 sessionPath");
     expect(mediaGen.store.add).not.toHaveBeenCalled();
   });
 });
 
 describe("generate-image tool — adapter resolution", () => {
-  it("returns an error when no adapter is available", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen();
+  it("returns error when no adapter of that type exists", async () => {
+    const { registry, store, poller } = makeMediaGen();
     registry.getByType.mockReturnValue([]);
-    const result = await execute({ prompt: "a cat" }, makeCtx({ registry, store, poller, getWritableGeneratedDir }));
-    expect(result.content[0].text).toContain("No image generation provider");
+    const ctx = makeCtx({ registry, store, poller });
+
+    const result = await execute({ prompt: "a cat" }, ctx);
+    expect(result.content[0].text).toContain("没有可用的图片生成 provider");
   });
 
-  it("uses an explicit adapter id directly when present in the registry", async () => {
-    const { registry, store, poller, adapter, getWritableGeneratedDir } = makeMediaGen();
+  it("returns error when explicit provider not found", async () => {
+    const { registry, store, poller } = makeMediaGen();
+    registry.get.mockReturnValue(undefined);
+    const ctx = makeCtx({ registry, store, poller });
+
+    const result = await execute({ prompt: "a cat", provider: "nonexistent" }, ctx);
+    expect(result.content[0].text).toContain('指定的图片生成 provider "nonexistent" 不可用');
+    expect(store.add).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit provider via registry.get when provider is specified", async () => {
+    const { registry, store, poller, adapter } = makeMediaGen();
     registry.get.mockImplementation((id) => (id === "fake-provider" ? adapter : undefined));
-    await execute({ prompt: "a cat", provider: "fake-provider" }, makeCtx({ registry, store, poller, getWritableGeneratedDir }));
+    const ctx = makeCtx({ registry, store, poller });
+
+    await execute({ prompt: "a cat", provider: "fake-provider" }, ctx);
     expect(registry.get).toHaveBeenCalledWith("fake-provider");
   });
 
-  it("uses last registered adapter when no provider is specified", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen();
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+  it("does not fall back to another provider when explicit media provider resolution fails", async () => {
+    const requestedAdapter = makeAdapter({
+      id: "minimax",
+      submit: vi.fn(async () => ({ taskId: "task-minimax" })),
+    });
+    const defaultAdapter = makeAdapter({
+      id: "openai",
+      submit: vi.fn(async () => ({ taskId: "task-openai" })),
+    });
+    const registry = {
+      get: vi.fn((id) => (id === "minimax" ? requestedAdapter : defaultAdapter)),
+      getProtocol: vi.fn(() => null),
+      getByType: vi.fn(() => [defaultAdapter]),
+    };
+    const store = { add: vi.fn(), update: vi.fn() };
+    const poller = { add: vi.fn() };
+    const ctx = makeCtx({ registry, store, poller }, {
+      request: vi.fn(async (type) => {
+        if (type === "provider:resolve-media-model") return { error: "no_credentials" };
+        return {};
+      }),
+    });
+
+    const result = await execute({ prompt: "a cat", provider: "minimax", model: "image-01" }, ctx);
+
+    expect(result.content[0].text).toContain('指定的图片生成 provider "minimax" 不可用');
+    expect(requestedAdapter.submit).not.toHaveBeenCalled();
+    expect(defaultAdapter.submit).not.toHaveBeenCalled();
+    expect(store.add).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to an arbitrary provider when an explicit model cannot be resolved", async () => {
+    const { registry, store, poller, adapter } = makeMediaGen({
+      submit: vi.fn(async () => ({ taskId: "task-openai" })),
+    });
+    const ctx = makeCtx({ registry, store, poller }, {
+      request: vi.fn(async (type) => {
+        if (type === "provider:media-providers") {
+          return {
+            providers: {
+              openai: {
+                providerId: "openai",
+                models: [{ id: "gpt-image-1.5", protocolId: "openai-images" }],
+                hasCredentials: true,
+              },
+            },
+          };
+        }
+        return {};
+      }),
+    });
+
+    const result = await execute({ prompt: "a cat", model: "image-01" }, ctx);
+
+    expect(result.content[0].text).toContain('指定的图片生成模型 "image-01" 不可用');
+    expect(adapter.submit).not.toHaveBeenCalled();
+    expect(store.add).not.toHaveBeenCalled();
+  });
+
+  it("uses last registered adapter when no provider specified", async () => {
+    const { registry, store, poller } = makeMediaGen();
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "a cat" }, ctx);
     expect(registry.getByType).toHaveBeenCalledWith("image");
+    expect(registry.get).not.toHaveBeenCalled();
   });
 
   it("falls back to the newest credentialed image adapter when a later adapter is unavailable", async () => {
@@ -129,17 +212,17 @@ describe("generate-image tool — adapter resolution", () => {
       id: "openai-codex-oauth",
       checkAuth: vi.fn(async () => ({ ok: false, message: "no_credentials" })),
       submit: vi.fn(async () => {
-        throw new Error("not logged in");
+        throw new Error("Provider \"openai-codex-oauth\" 未登录。");
       }),
     });
     const registry = {
       get: vi.fn(),
+      getDefault: vi.fn(),
       getByType: vi.fn(() => [openaiAdapter, codexAdapter]),
     };
     const store = { add: vi.fn(), update: vi.fn() };
-    const poller = { add: vi.fn(), checkNow: vi.fn() };
-    const getWritableGeneratedDir = vi.fn(async () => "/tmp/generated");
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const poller = { add: vi.fn() };
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "a desk lamp" }, ctx);
     const taskId = store.add.mock.calls[0][0].taskId;
@@ -148,70 +231,18 @@ describe("generate-image tool — adapter resolution", () => {
     expect(codexAdapter.submit).not.toHaveBeenCalled();
     expect(result.details.mediaGeneration.tasks).toEqual([{ taskId }]);
   });
-
-  it("maps a custom OpenAI-compatible provider to the OpenAI adapter", async () => {
-    const mediaGen = makeMediaGen({
-      id: "openai",
-      submit: vi.fn(async () => ({ taskId: "custom-1" })),
-    });
-    mediaGen.registry.get.mockImplementation((id) => (id === "openai" ? mediaGen.adapter : undefined));
-
-    const busRequest = vi.fn(async (type, payload) => {
-      if (type === "provider:entry" && payload.providerId === "custom-openai") {
-        return { entry: { id: "custom-openai", api: "openai-completions" } };
-      }
-      return {};
-    });
-
-    const ctx = makeCtx(mediaGen, { request: busRequest });
-    await execute({ prompt: "a cat", provider: "custom-openai" }, ctx);
-
-    expect(mediaGen.registry.get).toHaveBeenCalledWith("openai");
-    expect(mediaGen.adapter.submit).toHaveBeenCalledWith(
-      expect.objectContaining({ providerId: "custom-openai" }),
-      expect.objectContaining({ providerId: "custom-openai" }),
-    );
-  });
-
-  it("infers provider from the configured default image model", async () => {
-    const mediaGen = makeMediaGen({
-      id: "openai",
-      submit: vi.fn(async () => ({ taskId: "default-1" })),
-    });
-    mediaGen.registry.get.mockImplementation((id) => (id === "openai" ? mediaGen.adapter : undefined));
-
-    const ctx = makeCtx(mediaGen, {
-      request: vi.fn(async (type, payload) => {
-        if (type === "provider:entry" && payload.providerId === "custom-openai") {
-          return { entry: { id: "custom-openai", api: "openai-completions" } };
-        }
-        return {};
-      }),
-    });
-    ctx.config.get = vi.fn((key) => {
-      if (key === "defaultImageModel") return { id: "gpt-image-2", provider: "custom-openai" };
-      return {};
-    });
-
-    await execute({ prompt: "a cat" }, ctx);
-
-    expect(mediaGen.adapter.submit).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "gpt-image-2", providerId: "custom-openai" }),
-      expect.objectContaining({ providerId: "custom-openai" }),
-    );
-  });
 });
 
 describe("generate-image tool — submit error", () => {
   it("returns a placeholder and marks the task failed when background submit throws", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => { throw new Error("CLI not found"); }),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "a cat" }, ctx);
     const taskId = store.add.mock.calls[0][0].taskId;
-    expect(result.content[0].text).toContain("Submitted 1 image generation task");
+    expect(result.content[0].text).toContain("已提交 1 张");
 
     await flushBackgroundSubmits();
 
@@ -226,35 +257,58 @@ describe("generate-image tool — submit error", () => {
   });
 });
 
-describe("generate-image tool — successful submission flow", () => {
-  it("passes the resolved generated directory into the adapter and task store", async () => {
-    const mediaGen = makeMediaGen({
-      submit: vi.fn(async () => ({ taskId: "t-store" })),
+describe("generate-image tool — single submit returns media placeholder metadata", () => {
+  it("returns a pending media placeholder before adapter.submit settles", async () => {
+    let resolveSubmit;
+    const { registry, store, poller, adapter } = makeMediaGen({
+      submit: vi.fn(() => new Promise((resolve) => {
+        resolveSubmit = resolve;
+      })),
     });
-    const ctx = makeCtx(mediaGen);
+    const ctx = makeCtx({ registry, store, poller });
 
-    await execute({ prompt: "mountains" }, ctx);
+    const resultPromise = execute({ prompt: "a slow moon" }, ctx);
+    const returnedImmediately = await Promise.race([
+      resultPromise.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 10)),
+    ]);
 
-    expect(mediaGen.getWritableGeneratedDir).toHaveBeenCalledWith({ agentId: "agent-1" });
-    expect(mediaGen.adapter.submit).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: "mountains" }),
-      expect.objectContaining({ generatedDir: "/tmp/generated" }),
+    expect(returnedImmediately).toBe(true);
+    const result = await resultPromise;
+    const taskId = store.add.mock.calls[0][0].taskId;
+
+    expect(adapter.submit).toHaveBeenCalledOnce();
+    expect(result.details.mediaGeneration.tasks).toEqual([{ taskId }]);
+    expect(poller.add).toHaveBeenCalledWith(taskId);
+    expect(store.update).not.toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({ files: ["generated.png"] }),
     );
-    expect(mediaGen.store.add).toHaveBeenCalledWith(
-      expect.objectContaining({ generatedDir: "/tmp/generated" }),
+
+    resolveSubmit({ taskId: "remote-task-1", files: ["generated.png"] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.update).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({
+        adapterTaskId: "remote-task-1",
+        files: ["generated.png"],
+        submitState: "submitted",
+      }),
     );
   });
 
   it("returns mediaGeneration metadata on successful single submit", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-abc" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "a sunset" }, ctx);
     const taskId = store.add.mock.calls[0][0].taskId;
 
-    expect(result.content[0].text).toContain("Submitted 1 image generation task");
+    expect(result.content[0].text).toContain("已提交 1 张");
     expect(result.details.card).toBeUndefined();
     expect(result.details.mediaGeneration).toMatchObject({
       kind: "image",
@@ -264,11 +318,11 @@ describe("generate-image tool — successful submission flow", () => {
     expect(result.details.mediaGeneration.batchId).toBeTruthy();
   });
 
-  it("records task with submitState=submitting", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+  it("records task in store", async () => {
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-store" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "mountains" }, ctx);
 
@@ -282,11 +336,11 @@ describe("generate-image tool — successful submission flow", () => {
   });
 
   it("registers task with deferred:register", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-deferred" })),
     });
     const busRequest = vi.fn(async () => ({}));
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir }, { request: busRequest });
+    const ctx = makeCtx({ registry, store, poller }, { request: busRequest });
 
     await execute({ prompt: "ocean" }, ctx);
 
@@ -298,15 +352,16 @@ describe("generate-image tool — successful submission flow", () => {
     expect(deferredCall[1].meta.mediaKind).toBe("image");
     expect(deferredCall[1].meta.deliveryIntent).toBe("ui_only");
     expect(deferredCall[1].meta.triggerParentTurn).toBe(false);
+    expect(deferredCall[1].meta.notifyAgentOnFailure).toBe(true);
   });
 
-  it("marks bridge-originated tasks for bridge delivery", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+  it("marks bridge-originated tasks for bridge delivery instead of desktop parent delivery", async () => {
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-bridge-deferred" })),
     });
     const busRequest = vi.fn(async () => ({}));
     const ctx = {
-      ...makeCtx({ registry, store, poller, getWritableGeneratedDir }, { request: busRequest }),
+      ...makeCtx({ registry, store, poller }, { request: busRequest }),
       bridgeContext: {
         isBridgeSession: true,
         platform: "wechat",
@@ -331,10 +386,10 @@ describe("generate-image tool — successful submission flow", () => {
   });
 
   it("adds task to poller", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-poll" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "forest" }, ctx);
     const taskId = store.add.mock.calls[0][0].taskId;
@@ -343,10 +398,10 @@ describe("generate-image tool — successful submission flow", () => {
   });
 
   it("updates the local task when background submit returns files", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-files", files: ["img.png"] })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "a bird" }, ctx);
     const taskId = store.add.mock.calls[0][0].taskId;
@@ -363,27 +418,27 @@ describe("generate-image tool — successful submission flow", () => {
   });
 });
 
-describe("generate-image tool — multi submit behavior", () => {
+describe("generate-image tool — count=3 concurrent submits", () => {
   it("submits count times and records all tasks", async () => {
     let callIndex = 0;
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: `t-${++callIndex}` })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "stars", count: 3 }, ctx);
 
     expect(store.add).toHaveBeenCalledTimes(3);
     expect(poller.add).toHaveBeenCalledTimes(3);
-    expect(result.content[0].text).toContain("Submitted 3 image generation task");
+    expect(result.content[0].text).toContain("已提交 3 张");
   });
 
   it("clamps count to max 9", async () => {
     let callIndex = 0;
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: `t-${++callIndex}` })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "clouds", count: 10 }, ctx);
 
@@ -391,31 +446,45 @@ describe("generate-image tool — multi submit behavior", () => {
   });
 
   it("clamps count to min 1", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-min" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "waves", count: 0 }, ctx);
 
     expect(store.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("all tasks share the same batchId", async () => {
+    let callIndex = 0;
+    const { registry, store, poller } = makeMediaGen({
+      submit: vi.fn(async () => ({ taskId: `t-batch-${++callIndex}` })),
+    });
+    const ctx = makeCtx({ registry, store, poller });
+
+    await execute({ prompt: "desert", count: 2 }, ctx);
+
+    const batchIds = store.add.mock.calls.map(([arg]) => arg.batchId);
+    expect(batchIds[0]).toBe(batchIds[1]);
+    expect(batchIds[0]).toBeTruthy();
   });
 });
 
 describe("generate-image tool — partial failure handling", () => {
   it("returns placeholders for all requested images and records per-task background failures", async () => {
     let callIndex = 0;
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => {
         callIndex++;
         if (callIndex === 2) throw new Error("network error");
         return { taskId: `t-${callIndex}` };
       }),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "rain", count: 3 }, ctx);
-    expect(result.content[0].text).toContain("Submitted 3 image generation task");
+    expect(result.content[0].text).toContain("已提交 3 张");
     expect(result.details.mediaGeneration.tasks).toHaveLength(3);
 
     await flushBackgroundSubmits();
@@ -426,13 +495,13 @@ describe("generate-image tool — partial failure handling", () => {
   });
 
   it("returns placeholders even when every background submit later fails", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => { throw new Error("quota exceeded"); }),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "snow", count: 2 }, ctx);
-    expect(result.content[0].text).toContain("Submitted 2 image generation task");
+    expect(result.content[0].text).toContain("已提交 2 张");
     expect(result.details.mediaGeneration.tasks).toHaveLength(2);
 
     await flushBackgroundSubmits();
@@ -444,31 +513,32 @@ describe("generate-image tool — partial failure handling", () => {
 
   it("marks a background submit with no provider taskId or files as failed", async () => {
     let callIndex = 0;
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => {
         callIndex++;
+        // second call returns no taskId
         return callIndex === 2 ? {} : { taskId: `t-${callIndex}` };
       }),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     const result = await execute({ prompt: "ice", count: 2 }, ctx);
-    expect(result.content[0].text).toContain("Submitted 2 image generation task");
+    expect(result.content[0].text).toContain("已提交 2 张");
 
     await flushBackgroundSubmits();
 
     const failedUpdates = store.update.mock.calls.filter(([, patch]) => patch.status === "failed");
     expect(failedUpdates).toHaveLength(1);
-    expect(failedUpdates[0][1].failReason).toContain("neither taskId nor files");
+    expect(failedUpdates[0][1].failReason).toContain("没有返回 taskId 或文件");
   });
 });
 
-describe("generate-image tool — image param", () => {
+describe("generate-image tool — image param (image-to-image)", () => {
   it("passes image param to adapter.submit", async () => {
-    const { registry, store, poller, adapter, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller, adapter } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-img2img" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "enhance", image: "/path/to/ref.png" }, ctx);
 
@@ -477,10 +547,10 @@ describe("generate-image tool — image param", () => {
   });
 
   it("omits image key from params when not provided", async () => {
-    const { registry, store, poller, adapter, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller, adapter } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-no-img" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir });
+    const ctx = makeCtx({ registry, store, poller });
 
     await execute({ prompt: "landscape" }, ctx);
 
@@ -489,12 +559,12 @@ describe("generate-image tool — image param", () => {
   });
 });
 
-describe("generate-image tool — deferred registration failures are non-fatal", () => {
+describe("generate-image tool — deferred:register failure is non-fatal", () => {
   it("still returns media placeholder metadata when deferred:register throws", async () => {
-    const { registry, store, poller, getWritableGeneratedDir } = makeMediaGen({
+    const { registry, store, poller } = makeMediaGen({
       submit: vi.fn(async () => ({ taskId: "t-deferred-fail" })),
     });
-    const ctx = makeCtx({ registry, store, poller, getWritableGeneratedDir }, {
+    const ctx = makeCtx({ registry, store, poller }, {
       request: vi.fn(async (type) => {
         if (type === "deferred:register") throw new Error("bus unavailable");
         return {};
@@ -504,7 +574,7 @@ describe("generate-image tool — deferred registration failures are non-fatal",
     const result = await execute({ prompt: "fire" }, ctx);
     const taskId = store.add.mock.calls[0][0].taskId;
 
-    expect(result.content[0].text).toContain("Submitted 1 image generation task");
+    expect(result.content[0].text).toContain("已提交 1 张");
     expect(result.details.mediaGeneration.tasks).toEqual([{ taskId }]);
     expect(ctx.log.warn).toHaveBeenCalled();
   });

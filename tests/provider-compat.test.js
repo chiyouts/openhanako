@@ -27,6 +27,46 @@ describe("isAnthropicModel", () => {
   });
 });
 
+describe("Anthropic Max effort normalization", () => {
+  it("maps Hana's unified Max level to Anthropic max effort", () => {
+    const result = normalizeProviderPayload({
+      model: "claude-opus-4-7",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "xhigh" },
+      max_tokens: 42666,
+    }, {
+      id: "claude-opus-4-7",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      reasoning: true,
+      maxTokens: 128000,
+    }, { mode: "chat", reasoningLevel: "xhigh" });
+
+    expect(result.output_config).toEqual({ effort: "max" });
+    expect(result.max_tokens).toBe(64000);
+  });
+
+  it("does not overwrite an explicit non-default Anthropic output cap", () => {
+    const result = normalizeProviderPayload({
+      model: "claude-sonnet-4-6",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "high" },
+      max_tokens: 12000,
+    }, {
+      id: "claude-sonnet-4-6",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      reasoning: true,
+      maxTokens: 64000,
+    }, { mode: "chat", reasoningLevel: "xhigh" });
+
+    expect(result.output_config).toEqual({ effort: "max" });
+    expect(result.max_tokens).toBe(12000);
+  });
+});
+
 describe("getThinkingFormat", () => {
   it("优先读取模型显式 thinkingFormat 声明", () => {
     expect(getThinkingFormat({
@@ -925,6 +965,25 @@ describe("normalizeProviderPayload — DeepSeek utility 模式", () => {
     // 默认 mode = "chat"，会拉 max_tokens
     const result = normalizeProviderPayload(payload, deepseekV4);
     expect(result.max_tokens).toBe(65536);
+  });
+
+  it("utility 模式尊重自定义 provider 显式声明的 DeepSeek thinking format", () => {
+    const payload = {
+      model: "deepseek-v4-pro",
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 80,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "deepseek-v4-pro",
+      provider: "opencode-go",
+      api: "openai-completions",
+      reasoning: true,
+      maxTokens: 384000,
+      compat: { thinkingFormat: "deepseek" },
+    }, { mode: "utility" });
+
+    expect(result).toMatchObject({ thinking: { type: "disabled" } });
+    expect(result.max_tokens).toBe(80);
   });
 });
 

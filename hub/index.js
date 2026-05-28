@@ -439,7 +439,12 @@ export class Hub {
     // ── provider & agent handlers ──
 
     this._sessionHandlerCleanups.push(bus.handle("provider:credentials", async ({ providerId }) => {
-      const creds = engine.providerRegistry.getCredentials(providerId);
+      const fresh = typeof engine.resolveProviderCredentialsFresh === "function"
+        ? await engine.resolveProviderCredentialsFresh(providerId)
+        : null;
+      const creds = fresh
+        ? { apiKey: fresh.api_key, baseUrl: fresh.base_url, api: fresh.api, accountId: fresh.accountId }
+        : engine.providerRegistry.getCredentials(providerId);
       if (!creds?.apiKey) return { error: "no_credentials" };
       return {
         apiKey: creds.apiKey,
@@ -447,24 +452,6 @@ export class Hub {
         api: creds.api,
         ...(creds.accountId ? { accountId: creds.accountId } : {}),
       };
-    }));
-
-    this._sessionHandlerCleanups.push(bus.handle("provider:entry", async ({ providerId }) => {
-      const entry = engine.providerRegistry.get(providerId);
-      if (!entry) return { error: "not_found" };
-      return { entry };
-    }));
-
-    this._sessionHandlerCleanups.push(bus.handle("provider:list", async () => {
-      const providers = [...engine.providerRegistry.getAll().values()].map((entry) => ({
-        id: entry.id,
-        displayName: entry.displayName,
-        baseUrl: entry.baseUrl,
-        api: entry.api,
-        authType: entry.authType,
-        isBuiltin: entry.isBuiltin,
-      }));
-      return { providers };
     }));
 
     this._sessionHandlerCleanups.push(bus.handle("provider:models-by-type", async ({ type, providerId }) => {
@@ -498,6 +485,68 @@ export class Hub {
       return { providers };
     }));
 
+    this._sessionHandlerCleanups.push(bus.handle("provider:resolve-media-model", async ({
+      providerId,
+      provider,
+      modelId,
+      model,
+      capability = "image_generation",
+      credentialLaneId,
+    } = {}) => {
+      try {
+        const resolved = engine.providerRegistry.resolveMediaModel({
+          providerId: providerId || provider,
+          modelId: modelId || model,
+          capability,
+          credentialLaneId,
+        });
+        const status = engine.providerRegistry.getMediaProviderCredentialStatus(resolved.providerId, capability);
+        const lane = resolved.credentialLane || null;
+        const credentialProviderId = lane?.providerId || status.activeProviderId || resolved.providerId;
+        if (!status.hasCredentials && resolved.provider.authType !== "none") {
+          return { error: status.unavailableReason || "no_credentials" };
+        }
+        return {
+          providerId: resolved.providerId,
+          modelId: resolved.model.id,
+          protocolId: resolved.model.protocolId,
+          capability: resolved.capability,
+          credentialLaneId: lane?.id || status.activeLaneId || null,
+          credentialProviderId,
+        };
+      } catch (err) {
+        return { error: err.message || String(err) };
+      }
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("provider:add-media-model", async ({
+      providerId,
+      capability = "image_generation",
+      model,
+    } = {}) => {
+      try {
+        engine.providerRegistry.addMediaModel(providerId, capability, model);
+        await engine.onProviderChanged?.();
+        return { ok: true };
+      } catch (err) {
+        return { error: err.message || String(err) };
+      }
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("provider:remove-media-model", async ({
+      providerId,
+      capability = "image_generation",
+      modelId,
+    } = {}) => {
+      try {
+        engine.providerRegistry.removeMediaModel(providerId, capability, modelId);
+        await engine.onProviderChanged?.();
+        return { ok: true };
+      } catch (err) {
+        return { error: err.message || String(err) };
+      }
+    }));
+
     this._sessionHandlerCleanups.push(bus.handle("sandbox:check-path", async ({ path: rawPath, operation = "read", agentId, workspace, workspaceFolders } = {}) => {
       if (!rawPath || typeof rawPath !== "string") {
         return { allowed: false, reason: "path is required" };
@@ -527,7 +576,6 @@ export class Hub {
         ? { allowed: true }
         : { allowed: false, reason: result.reason };
     }));
-
     this._sessionHandlerCleanups.push(bus.handle("agent:config", async ({ agentId }) => {
       const { agent, error } = resolveAgentForBus(engine, agentId);
       if (error) return { error };

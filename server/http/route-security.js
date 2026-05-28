@@ -71,6 +71,7 @@ export function classifyHttpRoute({ method = "GET", path = "" } = {}) {
   }
   if (isDeskFileReadRoute(verb, routePath)) return scoped("files.read");
   if (isDeskFileWriteRoute(verb, routePath)) return scoped("files.write");
+  if (routePath === "/api/usage/llm") return verb === "GET" ? LOCAL_ONLY : LOCAL_ONLY;
   if (isSettingsReadRoute(verb, routePath)) return scoped("settings.read");
   if (isSettingsWriteRoute(verb, routePath)) return scoped("settings.write");
   if (isProviderManagementRoute(verb, routePath)) return scoped("providers.manage");
@@ -86,6 +87,9 @@ export function classifyHttpRoute({ method = "GET", path = "" } = {}) {
     return scoped("chat");
   }
   if (routePath === "/api/models") {
+    return verb === "GET" ? scoped("chat") : LOCAL_ONLY;
+  }
+  if (routePath === "/api/models/auxiliary-vision") {
     return verb === "GET" ? scoped("chat") : LOCAL_ONLY;
   }
   if (routePath === "/api/models/set" || routePath === "/api/models/switch") {

@@ -27,6 +27,7 @@ import { languages } from '@codemirror/language-data';
 import { markdownHighlight, codeHighlight } from '../editor/highlight';
 import { markdownTheme, codeTheme } from '../editor/theme';
 import { markdownBlockDecoField, markdownDecoPlugin, markdownImageContextFacet } from '../editor/md-decorations';
+import { markdownCoverField } from '../editor/cover-field';
 import { mermaidDecoField } from '../editor/mermaid-field';
 import { linkClickHandler } from '../editor/link-handler';
 import { tableDecoField } from '../editor/table-field';
@@ -41,7 +42,16 @@ import {
   clearAppFileDragPayload,
   readAppFileDragPayload,
 } from '../utils/app-file-drag';
-import type { FileVersion } from '../types';
+import {
+  isMarkdownCoverOnlyUpdate,
+  mergeMarkdownCoverIntoDocument,
+  parseMarkdownCover,
+} from '../utils/markdown-cover';
+import {
+  applyMarkdownCoverImageDrop,
+  hasMarkdownCoverDropImage,
+} from '../utils/markdown-cover-drop';
+import type { FileVersion, VersionedWriteResult } from '../types';
 
 /* ── Types ── */
 
@@ -55,10 +65,16 @@ export interface PreviewEditorStats {
   totalChars: number;
 }
 
+export type PreviewEditorSaveDocument = (
+  content: string,
+  expectedVersion?: FileVersion | null,
+) => Promise<VersionedWriteResult>;
+
 export interface PreviewEditorProps {
   content: string;
   filePath?: string;
   fileVersion?: FileVersion | null;
+  saveDocument?: PreviewEditorSaveDocument;
   mode: 'markdown' | 'code' | 'csv' | 'text';
   language?: string | null;
   onSelectionChange?: (view: EditorView) => void;
@@ -224,6 +240,26 @@ function dropPosition(view: EditorView, event: DragEvent): number | null {
   }
 }
 
+function dragEventElement(event: DragEvent): Element | null {
+  return event.target instanceof Element ? event.target : null;
+}
+
+function editorCoverElementFromEvent(event: DragEvent): HTMLElement | null {
+  return dragEventElement(event)?.closest('.cm-markdown-cover') as HTMLElement | null;
+}
+
+function clearEditorCoverDropState(view: EditorView): void {
+  view.dom.classList.remove('cm-markdown-cover-rail-active');
+  view.dom.querySelector('.cm-markdown-cover-drop-active')?.classList.remove('cm-markdown-cover-drop-active');
+}
+
+function isEditorCoverRailDrop(view: EditorView, event: DragEvent): boolean {
+  if (parseMarkdownCover(view.state.doc.toString())) return false;
+  const rect = view.scrollDOM.getBoundingClientRect();
+  const y = Number.isFinite(event.clientY) ? event.clientY : rect.top;
+  return y >= rect.top && y <= rect.top + 40;
+}
+
 /* ── File change emitter (global singleton) ── */
 
 const _fileChangeEmitter = new EventTarget();
@@ -240,7 +276,7 @@ function setupFileChangeListener() {
 /* ── Editor Component ── */
 
 export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>(
-  function PreviewEditor({ content, filePath, fileVersion, mode, language, onSelectionChange, onStatsChange, onContentChange, readOnly = false }, ref) {
+  function PreviewEditor({ content, filePath, fileVersion, saveDocument, mode, language, onSelectionChange, onStatsChange, onContentChange, readOnly = false }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -253,6 +289,8 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
     const lastCheckpointAtRef = useRef<number>(0);
     const filePathRef = useRef(filePath);
     filePathRef.current = filePath;
+    const saveDocumentRef = useRef(saveDocument);
+    saveDocumentRef.current = saveDocument;
     const selectionCbRef = useRef(onSelectionChange);
     selectionCbRef.current = onSelectionChange;
     const statsCbRef = useRef(onStatsChange);
@@ -345,31 +383,47 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
 
     const performSave = useCallback(async ({ text, revision }: SaveJob) => {
       const fp = filePathRef.current;
-      if (!fp) return;
+      const saveRemoteDocument = saveDocumentRef.current;
+      if (!fp && !saveRemoteDocument) return;
 
       try {
-        await createCheckpointIfDue(fp);
+        if (fp) await createCheckpointIfDue(fp);
         if (revision !== docRevisionRef.current || fp !== filePathRef.current) return;
         const expectedVersion = diskVersionRef.current;
         let nextVersion: FileVersion | null | undefined;
 
-        if (window.platform?.writeFileIfUnchanged) {
-          const result = await window.platform.writeFileIfUnchanged(fp, text, expectedVersion);
+        if (saveRemoteDocument) {
+          const result = await saveRemoteDocument(text, expectedVersion);
           if (!result?.ok) {
             if (result?.conflict) {
               const tFn = window.t ?? ((p: string) => p);
               throw new Error(tFn('settings.fileChangedOnDisk'));
             }
-            throw new Error('write-file-if-unchanged returned false');
+            throw new Error('saveDocument returned false');
           }
           nextVersion = result.version ?? null;
           if (result.version) diskVersionRef.current = result.version;
           rememberSelfWrite(text);
         } else {
-          rememberSelfWrite(text);
-          const ok = await window.platform?.writeFile(fp, text);
-          if (ok === false) throw new Error('write-file returned false');
-          nextVersion = undefined;
+          if (!fp) return;
+          if (window.platform?.writeFileIfUnchanged) {
+            const result = await window.platform.writeFileIfUnchanged(fp, text, expectedVersion);
+            if (!result?.ok) {
+              if (result?.conflict) {
+                const tFn = window.t ?? ((p: string) => p);
+                throw new Error(tFn('settings.fileChangedOnDisk'));
+              }
+              throw new Error('write-file-if-unchanged returned false');
+            }
+            nextVersion = result.version ?? null;
+            if (result.version) diskVersionRef.current = result.version;
+            rememberSelfWrite(text);
+          } else {
+            rememberSelfWrite(text);
+            const ok = await window.platform?.writeFile(fp, text);
+            if (ok === false) throw new Error('write-file returned false');
+            nextVersion = undefined;
+          }
         }
         lastSavedContentRef.current = text;
 
@@ -398,6 +452,50 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
       pendingSaveRef.current = { text, revision };
       drainSaveQueue();
     }, [drainSaveQueue]);
+
+    const applyIncomingContent = useCallback((nextContent: string, options: { publish?: boolean } = {}) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const current = view.state.doc.toString();
+      if (current === nextContent) {
+        if (options.publish) lastSavedContentRef.current = nextContent;
+        return;
+      }
+
+      const hasLocalUnsavedEdits = !readOnly && current !== lastSavedContentRef.current;
+      if (hasLocalUnsavedEdits) {
+        const merged = mode === 'markdown' && isMarkdownCoverOnlyUpdate(lastSavedContentRef.current, nextContent)
+          ? mergeMarkdownCoverIntoDocument(current, nextContent)
+          : null;
+        if (merged) {
+          docRevisionRef.current += 1;
+          const revision = docRevisionRef.current;
+          if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+          }
+          lastSavedContentRef.current = nextContent;
+          replaceDocumentPreservingSelection(view, merged);
+          contentCbRef.current?.(merged);
+          saveToFile(merged, revision);
+          return;
+        }
+
+        showSaveError('settings.fileChangedOnDisk', 'local edits are not saved yet');
+        return;
+      }
+
+      docRevisionRef.current += 1;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      lastSavedContentRef.current = nextContent;
+      replaceDocumentPreservingSelection(view, nextContent);
+      if (options.publish) {
+        contentCbRef.current?.(nextContent, diskVersionRef.current);
+      }
+    }, [mode, readOnly, saveToFile]);
 
     // Create editor
     useEffect(() => {
@@ -487,6 +585,7 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
             getFileUrl: window.platform?.getFileUrl,
           }),
           markdownDecoPlugin,
+          markdownCoverField,
           markdownBlockDecoField,
           mermaidDecoField,
         ] : []),
@@ -501,6 +600,53 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
 
       const state = EditorState.create({ doc: content, extensions });
       const view = new EditorView({ state, parent: containerRef.current });
+      const onCoverDragOver = (event: DragEvent) => {
+        const coverElement = editorCoverElementFromEvent(event);
+        if (coverElement && filePathRef.current && hasMarkdownCoverDropImage(event.dataTransfer)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+          coverElement.classList.add('cm-markdown-cover-drop-active');
+          view.dom.classList.remove('cm-markdown-cover-rail-active');
+          return;
+        }
+
+        if (filePathRef.current && hasMarkdownCoverDropImage(event.dataTransfer) && isEditorCoverRailDrop(view, event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+          view.dom.classList.add('cm-markdown-cover-rail-active');
+          return;
+        }
+
+        clearEditorCoverDropState(view);
+      };
+      const onCoverDragLeave = (event: DragEvent) => {
+        const coverElement = editorCoverElementFromEvent(event);
+        if (coverElement && !(event.relatedTarget instanceof Node && coverElement.contains(event.relatedTarget))) {
+          coverElement.classList.remove('cm-markdown-cover-drop-active');
+        }
+        if (!(event.relatedTarget instanceof Node && view.dom.contains(event.relatedTarget))) {
+          clearEditorCoverDropState(view);
+        }
+      };
+      const onCoverDrop = (event: DragEvent) => {
+        const coverElement = editorCoverElementFromEvent(event);
+        const isCoverTarget = Boolean(coverElement)
+          || (hasMarkdownCoverDropImage(event.dataTransfer) && isEditorCoverRailDrop(view, event));
+        if (!filePathRef.current || !isCoverTarget || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        clearEditorCoverDropState(view);
+        void applyMarkdownCoverImageDrop({
+          filePath: filePathRef.current,
+          dataTransfer: event.dataTransfer,
+        });
+      };
+      view.dom.addEventListener('dragover', onCoverDragOver, true);
+      view.dom.addEventListener('dragleave', onCoverDragLeave, true);
+      view.dom.addEventListener('drop', onCoverDrop, true);
       viewRef.current = view;
       lastStatsRef.current = null;
       emitStatsIfChanged(view);
@@ -511,6 +657,9 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
           saveTimerRef.current = null;
           saveToFile(view.state.doc.toString(), docRevisionRef.current);
         }
+        view.dom.removeEventListener('dragover', onCoverDragOver, true);
+        view.dom.removeEventListener('dragleave', onCoverDragLeave, true);
+        view.dom.removeEventListener('drop', onCoverDrop, true);
         view.destroy();
         viewRef.current = null;
       };
@@ -518,18 +667,8 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
 
     // content prop change → update editor (skip if already in sync)
     useEffect(() => {
-      const view = viewRef.current;
-      if (!view) return;
-      const current = view.state.doc.toString();
-      if (current !== content) {
-        docRevisionRef.current += 1;
-        if (saveTimerRef.current) {
-          clearTimeout(saveTimerRef.current);
-          saveTimerRef.current = null;
-        }
-        replaceDocumentPreservingSelection(view, content);
-      }
-    }, [content]);
+      applyIncomingContent(content);
+    }, [content, applyIncomingContent]);
 
     // File watching（只读模式下由调用方自理，这里跳过避免重复监听）
     useEffect(() => {
@@ -553,18 +692,7 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
               lastSavedContentRef.current = newContent;
               return;
             }
-            const view = viewRef.current;
-            if (!view) return;
-            const current = view.state.doc.toString();
-            if (current === newContent) return;
-            docRevisionRef.current += 1;
-            if (saveTimerRef.current) {
-              clearTimeout(saveTimerRef.current);
-              saveTimerRef.current = null;
-            }
-            lastSavedContentRef.current = newContent;
-            replaceDocumentPreservingSelection(view, newContent);
-            contentCbRef.current?.(newContent, diskVersionRef.current);
+            applyIncomingContent(newContent, { publish: true });
           })
           .catch((err) => {
             console.warn('[PreviewEditor] reload watched file failed:', err);
@@ -576,7 +704,7 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
         _fileChangeEmitter.removeEventListener('change', handler);
         window.platform?.unwatchFile(filePath);
       };
-    }, [filePath, readOnly]);
+    }, [filePath, readOnly, applyIncomingContent]);
 
     return <div className={`preview-editor mode-${mode}`} ref={containerRef} />;
   },

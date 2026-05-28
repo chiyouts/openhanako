@@ -495,6 +495,82 @@ describe("model sync related routes", () => {
     expect(allData.models[1].xhigh).toBe(true);
   });
 
+  it("auxiliary vision route exposes availability without settings secrets", async () => {
+    const { createModelsRoute } = await import("../server/routes/models.js");
+    const app = new Hono();
+    const engine = {
+      availableModels: [],
+      currentModel: null,
+      config: {},
+      getSharedModels: vi.fn(() => ({
+        vision_enabled: true,
+        vision: { id: "qwen-vl", provider: "dashscope" },
+      })),
+      resolveModelWithCredentials: vi.fn(() => ({
+        model: {
+          id: "qwen-vl",
+          provider: "dashscope",
+          name: "Qwen VL",
+          input: ["text", "image"],
+        },
+        provider: "dashscope",
+        api: "openai-completions",
+        api_key: "sk-test-secret",
+        base_url: "https://dashscope.example/v1",
+      })),
+    };
+
+    app.route("/api", createModelsRoute(engine));
+
+    const res = await app.request("/api/models/auxiliary-vision");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toEqual({
+      auxiliaryVision: {
+        enabled: true,
+        configured: true,
+        available: true,
+        unavailableReason: null,
+        model: { id: "qwen-vl", provider: "dashscope" },
+      },
+    });
+    expect(JSON.stringify(data)).not.toContain("sk-test-secret");
+    expect(JSON.stringify(data)).not.toContain("dashscope.example");
+  });
+
+  it("auxiliary vision route reports text-only configured models as unavailable", async () => {
+    const { createModelsRoute } = await import("../server/routes/models.js");
+    const app = new Hono();
+    const engine = {
+      availableModels: [],
+      currentModel: null,
+      config: {},
+      getSharedModels: vi.fn(() => ({
+        vision_enabled: true,
+        vision: { id: "deepseek-chat", provider: "deepseek" },
+      })),
+      resolveModelWithCredentials: vi.fn(() => ({
+        model: { id: "deepseek-chat", provider: "deepseek", input: ["text"] },
+        provider: "deepseek",
+      })),
+    };
+
+    app.route("/api", createModelsRoute(engine));
+
+    const res = await app.request("/api/models/auxiliary-vision");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.auxiliaryVision).toEqual({
+      enabled: true,
+      configured: true,
+      available: false,
+      unavailableReason: "model_without_image_input",
+      model: { id: "deepseek-chat", provider: "deepseek" },
+    });
+  });
+
   it("model health accepts explicit model refs and uses the utility LLM path", async () => {
     const { createModelsRoute } = await import("../server/routes/models.js");
     const app = new Hono();
@@ -586,6 +662,54 @@ describe("model sync related routes", () => {
       code: "LLM_EMPTY_RESPONSE",
       reason: "empty_after_thinking",
       error: "模型未回复正文，请检查思考内容或稍后重试。",
+    });
+  });
+
+  it("classifies expected session model switch failures instead of returning a generic 500", async () => {
+    const { createModelsRoute } = await import("../server/routes/models.js");
+    const app = new Hono();
+    const engine = {
+      availableModels: [],
+      currentModel: null,
+      config: {},
+      isSessionStreaming: vi.fn(() => false),
+      switchSessionModel: vi.fn()
+        .mockRejectedValueOnce(new Error("Model not found: minimax-token-plan/MiniMax-M2.7"))
+        .mockRejectedValueOnce(new Error("No API key configured for provider minimax-token-plan"))
+        .mockRejectedValueOnce(new Error("cannot switch model during compaction")),
+      getSessionByPath: vi.fn(),
+    };
+    app.route("/api", createModelsRoute(engine));
+
+    const request = () => app.request("/api/models/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionPath: "/tmp/session.jsonl",
+        modelId: "MiniMax-M2.7",
+        provider: "minimax-token-plan",
+      }),
+    });
+
+    const missingModel = await request();
+    expect(missingModel.status).toBe(404);
+    expect(await missingModel.json()).toMatchObject({
+      code: "MODEL_NOT_FOUND",
+      error: expect.stringContaining("MiniMax-M2.7"),
+    });
+
+    const missingCredentials = await request();
+    expect(missingCredentials.status).toBe(422);
+    expect(await missingCredentials.json()).toMatchObject({
+      code: "MODEL_CREDENTIALS_MISSING",
+      error: expect.stringContaining("minimax-token-plan"),
+    });
+
+    const conflict = await request();
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({
+      code: "MODEL_SWITCH_CONFLICT",
+      error: expect.stringContaining("compaction"),
     });
   });
 
@@ -1220,6 +1344,41 @@ describe("model sync related routes", () => {
     const data = await res.json();
     expect(data.source).toBe("builtin");
     expect(data.models.map(m => m.id)).toEqual(["kimi-k2.6", "kimi-k2.5"]);
+  });
+
+  it("normalizes MiniMax CN v1 base URLs for Anthropic-compatible model discovery", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ id: "MiniMax-M2.7", display_name: "MiniMax M2.7" }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "sk-test", baseUrl: "https://api.minimaxi.com/v1", api: "anthropic-messages" }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "minimax" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.minimaxi.com/anthropic/v1/models?limit=1000");
+    const data = await res.json();
+    expect(data.models.map(m => m.id)).toEqual(["MiniMax-M2.7"]);
   });
 
   it("request body api_key overrides saved credentials", async () => {

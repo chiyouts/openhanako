@@ -1,9 +1,16 @@
+// plugins/image-gen/index.js
+import path from "node:path";
+import fs from "node:fs";
 import { AdapterRegistry } from "./lib/adapter-registry.js";
 import { TaskStore } from "./lib/task-store.js";
 import { Poller } from "./lib/poller.js";
 import { volcengineImageAdapter } from "./adapters/volcengine.js";
 import { openaiImageAdapter } from "./adapters/openai.js";
 import { openaiCodexImageAdapter } from "./adapters/openai-codex.js";
+import { minimaxImageAdapter } from "./adapters/minimax.js";
+import { dashscopeImageAdapter } from "./adapters/dashscope.js";
+import { geminiImageAdapter } from "./adapters/gemini.js";
+import { submitImageGeneration } from "./lib/submit-image.js";
 import {
   ensureWritableGeneratedDir,
   removeGeneratedFiles,
@@ -12,34 +19,38 @@ import {
 
 export default class ImageGenPlugin {
   async onload() {
-    const { bus, log } = this.ctx;
+    const { dataDir, bus, log } = this.ctx;
 
+    const generatedDir = () => resolveGeneratedDir(this.ctx);
+    fs.mkdirSync(generatedDir(), { recursive: true });
+
+    // Infrastructure
     const registry = new AdapterRegistry();
-    const store = new TaskStore(this.ctx.dataDir);
+    const store = new TaskStore(dataDir);
     const poller = new Poller({
       store,
       registry,
       bus,
-      generatedDir: () => resolveGeneratedDir(this.ctx),
+      dataDir,
+      generatedDir,
       log,
       registerSessionFile: this.ctx.registerSessionFile,
     });
 
+    // Built-in adapters
     registry.register(volcengineImageAdapter);
-    registry.register({ ...volcengineImageAdapter, id: "volcengine-coding" });
     registry.register(openaiImageAdapter);
     registry.register(openaiCodexImageAdapter);
+    registry.register(minimaxImageAdapter);
+    registry.register(dashscopeImageAdapter);
+    registry.register(geminiImageAdapter);
 
+    // Attach to ctx for tools
     const getGeneratedDir = () => resolveGeneratedDir(this.ctx);
     const getWritableGeneratedDir = (options) => ensureWritableGeneratedDir(this.ctx, options);
-    this.ctx._mediaGen = {
-      registry,
-      store,
-      poller,
-      getGeneratedDir,
-      getWritableGeneratedDir,
-    };
+    this.ctx._mediaGen = { registry, store, poller, generatedDir: getGeneratedDir, getGeneratedDir, getWritableGeneratedDir };
 
+    // Bus handlers — adapter registration (for external plugins like dreamina)
     this.register(bus.handle("media-gen:register-adapter", ({ adapter }) => {
       registry.register(adapter);
       log.info(`adapter registered: ${adapter.id}`);
@@ -52,6 +63,7 @@ export default class ImageGenPlugin {
       return { ok: true };
     }));
 
+    // Listen for fire-and-forget unregister events (plugin teardown is sync)
     this.register(bus.subscribe((event) => {
       if (event.type === "media-gen:adapter-removed" && event.adapterId) {
         registry.unregister(event.adapterId);
@@ -60,14 +72,37 @@ export default class ImageGenPlugin {
     }));
 
     this.register(bus.handle("media-gen:list-adapters", () => {
-      return { adapters: registry.list().map((adapter) => ({ id: adapter.id, name: adapter.name, types: adapter.types })) };
+      return { adapters: registry.list().map((a) => ({ id: a.id, name: a.name, types: a.types })) };
     }));
 
+    this.register(bus.handle("media-gen:submit-image", async (payload = {}) => {
+      const input = payload.input && typeof payload.input === "object" ? payload.input : payload;
+      const sessionPath = typeof payload.sessionPath === "string" && payload.sessionPath.trim()
+        ? payload.sessionPath.trim()
+        : null;
+      if (!sessionPath) return { ok: false, error: "sessionPath is required" };
+      try {
+        return await submitImageGeneration({
+          input,
+          ctx: {
+            ...this.ctx,
+            sessionPath,
+            _mediaGen: this.ctx._mediaGen,
+          },
+          metadata: payload.metadata || null,
+          deliveryTarget: payload.deliveryTarget === undefined ? null : payload.deliveryTarget,
+        });
+      } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+    }));
+
+    // Bus handlers — task CRUD (for external panels like dreamina)
     this.register(bus.handle("media-gen:get-tasks", ({ adapterId, batchId, status } = {}) => {
       let tasks = store.listAll();
-      if (adapterId) tasks = tasks.filter((task) => task.adapterId === adapterId);
-      if (batchId) tasks = tasks.filter((task) => task.batchId === batchId);
-      if (status) tasks = tasks.filter((task) => task.status === status);
+      if (adapterId) tasks = tasks.filter((t) => t.adapterId === adapterId);
+      if (batchId) tasks = tasks.filter((t) => t.batchId === batchId);
+      if (status) tasks = tasks.filter((t) => t.status === status);
       return { tasks };
     }));
 
@@ -85,7 +120,9 @@ export default class ImageGenPlugin {
     this.register(bus.handle("media-gen:remove-task", ({ taskId }) => {
       const task = store.get(taskId);
       if (task) {
-        removeGeneratedFiles(this.ctx, task.files || []);
+        for (const f of task.files || []) {
+          try { removeGeneratedFiles(this.ctx, [f]); } catch { /* ok */ }
+        }
         store.remove(taskId);
       }
       return { ok: true };
@@ -93,19 +130,24 @@ export default class ImageGenPlugin {
 
     this.register(bus.handle("media-gen:remove-unfavorited", () => {
       const removed = store.removeUnfavorited();
-      for (const task of removed) {
-        removeGeneratedFiles(this.ctx, task.files || []);
+      for (const t of removed) {
+        for (const f of t.files || []) {
+          try { removeGeneratedFiles(this.ctx, [f]); } catch { /* ok */ }
+        }
       }
       return { ok: true, removed: removed.length };
     }));
 
+    // Start poller
     poller.start();
 
+    // Register media-generation task handler for TaskRegistry
     bus.request("task:register-handler", {
       type: "media-generation",
       abort: (taskId) => { poller.cancel(taskId); },
     }).catch(() => {});
 
+    // Cleanup
     this.register(() => {
       poller.stop();
       store.destroy();
@@ -113,6 +155,6 @@ export default class ImageGenPlugin {
       log.info("image-gen plugin unloaded");
     });
 
-    log.info("image-gen plugin loaded");
+    log.info("image-gen plugin loaded (unified media-gen)");
   }
 }

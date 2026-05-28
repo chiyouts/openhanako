@@ -15,7 +15,7 @@ import { isImageFile, isVideoFile } from '../utils/format';
 import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
 import { ensureSession, loadSessions } from '../stores/session-actions';
-import { loadDeskFiles, searchDeskFiles, toggleJianSidebar } from '../stores/desk-actions';
+import { revealDeskDirectory, searchDeskFiles, toggleJianSidebar } from '../stores/desk-actions';
 import { getWebSocket } from '../services/websocket';
 import { collectUiContext } from '../utils/ui-context';
 import { formatQuotedSelectionForPrompt } from '../utils/quoted-selection';
@@ -192,10 +192,9 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const sessionFiles = useStore(s => (s.currentSessionPath ? selectSessionFiles(s, s.currentSessionPath) : EMPTY_FILE_REFS));
   const attachedFiles = useStore(s => s.attachedFiles);
   const docContextAttached = useStore(s => s.docContextAttached);
-  const quotedSelection = useStore(s => s.quotedSelection);
+  const quotedSelections = useStore(s => s.quotedSelections);
   const deskFiles = useStore(s => s.deskFiles);
   const deskBasePath = useStore(s => s.deskBasePath);
-  const deskCurrentPath = useStore(s => s.deskCurrentPath);
   const previewItems = useStore(selectPreviewItems);
   const activeTabId = useStore(selectActiveTabId);
   const previewOpen = useStore(s => s.previewOpen);
@@ -497,12 +496,11 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     sessionFiles,
     deskFiles,
     deskBasePath,
-    deskCurrentPath,
+    deskCurrentPath: '',
     searchResults: fileMentionSearchResults,
   }), [
     attachedFiles,
     deskBasePath,
-    deskCurrentPath,
     deskFiles,
     fileMentionQuery,
     fileMentionSearchResults,
@@ -702,19 +700,28 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   }, [fileMenuOpen]);
 
   // Can send?
-  const hasContent = inputText.trim().length > 0 || attachedFiles.length > 0 || docContextAttached || !!quotedSelection
+  const hasContent = inputText.trim().length > 0 || attachedFiles.length > 0 || docContextAttached || quotedSelections.length > 0
     || editorHasInlineNode(editor, 'skillBadge')
     || editorHasInlineNode(editor, 'fileBadge');
   const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath;
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
+    if (surface === 'mobile') {
+      const res = await hanaFetch('/api/models/auxiliary-vision');
+      const data = await res.json();
+      const auxiliaryVision = data?.auxiliaryVision;
+      return {
+        enabled: auxiliaryVision?.available === true,
+        model: auxiliaryVision?.model || null,
+      };
+    }
     const res = await hanaFetch('/api/preferences/models');
     const data = await res.json();
     return {
       enabled: data?.models?.vision_enabled === true,
       model: data?.models?.vision || null,
     };
-  }, []);
+  }, [surface]);
 
   // ── Paste image ──
   // 与拖拽对齐：剪贴板图片同样落盘到 uploads 目录，入 store 的形态和拖拽完全一致
@@ -853,7 +860,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
 
     const inputFiles = mergeEditorFileRefs(attachedFiles, fileRefs);
     const hasFiles = inputFiles.length > 0;
-    if ((!text && !hasFiles && !docContextAttached && !useStore.getState().quotedSelection) || !connected) return;
+    if ((!text && !hasFiles && !docContextAttached && useStore.getState().quotedSelections.length === 0) || !connected) return;
     if (isStreaming) return;
     if (sending) return;
     if (modelSwitching) return;
@@ -966,9 +973,9 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       if (docContextAttached) setDocContextAttached(false);
 
       // 引用片段
-      const qs = useStore.getState().quotedSelection;
-      if (qs) {
-        const quoteStr = formatQuotedSelectionForPrompt(qs);
+      const quotes = useStore.getState().quotedSelections;
+      if (quotes.length > 0) {
+        const quoteStr = quotes.map(formatQuotedSelectionForPrompt).join('\n\n');
         finalText = finalText ? `${finalText}\n\n${quoteStr}` : quoteStr;
       }
 
@@ -978,8 +985,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       editor.commands.clearContent();
       if (currentSessionPath) clearDraft(currentSessionPath);
       clearAttachedFiles();
-      const qs2 = useStore.getState().quotedSelection;
-      if (qs2) useStore.getState().clearQuotedSelection();
+      if (useStore.getState().quotedSelections.length > 0) useStore.getState().clearQuotedSelections();
 
       const ws = getWebSocket();
       const wsMsg: Record<string, unknown> = {
@@ -990,7 +996,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         displayMessage: {
           text,
           skills: skills.length > 0 ? skills : undefined,
-          quotedText: qs?.text,
+          quotedText: quotes.length > 0 ? quotes.map(q => q.text).join('\n\n') : undefined,
           attachments: allFiles.length > 0 ? allFiles.map(f => {
             const cached = imageBase64Map.get(f.path);
             const cachedVideo = videoBase64Map.get(f.path);
@@ -1120,7 +1126,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const handleSlashResultClick = useCallback(() => {
     if (!slashResult?.deskDir) return;
     toggleJianSidebar(true);
-    loadDeskFiles('', slashResult.deskDir);
+    void revealDeskDirectory(slashResult.deskDir);
   }, [slashResult?.deskDir]);
 
   const handleCompleteTodos = useCallback(async () => {
@@ -1151,7 +1157,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       <InputContextRow
         attachedFiles={attachedFiles}
         removeAttachedFile={removeAttachedFile}
-        hasQuotedSelection={!!quotedSelection}
+        hasQuotedSelection={quotedSelections.length > 0}
         sessionTodos={sessionTodos}
         onCompleteTodos={handleCompleteTodos}
         completingTodos={completingTodos}

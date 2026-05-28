@@ -1,12 +1,12 @@
 /**
- * ModelManager -- 模型发现、切换、凭证解�?
+ * ModelManager -- 模型发现、切换、凭证解析
  *
- * 管理 Pi SDK AuthStorage / ModelRegistry 基础设施�?
- * 以及模型选择、provider 凭证查找、utility 配置解析�?
- * �?Engine 提取，Engine 通过 manager 访问模型状态�?
+ * 管理 Pi SDK AuthStorage / ModelRegistry 基础设施，
+ * 以及模型选择、provider 凭证查找、utility 配置解析。
+ * 从 Engine 提取，Engine 通过 manager 访问模型状态。
  *
  * _availableModels 是唯一的模型真理源。所有模型解析、enrichment
- * 都在这个数组上完成，不再经过中间层�?
+ * 都在这个数组上完成，不再经过中间层。
  */
 import path from "path";
 import { AuthStorage, createModelRegistry } from "../lib/pi-sdk/index.js";
@@ -22,13 +22,13 @@ import { migrateLegacyApiKeyAuthToProviders } from "./provider-auth-migration.js
 export class ModelManager {
   /**
    * @param {object} opts
-   * @param {string} opts.hanakoHome - 用户数据根目�?
+   * @param {string} opts.hanakoHome - 用户数据根目录
    */
   constructor({ hanakoHome }) {
     this._hanakoHome = hanakoHome;
     this._authStorage = null;
     this._modelRegistry = null;
-    this._defaultModel = null;   // 设置页面选的，持久化，bridge 用这�?
+    this._defaultModel = null;   // 设置页面选的，持久化，bridge 用这个
     this._availableModels = [];
 
     // 新架构模块（init() 后可用）
@@ -36,11 +36,12 @@ export class ModelManager {
     this.executionRouter = null;
   }
 
-  /** 初始�?AuthStorage + ModelRegistry + 新架构模�?*/
+  /** 初始化 AuthStorage + ModelRegistry + 新架构模块 */
   init() {
     this._authStorage = AuthStorage.create(path.join(this._hanakoHome, "auth.json"));
     this.providerRegistry.reload();
     this._removeApiKeyProviderAuthEntries();
+    this._applyRuntimeApiKeyOverrides(this.providerRegistry.getAllProvidersRaw());
     this._modelRegistry = createModelRegistry(
       this._authStorage,
       path.join(this._hanakoHome, "models.json"),
@@ -63,17 +64,17 @@ export class ModelManager {
   get modelsJsonPath() { return path.join(this._hanakoHome, "models.json"); }
   get authJsonPath() { return path.join(this._hanakoHome, "auth.json"); }
 
-  // ── 模型解析：_availableModels 唯一真理�?──
+  // ── 模型解析：_availableModels 唯一真理源 ──
 
   /**
-   * �?_availableModels 解析模型引用�?
+   * 从 _availableModels 解析模型引用。
    *
    * 合法输入（通过 parseModelRef 规整后必须带 provider）：
    *   - {id, provider} 对象
-   *   - "provider/id" 字符�?
+   *   - "provider/id" 字符串
    *
-   * �?id 字符�?*不合�?*——历史数据走 migrations #5，运行期调用方必须显式带 provider�?
-   * ref 无法解析�?provider 时返 null（不�?id 降级猜）�?
+   * 裸 id 字符串**不合法**——历史数据走 migrations #5，运行期调用方必须显式带 provider。
+   * ref 无法解析出 provider 时返 null（不按 id 降级猜）。
    *
    * @param {string|object} ref - 模型引用
    * @returns {object|null} SDK 模型对象
@@ -90,7 +91,7 @@ export class ModelManager {
   async refreshAvailable() {
     const allModels = await this._modelRegistry.getAvailable();
     // Pi SDK 返回所有有 auth 的模型（包括 OAuth 内置模型），
-    // 但用户只想看自己配置的模型。用 added-models.yaml 的模型列表过滤�?
+    // 但用户只想看自己配置的模型。用 added-models.yaml 的模型列表过滤。
     const rawProviders = this.providerRegistry.getAllProvidersRaw();
     const userModelSets = new Map();
     for (const [name, raw] of Object.entries(rawProviders)) {
@@ -100,13 +101,13 @@ export class ModelManager {
         : raw.models.map(m => typeof m === "object" ? m.id : m);
       const ids = new Set(chatIds);
       userModelSets.set(name, ids);
-      // OAuth provider �?authJsonKey 可能不同�?provider ID
+      // OAuth provider 的 authJsonKey 可能不同于 provider ID
       const authKey = this.providerRegistry.getAuthJsonKey(name);
       if (authKey !== name) userModelSets.set(authKey, ids);
     }
     this._availableModels = allModels.filter(m => {
       const allowed = userModelSets.get(m.provider);
-      // 没有�?added-models.yaml 里的 provider �?全部放行（兼容未知来源）
+      // 没有在 added-models.yaml 里的 provider → 全部放行（兼容未知来源）
       if (!allowed) return true;
       return allowed.has(m.id);
     }).map(enrichModelFromKnownMetadata);
@@ -114,14 +115,14 @@ export class ModelManager {
   }
 
   /**
-   * 同步 added-models.yaml �?models.json，然后刷�?ModelRegistry�?
+   * 同步 added-models.yaml → models.json，然后刷新 ModelRegistry。
    *
-   * �?刷新�?_availableModels 是全新数组，旧的 model 对象引用（含烤在字段里的
-   * 过期 baseUrl）会失效。本方法负责�?_defaultModel 指针也重新定位到新数组里
-   * 的对应对象——否则新�?session 会继续用�?baseUrl 发请求（provider 改端点后
-   * 出现 429 的根因）�?
+   * ⚠ 刷新后 _availableModels 是全新数组，旧的 model 对象引用（含烤在字段里的
+   * 过期 baseUrl）会失效。本方法负责把 _defaultModel 指针也重新定位到新数组里
+   * 的对应对象——否则新建 session 会继续用旧 baseUrl 发请求（provider 改端点后
+   * 出现 429 的根因）。
    *
-   * @returns {boolean} 是否有变�?
+   * @returns {boolean} 是否有变化
    */
   async syncAndRefresh() {
     this._removeApiKeyProviderAuthEntries();
@@ -134,7 +135,6 @@ export class ModelManager {
         ...raw,
         base_url: raw.base_url || entry?.baseUrl || "",
         api: raw.api || entry?.api || "openai-completions",
-        _isBuiltin: entry?.isBuiltin === true,
         auth_type: raw.auth_type || entry?.authType || "api-key",
       };
     }
@@ -144,6 +144,7 @@ export class ModelManager {
       oauthKeyMap: this._buildOAuthKeyMap(),
       chatProjectionMap: this._buildChatProjectionMap(),
     });
+    this._applyRuntimeApiKeyOverrides(providers);
     if (changed) {
       this._modelRegistry.refresh();
       await this.refreshAvailable();
@@ -152,9 +153,20 @@ export class ModelManager {
     return changed;
   }
 
+  _applyRuntimeApiKeyOverrides(providers) {
+    if (!this._authStorage?.setRuntimeApiKey) return;
+    for (const [providerId, provider] of Object.entries(providers || {})) {
+      if (typeof provider?.api_key === "string" && provider.api_key.length > 0) {
+        this._authStorage.setRuntimeApiKey(providerId, provider.api_key);
+      } else {
+        this._authStorage.removeRuntimeApiKey?.(providerId);
+      }
+    }
+  }
+
   /**
-   * _availableModels 重建后，�?_defaultModel 重新绑到新数组里的对应对象�?
-   * 找不到则�?null（provider 被删、模型消失等）�?
+   * _availableModels 重建后，把 _defaultModel 重新绑到新数组里的对应对象。
+   * 找不到则置 null（provider 被删、模型消失等）。
    * @private
    */
   _rebindDefaultModel() {
@@ -168,7 +180,7 @@ export class ModelManager {
   }
 
   /**
-   * 构建 OAuth providerId �?auth.json key 映射
+   * 构建 OAuth providerId → auth.json key 映射
    * @private
    */
   _buildOAuthKeyMap() {
@@ -214,7 +226,7 @@ export class ModelManager {
 
   /**
    * 设置 agent 默认模型
-   * @returns {object} 新模型对�?
+   * @returns {object} 新模型对象
    */
   setDefaultModel(modelId, provider) {
     const model = findModel(this._availableModels, modelId, provider);
@@ -223,13 +235,13 @@ export class ModelManager {
     return model;
   }
 
-  /** auto -> medium，其余原�?*/
+  /** auto -> medium，其余原样 */
   resolveThinkingLevel(level) {
     return level === "auto" ? "medium" : level;
   }
 
   /**
-   * 将模型引用（provider/id �?{id, provider}）解析成 SDK 可用的模型对�?
+   * 将模型引用（provider/id 或 {id, provider}）解析成 SDK 可用的模型对象
    * 只查 _availableModels（唯一真理源）
    */
   resolveExecutionModel(modelRef) {
@@ -250,7 +262,7 @@ export class ModelManager {
 
   /**
    * 根据 provider 名称查找凭证
-   * 委托 ProviderRegistry，返�?snake_case 格式（兼�?callProviderText 消费方）
+   * 委托 ProviderRegistry，返回 snake_case 格式（兼容 callProviderText 消费方）
    * @param {string} provider
    * @returns {{ api_key: string, base_url: string, api: string }}
    */
@@ -264,8 +276,51 @@ export class ModelManager {
   }
 
   /**
-   * Provider 配置变更�?reload registry + 重新同步模型�?
-   * �?engine.onProviderChanged() 调用，不要直接用�?
+   * OAuth-aware provider credential resolution for non-chat runtimes.
+   *
+   * Chat execution goes through Pi SDK ModelRegistry, whose AuthStorage path
+   * refreshes OAuth tokens. Media adapters historically bypassed that path by
+   * reading ProviderRegistry credentials directly, so they could keep using an
+   * expired access token until a chat request refreshed it. This method makes
+   * the refresh boundary explicit without moving adapter-specific semantics into
+   * ProviderRegistry.
+   *
+   * @param {string} provider
+   * @returns {Promise<{ api_key: string, base_url: string, api: string, accountId?: string }>}
+   */
+  async resolveProviderCredentialsFresh(provider) {
+    if (!provider) return { api_key: "", base_url: "", api: "" };
+    const entry = this.providerRegistry.get(provider);
+    let refreshedOAuthKey = null;
+    if (entry && this.providerRegistry.getAuthType(provider) === "oauth" && this._authStorage) {
+      const authKey = this.providerRegistry.getAuthJsonKey(provider);
+      refreshedOAuthKey = await this._authStorage.getApiKey?.(authKey);
+      this._authStorage.reload?.();
+      this.providerRegistry.clearAuthCache?.();
+    }
+    const cred = this.providerRegistry.getCredentials(provider);
+    if (entry && this.providerRegistry.getAuthType(provider) === "oauth" && !refreshedOAuthKey) {
+      return {
+        api_key: "",
+        base_url: cred?.baseUrl || entry.baseUrl || "",
+        api: cred?.api || entry.api || "",
+        ...(cred?.accountId ? { accountId: cred.accountId } : {}),
+      };
+    }
+    if (cred) {
+      return {
+        api_key: refreshedOAuthKey || cred.apiKey || "",
+        base_url: cred.baseUrl || "",
+        api: cred.api || "",
+        ...(cred.accountId ? { accountId: cred.accountId } : {}),
+      };
+    }
+    return { api_key: "", base_url: "", api: "" };
+  }
+
+  /**
+   * Provider 配置变更后 reload registry + 重新同步模型。
+   * 由 engine.onProviderChanged() 调用，不要直接用。
    */
   async reloadAndSync() {
     this.providerRegistry.reload();
@@ -273,10 +328,10 @@ export class ModelManager {
   }
 
   /**
-   * 统一解析：模型引�?-> { model, provider, api, api_key, base_url }
+   * 统一解析：模型引用 -> { model, provider, api, api_key, base_url }
    *
-   * model 字段�?*完整 model 对象**（不再是�?id 字符串）。所�?callText 消费�?
-   * 解构�?model 后直接传�?callText，由 callText 内部�?provider-compat�?
+   * model 字段是**完整 model 对象**（不再是裸 id 字符串）。所有 callText 消费方
+   * 解构出 model 后直接传给 callText，由 callText 内部走 provider-compat。
    *
    * @param {string|object} modelRef
    * @returns {{ model: object, provider: string, api: string, api_key: string, base_url: string }}
@@ -317,8 +372,8 @@ export class ModelManager {
   }
 
   /**
-   * �?Pi SDK registry 获取�?provider 的所有模型（不经�?added-models.yaml 过滤�?
-   * 用于模型发现（fetch-models），不影响主应用�?availableModels
+   * 从 Pi SDK registry 获取某 provider 的所有模型（不经过 added-models.yaml 过滤）
+   * 用于模型发现（fetch-models），不影响主应用的 availableModels
    * @param {string} name - provider ID
    * @returns {object[]}
    */

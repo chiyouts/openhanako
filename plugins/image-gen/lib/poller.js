@@ -12,7 +12,7 @@
  * and marks the task successful immediately.
  */
 
-import { join as pathJoin } from "node:path";
+import { dirname, join as pathJoin } from "node:path";
 import { readImageSize } from "./image-size.js";
 
 const TICK_MS = 5_000;
@@ -38,16 +38,18 @@ export class Poller {
    * @param {{
    *   store: import("./task-store.js").TaskStore,
    *   registry: import("./adapter-registry.js").AdapterRegistry,
-   *   bus: object,
-   *   generatedDir: string | ((task?: object) => string),
-   *   log: object,
-   *   registerSessionFile?: Function,
-   * }} opts
-   */
-  constructor({ store, registry, bus, generatedDir, log, registerSessionFile }) {
+ *   bus: object,
+	 *   dataDir?: string,
+	 *   generatedDir: string,
+	 *   log: object,
+	 *   registerSessionFile?: Function,
+	 * }} opts
+	 */
+  constructor({ store, registry, bus, dataDir, generatedDir, log, registerSessionFile }) {
     this._store        = store;
     this._registry     = registry;
     this._bus          = bus;
+    this._dataDir      = dataDir || dirname(typeof generatedDir === "function" ? generatedDir() : generatedDir);
     this._generatedDir = generatedDir;
     this._log          = log;
     this._registerSessionFile = registerSessionFile || null;
@@ -73,6 +75,8 @@ export class Poller {
    * @param {string} taskId
    */
   add(taskId) {
+    this._cancelled.delete(taskId);
+    this._errorCounts.delete(taskId);
     this._active.add(taskId);
   }
 
@@ -132,6 +136,7 @@ export class Poller {
           mediaKind: task.type === "video" ? "video" : "image",
           deliveryIntent: "ui_only",
           triggerParentTurn: false,
+          ...(task.type === "image" ? { notifyAgentOnFailure: true } : {}),
           prompt: task.prompt,
           ...(task.deliveryTarget ? { deliveryTarget: task.deliveryTarget } : {}),
         },
@@ -183,6 +188,7 @@ export class Poller {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
+
   _getGeneratedDir(task) {
     if (task?.generatedDir) return task.generatedDir;
     return typeof this._generatedDir === "function"
@@ -202,9 +208,8 @@ export class Poller {
   _registerGeneratedFiles(task, files) {
     if (!this._registerSessionFile || !task?.sessionPath || !files?.length) return [];
     const sessionFiles = [];
-    const generatedDir = this._getGeneratedDir(task);
     for (const file of files) {
-      const filePath = pathJoin(generatedDir, file).split("\\").join("/");
+      const filePath = pathJoin(this._getGeneratedDir(task), file).split("\\").join("/");
       try {
         const sessionFile = this._registerSessionFile({
           sessionPath: task.sessionPath,
@@ -219,6 +224,26 @@ export class Poller {
       }
     }
     return sessionFiles;
+  }
+
+  _emitTaskDone(task, files, dims, sessionFiles) {
+    const latest = this._store.get(task.taskId) || task;
+    this._bus.emit({
+      type: "media-gen:task-done",
+      taskId: task.taskId,
+      batchId: task.batchId || null,
+      kind: task.type === "video" ? "video" : "image",
+      files: Array.isArray(files) ? files : [],
+      generatedDir: this._getGeneratedDir(task),
+      sessionFiles: Array.isArray(sessionFiles) ? sessionFiles : [],
+      imageWidth: dims?.imageWidth ?? latest.imageWidth ?? null,
+      imageHeight: dims?.imageHeight ?? latest.imageHeight ?? null,
+      providerId: latest.providerId || null,
+      modelId: latest.modelId || null,
+      protocolId: latest.protocolId || null,
+      metadata: latest.metadata || null,
+      task: latest,
+    }, task.sessionPath || null);
   }
 
   _tick() {
@@ -274,6 +299,7 @@ export class Poller {
         files: task.files,
         ...(sessionFiles.length ? { sessionFiles } : {}),
       });
+      this._emitTaskDone(task, task.files, dims, sessionFiles);
       return;
     }
 
@@ -282,7 +308,9 @@ export class Poller {
     }
 
     // Real async: delegate to the adapter.
-    const adapter = this._registry.get(task.adapterId);
+    const adapter = (task.protocolId && this._registry.getProtocol?.(task.protocolId))
+      || this._registry.get(task.adapterId)
+      || this._registry.get(task.providerId);
     if (!adapter) {
       const err = new Error(`[image-gen] no adapter registered for "${task.adapterId}"`);
       this._store.update(taskId, {
@@ -297,6 +325,7 @@ export class Poller {
     }
 
     const ctx = {
+      dataDir: this._dataDir,
       generatedDir: this._getGeneratedDir(task),
       bus: this._bus,
       log: this._log,
@@ -332,7 +361,7 @@ export class Poller {
 
     const { status } = result ?? {};
 
-    if (status === "success") {
+    if (status === "success" || status === "done") {
       const files = result.files ?? [];
       const dims = await this._readImageDimensions(task, files);
       const sessionFiles = this._registerGeneratedFiles(task, files);
@@ -350,6 +379,7 @@ export class Poller {
         files,
         ...(sessionFiles.length ? { sessionFiles } : {}),
       });
+      this._emitTaskDone(task, files, dims, sessionFiles);
       return;
     }
 

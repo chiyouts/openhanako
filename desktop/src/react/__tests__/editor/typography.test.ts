@@ -15,8 +15,8 @@ function readPreviewStyles(): string {
 }
 
 describe('editor typography settings', () => {
-  it('uses Notion-like markdown defaults and preserves future heading controls', () => {
-    expect(DEFAULT_EDITOR_TYPOGRAPHY.markdown.bodyFontSize).toBe(16);
+  it('uses markdown defaults and preserves future heading controls', () => {
+    expect(DEFAULT_EDITOR_TYPOGRAPHY.markdown.bodyFontSize).toBe(15);
     expect(DEFAULT_EDITOR_TYPOGRAPHY.markdown.heading1FontSize).toBe(24);
     expect(DEFAULT_EDITOR_TYPOGRAPHY.markdown.heading2FontSize).toBe(20);
     expect(DEFAULT_EDITOR_TYPOGRAPHY.markdown.heading3FontSize).toBe(18);
@@ -98,12 +98,13 @@ describe('editor typography settings', () => {
     expect(css).toMatch(/:global\(\.preview-markdown\) strong\s*\{[\s\S]*font-weight:\s*700/);
   });
 
-  it('lets preview editor content use the full panel width', () => {
+  it('leaves CodeMirror editor layout to the editor themes', () => {
     const css = readPreviewStyles();
     const contentRule = css.match(/:global\(\.preview-editor \.cm-content\)\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? '';
 
-    expect(contentRule).toMatch(/width:\s*100%/);
     expect(contentRule).not.toMatch(/max-width/);
     expect(contentRule).not.toMatch(/margin:\s*0 auto/);
+    expect(css).not.toMatch(/:global\(\.preview-editor \.cm-scroller\)\s*\{/);
+    expect(css).not.toMatch(/:global\(\.preview-editor \.cm-content\)\s*\{/);
   });
 });

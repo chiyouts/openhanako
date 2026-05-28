@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -58,6 +58,28 @@ async function getDeepseekApiKey(manager) {
 }
 
 describe("ModelManager AuthStorage ownership", () => {
+  it("injects added-models API keys as runtime overrides before Pi SDK env resolution", async () => {
+    const originalPublic = process.env.PUBLIC;
+    process.env.PUBLIC = "C:\\Users\\Public";
+    try {
+      writeAuth({});
+      writeAddedModels({
+        deepseek: deepseekProvider("public"),
+      });
+
+      const manager = new ModelManager({ hanakoHome: tmpDir });
+      manager.init();
+      await manager.syncAndRefresh();
+
+      await expect(getDeepseekApiKey(manager)).resolves.toBe("public");
+      const projected = JSON.parse(fs.readFileSync(path.join(tmpDir, "models.json"), "utf-8"));
+      expect(projected.providers.deepseek.apiKey).toBe("hana-runtime-api-key:deepseek");
+    } finally {
+      if (originalPublic === undefined) delete process.env.PUBLIC;
+      else process.env.PUBLIC = originalPublic;
+    }
+  });
+
   it("migrates legacy API-key auth into added-models before clearing auth.json", async () => {
     writeAuth({
       deepseek: { type: "api_key", key: "sk-legacy-4d2a" },
@@ -153,5 +175,79 @@ describe("ModelManager AuthStorage ownership", () => {
     await manager.reloadAndSync();
 
     await expect(getDeepseekApiKey(manager)).resolves.toBe("sk-new-999c");
+  });
+
+  it("refreshes OAuth credentials before resolving provider credentials for media adapters", async () => {
+    writeAddedModels({
+      "openai-codex-oauth": {
+        models: ["gpt-5.5"],
+      },
+    });
+    writeAuth({
+      "openai-codex": {
+        type: "oauth",
+        access: "expired-token",
+        refresh: "refresh-token",
+        expires: Date.now() - 10_000,
+        resourceUrl: "https://chatgpt.com/backend-api",
+        accountId: "acct_123",
+      },
+    });
+
+    const manager = new ModelManager({ hanakoHome: tmpDir });
+    manager.providerRegistry.reload();
+    manager._authStorage = {
+      getApiKey: vi.fn(async () => {
+        writeAuth({
+          "openai-codex": {
+            type: "oauth",
+            access: "fresh-token",
+            refresh: "refresh-token",
+            expires: Date.now() + 3600_000,
+            resourceUrl: "https://chatgpt.com/backend-api",
+            accountId: "acct_123",
+          },
+        });
+        return "fresh-token";
+      }),
+      reload: vi.fn(),
+    };
+
+    const creds = await manager.resolveProviderCredentialsFresh("openai-codex-oauth");
+
+    expect(manager._authStorage.getApiKey).toHaveBeenCalledWith("openai-codex");
+    expect(creds).toEqual({
+      api_key: "fresh-token",
+      base_url: "https://chatgpt.com/backend-api",
+      api: "openai-codex-responses",
+      accountId: "acct_123",
+    });
+  });
+
+  it("does not return a stale OAuth token when refresh fails", async () => {
+    writeAddedModels({
+      "openai-codex-oauth": {
+        models: ["gpt-5.5"],
+      },
+    });
+    writeAuth({
+      "openai-codex": {
+        type: "oauth",
+        access: "expired-token",
+        refresh: "refresh-token",
+        expires: Date.now() - 10_000,
+      },
+    });
+
+    const manager = new ModelManager({ hanakoHome: tmpDir });
+    manager.providerRegistry.reload();
+    manager._authStorage = {
+      getApiKey: vi.fn(async () => undefined),
+      reload: vi.fn(),
+    };
+
+    const creds = await manager.resolveProviderCredentialsFresh("openai-codex-oauth");
+
+    expect(creds.api_key).toBe("");
   });
 });

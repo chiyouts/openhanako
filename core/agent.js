@@ -260,7 +260,11 @@ export class Agent {
         configPath: this.configPath,
         factStore: this._factStore,
         // 现场 resolve：每次 tick 拿到 yaml 最新凭证
-        getResolvedMemoryModel: () => this._resolveModel(this._memoryModel, this._config),
+        getResolvedMemoryModel: () => ({
+          ...this._resolveModel(this._memoryModel, this._config),
+          usageLedger: this._cb?.getEngine?.()?.usageLedger,
+          usageAgentId: this.id,
+        }),
         getMemoryMasterEnabled: () => this._memoryMasterEnabled,
         isSessionMemoryEnabled: (sessionPath) => this.isSessionMemoryEnabledFor(sessionPath),
         getTimezone: () => this._cb?.getTimezone?.() || Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -851,6 +855,59 @@ export class Agent {
     return fill(raw);
   }
 
+  _formatTeamRoster(isZh, options = {}) {
+    const includeSelf = options.includeSelf !== false;
+    if (!this._listAgents) return "";
+    const allAgents = this._listAgents();
+    const others = allAgents.filter(a => a.id !== this.id);
+    if (others.length === 0) return "";
+    const rosterAgents = includeSelf ? allAgents : others;
+    return rosterAgents.map(a => {
+      const tag = a.id === this.id ? (isZh ? "（你）" : " (you)") : "";
+      const model = a.model ? ` [${a.model}]` : "";
+      const desc = a.summary ? ` — ${a.summary}` : "";
+      const nameLabel = a.name && a.name !== a.id ? `（${a.name}）` : "";
+      return `- \`${a.id}\`${nameLabel}${tag}${model}${desc}`;
+    }).join("\n");
+  }
+
+  buildMemoryReflectionSnapshot(options = {}) {
+    const forceMemoryEnabled = Object.prototype.hasOwnProperty.call(options, "forceMemoryEnabled")
+      ? options.forceMemoryEnabled
+      : null;
+    const memoryEnabled = typeof forceMemoryEnabled === "boolean"
+      ? forceMemoryEnabled
+      : this.memoryEnabled;
+    const isZh = String(this._config.locale || "").startsWith("zh");
+    const readFile = (filePath) => safeReadFile(filePath, "");
+
+    const pinnedMd = readFile(path.join(this.agentDir, "pinned.md")).trim();
+    const memoryMd = readFile(this.memoryMdPath).trim();
+    const hasMemory = memoryMd && memoryMd !== "（暂无记忆）" && memoryMd !== "(No memory yet)";
+    const existingMemory = memoryEnabled
+      ? [
+        pinnedMd
+          ? (isZh ? `# 置顶记忆\n\n${pinnedMd}` : `# Pinned Memories\n\n${pinnedMd}`)
+          : "",
+        hasMemory
+          ? (isZh ? `# 长期记忆\n\n${memoryMd}` : `# Long-Term Memory\n\n${memoryMd}`)
+          : "",
+      ].filter(Boolean).join("\n\n")
+      : "";
+
+    return {
+      version: 1,
+      locale: this._config.locale || "",
+      agentId: this.id,
+      agentName: this.agentName,
+      userName: this.userName,
+      identityAndPersonality: this.personality.trim(),
+      userProfile: readFile(path.join(this.userDir, "user.md")).trim(),
+      existingMemory,
+      roster: this._formatTeamRoster(isZh, { includeSelf: false }),
+    };
+  }
+
   /**
    * 组装 system prompt
    * @param {object} [options]
@@ -904,8 +961,8 @@ export class Agent {
     // 叙事顺序上先告诉模型"用户是谁"，再告诉它"你是谁、你和用户什么关系"。
     const parts = [
       isZh
-        ? "你运行在 OpenHanako 平台上，由 liliMozi 开发。项目主页：https://github.com/liliMozi/openhanako"
-        : "You are running on the OpenHanako platform, developed by liliMozi. Project page: https://github.com/liliMozi/openhanako",
+        ? "你运行在 HanaAgent 平台上（原名 OpenHanako），由 liliMozi 开发。项目主页：https://github.com/liliMozi/openhanako"
+        : "You are running on the HanaAgent platform (formerly OpenHanako), developed by liliMozi. Project page: https://github.com/liliMozi/openhanako",
     ];
     const platformPrompt = getPlatformPromptNote({ platform: process.platform });
     if (platformPrompt) {
@@ -1155,18 +1212,9 @@ export class Agent {
 
     // 团队协作（仅当存在其他 agent 时注入）
     // Subagent 场景下跳过：subagent 没有 subagent 工具，知道其他 agent 也使不上
-    if (this._listAgents && !forSubagent) {
-      const myId = this.id;
-      const allAgents = this._listAgents();
-      const others = allAgents.filter(a => a.id !== myId);
-      if (others.length > 0) {
-        const roster = allAgents.map(a => {
-          const tag = a.id === myId ? (isZh ? "（你）" : " (you)") : "";
-          const model = a.model ? ` [${a.model}]` : "";
-          const desc = a.summary ? ` — ${a.summary}` : "";
-          const nameLabel = a.name && a.name !== a.id ? `（${a.name}）` : "";
-          return `- \`${a.id}\`${nameLabel}${tag}${model}${desc}`;
-        }).join("\n");
+    if (!forSubagent) {
+      const roster = this._formatTeamRoster(isZh);
+      if (roster) {
         parts.push(isZh
           ? `\n## 团队\n\n` +
             `你不是独自工作。当前环境中有多个 agent，各有不同的专长和模型：\n\n${roster}\n\n` +
@@ -1226,9 +1274,9 @@ export class Agent {
 
     parts.push(isZh
       ? "\n## 技能文件身份\n\n" +
-        "技能的运行时位置可能是会话冻结的源文件指针，也可能是旧会话遗留的快照副本。指针只冻结本次会话可见的技能身份；如果源文件已不存在，该技能视为不可用。`sessions/.skill-snapshots` 与 `session-files` 下的技能副本不是源文件，不能编辑。用户要求修改技能时，先定位真实源文件：工作台技能通常在当前工作目录的 `.agents/skills/<name>/SKILL.md`；安装后的用户技能或自学技能以安装工具返回的 `skill_source` 为准。找不到源文件时显式说明。"
+        "技能的运行时位置可能是会话冻结的源文件指针，也可能是旧会话遗留的快照副本。指针只冻结本次会话可见的技能身份；如果源文件已不存在，该技能视为不可用。`sessions/.skill-snapshots` 与 `session-files` 下的技能副本不是源文件，不能编辑。用户要求修改技能时，先定位真实源文件：工作台技能通常在当前工作目录的 `.agents/skills/<name>/SKILL.md`；安装后的用户技能以安装工具返回的 `skill_source` 为准。找不到源文件时显式说明。"
       : "\n## Skill File Identity\n\n" +
-        "A skill's runtime location may be a per-session source pointer, or a legacy snapshot copy from older sessions. A pointer freezes only the skill identity visible to this session; if the source file no longer exists, that skill is unavailable. Skill copies under `sessions/.skill-snapshots` and `session-files` are not source files and must not be edited. When the user asks to modify a skill, locate the real source file first: workspace skills usually live at `.agents/skills/<name>/SKILL.md` under the current working directory; installed user or learned skills should use the `skill_source` returned by install tools. If the source cannot be resolved, say so explicitly."
+        "A skill's runtime location may be a per-session source pointer, or a legacy snapshot copy from older sessions. A pointer freezes only the skill identity visible to this session; if the source file no longer exists, that skill is unavailable. Skill copies under `sessions/.skill-snapshots` and `session-files` are not source files and must not be edited. When the user asks to modify a skill, locate the real source file first: workspace skills usually live at `.agents/skills/<name>/SKILL.md` under the current working directory; installed user skills should use the `skill_source` returned by install tools. If the source cannot be resolved, say so explicitly."
     );
 
     // 记忆规则 + 置顶记忆 + 记忆（动态，后台 compile 会更新；按 session 快照）

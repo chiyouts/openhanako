@@ -151,6 +151,17 @@ export default function registerMediaRoutes(app, ctx) {
 
   app.get("/providers", async (c) => {
     try {
+      const mediaProviders = await ctx.bus.request("provider:media-providers", { capability: "image_generation" }).catch(() => null);
+      if (mediaProviders?.providers && typeof mediaProviders.providers === "object") {
+        return c.json({
+          providers: mediaProviders.providers,
+          config: {
+            ...(ctx.config.get() || {}),
+            resolvedOutputDir: resolveGeneratedDir(ctx),
+          },
+        });
+      }
+
       const providerList = await ctx.bus.request("provider:list").catch(() => ({ providers: [] }));
       const imageModelsResult = await ctx.bus.request("provider:models-by-type", { type: "image" });
       const providerEntries = providerList.providers || [];
@@ -244,6 +255,39 @@ export default function registerMediaRoutes(app, ctx) {
           resolvedOutputDir: resolveGeneratedDir(ctx),
         },
       });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/providers/:providerId/models", async (c) => {
+    const providerId = c.req.param("providerId");
+    try {
+      const body = await c.req.json();
+      const model = body?.model || body;
+      const result = await ctx.bus.request("provider:add-media-model", {
+        providerId,
+        capability: "image_generation",
+        model,
+      });
+      if (result?.error) return c.json({ error: result.error }, 400);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.delete("/providers/:providerId/models/:modelId", async (c) => {
+    const providerId = c.req.param("providerId");
+    const modelId = c.req.param("modelId");
+    try {
+      const result = await ctx.bus.request("provider:remove-media-model", {
+        providerId,
+        capability: "image_generation",
+        modelId,
+      });
+      if (result?.error) return c.json({ error: result.error }, 400);
+      return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

@@ -86,6 +86,46 @@ function outputContainsReasoning(output) {
   });
 }
 
+function isResponsesAssistantMessage(item) {
+  if (!item || typeof item !== "object") return false;
+  if (item.type !== "message") return false;
+  return typeof item.role !== "string" || item.role === "" || item.role === "assistant";
+}
+
+function extractResponsesMessageText(item) {
+  if (!Array.isArray(item?.content)) return [];
+  const parts = [];
+  for (const block of item.content) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type !== "output_text" && block.type !== "text") continue;
+    if (typeof block.text === "string" && block.text.trim()) {
+      parts.push(block.text.trim());
+    }
+  }
+  return parts;
+}
+
+function extractResponsesText(data) {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return {
+      text: data.output_text.trim(),
+      removedThinking: outputContainsReasoning(data?.output),
+    };
+  }
+
+  const output = Array.isArray(data?.output) ? data.output : [];
+  const text = output
+    .filter(isResponsesAssistantMessage)
+    .flatMap(extractResponsesMessageText)
+    .join("\n")
+    .trim();
+
+  return {
+    text,
+    removedThinking: outputContainsReasoning(output),
+  };
+}
+
 function throwAbortOrTimeout(err, signal, modelId) {
   if (err.name === "AbortError" || err.name === "TimeoutError") {
     if (signal?.aborted) throw createUserAbortError();
@@ -151,6 +191,8 @@ function convertContentForApi(content, api) {
  * @param {number} [opts.timeoutMs]    超时毫秒 (default 60000)
  * @param {AbortSignal} [opts.signal]  外部取消信号
  * @param {boolean} [opts.returnUsage] 返回 { text, usage }，默认保持旧接口返回纯文本
+ * @param {object} [opts.usageContext] 用量归属和诊断来源
+ * @param {object} [opts.usageLedger]  用量账本
  * @returns {Promise<string|{text: string, usage: object|null}>} 生成的文本
  */
 export async function callText({
@@ -167,6 +209,8 @@ export async function callText({
   timeoutMs = 60_000,
   signal,
   returnUsage = false,
+  usageContext,
+  usageLedger,
 }) {
   // 同时接受完整 model 对象和裸 id。modelObj 用于 provider-compat 决策；modelId 入 payload。
   const modelObj = typeof model === "object" && model !== null ? model : null;
@@ -267,6 +311,14 @@ export async function callText({
   });
 
   // ── 4. 发送请求 ──
+  const usageRequest = usageLedger?.start?.({
+    model: { provider, modelId, api },
+    usageContext,
+    costRates: modelObj?.cost,
+  }) || null;
+  let observedUsagePayload = null;
+  let usageRequestClosed = false;
+  try {
   const SLOW_THRESHOLD_MS = 15_000;
   const slowTimer = setTimeout(() => {
     errorBus.report(new AppError('LLM_SLOW_RESPONSE', {
@@ -299,6 +351,7 @@ export async function callText({
   } catch {
     throw new Error(`LLM returned invalid JSON (status=${res.status})`);
   }
+  observedUsagePayload = data?.usage ?? null;
 
   if (!res.ok) {
     const message = data?.error?.message || data?.message || rawText || `HTTP ${res.status}`;
@@ -319,15 +372,9 @@ export async function callText({
     text = extracted.text;
     removedStructuredThinking = extracted.removedThinking;
   } else if (api === "openai-responses" || api === "openai-codex-responses") {
-    if (typeof data?.output_text === "string") {
-      text = data.output_text.trim();
-    } else {
-      text = (data?.output || [])
-        .filter(item => item?.type === "message" && item?.role === "assistant")
-        .flatMap(item => (item.content || []).filter(c => typeof c?.text === "string").map(c => c.text.trim()))
-        .join("\n").trim();
-    }
-    removedStructuredThinking = outputContainsReasoning(data?.output);
+    const extracted = extractResponsesText(data);
+    text = extracted.text;
+    removedStructuredThinking = extracted.removedThinking;
   } else {
     const message = data?.choices?.[0]?.message;
     text = (typeof message?.content === "string")
@@ -373,6 +420,23 @@ export async function callText({
     usage: data?.usage,
     costRates: modelObj?.cost,
   });
+  usageLedger?.finish?.(usageRequest?.requestId, {
+    usage: data?.usage,
+    model: { provider, modelId, api },
+    costRates: modelObj?.cost,
+  });
+  usageRequestClosed = true;
 
   return returnUsage ? { text, usage } : text;
+  } catch (err) {
+    if (usageRequest?.requestId && !usageRequestClosed) {
+      const status = err?.name === "AbortError" || err?.type === "aborted" ? "aborted" : "error";
+      usageLedger?.recordError?.(usageRequest.requestId, err, status, {
+        usage: observedUsagePayload,
+        model: { provider, modelId, api },
+        costRates: modelObj?.cost,
+      });
+    }
+    throw err;
+  }
 }

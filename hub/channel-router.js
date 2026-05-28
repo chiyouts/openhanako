@@ -25,10 +25,12 @@ import { runAgentPhoneSession } from "./agent-executor.js";
 import { debugLog, createModuleLogger } from "../lib/debug-log.js";
 import { getLocale } from "../server/i18n.js";
 import {
-  getAgentPhoneProjectionPath,
-  readAgentPhoneProjection,
   recordAgentPhoneActivity,
 } from "../lib/conversations/agent-phone-projection.js";
+import {
+  readAgentPhoneRuntime,
+  resolveAgentPhoneRuntimeSessionPath,
+} from "../lib/conversations/agent-phone-runtime.js";
 import { normalizeAgentPhoneToolMode } from "../lib/conversations/agent-phone-session.js";
 import {
   DEFAULT_AGENT_PHONE_SETTINGS,
@@ -144,13 +146,7 @@ export class ChannelRouter {
     try {
       const agent = this._getAgentInstance(agentId);
       const agentDir = agent?.agentDir || path.join(this._engine.agentsDir, agentId);
-      const projection = readAgentPhoneProjection(getAgentPhoneProjectionPath(agentDir, channelName));
-      const stored = projection.meta.phoneSessionFile;
-      if (!stored || typeof stored !== "string") return null;
-      const resolved = path.resolve(agentDir, ...stored.split("/").filter(Boolean));
-      const base = path.resolve(agentDir);
-      if (!resolved.startsWith(base + path.sep) && resolved !== base) return null;
-      return resolved;
+      return resolveAgentPhoneRuntimeSessionPath(agentDir, readAgentPhoneRuntime(agentDir, channelName));
     } catch {
       return null;
     }
@@ -333,6 +329,7 @@ export class ChannelRouter {
       onEvent: (event, data) => {
         this._hub.eventBus.emit({ type: event, ...data }, null);
       },
+      isEnabled: () => engine.isChannelsEnabled?.() !== false,
     });
     this._ticker.start();
   }
@@ -461,7 +458,6 @@ export class ChannelRouter {
     mentionTargeted = false,
     deliveryWindow = null,
   } = {}) {
-    const engine = this._engine;
     const msgText = formatMessagesForLLM(newMessages);
     const isZh = getLocale().startsWith("zh");
     const lastNewMessage = newMessages[newMessages.length - 1] || null;
@@ -902,6 +898,19 @@ export class ChannelRouter {
         }],
         temperature: 0.3,
         maxTokens: 200,
+        usageLedger: engine.usageLedger,
+        usageContext: {
+          source: {
+            subsystem: "memory",
+            operation: "channel_memory_summary",
+            surface: "channel",
+            trigger: "scheduled",
+          },
+          attribution: {
+            kind: "memory",
+            agentId,
+          },
+        },
       });
       const summaryText = this._normalizeChannelMemorySummary(rawSummary);
 

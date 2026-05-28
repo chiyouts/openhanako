@@ -51,6 +51,7 @@ describe("HTTP route security policy", () => {
     for (const [method, path] of [
       ["POST", "/api/shutdown"],
       ["GET", "/internal/browser"],
+      ["GET", "/api/usage/llm"],
     ]) {
       expect(authorizeHttpRoute({ method, path, principal })).toMatchObject({
         allowed: false,
@@ -145,6 +146,7 @@ describe("HTTP route security policy", () => {
       ["GET", "/api/avatar/agent"],
       ["GET", "/api/agents/hana/avatar"],
       ["GET", "/api/models"],
+      ["GET", "/api/models/auxiliary-vision"],
       ["POST", "/api/models/set"],
       ["POST", "/api/models/switch"],
       ["GET", "/api/session-permission-mode"],
@@ -169,6 +171,11 @@ describe("HTTP route security policy", () => {
     expect(authorizeHttpRoute({
       method: "POST",
       path: "/api/mobile/workbench/actions",
+      principal: reader,
+    })).toMatchObject({ allowed: false, error: "insufficient_scope" });
+    expect(authorizeHttpRoute({
+      method: "GET",
+      path: "/api/preferences/models",
       principal: reader,
     })).toMatchObject({ allowed: false, error: "insufficient_scope" });
     expect(authorizeHttpRoute({
