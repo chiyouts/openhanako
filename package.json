@@ -124,6 +124,7 @@
     "appId": "com.hanako.app",
     "productName": "Hanako",
     "asar": true,
+    "compression": "maximum",
     "afterPack": "./scripts/fix-modules.cjs",
     "extraMetadata": {
       "main": "desktop/bootstrap.cjs"
@@ -202,7 +203,19 @@
       "extraResources": [
         {
           "from": "vendor/git-portable",
-          "to": "git"
+          "to": "git",
+          "filter": [
+            "**/*",
+            "!dev/**",
+            "!tmp/**",
+            "!mingw32/share/doc/**",
+            "!mingw32/share/licenses/**",
+            "!usr/share/doc/**",
+            "!usr/share/licenses/**",
+            "!usr/share/vim/**",
+            "!**/*.html",
+            "!unins000.*"
+          ]
         },
         {
           "from": "dist-sandbox/win-${arch}/",
