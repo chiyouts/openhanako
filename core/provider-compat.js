@@ -21,9 +21,11 @@
 import * as deepseek from "./provider-compat/deepseek.js";
 import * as mimo from "./provider-compat/mimo.js";
 import * as qwen from "./provider-compat/qwen.js";
+import * as zhipu from "./provider-compat/zhipu.js";
 import * as openaiVideoUrl from "./provider-compat/openai-video-url.js";
 import * as anthropic from "./provider-compat/anthropic.js";
 import { normalizeImplicitOutputBudget } from "./provider-compat/output-budget.js";
+import { stripOrphanToolResults } from "./provider-compat/tool-pairing.js";
 import {
   getReasoningProfile as getDeclaredReasoningProfile,
   getThinkingFormat as getDeclaredThinkingFormat,
@@ -33,7 +35,7 @@ import {
  * 子模块注册表。顺序敏感：first-match-wins。
  * 新 provider 默认加在末尾；只有当模块的 matches 是另一模块子集（更具体规则）时才前置。
  */
-const PROVIDER_MODULES = [deepseek, mimo, qwen, openaiVideoUrl, anthropic];
+const PROVIDER_MODULES = [deepseek, mimo, qwen, zhipu, openaiVideoUrl, anthropic];
 
 function lower(value) {
   return typeof value === "string" ? value.toLowerCase() : "";
@@ -106,6 +108,19 @@ function stripDisabledReasoningEffort(payload) {
 }
 
 /**
+ * 孤儿 toolResult 配对兜底（issue #1285，provider-agnostic）。
+ * 删除「父 tool_calls 已被 SDK transform-messages 丢弃的孤儿 role:"tool"」，
+ * 使每个 role:"tool" 都有前驱带匹配 tool_calls 的 assistant，避免 OpenAI-compatible
+ * provider 返回 400。逻辑与删除条件见 ./provider-compat/tool-pairing.js。
+ */
+function stripOrphanToolMessages(payload) {
+  if (!Array.isArray(payload.messages)) return payload;
+  const repaired = stripOrphanToolResults(payload.messages);
+  if (repaired === payload.messages) return payload;
+  return { ...payload, messages: repaired };
+}
+
+/**
  * Provider payload 兼容化的唯一入口。chat 路径与 utility 路径共享。
  *
  * 处理顺序：
@@ -126,6 +141,9 @@ export function normalizeProviderPayload(payload, model, options = {}) {
   result = stripEmptyTools(result);
   result = stripIncompatibleThinking(result, model);
   result = stripDisabledReasoningEffort(result);
+  // 孤儿 toolResult 配对兜底先于 provider 子模块：保证子模块（如 deepseek 的
+  // reasoning_content 校验）拿到的是已配对的 messages，不会被孤儿干扰。
+  result = stripOrphanToolMessages(result);
   result = normalizeImplicitOutputBudget(result, model, options);
 
   // 2. Provider-specific 补丁（按 matches 分发，first-match-wins）

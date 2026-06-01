@@ -11,6 +11,7 @@ import { useStore } from './stores';
 import { hanaFetch } from './hooks/use-hana-fetch';
 import { applyAgentIdentity, loadAgents, loadAvatars } from './stores/agent-actions';
 import { loadSessions } from './stores/session-actions';
+import { initSessionProjectCatalog } from './stores/session-project-actions';
 import { connectWebSocket, getWebSocket } from './services/websocket';
 import { setStatus, loadModels } from './utils/ui-helpers';
 import { initJian } from './stores/desk-actions';
@@ -46,6 +47,14 @@ declare const i18n: {
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- 全局 bootstrap：platform/IPC callback 签名含 any */
+
+function markRendererLaunch(event: string, details?: unknown) {
+  if (details === undefined) {
+    console.info(`[hana-launch] ${event}`);
+  } else {
+    console.info(`[hana-launch] ${event}`, details);
+  }
+}
 
 // ── __hanaLog：前端日志上报 ──
 window.__hanaLog = function (level: string, module: string, message: string) {
@@ -104,6 +113,7 @@ export async function initApp(): Promise<void> {
 
   if (!activeServerConnection) {
     setStatus('status.serverNotReady', false);
+    markRendererLaunch('app-ready', JSON.stringify({ reason: 'no-active-server-connection' }));
     platform.appReady();
     return;
   }
@@ -134,12 +144,14 @@ export async function initApp(): Promise<void> {
       } catch (localErr) {
         console.error('[init] server identity failed:', localErr);
         setStatus('status.serverNotReady', false);
+        markRendererLaunch('app-ready', JSON.stringify({ reason: 'local-server-identity-failed' }));
         platform.appReady();
         return;
       }
     } else {
       console.error('[init] server identity failed:', err);
       setStatus('status.serverNotReady', false);
+      markRendererLaunch('app-ready', JSON.stringify({ reason: 'server-identity-failed' }));
       platform.appReady();
       return;
     }
@@ -198,6 +210,11 @@ export async function initApp(): Promise<void> {
   await loadAgents();
   await loadSessions();
 
+  // 10b. 加载项目目录（带重试）。放在 sessions 之后：此时 server 已确认可用，
+  // 避免项目目录像过去那样只靠 SessionList 挂载时一次性拉取、失败即长期空白，
+  // 导致自定义项目消失、其会话被错误并入 cwd 推导分组。
+  await initSessionProjectCatalog();
+
   // 11. 初始化书桌
   initJian();
 
@@ -250,6 +267,7 @@ export async function initApp(): Promise<void> {
   });
 
   // 22. 通知 app ready
+  markRendererLaunch('app-ready');
   platform.appReady();
 }
 

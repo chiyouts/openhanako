@@ -4,6 +4,8 @@ import { normalizeProviderPayload } from './provider-compat.js';
 import { logLlmUsage, normalizeLlmUsage } from '../lib/llm/usage-observer.js';
 
 const EMPTY_AFTER_THINKING_MESSAGE = "模型未回复正文，请检查思考内容或稍后重试。";
+const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
+const CODEX_ACCOUNT_CLAIM_PATH = "https://api.openai.com/auth";
 
 /**
  * core/llm-client.js — 统一的非流式 LLM 调用入口
@@ -57,6 +59,34 @@ function stripTaggedThinking(text) {
 function positiveInteger(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
+function resolveCodexResponsesUrl(baseUrl) {
+  const raw = (baseUrl || DEFAULT_CODEX_BASE_URL).replace(/\/+$/, "");
+  if (raw.endsWith("/codex/responses")) return raw;
+  if (raw.endsWith("/codex")) return `${raw}/responses`;
+  return `${raw}/codex/responses`;
+}
+
+function extractAccountIdFromToken(token) {
+  if (typeof token !== "string") return "";
+  const [, payload] = token.split(".");
+  if (!payload) return "";
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
+    const accountId = data?.[CODEX_ACCOUNT_CLAIM_PATH]?.chatgpt_account_id;
+    return typeof accountId === "string" ? accountId : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveCodexAccountId(modelObj, apiKey) {
+  const direct = modelObj?.accountId || modelObj?.account_id || modelObj?.accountID;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const header = modelObj?.headers?.["chatgpt-account-id"] || modelObj?.headers?.["ChatGPT-Account-ID"];
+  if (typeof header === "string" && header.trim()) return header.trim();
+  return extractAccountIdFromToken(apiKey);
 }
 
 function isThinkingBlock(block) {
@@ -123,6 +153,70 @@ function extractResponsesText(data) {
   return {
     text,
     removedThinking: outputContainsReasoning(output),
+  };
+}
+
+async function readCodexResponsesStream(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const events = [];
+  const textDeltas = [];
+  let doneText = "";
+  let completedResponse = null;
+  let buffer = "";
+
+  const consumeBlock = (block) => {
+    const data = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data || data === "[DONE]") return;
+
+    let event;
+    try {
+      event = JSON.parse(data);
+    } catch {
+      return;
+    }
+    events.push(event);
+
+    if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+      textDeltas.push(event.delta);
+    } else if (event.type === "response.output_text.done" && typeof event.text === "string") {
+      doneText = event.text;
+    } else if (event.type === "response.completed") {
+      completedResponse = event.response || event;
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: !done });
+    let sep;
+    while ((sep = buffer.search(/\r?\n\r?\n/)) !== -1) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(buffer[sep] === "\r" ? sep + 4 : sep + 2);
+      consumeBlock(block);
+    }
+    if (done) break;
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeBlock(buffer);
+
+  const outputText = textDeltas.join("").trim() || doneText.trim();
+  const usage = completedResponse?.usage || events.find((event) => event?.usage)?.usage || null;
+  if (outputText) {
+    return {
+      output_text: outputText,
+      ...(usage ? { usage } : {}),
+    };
+  }
+  if (completedResponse) return completedResponse;
+  return {
+    output: events,
+    ...(usage ? { usage } : {}),
   };
 }
 
@@ -258,7 +352,32 @@ export async function callText({
       ...(mergedSystem && { system: mergedSystem }),
       messages: anthropicMessages,
     };
-  } else if (api === "openai-responses" || api === "openai-codex-responses") {
+  } else if (api === "openai-codex-responses") {
+    const accountId = resolveCodexAccountId(modelObj, apiKey);
+    if (!accountId) {
+      throw new AppError("LLM_AUTH_FAILED", {
+        message: "Codex OAuth account id is required for openai-codex-responses.",
+        context: { model: modelId, provider },
+      });
+    }
+    endpoint = resolveCodexResponsesUrl(baseUrl);
+    headers = {
+      "Content-Type": "application/json",
+      "OpenAI-Beta": "responses=experimental",
+      "originator": "pi",
+      "chatgpt-account-id": accountId,
+    };
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+    body = {
+      model: modelId,
+      store: false,
+      stream: true,
+      ...(explicitMaxTokens !== null && { max_output_tokens: explicitMaxTokens }),
+      ...(temperature !== undefined && { temperature }),
+      ...(mergedSystem && { instructions: mergedSystem }),
+      input: normalizedMessages,
+    };
+  } else if (api === "openai-responses") {
     // OpenAI Responses API
     endpoint = `${base}/responses`;
     headers = { "Content-Type": "application/json" };
@@ -338,18 +457,25 @@ export async function callText({
 
   // ── 5. 解析响应 ──
   let rawText;
+  let data;
   try {
-    rawText = await res.text();
+    if (res.ok && api === "openai-codex-responses" && res.body && typeof res.body.getReader === "function") {
+      data = await readCodexResponsesStream(res.body);
+      rawText = JSON.stringify(data);
+    } else {
+      rawText = await res.text();
+    }
   } catch (err) {
     clearTimeout(slowTimer);
     throwAbortOrTimeout(err, signal, modelId);
   }
   clearTimeout(slowTimer);
-  let data;
-  try {
-    data = rawText ? JSON.parse(rawText) : null;
-  } catch {
-    throw new Error(`LLM returned invalid JSON (status=${res.status})`);
+  if (!data) {
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      throw new Error(`LLM returned invalid JSON (status=${res.status})`);
+    }
   }
   observedUsagePayload = data?.usage ?? null;
 

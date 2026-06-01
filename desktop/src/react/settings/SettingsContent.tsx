@@ -84,6 +84,7 @@ const TAB_TITLES: Record<string, string> = {
   interface: '界面',
   work: '工作台',
   computer: '使用电脑',
+  workflow: 'Workflow',
   skills: '技能',
   bridge: '社交平台',
   providers: '供应商',

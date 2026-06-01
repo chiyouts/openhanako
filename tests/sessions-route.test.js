@@ -159,6 +159,53 @@ describe("sessions route", () => {
     );
   });
 
+  it("assigns a new session to the requested project before broadcasting it", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const app = new Hono();
+    const hub = { eventBus: { emit: vi.fn() } };
+
+    const engine = {
+      currentAgentId: "hana",
+      config: {},
+      cwd: "/tmp/work",
+      memoryEnabled: true,
+      planMode: false,
+      memoryModelUnavailableReason: null,
+      normalizeSessionProjectAssignmentId: vi.fn(() => "project-hana"),
+      createSession: vi.fn(async () => ({ sessionPath: "/tmp/agents/hana/sessions/new.jsonl", agentId: "hana" })),
+      createSessionForAgent: vi.fn(),
+      setSessionProjectAssignment: vi.fn(async ({ sessionPath, projectId }) => ({ sessionPath, projectId })),
+      persistSessionMeta: vi.fn(),
+      updateConfig: vi.fn(async (patch) => Object.assign(engine.config, patch)),
+      getAgent: vi.fn(() => ({ agentName: "Hana" })),
+      getSessionWorkspaceFolders: vi.fn(() => []),
+    };
+
+    app.route("/api", createSessionsRoute(engine, hub));
+
+    const res = await app.request("/api/sessions/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/tmp/work", projectId: "project-hana" }),
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(engine.normalizeSessionProjectAssignmentId).toHaveBeenCalledWith("project-hana");
+    expect(engine.setSessionProjectAssignment).toHaveBeenCalledWith({
+      sessionPath: "/tmp/agents/hana/sessions/new.jsonl",
+      projectId: "project-hana",
+    });
+    expect(data.projectId).toBe("project-hana");
+    expect(hub.eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "session_created",
+        session: expect.objectContaining({ projectId: "project-hana" }),
+      }),
+      "/tmp/agents/hana/sessions/new.jsonl",
+    );
+  });
+
   it("includes pinnedAt in the session list response", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.js");
     const app = new Hono();
@@ -186,6 +233,34 @@ describe("sessions route", () => {
 
     expect(res.status).toBe(200);
     expect(data[0].pinnedAt).toBe(pinnedAt);
+  });
+
+  it("includes explicit projectId in the session list response", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const app = new Hono();
+
+    const engine = {
+      listSessions: vi.fn(async () => [{
+        path: "/tmp/agents/hana/sessions/a.jsonl",
+        title: "Project thread",
+        firstMessage: "hello",
+        modified: new Date("2026-05-28T07:00:00.000Z"),
+        messageCount: 2,
+        cwd: "/tmp/work",
+        agentId: "hana",
+        agentName: "Hana",
+        projectId: "project-hana",
+      }]),
+      rcState: null,
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data[0].projectId).toBe("project-hana");
   });
 
   it("searches sessions without exposing the cached full transcript", async () => {
@@ -720,6 +795,121 @@ describe("sessions route", () => {
       agentName: "Hanako",
       streamKey: "/tmp/agents/hanako/subagent-sessions/child.jsonl",
     });
+  });
+
+  it("reload 时从 runStore 回填 workflow inline 块终态（running→done + 补 finishedAt）", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "hi", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "assistant", content: "hi" },
+      {
+        role: "toolResult",
+        toolName: "workflow",
+        details: { taskId: "workflow-1", workflow: "three-theme-poem", streamStatus: "running", startedAt: 1000 },
+      },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+      subagentRuns: {
+        query: vi.fn((id) => id === "workflow-1"
+          ? { taskId: "workflow-1", status: "resolved", summary: "诗", completedAt: "2026-05-31T08:26:49.160Z" }
+          : null),
+      },
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+    const res = await app.request("/api/sessions/messages");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    const wf = data.blocks.find((b) => b.type === "workflow");
+    expect(wf).toMatchObject({ taskId: "workflow-1", streamStatus: "done", startedAt: 1000 });
+    expect(wf.finishedAt).toBe(Date.parse("2026-05-31T08:26:49.160Z"));
+  });
+
+  it("workflow inline 块仍 pending 时保持 running（不误判完成）", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "hi", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "assistant", content: "hi" },
+      {
+        role: "toolResult",
+        toolName: "workflow",
+        details: { taskId: "workflow-2", workflow: "wf", streamStatus: "running", startedAt: 1000 },
+      },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+      subagentRuns: { query: vi.fn(() => ({ taskId: "workflow-2", status: "pending" })) },
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+    const res = await app.request("/api/sessions/messages");
+    const data = await res.json();
+    const wf = data.blocks.find((b) => b.type === "workflow");
+    expect(wf.streamStatus).toBe("running");
+  });
+
+  it("首屏载入重发该会话的 workflow 活动（重启后右侧卡复原）", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "hi", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "assistant", content: "hi" },
+    ]);
+
+    const rebroadcastSession = vi.fn();
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+      subagentRuns: null,
+      activityHub: { rebroadcastSession },
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+    const res = await app.request(`/api/sessions/messages?path=${encodeURIComponent("/s/a.jsonl")}`);
+    expect(res.status).toBe(200);
+    expect(rebroadcastSession).toHaveBeenCalledWith("/s/a.jsonl");
+  });
+
+  it("翻页（before）不重发 workflow 活动（避免重复广播）", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.js");
+    const msgUtils = await import("../core/message-utils.js");
+    const app = new Hono();
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "hi", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "assistant", content: "hi" },
+    ]);
+
+    const rebroadcastSession = vi.fn();
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+      subagentRuns: null,
+      activityHub: { rebroadcastSession },
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+    const res = await app.request(`/api/sessions/messages?path=${encodeURIComponent("/s/a.jsonl")}&before=5`);
+    expect(res.status).toBe(200);
+    expect(rebroadcastSession).not.toHaveBeenCalled();
   });
 
   it("includes session entry timestamps on displayable history messages", async () => {

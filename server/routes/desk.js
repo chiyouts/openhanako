@@ -18,6 +18,7 @@ import { DEFAULT_DISABLED_TOOL_NAMES } from "../../shared/tool-categories.js";
 import { applyMarkdownCoverFromGeneratedFile } from "../../plugins/beautify/lib/markdown-cover-service.js";
 import { resolveCoverGalleryPresetImagePath } from "../../plugins/beautify/lib/cover-gallery-assets.js";
 import { buildCoverStyleGuideForAgent } from "../../plugins/beautify/lib/cover-style-guide.js";
+import { createSubmitContext, validateImageModelRef } from "../../plugins/image-gen/lib/image-task-runner.js";
 import { emitAppEvent } from "../app-events.js";
 import { t } from "../i18n.js";
 import { realPath, isSensitivePath } from "../utils/path-security.js";
@@ -40,26 +41,41 @@ function isInsidePath(target, baseDir) {
   return full === base || full.startsWith(base + path.sep);
 }
 
+function isInsideAnyRoot(dir, roots) {
+  const resolved = realPath(dir);
+  if (!resolved) return false;
+  return roots.filter(Boolean).some(root => {
+    const r = realPath(root);
+    if (!r) return false;
+    return resolved === r || resolved.startsWith(r + path.sep);
+  });
+}
+
+function selectedAgentDeskRoots(engine, agentId) {
+  if (!agentId || typeof agentId !== "string") return [];
+  return [
+    typeof engine.getExplicitHomeCwd === "function" ? engine.getExplicitHomeCwd(agentId) : null,
+    typeof engine.getHomeCwd === "function" ? engine.getHomeCwd(agentId) : null,
+  ].filter(Boolean);
+}
+
 /** 校验 dir 覆盖：仅允许 engine 已知的根目录（解析 symlink 后比较） */
-function isApprovedDir(dir, engine) {
+function isApprovedDir(dir, engine, { agentId = null } = {}) {
+  if (isInsideAnyRoot(dir, selectedAgentDeskRoots(engine, agentId))) {
+    return true;
+  }
   if (typeof engine.isApprovedDeskDir === "function") {
-    return engine.isApprovedDeskDir(dir);
+    return engine.isApprovedDeskDir(dir, { agentId });
   }
   const approved = [
     engine.deskCwd,
     engine.homeCwd,
     ...(Array.isArray(engine.config?.cwd_history) ? engine.config.cwd_history : []),
   ].filter(Boolean);
-  const resolved = realPath(dir);
-  if (!resolved) return false;
-  if (typeof engine.isApprovedWorkspaceDir === "function" && engine.isApprovedWorkspaceDir(dir)) {
+  if (typeof engine.isApprovedWorkspaceDir === "function" && engine.isApprovedWorkspaceDir(dir, { agentId })) {
     return true;
   }
-  return approved.some(root => {
-    const r = realPath(root);
-    if (!r) return false;
-    return resolved === r || resolved.startsWith(r + path.sep);
-  });
+  return isInsideAnyRoot(dir, approved);
 }
 
 function defaultDeskDir(engine) {
@@ -282,13 +298,13 @@ export function createDeskRoute(engine, hub) {
     ].filter(Boolean).join("\n");
   }
 
-  function getBeautifyAgent(requestedAgentId) {
+  function getBeautifyExecutorAgent(requestedAgentId) {
     const agentId = typeof requestedAgentId === "string" && requestedAgentId.trim()
       ? requestedAgentId.trim()
-      : engine.currentAgentId;
-    const agent = engine.getAgent?.(agentId) || engine.agent;
+      : (engine.getPrimaryAgentId?.() || engine.currentAgentId || null);
+    const agent = agentId ? engine.getAgent?.(agentId) : null;
     return {
-      agent,
+      agent: agent || null,
       agentId: agent?.id || agentId || null,
     };
   }
@@ -303,6 +319,123 @@ export function createDeskRoute(engine, hub) {
       ? agent.config.tools.disabled
       : DEFAULT_DISABLED_TOOL_NAMES;
     return !disabled.includes(BEAUTIFY_OPTIONAL_TOOL_NAME);
+  }
+
+  function beautifyAgentName(agent, agentId) {
+    return agent?.agentName || agent?.name || agentId || null;
+  }
+
+  function getImageGenContext() {
+    return engine.pluginManager?.getPlugin?.("image-gen")?.ctx || null;
+  }
+
+  async function resolveDefaultImageModelStatus() {
+    const imageGenCtx = getImageGenContext();
+    if (!imageGenCtx) {
+      return {
+        ok: false,
+        status: 404,
+        reason: "image-gen-unavailable",
+        error: "image generation plugin is unavailable",
+        settingsTarget: "media",
+      };
+    }
+
+    const defaultModel = imageGenCtx.config?.get?.("defaultImageModel");
+    if (!defaultModel?.provider || !defaultModel?.id) {
+      return {
+        ok: false,
+        status: 409,
+        reason: "default-image-model-missing",
+        error: "default image model is not configured",
+        settingsTarget: "media",
+      };
+    }
+
+    const registry = imageGenCtx._mediaGen?.registry;
+    if (!registry) {
+      return {
+        ok: false,
+        status: 404,
+        reason: "image-gen-unavailable",
+        error: "image generation runtime is unavailable",
+        settingsTarget: "media",
+      };
+    }
+
+    try {
+      const resolved = await validateImageModelRef(
+        { providerId: defaultModel.provider, modelId: defaultModel.id },
+        registry,
+        createSubmitContext(imageGenCtx),
+      );
+      return { ok: true, resolved };
+    } catch (err) {
+      return {
+        ok: false,
+        status: 409,
+        reason: "default-image-model-invalid",
+        error: err?.message || String(err),
+        settingsTarget: "media",
+      };
+    }
+  }
+
+  async function getBeautifyGenerationStatus(requestedAgentId) {
+    const { agent, agentId } = getBeautifyExecutorAgent(requestedAgentId);
+    const base = {
+      available: false,
+      enabled: false,
+      executorAgentId: agentId,
+      executorAgentName: beautifyAgentName(agent, agentId),
+      disabledReason: null,
+      message: null,
+      settingsTarget: null,
+    };
+
+    if (!agentId || !agent) {
+      return {
+        ...base,
+        disabledReason: "agent-unavailable",
+        message: "agent unavailable",
+      };
+    }
+
+    if (!isBeautifyPluginAvailable()) {
+      return {
+        ...base,
+        disabledReason: "beautify-plugin-unavailable",
+        message: "beautify tool is unavailable",
+        settingsTarget: "plugins",
+      };
+    }
+
+    if (!isBeautifyEnabled(agent)) {
+      return {
+        ...base,
+        available: true,
+        disabledReason: "beautify-disabled",
+        message: "beautify tool is disabled for this agent",
+        settingsTarget: "agent-tools",
+      };
+    }
+
+    const imageStatus = await resolveDefaultImageModelStatus();
+    if (!imageStatus.ok) {
+      return {
+        ...base,
+        available: true,
+        disabledReason: imageStatus.reason,
+        message: imageStatus.error,
+        settingsTarget: imageStatus.settingsTarget,
+      };
+    }
+
+    return {
+      ...base,
+      available: true,
+      enabled: true,
+    };
   }
 
   function validateBeautifyMarkdownFilePath(filePath) {
@@ -321,23 +454,44 @@ export function createDeskRoute(engine, hub) {
     return null;
   }
 
-  function validateBeautifyAccess(body) {
-    const { agent, agentId } = getBeautifyAgent(body?.agentId);
-    if (!agentId) return { error: "agent unavailable", status: 500 };
+  function validateMarkdownCoverSystemAccess() {
     if (!isBeautifyPluginAvailable()) {
       return { error: "beautify tool is unavailable", status: 404 };
     }
-    if (!isBeautifyEnabled(agent)) {
-      return { error: "beautify tool is disabled for this agent", status: 403 };
+    return {};
+  }
+
+  async function validateBeautifyGenerationAccess(body) {
+    const status = await getBeautifyGenerationStatus(body?.executorAgentId || body?.agentId);
+    if (!status.executorAgentId) return { error: "agent unavailable", status: 500, reason: "agent-unavailable" };
+    if (!status.enabled) {
+      const httpStatus = status.disabledReason === "beautify-disabled"
+        ? 403
+        : status.disabledReason === "beautify-plugin-unavailable" || status.disabledReason === "image-gen-unavailable"
+          ? 404
+          : 409;
+      return {
+        error: status.message || "beautify generation is unavailable",
+        status: httpStatus,
+        reason: status.disabledReason,
+        settingsTarget: status.settingsTarget,
+      };
     }
-    return { agent, agentId };
+    const agent = engine.getAgent?.(status.executorAgentId);
+    return { agent, agentId: status.executorAgentId };
   }
 
   route.get("/desk/beautify/status", async (c) => {
-    const { agent, agentId } = getBeautifyAgent(c.req.query("agentId"));
-    const available = isBeautifyPluginAvailable();
-    const enabled = Boolean(available && agentId && isBeautifyEnabled(agent));
-    return c.json({ available, enabled, agentId });
+    const systemCover = { available: isBeautifyPluginAvailable() };
+    const agentGenerate = await getBeautifyGenerationStatus(c.req.query("executorAgentId") || c.req.query("agentId"));
+    return c.json({
+      systemCover,
+      agentGenerate,
+      // Compatibility for older renderer code while the desktop bundle updates.
+      available: systemCover.available,
+      enabled: agentGenerate.enabled,
+      agentId: agentGenerate.executorAgentId,
+    });
   });
 
   route.post("/desk/beautify/cover/apply", async (c) => {
@@ -346,7 +500,7 @@ export function createDeskRoute(engine, hub) {
     const fileError = validateBeautifyMarkdownFilePath(filePath);
     if (fileError) return c.json({ error: fileError }, 400);
 
-    const access = validateBeautifyAccess(body);
+    const access = validateMarkdownCoverSystemAccess();
     if (access.error) return c.json({ error: access.error }, access.status);
 
     const imageFilePath = typeof body?.imageFilePath === "string"
@@ -374,7 +528,7 @@ export function createDeskRoute(engine, hub) {
     const fileError = validateBeautifyMarkdownFilePath(filePath);
     if (fileError) return c.json({ error: fileError }, 400);
 
-    const access = validateBeautifyAccess(body);
+    const access = validateMarkdownCoverSystemAccess();
     if (access.error) return c.json({ error: access.error }, access.status);
 
     const presetId = typeof body?.presetId === "string" ? body.presetId : "";
@@ -403,8 +557,14 @@ export function createDeskRoute(engine, hub) {
     const fileError = validateBeautifyMarkdownFilePath(filePath);
     if (fileError) return c.json({ error: fileError }, 400);
 
-    const access = validateBeautifyAccess(body);
-    if (access.error) return c.json({ error: access.error }, access.status);
+    const access = await validateBeautifyGenerationAccess(body);
+    if (access.error) {
+      return c.json({
+        error: access.error,
+        reason: access.reason,
+        settingsTarget: access.settingsTarget,
+      }, access.status);
+    }
     const { agent, agentId } = access;
 
     const activityId = `beautify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -682,9 +842,10 @@ export function createDeskRoute(engine, hub) {
 
   /** 扫描工作台下的项目级技能 */
   route.get("/desk/skills", async (c) => {
+    const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ skills: [] });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine)) return c.json({ skills: [] });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ skills: [] });
 
     const results = [];
     for (const { sub, label } of WORKSPACE_SKILL_DIRS) {
@@ -721,11 +882,12 @@ export function createDeskRoute(engine, hub) {
   route.post("/desk/install-skill", async (c) => {
     const body = await safeJson(c);
     const { filePath, dir } = body;
+    const agentId = body.agentId || null;
     const cwd = dir || defaultDeskDir(engine);
     if (!filePath || !cwd) {
       return c.json({ error: "filePath and active workspace required" }, 400);
     }
-    if (dir && !isApprovedDir(cwd, engine)) {
+    if (dir && !isApprovedDir(cwd, engine, { agentId })) {
       return c.json({ error: "workspace is not approved" }, 403);
     }
 
@@ -791,18 +953,20 @@ export function createDeskRoute(engine, hub) {
 
   /** 工作台路径 */
   route.get("/desk/path", async (c) => {
+    const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ path: null });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
     fs.mkdirSync(dir, { recursive: true });
     return c.json({ path: dir });
   });
 
   /** 列出工作台文件（支持 ?subdir=xxx 浏览子目录, ?dir=xxx 覆盖基目录） */
   route.get("/desk/files", async (c) => {
+    const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ files: [], subdir: "", basePath: null });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
     const subdir = c.req.query("subdir") || "";
     // 安全：禁止路径穿越
     if (subdir && (subdir.includes("\\") || subdir.includes("..") || subdir.startsWith("."))) {
@@ -815,9 +979,10 @@ export function createDeskRoute(engine, hub) {
 
   /** 搜索工作台文件名（递归，默认跳过隐藏目录和常见依赖/构建目录） */
   route.get("/desk/search-files", async (c) => {
+    const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ results: [], basePath: null, query: c.req.query("q") || "" });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
     const query = c.req.query("q") || "";
     const limitRaw = Number.parseInt(c.req.query("limit") || "", 10);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0
@@ -835,9 +1000,10 @@ export function createDeskRoute(engine, hub) {
 
   /** 读取指定目录的 jian.md */
   route.get("/desk/jian", async (c) => {
+    const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ content: null });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
     const subdir = c.req.query("subdir") || "";
     if (subdir && (subdir.includes("\\") || subdir.includes("..") || subdir.startsWith("."))) {
       return c.json({ error: "invalid subdir" });
@@ -856,9 +1022,10 @@ export function createDeskRoute(engine, hub) {
   /** 保存指定目录的 jian.md（自动创建 / 内容为空时删除） */
   route.post("/desk/jian", async (c) => {
     const body = await safeJson(c);
+    const agentId = body.agentId || null;
     const dir = body.dir ? body.dir : defaultDeskDir(engine);
     if (!dir) return c.json({ error: t("error.noWorkspace") });
-    if (body.dir && !isApprovedDir(dir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    if (body.dir && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
     const { subdir, content } = body;
     const sub = subdir || "";
     if (sub && (sub.includes("\\") || sub.includes("..") || sub.startsWith("."))) {
@@ -886,9 +1053,10 @@ export function createDeskRoute(engine, hub) {
   /** 工作台文件操作（支持 subdir + dir override） */
   route.post("/desk/files", async (c) => {
     const body = await safeJson(c);
+    const agentId = body.agentId || null;
     const baseDir = body.dir || defaultDeskDir(engine);
     if (!baseDir) return c.json({ error: t("error.noWorkspace") });
-    if (body.dir && !isApprovedDir(baseDir, engine)) return c.json({ error: t("error.dirNotAllowed") });
+    if (body.dir && !isApprovedDir(baseDir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
     fs.mkdirSync(baseDir, { recursive: true });
 
     const { action, subdir: sub, paths, name, content, oldName, newName } = body;

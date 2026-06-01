@@ -16,7 +16,7 @@ import {
   runCachePreservingCompactionForSession,
 } from "./session-compactor.js";
 import { teardownSessionResources } from "./session-teardown.js";
-import { evaluateSessionHealth } from "./session-health.js";
+import { evaluateSessionHealth, repairOrphanToolResultEntriesInFile } from "./session-health.js";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { BrowserManager } from "../lib/browser/browser-manager.js";
 import { t, getLocale } from "../server/i18n.js";
@@ -1002,6 +1002,8 @@ export class SessionCoordinator {
     // 说明用户已经撞到了"反复 empty_stream"循环，给前端发警告事件让 UI 提示用户
     // 新建会话或修复。restore 本身仍然继续，避免破坏用户预期。
     this._emitSessionHealthWarning(sessionPath);
+    // #1285: 在 open 前修复坏会话的孤儿 toolResult（必须早于 SessionManager.open）
+    this._repairOrphanToolHistory(sessionPath);
 
     // 冷启动恢复：model 由 PI SDK 从 session JSONL 恢复（单一数据源），不从 session-meta.json 读
     const sessionMgr = SessionManager.open(sessionPath, this._d.getAgent().sessionDir);
@@ -1032,6 +1034,28 @@ export class SessionCoordinator {
     } catch (err) {
       // 健康度检查不能阻塞 restore，吃掉所有错误
       log.warn(`session health check failed for ${path.basename(sessionPath)}: ${err.message}`);
+    }
+  }
+
+  /**
+   * @private #1285 读时结构修复：在 SessionManager.open 之前清理已落盘坏会话里的孤儿
+   * toolResult entry（父 toolCall 属于会被 SDK 丢弃的 error/aborted assistant），避免
+   * 重放时序列化出无前驱 tool_calls 的 role:"tool" → OpenAI-compatible provider 400。
+   *
+   * 必须在 open 之前调用：修复发生在文件层，open 之后 SessionManager 从已清理文件加载。
+   * 容错不阻塞 restore（异常吃掉；运行时 provider-compat 兜底仍会防 400）。
+   */
+  _repairOrphanToolHistory(sessionPath) {
+    try {
+      const { repaired, removed } = repairOrphanToolResultEntriesInFile(sessionPath);
+      if (repaired) {
+        log.warn(
+          `session restore: ${path.basename(sessionPath)} 清理 ${removed} 条孤儿 toolResult `
+          + `(父 tool_calls 属于 error/aborted assistant，会被 SDK 丢弃) — see #1285.`
+        );
+      }
+    } catch (err) {
+      log.warn(`orphan tool history repair failed for ${path.basename(sessionPath)}: ${err.message}`);
     }
   }
 
@@ -1953,6 +1977,8 @@ export class SessionCoordinator {
     }
 
     this._emitSessionHealthWarning(sessionPath);
+    // #1285: 在 open 前修复坏会话的孤儿 toolResult（必须早于 SessionManager.open）
+    this._repairOrphanToolHistory(sessionPath);
     const sessionMgr = SessionManager.open(sessionPath, agent.sessionDir);
     const cwd = sessionMgr.getCwd?.() || undefined;
     const result = await this.createSession(sessionMgr, cwd, memoryEnabled, null, {
@@ -2015,6 +2041,8 @@ export class SessionCoordinator {
     try {
       // #521: attach 路径同样要做健康度评估，否则 bridge / RC 自动恢复时也会反复失败
       this._emitSessionHealthWarning(sessionPath);
+      // #1285: 在 open 前修复坏会话的孤儿 toolResult（必须早于 SessionManager.open）
+      this._repairOrphanToolHistory(sessionPath);
       const sessionMgr = SessionManager.open(sessionPath, agent.sessionDir);
       const cwd = sessionMgr.getCwd?.() || undefined;
       await this.createSession(sessionMgr, cwd, memoryEnabled, null, {
@@ -2070,6 +2098,9 @@ export class SessionCoordinator {
           const sessKey = path.basename(s.path);
           const metaEntry = meta[sessKey];
           s.pinnedAt = typeof metaEntry?.pinnedAt === "string" ? metaEntry.pinnedAt : null;
+          s.projectId = typeof metaEntry?.projectId === "string" && metaEntry.projectId.trim()
+            ? metaEntry.projectId.trim()
+            : null;
           // 读取新格式 model:{id,provider}；老格式（只有 modelId）视为无 provider，
           // 调用方必须接受 modelProvider 可能为 null。
           if (metaEntry?.model && typeof metaEntry.model === "object") {
@@ -2114,6 +2145,7 @@ export class SessionCoordinator {
         modelId: entry.modelId || null,
         modelProvider: entry.modelProvider || null,
         pinnedAt: null,
+        projectId: null,
       });
       projectedPaths.add(sessionPath);
     }
@@ -2567,7 +2599,11 @@ export class SessionCoordinator {
     if (this._headlessOps.size === 1) bm.setHeadless(true);
     let tempSessionMgr;
     let childSessionPath = null;
+    // resume 复用的持久实例 session：cleanup 各路径（含 early_abort 的无条件 cleanupTempSession）
+    // 一律不动，否则被 abort 一次实例文件就蒸发（撞底线#3）。
+    let isResumedSession = false;
     const cleanupTempSession = () => {
+      if (isResumedSession) return;
       const sp = tempSessionMgr?.getSessionFile?.();
       if (sp) {
         // 临时 session 文件清理 best-effort：删不掉（如已被删/权限）不应让 isolated 执行失败。
@@ -2615,7 +2651,19 @@ export class SessionCoordinator {
         }
       }
       const execModel = models.resolveExecutionModel(resolvedModel);
-      tempSessionMgr = SessionManager.create(execCwd, sessionDir);
+      // resume 分支：opts.resumeSessionPath 指向已有持久实例 session（subagent 复用续接）。
+      // 照前台 restore / bridge owner 范式：先修 #1285 孤儿 toolResult（必须早于 open），再 open；
+      // 文件不存在则退回新建（禁止静默：调用方传了 resumeSessionPath 但文件没了，按新建处理并由上层感知）。
+      const resumeExisting = typeof opts.resumeSessionPath === "string"
+        && opts.resumeSessionPath.trim()
+        && fs.existsSync(opts.resumeSessionPath);
+      if (resumeExisting) {
+        this._repairOrphanToolHistory(opts.resumeSessionPath);
+        tempSessionMgr = SessionManager.open(opts.resumeSessionPath, sessionDir);
+        isResumedSession = true;
+      } else {
+        tempSessionMgr = SessionManager.create(execCwd, sessionDir);
+      }
       const targetAgentToolsSnapshot = typeof targetAgent.getToolsSnapshot === "function"
         ? targetAgent.getToolsSnapshot({
           forceMemoryEnabled: targetAgent.memoryMasterEnabled !== false,
@@ -2634,7 +2682,8 @@ export class SessionCoordinator {
           workspaceFolders: execWorkspaceScope.workspaceFolders,
           getSessionPath: () => tempSessionMgr?.getSessionFile?.() || null,
           fileReadSessionPaths,
-          getPermissionMode: () => SESSION_PERMISSION_MODES.OPERATE,
+          getPermissionMode: () => opts.permissionMode || SESSION_PERMISSION_MODES.OPERATE,
+          permissionContext: { isSubagent: !!opts.subagentContext },
         },
       );
 
@@ -2816,8 +2865,9 @@ export class SessionCoordinator {
       const finalReplyText = replyText || finalAssistantText;
       const completionError = isolatedCompletionError(finalStopReason, finalErrorMessage);
 
-      if (!opts.persist && sessionPath) {
+      if (!opts.persist && !isResumedSession && sessionPath) {
         // 非 persist 的临时 session 文件清理 best-effort：删不掉不影响返回结果。
+        // isResumedSession 双保险：resume 复用文件即使调用方漏设 persist 也绝不删。
         try { fs.unlinkSync(sessionPath); } catch {}
         return {
           sessionPath: null,

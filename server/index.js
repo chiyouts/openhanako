@@ -41,6 +41,7 @@ installOpenAIRelayFetchSanitizer();
 import { loadLocale } from "./i18n.js";
 import { createChatRoute } from "./routes/chat.js";
 import { createSessionsRoute } from "./routes/sessions.js";
+import { createSessionProjectsRoute } from "./routes/session-projects.js";
 import { createModelsRoute } from "./routes/models.js";
 import { createConfigRoute } from "./routes/config.js";
 import { createUploadRoute } from "./routes/upload.js";
@@ -76,6 +77,9 @@ import { configureProcessPiSdkEnv, ensureHanaPiSdkDirs, resolveHanakoHome } from
 import { ConfirmStore } from "../lib/confirm-store.js";
 import { DeferredResultStore } from "../lib/deferred-result-store.js";
 import { SubagentRunStore } from "../lib/subagent-run-store.js";
+import { ReusableSubagentStore } from "../lib/reusable-subagent-store.js";
+import { ActivityHub } from "../lib/activity-hub.js";
+import { WorkflowActivityStore } from "../lib/workflow-activity-store.js";
 import { normalizeDeferredResolveResult } from "../lib/deferred-result-payload.js";
 import { createDeferredResultExtension } from "../lib/extensions/deferred-result-ext.js";
 import { createCompactionGuardExtension } from "../lib/extensions/compaction-guard-ext.js";
@@ -244,6 +248,7 @@ dlog.log("server", "engine initialized");
 
 const outboundProxyRuntime = createOutboundProxyRuntime({
   log: (msg) => dlog.log("server", msg),
+  warn: (msg) => log.warn(msg),
 });
 engine.setOutboundProxyRuntime(outboundProxyRuntime);
 outboundProxyRuntime.apply(engine.getNetworkProxy());
@@ -397,6 +402,28 @@ const subagentRunStore = new SubagentRunStore(
   path.join(hanakoHome, "subagent-runs.json"),
 );
 engine.setSubagentRunStore(subagentRunStore);
+
+// 复用 subagent 实例账本（按 reuseKey 记稳定 childSessionPath + 串行锁）：
+// 单例，跨所有 per-agent subagent 工具闭包共享，保证复用实例全局串行。
+const reusableSubagentStore = new ReusableSubagentStore(
+  path.join(hanakoHome, "reusable-subagents.json"),
+);
+engine.setReusableSubagentStore(reusableSubagentStore);
+
+// 统一 Agent Activity 实时真相源（内存广播层）：subagent / workflow / 巡检 都往这推，
+// 前端按当前对话 sessionPath 订阅。广播走 engine.emitEvent → WS（与 block_update 同一路）。
+// workflow / workflow_agent 另有持久化背书（重启不丢右侧卡）：启动先按 72h 修剪冷活动，
+// 再交给 ActivityHub 回灌（构造时把遗留 running 判孤儿、标 failed）。
+const WORKFLOW_ACTIVITY_TTL_MS = 72 * 60 * 60 * 1000;
+const workflowActivityStore = new WorkflowActivityStore(
+  path.join(hanakoHome, "workflow-activity.json"),
+);
+workflowActivityStore.prune(WORKFLOW_ACTIVITY_TTL_MS, Date.now());
+const activityHub = new ActivityHub(
+  { emit: (event, sp) => engine.emitEvent(event, sp) },
+  workflowActivityStore,
+);
+engine.setActivityHub(activityHub);
 
 // Bus handlers for plugin access
 hub.eventBus.handle("deferred:register", ({ taskId, sessionPath, meta }) => {
@@ -663,6 +690,7 @@ app.route("/api", createAccessRoute({
   runtimeState: serverRuntimeState,
 }));
 app.route("/api", createSessionsRoute(engine, hub));
+app.route("/api", createSessionProjectsRoute(engine));
 app.route("/api", createModelsRoute(engine));
 app.route("/api", createConfigRoute(engine));
 app.route("/api", createUploadRoute(engine));

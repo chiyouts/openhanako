@@ -449,9 +449,18 @@ export function handleServerMessage(msg: any): void {
       }
       break;
 
+    case 'agent_activity':
+      // 统一 Agent Activity 真相源（ActivityHub 广播）：subagent / workflow / 巡检
+      if (msg.entry?.id) {
+        useStore.getState().upsertAgentActivity(msg.entry);
+      }
+      break;
+
     case 'notification':
       if (window.hana?.showNotification) {
-        window.hana.showNotification(msg.title, msg.body);
+        // agentId 标识触发通知的助手，主进程据此读取该 agent 头像作为通知 icon。
+        // 缺失时透传 null，主进程退回无 icon，禁止从当前焦点 agent 兜底。
+        window.hana.showNotification(msg.title, msg.body, msg.agentId ?? null);
       }
       break;
 

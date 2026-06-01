@@ -38,6 +38,22 @@ function defaultDeskRoot(s: ReturnType<typeof useStore.getState>): string | unde
     || undefined;
 }
 
+function selectedDeskAgentId(s: ReturnType<typeof useStore.getState>): string | null {
+  return typeof s.selectedAgentId === 'string' && s.selectedAgentId.trim()
+    ? s.selectedAgentId.trim()
+    : null;
+}
+
+function addSelectedDeskAgentParam(params: URLSearchParams, s: ReturnType<typeof useStore.getState>): void {
+  const agentId = selectedDeskAgentId(s);
+  if (agentId) params.set('agentId', agentId);
+}
+
+function selectedDeskAgentBody(s: ReturnType<typeof useStore.getState>): { agentId?: string } {
+  const agentId = selectedDeskAgentId(s);
+  return agentId ? { agentId } : {};
+}
+
 function buildWorkspaceDeskState(s: ReturnType<typeof useStore.getState>): WorkspaceDeskState {
   const openTabs = [...(s.openTabs || [])];
   const activeTabId = s.activeTabId && openTabs.includes(s.activeTabId)
@@ -202,6 +218,7 @@ export async function loadDeskFiles(subdir?: string, overrideDir?: string | null
       ? (overrideDir || undefined)
       : defaultDeskRoot(s);
     if (dir) params.set('dir', dir);
+    addSelectedDeskAgentParam(params, s);
     const curPath = '';
     if (curPath) params.set('subdir', curPath);
     const qs = params.toString() ? `?${params}` : '';
@@ -331,6 +348,7 @@ export async function loadDeskTreeFiles(subdir = '', options: { force?: boolean;
     const params = new URLSearchParams();
     if (dir) params.set('dir', dir);
     if (normalizedSubdir) params.set('subdir', normalizedSubdir);
+    addSelectedDeskAgentParam(params, s);
     const qs = params.toString() ? `?${params}` : '';
     const res = await hanaFetch(`/api/desk/files${qs}`);
     const data = await res.json();
@@ -356,6 +374,7 @@ export async function searchDeskFiles(query: string): Promise<DeskSearchResult[]
     const params = new URLSearchParams();
     const dir = defaultDeskRoot(s);
     if (dir) params.set('dir', dir);
+    addSelectedDeskAgentParam(params, s);
     params.set('q', trimmed);
     const res = await hanaFetch(`/api/desk/search-files?${params}`);
     const data = await res.json();
@@ -422,6 +441,7 @@ export async function loadJianContent(): Promise<void> {
   try {
     const params = new URLSearchParams();
     if (s.deskBasePath) params.set('dir', s.deskBasePath);
+    addSelectedDeskAgentParam(params, s);
     const qs = params.toString() ? `?${params}` : '';
     const res = await hanaFetch(`/api/desk/jian${qs}`);
     const data = await res.json();
@@ -440,12 +460,13 @@ export async function saveJianContent(content?: string): Promise<void> {
     await hanaFetch('/api/desk/jian', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dir: s.deskBasePath || undefined, subdir: '', content: text }),
+      body: JSON.stringify({ ...selectedDeskAgentBody(s), dir: s.deskBasePath || undefined, subdir: '', content: text }),
     });
     useStore.getState().setDeskJianContent(text || null);
     const st2 = useStore.getState();
     const params = new URLSearchParams();
     if (st2.deskBasePath) params.set('dir', st2.deskBasePath);
+    addSelectedDeskAgentParam(params, st2);
     const qs = params.toString() ? `?${params}` : '';
     const res2 = await hanaFetch(`/api/desk/files${qs}`);
     const data2 = await res2.json();
@@ -463,7 +484,7 @@ export async function deskUploadFiles(paths: string[]): Promise<void> {
     const res = await hanaFetch('/api/desk/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'upload', dir: s.deskBasePath || undefined, subdir: '', paths }),
+      body: JSON.stringify({ ...selectedDeskAgentBody(s), action: 'upload', dir: s.deskBasePath || undefined, subdir: '', paths }),
     });
     const data = await res.json();
     if (data.files) {
@@ -483,7 +504,7 @@ export async function deskUploadFilesToSubdir(paths: string[], subdir: string): 
     const res = await hanaFetch('/api/desk/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'upload', dir: s.deskBasePath || undefined, subdir: normalizedSubdir, paths }),
+      body: JSON.stringify({ ...selectedDeskAgentBody(s), action: 'upload', dir: s.deskBasePath || undefined, subdir: normalizedSubdir, paths }),
     });
     const data = await res.json();
     if (data.files) {
@@ -513,6 +534,7 @@ export async function deskCreateFileInSubdir(subdir: string, name: string, text:
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...selectedDeskAgentBody(s),
         action: 'create',
         dir: s.deskBasePath || undefined,
         subdir: normalizedSubdir,
@@ -545,7 +567,7 @@ export async function deskMoveFiles(names: string[], destFolder: string): Promis
     const res = await hanaFetch('/api/desk/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'move', dir: s.deskBasePath || undefined, subdir: '', names, destFolder }),
+      body: JSON.stringify({ ...selectedDeskAgentBody(s), action: 'move', dir: s.deskBasePath || undefined, subdir: '', names, destFolder }),
     });
     const data = await res.json();
     if (data.files) {
@@ -607,6 +629,7 @@ export async function deskMoveTreeFiles(items: DeskTreeMoveItem[], destSubdir: s
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...selectedDeskAgentBody(s),
         action: 'movePaths',
         dir: s.deskBasePath || undefined,
         items: items.map(item => ({
@@ -646,6 +669,7 @@ export async function deskRenameTreeItem(sourceSubdir: string, oldName: string, 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...selectedDeskAgentBody(s),
         action: 'rename',
         dir: s.deskBasePath || undefined,
         subdir: normalizedSource,
@@ -714,7 +738,7 @@ export async function deskRemoveFile(name: string): Promise<void> {
     const res = await hanaFetch('/api/desk/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'remove', dir: s.deskBasePath || undefined, subdir: '', name }),
+      body: JSON.stringify({ ...selectedDeskAgentBody(s), action: 'remove', dir: s.deskBasePath || undefined, subdir: '', name }),
     });
     const data = await res.json();
     if (data.files) {
@@ -745,6 +769,7 @@ export async function deskMkdirInSubdir(subdir: string, name: string): Promise<b
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...selectedDeskAgentBody(s),
         action: 'mkdir',
         dir: s.deskBasePath || undefined,
         subdir: normalizedSubdir,
@@ -762,11 +787,12 @@ export async function deskMkdirInSubdir(subdir: string, name: string): Promise<b
 }
 
 export async function deskRenameFile(oldName: string, newName: string): Promise<boolean> {
+  const s = useStore.getState();
   try {
     const res = await hanaFetch('/api/desk/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'rename', dir: useStore.getState().deskBasePath || undefined, subdir: '', oldName, newName }),
+      body: JSON.stringify({ ...selectedDeskAgentBody(s), action: 'rename', dir: s.deskBasePath || undefined, subdir: '', oldName, newName }),
     });
     const data = await res.json();
     if (data.error) { console.error('[desk] rename error:', data.error); return false; }

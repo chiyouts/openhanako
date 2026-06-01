@@ -1,4 +1,18 @@
 {
+  "cover": {
+    "make": "Make cover",
+    "agentGenerate": {
+      "beautifyDisabled": "Enable 小花美术 in the main agent's tool settings first.",
+      "defaultModelMissing": "Configure a default image model in settings first.",
+      "defaultModelInvalid": "The default image model is unavailable. Reconfigure it in settings.",
+      "imageGenUnavailable": "The image generation tool is disabled. Enable it in settings first.",
+      "agentUnavailable": "The main agent is temporarily unavailable, so Agent generation can't start.",
+      "disabled": "Agent generation is currently unavailable."
+    }
+  },
+  "selection": {
+    "quoteToChat": "Quote to chat"
+  },
   "channel": {
     "tab": "Channels",
     "chatTab": "Chat",
@@ -50,6 +64,9 @@
     "toolPermission": "Tool permission",
     "agentIdle": "Idle",
     "phoneReceivedNewMessages": "Received new channel messages",
+    "deliveryActive": "Delivering to {agent} ({done}/{total})",
+    "deliveryQueued": "Delivery queued",
+    "nextReminder": "Next initiation: {time}",
     "replyRange": "Reply length",
     "replyMinPlaceholder": "Min",
     "replyMaxPlaceholder": "Max",
@@ -68,6 +85,7 @@
     "noModelsAvailable": "No models available",
     "toolReadOnly": "Read",
     "toolWrite": "Write",
+    "filesUnsupported": "Channels currently support text only; files will not be attached to chat",
     "createIntroOptional": "Description"
   },
   "sidebar": {
@@ -89,7 +107,34 @@
     "searchingTitles": "Searching titles…",
     "searchingContent": "Searching content…",
     "searchNoResults": "No matching chats",
-    "searchFailed": "Search failed"
+    "searchFailed": "Search failed",
+    "view": {
+      "time": "Sort by time",
+      "project": "Sort by project",
+      "sort": "Sort view"
+    },
+    "projects": {
+      "title": "Projects",
+      "more": "Project view",
+      "create": "New project",
+      "newProject": "New project",
+      "newFolder": "New folder",
+      "renameProject": "Rename project",
+      "renameFolder": "Rename folder",
+      "deleteProject": "Delete project",
+      "deleteFolder": "Delete folder",
+      "deleteProjectConfirm": "Delete project \"{name}\"? Its chats will move to Uncategorized.",
+      "deleteFolderConfirm": "Delete folder \"{name}\"? Its projects will move to the project root.",
+      "newChatInProject": "Start a new chat in {name}",
+      "newProjectPrompt": "Project name",
+      "newFolderPrompt": "Folder name",
+      "createAction": "Create",
+      "save": "Save",
+      "cancel": "Cancel",
+      "showMore": "Show more",
+      "loading": "Loading projects…",
+      "empty": "No projects yet"
+    }
   },
   "titlebar": {
     "currentChatTitle": "Current chat title"
@@ -209,8 +254,13 @@
     "floatingInput": "Selection floating input",
     "selectFolder": "Select folder",
     "workspace": "Workspace: ",
+    "project": "Project: ",
     "selectWorkspace": "Select workspace",
     "currentWorkspace": "This workspace",
+    "cwdProject": "Workspace project: {name}",
+    "customProjects": "Custom projects",
+    "selectProject": "Select project",
+    "noCustomProjects": "No custom projects",
     "selectOtherFolder": "Choose another folder",
     "extraFolders": "Extra folders",
     "addExternalFolder": "Add folder outside workspace",
@@ -781,7 +831,8 @@
           "cron": { "label": "Scheduled Tasks", "summary": "Run tasks automatically at specified times" },
           "dm": { "label": "Direct Message", "summary": "Send a one-on-one message to another agent" },
           "install_skill": { "label": "Install Skill", "summary": "Install new skills from GitHub or the skill library" },
-          "update_settings": { "label": "Update Settings", "summary": "Allow the agent to modify application configuration" }
+          "update_settings": { "label": "Update Settings", "summary": "Allow the agent to modify application configuration" },
+          "workflow": { "label": "Workflow", "summary": "Let the agent orchestrate multi-agent workflow scripts as background tasks" }
         }
       },
       "computerUse": {
@@ -853,10 +904,10 @@
       "mobileKeyCreated": "Mobile access key created",
       "mobileKeyFailed": "Creation failed",
       "desktopUrl": "Computer URL",
-      "desktopUrlLanHint": "Enter this address in another Hana desktop frontend",
+      "desktopUrlLanHint": "Open this address in another computer's browser",
       "desktopUrlLocalHint": "Only this computer can connect until LAN access is enabled",
       "generateDesktopKey": "Generate Computer Access Key",
-      "desktopKeyHint": "Use this for manual connection from another Hana desktop frontend",
+      "desktopKeyHint": "Use this for the first browser login on another computer",
       "desktopKey": "Computer Access Key",
       "desktopKeyOnce": "The key is shown only once after creation",
       "desktopKeyCreated": "Computer access key created",
@@ -1007,6 +1058,14 @@
       "cacheShort": "cache {tokens}",
       "tokensShort": "{tokens} tok",
       "cacheSummary": "Cache {cache} · uncached {uncached}",
+      "window": {
+        "week": "Last 7 days",
+        "month": "Last 30 days"
+      },
+      "period": {
+        "week": "Week",
+        "month": "Month"
+      },
       "view": {
         "overall": "Overall",
         "daily": "By date",
@@ -1037,6 +1096,7 @@
       "defaultModel": "Default Image Model",
       "credentialOk": "API Key configured (reuses provider settings)",
       "credentialMissing": "Not configured, go to Provider settings",
+      "adapterMissing": "Image adapter missing",
       "addModel": "Add Image Model",
       "providerDefaults": "Default Parameters",
       "size": "Size",
@@ -1394,6 +1454,10 @@
       "headersHint": "One KEY=value pair per line. Values are stored for connector requests and masked after saving.",
       "statusRunning": "Running",
       "statusStopped": "Stopped",
+      "statusConnecting": "Connecting",
+      "statusReconnecting": "Reconnecting",
+      "statusFailed": "Reconnect failed",
+      "statusNeedsAuth": "Needs sign-in",
       "command": "Command",
       "args": "Arguments",
       "cwd": "Working Directory",
@@ -1446,7 +1510,7 @@
       "feishu": "Feishu",
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
-      "feishuHint": "Get from Feishu Open Platform",
+      "feishuHint": "Get from Feishu Open Platform; events use long connection, no local callback URL needed",
       "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
@@ -1665,6 +1729,26 @@
     "selectAll": "Select All"
   },
   "rightWorkspace": {
+    "activity": {
+      "title": "Activity"
+    },
+    "todo": {
+      "title": "To-dos"
+    },
+    "subagent": {
+      "title": "Sub-agents"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "running": "Running {text}",
+      "agents": "{n} agents"
+    },
+    "session": {
+      "title": "This Conversation",
+      "cwd": "Workspace",
+      "model": "Model",
+      "files": "Files"
+    },
     "tabs": {
       "label": "Right workspace",
       "sessionFiles": "Conversation Files",
@@ -1956,6 +2040,7 @@
     "subagentStopReason": "Sub-agent did not finish cleanly (stopReason: {reason}).",
     "subagentToolFailed": "Sub-agent tool failed: {msg}",
     "subagentDispatched": "Sub-task dispatched (task-id: {taskId}). Results will be delivered when ready.",
+    "subagentReuseQueued": "Sub-task dispatched (task-id: {taskId}). Instance \"{instance}\" is busy; queued to run after the current task finishes.",
     "installSkillDisabled": "Skill installation is not enabled. Please enable \"Allow Agent to create/install skills\" in settings.",
     "installSkillGithubDisabled": "GitHub skill fetching not enabled. Please enable \"Allow fetching skills from GitHub\" in settings.",
     "installSkillInvalidGithubUrl": "Invalid GitHub URL: {url}",
@@ -2124,7 +2209,7 @@
       "label": "Web Search",
       "description": "Search the internet for real-time information. Use when you need the latest news, technical docs, current events, or any external knowledge not in memory.",
       "queryDesc": "Search keywords",
-      "maxResultsDesc": "Number of results to return, default 5"
+      "maxResultsDesc": "Number of results to return, default 10"
     },
     "webFetch": {
       "label": "Fetch Web Page",
@@ -2231,9 +2316,11 @@
     },
     "subagent": {
       "label": "Launch Sub-agent",
-      "description": "Delegate a task to a sub-agent. Optionally specify another agent (pass agent param), or omit to self-clone. Pass agent=\"?\" to list available agents.\n\nBehavior after dispatch:\n1. The sub-agent starts executing in the background immediately\n2. Continue with your current work — do not stop to wait\n3. Once your other work is done, use check_pending_tasks to check status\n4. If not yet complete, estimate a reasonable wait time based on task complexity, use wait then check again. Check at most 2 times, then stop polling\n5. The system will automatically notify you when tasks complete (<hana-background-result> messages) — process results at that point\n\nGood for:\n- Research tasks that require extensive searching and reading, summarized into a brief conclusion\n- Independent sub-problems that can run in parallel with your current work\n- Tasks that need simultaneous exploration in multiple directions (you can fire multiple subagent calls at once)\n- Having another agent handle a task from their specialized perspective\n\nImportant:\n- The task parameter must contain complete instructions and necessary background, as the sub-agent cannot see the current conversation history\n- Clearly state whether the sub-agent should only research (read-only) or is allowed to modify files. When not specified, the sub-agent defaults to research only — no file modifications",
+      "description": "Delegate a task to a sub-agent. Optionally specify another agent (pass agent param), or omit to self-clone. Pass agent=\"?\" to list available agents.\n\nBehavior after dispatch:\n1. The sub-agent starts executing in the background immediately\n2. Continue with your current work — do not stop to wait\n3. Once your other work is done, use check_pending_tasks to check status\n4. If not yet complete, estimate a reasonable wait time based on task complexity, use wait then check again. Check at most 2 times, then stop polling\n5. The system will automatically notify you when tasks complete (<hana-background-result> messages) — process results at that point\n\nGood for:\n- Research tasks that require extensive searching and reading, summarized into a brief conclusion\n- Independent sub-problems that can run in parallel with your current work\n- Tasks that need simultaneous exploration in multiple directions (you can fire multiple subagent calls at once)\n- Having another agent handle a task from their specialized perspective\n\nImportant:\n- The task parameter must contain complete instructions and necessary background, as the sub-agent cannot see the current conversation history\n- Use the access parameter to declare permissions: pass \"read\" for research/exploration/review (read-only), \"write\" for execution/modification (can operate); omit to inherit your current session's permission tier",
       "taskDesc": "Full instructions for the sub-agent. Format: first line writes \"Task: xxx\" as the task title, then a blank line, then detailed requirements and necessary background. The sub-agent cannot see the current conversation history, so all needed context must be written here.",
       "agentDesc": "Target agent's id field value (the one in parentheses in the team roster, not the bold display name). Omit to self-execute, pass \"?\" to list available agents.",
+      "instanceDesc": "Optional. Reusable instance suffix (e.g. \"research\", \"draft\"). Provide it to dispatch to a persistent sub-helper that remembers history: same agent + same suffix resumes the same conversation and sees prior context. Omit for a one-shot sub-task with no memory. Note: one instance runs one task at a time; concurrent dispatches queue automatically.",
+      "accessDesc": "Optional. Permission tier: pass \"read\" for exploration/research/review tasks (read-only, cannot modify files or run commands); pass \"write\" for execution/modification tasks (can operate). Omit to inherit your current session's permission tier: normal session → can operate, read-only/plan mode → read-only.",
       "modelDesc": "Specify model as provider/id (optional, defaults to utility model)"
     },
     "installSkill": {

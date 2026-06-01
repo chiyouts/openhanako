@@ -23,34 +23,13 @@ const log = createModuleLogger("config");
 export const ACCESS_MODE_OPERATE = "operate";
 export const ACCESS_MODE_READ_ONLY = "read_only";
 
-/** Plan Mode / Bridge 只读 SDK 工具名白名单 */
-export const READ_ONLY_BUILTIN_TOOLS = ["read", "grep", "find", "ls"];
-
-/** Session 只读模式下仍允许的信息获取工具。顺序由实际工具注册顺序决定。 */
-export const READ_ONLY_TOOL_NAMES = [
-  ...READ_ONLY_BUILTIN_TOOLS,
-  "search_memory",
-  "web_search",
-  "web_fetch",
-  "current_status",
-  "recall_experience",
-  "browser",
-];
-
-const READ_ONLY_TOOL_NAME_SET = new Set(READ_ONLY_TOOL_NAMES);
-
+// COMPAT: 旧 access-mode 枚举，仅 computer-host 仍用（待迁到 canonical session-permission-mode 后删）。
+// 只读工具白名单（READ_ONLY_TOOL_NAMES / filterReadOnlyToolNames 等）已删——零调用方的死代码，
+// 真正的只读判定收口在 core/session-permission-mode.js 的 classifySessionPermission。
 export function normalizeAccessMode(mode, { legacyPlanMode = false } = {}) {
   if (mode === ACCESS_MODE_READ_ONLY) return ACCESS_MODE_READ_ONLY;
   if (mode === ACCESS_MODE_OPERATE) return ACCESS_MODE_OPERATE;
   return legacyPlanMode ? ACCESS_MODE_READ_ONLY : ACCESS_MODE_OPERATE;
-}
-
-export function isReadOnlyAccessMode(mode) {
-  return normalizeAccessMode(mode) === ACCESS_MODE_READ_ONLY;
-}
-
-export function filterReadOnlyToolNames(toolNames) {
-  return (toolNames || []).filter((name) => READ_ONLY_TOOL_NAME_SET.has(name));
 }
 
 /** 全局共享模型字段 → preferences key 映射 */

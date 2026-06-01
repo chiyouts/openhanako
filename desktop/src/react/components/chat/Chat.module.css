@@ -1582,7 +1582,10 @@
 
 .scrollToBottomFab {
     position: absolute;
-    bottom: 140px;
+    /* 跟随输入卡片实时高度浮在其上方，避免多行输入时被输入框覆盖（#1297）。
+       复用 InputArea 注入到 .main-content 的 --input-card-h（.sessionShell 同源消费）；
+       变量未注入时回退 124px(≈单行卡片高度)+space-md=原 140px，行为不变。 */
+    bottom: calc(var(--input-card-h, 124px) + var(--space-md));
     left: 50%;
     transform: translateX(-50%);
     z-index: 6;
@@ -1664,6 +1667,14 @@
     font-weight: normal;
     font-size: 0.75rem;
     margin-left: 6px;
+    color: var(--text-muted);
+}
+
+/* 复用实例后缀（如 毛毛·探索）：紧贴名字、低对比度，作身份标注而非状态 */
+.subagentInstance {
+    font-weight: normal;
+    font-size: 0.78rem;
+    margin-left: 5px;
     color: var(--text-muted);
 }
 
@@ -1808,4 +1819,22 @@
 
 .subagentIcon {
     margin-right: 4px;
+}
+
+/* ── 框选 / 选择模式（桌面端） ── */
+/* selectionBox 用 fixed + viewport 坐标渲染（与 getBoundingClientRect/clientX 同坐标系）。
+   依赖：无带 transform/filter/will-change 的祖先，否则 fixed 会相对该祖先定位而错位。 */
+.selectionBox {
+    position: fixed;
+    z-index: 60;
+    border: 1px solid var(--accent);
+    background: var(--accent-light);
+    opacity: 0.5;
+    border-radius: 2px;
+    pointer-events: none;
+}
+
+.selectionModeActive .messageGroup {
+    user-select: none;
+    cursor: pointer;
 }

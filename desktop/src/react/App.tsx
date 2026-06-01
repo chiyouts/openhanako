@@ -71,10 +71,17 @@ function App() {
   const { floatCard, show: showFloat, scheduleHide: scheduleFloatHide, cancelHide: cancelFloatHide, hide: hideFloat } = useFloatCard();
 
   useEffect(() => {
-    initApp().catch((err: unknown) => {
-      console.error('[init] 初始化异常:', err);
-      window.platform?.appReady?.();
-    });
+    console.info('[hana-launch] init-start');
+    initApp()
+      .then(() => {
+        console.info('[hana-launch] init-finished');
+      })
+      .catch((err: unknown) => {
+        console.error('[init] 初始化异常:', err);
+        console.error('[hana-launch] init-failed', err);
+        console.info('[hana-launch] app-ready', JSON.stringify({ reason: 'init-failed' }));
+        window.platform?.appReady?.();
+      });
   }, []);
 
   return (
@@ -83,30 +90,34 @@ function App() {
       <SidebarLayout />
       <ChannelsPanel />
 
-      {/* ── Titlebar ── */}
-      <AppTitlebar
-        sidebarOpen={sidebarOpen}
-        jianOpen={jianOpen}
-        onToggleSidebar={() => { hideFloat(); toggleSidebar(); }}
-        onToggleJian={() => { hideFloat(); toggleJianSidebar(); }}
-        onLeftMouseEnter={(e) => showFloat('left', e.currentTarget)}
-        onRightMouseEnter={(e) => showFloat('right', e.currentTarget)}
-        onToggleMouseLeave={scheduleFloatHide}
-      />
-
-      {/* ── App body ── */}
-      <div className="app">
-        <ChatSidebar
-          open={sidebarOpen && !isPluginTab}
-          onNewSession={createNewSession}
-          onCollapse={() => toggleSidebar()}
-          onOpenSettings={() => openSettingsModal()}
-          onTogglePanel={togglePanel}
+      {/* ── App shell: titlebar 作为独立布局行（flex column 第一行），
+           app body 占剩余高度。取代旧的 fixed overlay + 各内容区 padding-top 避让。 ── */}
+      <div className="app-shell">
+        {/* ── Titlebar ── */}
+        <AppTitlebar
+          sidebarOpen={sidebarOpen}
+          jianOpen={jianOpen}
+          onToggleSidebar={() => { hideFloat(); toggleSidebar(); }}
+          onToggleJian={() => { hideFloat(); toggleJianSidebar(); }}
+          onLeftMouseEnter={(e) => showFloat('left', e.currentTarget)}
+          onRightMouseEnter={(e) => showFloat('right', e.currentTarget)}
+          onToggleMouseLeave={scheduleFloatHide}
         />
 
-        <RegionalErrorBoundary region="app-pages" resetKeys={[currentTab]}>
-          <AppPages />
-        </RegionalErrorBoundary>
+        {/* ── App body ── */}
+        <div className="app">
+          <ChatSidebar
+            open={sidebarOpen && !isPluginTab}
+            onNewSession={createNewSession}
+            onCollapse={() => toggleSidebar()}
+            onOpenSettings={() => openSettingsModal()}
+            onTogglePanel={togglePanel}
+          />
+
+          <RegionalErrorBoundary region="app-pages" resetKeys={[currentTab]}>
+            <AppPages />
+          </RegionalErrorBoundary>
+        </div>
       </div>
 
       {/* Connection status */}

@@ -101,6 +101,16 @@ describe("HTTP route security policy", () => {
       .toMatchObject({ allowed: true });
     expect(authorizeHttpRoute({ method: "GET", path: "/api/sessions", principal }))
       .toMatchObject({ allowed: true });
+    expect(authorizeHttpRoute({ method: "GET", path: "/api/session-projects", principal }))
+      .toMatchObject({ allowed: true });
+    expect(authorizeHttpRoute({ method: "POST", path: "/api/session-projects/session-assignment", principal }))
+      .toMatchObject({ allowed: true });
+    expect(authorizeHttpRoute({ method: "DELETE", path: "/api/session-projects/projects/project-hana", principal }))
+      .toMatchObject({ allowed: true });
+    expect(authorizeHttpRoute({ method: "GET", path: "/api/preferences/sidebar-ui", principal }))
+      .toMatchObject({ allowed: true });
+    expect(authorizeHttpRoute({ method: "PUT", path: "/api/preferences/sidebar-ui", principal }))
+      .toMatchObject({ allowed: true });
     expect(authorizeHttpRoute({ method: "GET", path: "/api/resources/res_1", principal }))
       .toMatchObject({ allowed: true });
     expect(authorizeHttpRoute({ method: "HEAD", path: "/api/resources/res_1/content", principal }))
@@ -116,7 +126,7 @@ describe("HTTP route security policy", () => {
       });
   });
 
-  it("treats mobile PWA assets and web-auth login as public bootstrap routes", async () => {
+  it("treats browser PWA assets and web-auth login as public bootstrap routes", async () => {
     const { authorizeHttpRoute, classifyHttpRoute } = await import("../server/http/route-security.js");
 
     for (const [method, path] of [
@@ -128,6 +138,14 @@ describe("HTTP route security policy", () => {
       ["GET", "/mobile/lib/i18n.js"],
       ["GET", "/mobile/themes/warm-paper.css"],
       ["GET", "/mobile/locales/zh.json"],
+      ["GET", "/desktop/"],
+      ["GET", "/desktop/assets/mobile.js"],
+      ["GET", "/desktop/manifest.webmanifest"],
+      ["GET", "/desktop/sw.js"],
+      ["GET", "/desktop/icon.png"],
+      ["GET", "/desktop/lib/i18n.js"],
+      ["GET", "/desktop/themes/warm-paper.css"],
+      ["GET", "/desktop/locales/zh.json"],
       ["POST", "/api/web-auth/login"],
       ["GET", "/api/web-auth/session"],
     ]) {
@@ -237,6 +255,8 @@ describe("HTTP route security policy", () => {
     })).toMatchObject({ allowed: false, error: "insufficient_scope" });
 
     expect(classifyHttpRoute({ method: "GET", path: "/preview/html/pv_123" }))
+      .toMatchObject({ kind: "public" });
+    expect(classifyHttpRoute({ method: "GET", path: "/preview/html/pv_123/assets/preview_only/images/pic.png" }))
       .toMatchObject({ kind: "public" });
     expect(authorizeHttpRoute({
       method: "GET",

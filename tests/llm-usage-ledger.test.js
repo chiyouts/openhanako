@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createUsageLedger } from "../lib/llm/usage-ledger.js";
 
 function sessionContext(sessionPath = "/tmp/session.jsonl") {
@@ -18,6 +21,13 @@ function sessionContext(sessionPath = "/tmp/session.jsonl") {
 }
 
 describe("Usage ledger", () => {
+  let tmpDir = null;
+
+  afterEach(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = null;
+  });
+
   it("records a completed request with normalized usage and emits llm_usage", () => {
     const events = [];
     const ledger = createUsageLedger({
@@ -47,6 +57,20 @@ describe("Usage ledger", () => {
     expect(events).toEqual([
       { event: { type: "llm_usage", entry }, scope: "/sessions/a.jsonl" },
     ]);
+  });
+
+  it("list 支持 childSessionPath 过滤（workflow 节点级 token 查询）", () => {
+    const ledger = createUsageLedger({ now: () => 1000, requestIdFactory: () => "req-cs" });
+    const req = ledger.start({
+      model: { provider: "openai", modelId: "gpt-5", api: "openai-completions" },
+      usageContext: {
+        source: { subsystem: "subagent", operation: "run", surface: "desktop", trigger: "tool" },
+        attribution: { kind: "session", sessionPath: "/parent.jsonl", childSessionPath: "/child-1.jsonl" },
+      },
+    });
+    ledger.finish(req.requestId, { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } });
+    expect(ledger.list({ childSessionPath: "/child-1.jsonl" }).entries).toHaveLength(1);
+    expect(ledger.list({ childSessionPath: "/other.jsonl" }).entries).toHaveLength(0);
   });
 
   it("records usage_missing for completed requests without provider usage", () => {
@@ -132,5 +156,35 @@ describe("Usage ledger", () => {
     });
 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("unknown usage context"));
+  });
+
+  it("persists completed entries so a new ledger can restore them after restart", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-usage-ledger-"));
+    const storagePath = path.join(tmpDir, "usage-ledger.json");
+    const ledger = createUsageLedger({
+      storagePath,
+      requestIdFactory: () => "req-persisted",
+      now: () => 1_000,
+    });
+
+    ledger.record({
+      model: { provider: "openai", modelId: "gpt-5", api: "openai-completions" },
+      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      usageContext: sessionContext("/sessions/persisted.jsonl"),
+    });
+
+    const restored = createUsageLedger({ storagePath });
+
+    expect(restored.list({}).entries).toMatchObject([
+      {
+        requestId: "req-persisted",
+        attribution: { kind: "session", sessionPath: "/sessions/persisted.jsonl" },
+        usage: { totalTokens: 12 },
+      },
+    ]);
+    expect(JSON.parse(fs.readFileSync(storagePath, "utf-8"))).toMatchObject({
+      version: 1,
+      entries: [{ requestId: "req-persisted" }],
+    });
   });
 });

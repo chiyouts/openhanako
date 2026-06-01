@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { execFile } from "child_process";
+import { createSubmitContext, validateImageModelRef } from "../lib/image-task-runner.js";
 import {
   findGeneratedFile,
   recordOutputDirHistory,
@@ -53,7 +54,6 @@ function catalogKeyForProvider(entry) {
   return null;
 }
 
-/** Open a file with the system default application (cross-platform). */
 function openWithSystem(filePath) {
   return new Promise((resolve, reject) => {
     const p = process.platform;
@@ -67,6 +67,102 @@ function openWithSystem(filePath) {
     }
     execFile(cmd, args, (err) => (err ? reject(err) : resolve()));
   });
+}
+
+function adapterAvailableForModel(providerId, model, ctx) {
+  const registry = ctx?._mediaGen?.registry;
+  if (!registry) return true;
+  if (!model?.protocolId) return false;
+  return Boolean(registry.getProtocol?.(model.protocolId) || registry.get?.(providerId));
+}
+
+function annotateAdapterAvailability(providers, ctx) {
+  const next = {};
+  for (const [providerId, provider] of Object.entries(providers || {})) {
+    next[providerId] = {
+      ...provider,
+      models: (provider?.models || []).map((model) => ({
+        ...model,
+        adapterAvailable: adapterAvailableForModel(providerId, model, ctx),
+      })),
+    };
+  }
+  return next;
+}
+
+async function buildLegacyProviderSummary(ctx) {
+  const providerList = await ctx.bus.request("provider:list").catch(() => ({ providers: [] }));
+  const imageModelsResult = await ctx.bus.request("provider:models-by-type", { type: "image" });
+  const providerEntries = providerList.providers || [];
+  const imageModels = imageModelsResult.models || [];
+
+  const grouped = {};
+  const providerIndex = new Map(providerEntries.map((entry) => [entry.id, entry]));
+
+  for (const entry of providerEntries) {
+    const catalogKey = catalogKeyForProvider(entry);
+    if (!catalogKey) continue;
+    grouped[entry.id] = {
+      providerId: entry.id,
+      displayName: entry.displayName || entry.id,
+      hasCredentials: false,
+      models: [],
+      availableModels: [...KNOWN_IMAGE_MODELS[catalogKey]],
+      api: entry.api || "",
+      baseUrl: entry.baseUrl || "",
+    };
+  }
+
+  for (const model of imageModels) {
+    const entry = providerIndex.get(model.provider);
+    const catalogKey = catalogKeyForProvider(entry);
+    if (!grouped[model.provider]) {
+      grouped[model.provider] = {
+        providerId: model.provider,
+        displayName: entry?.displayName || model.provider,
+        hasCredentials: false,
+        models: [],
+        availableModels: catalogKey ? [...KNOWN_IMAGE_MODELS[catalogKey]] : [],
+        api: entry?.api || "",
+        baseUrl: entry?.baseUrl || "",
+      };
+    }
+    grouped[model.provider].models.push({ ...model, id: model.id, name: model.name || model.id });
+  }
+
+  for (const providerId of Object.keys(grouped)) {
+    const creds = await ctx.bus.request("provider:credentials", { providerId }).catch(() => ({ error: "no_credentials" }));
+    grouped[providerId].hasCredentials = !creds?.error;
+
+    const entry = providerIndex.get(providerId);
+    const catalogKey = catalogKeyForProvider(entry);
+    const catalog = catalogKey ? KNOWN_IMAGE_MODELS[catalogKey] || [] : [];
+    const addedIds = new Set(grouped[providerId].models.map((model) => model.id));
+    grouped[providerId].availableModels = catalog.filter((model) => !addedIds.has(model.id));
+  }
+
+  return grouped;
+}
+
+async function validateDefaultImageModelConfig(values, ctx) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return null;
+  if (!Object.prototype.hasOwnProperty.call(values, "defaultImageModel")) return null;
+  const value = values.defaultImageModel;
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "defaultImageModel must be an object with provider and id";
+  }
+  const provider = typeof value.provider === "string" ? value.provider.trim() : "";
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  if (!provider || !id) return "defaultImageModel requires provider and id";
+  const registry = ctx?._mediaGen?.registry;
+  if (!registry) return null;
+  try {
+    await validateImageModelRef({ providerId: provider, modelId: id }, registry, createSubmitContext(ctx));
+    return null;
+  } catch (err) {
+    return err?.message || String(err);
+  }
 }
 
 export default function registerMediaRoutes(app, ctx) {
@@ -133,11 +229,8 @@ export default function registerMediaRoutes(app, ctx) {
     if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
       return c.json({ error: "invalid filename" }, 400);
     }
-    const filePath = path.join(ctx.dataDir, "generated", filename);
-
-    try {
-      fs.statSync(filePath);
-    } catch {
+    const filePath = findGeneratedFile(ctx, filename);
+    if (!filePath) {
       return c.json({ error: "not found" }, 404);
     }
 
@@ -152,68 +245,12 @@ export default function registerMediaRoutes(app, ctx) {
   app.get("/providers", async (c) => {
     try {
       const mediaProviders = await ctx.bus.request("provider:media-providers", { capability: "image_generation" }).catch(() => null);
-      if (mediaProviders?.providers && typeof mediaProviders.providers === "object") {
-        return c.json({
-          providers: mediaProviders.providers,
-          config: {
-            ...(ctx.config.get() || {}),
-            resolvedOutputDir: resolveGeneratedDir(ctx),
-          },
-        });
-      }
-
-      const providerList = await ctx.bus.request("provider:list").catch(() => ({ providers: [] }));
-      const imageModelsResult = await ctx.bus.request("provider:models-by-type", { type: "image" });
-      const providerEntries = providerList.providers || [];
-      const imageModels = imageModelsResult.models || [];
-
-      const grouped = {};
-      const providerIndex = new Map(providerEntries.map((entry) => [entry.id, entry]));
-
-      for (const entry of providerEntries) {
-        const catalogKey = catalogKeyForProvider(entry);
-        if (!catalogKey) continue;
-        grouped[entry.id] = {
-          providerId: entry.id,
-          displayName: entry.displayName || entry.id,
-          hasCredentials: false,
-          models: [],
-          availableModels: [...KNOWN_IMAGE_MODELS[catalogKey]],
-          api: entry.api || "",
-          baseUrl: entry.baseUrl || "",
-        };
-      }
-
-      for (const model of imageModels) {
-        const entry = providerIndex.get(model.provider);
-        const catalogKey = catalogKeyForProvider(entry);
-        if (!grouped[model.provider]) {
-          grouped[model.provider] = {
-            providerId: model.provider,
-            displayName: entry?.displayName || model.provider,
-            hasCredentials: false,
-            models: [],
-            availableModels: catalogKey ? [...KNOWN_IMAGE_MODELS[catalogKey]] : [],
-            api: entry?.api || "",
-            baseUrl: entry?.baseUrl || "",
-          };
-        }
-        grouped[model.provider].models.push({ id: model.id, name: model.name || model.id });
-      }
-
-      for (const providerId of Object.keys(grouped)) {
-        const creds = await ctx.bus.request("provider:credentials", { providerId }).catch(() => ({ error: "no_credentials" }));
-        grouped[providerId].hasCredentials = !creds?.error;
-
-        const entry = providerIndex.get(providerId);
-        const catalogKey = catalogKeyForProvider(entry);
-        const catalog = catalogKey ? KNOWN_IMAGE_MODELS[catalogKey] || [] : [];
-        const addedIds = new Set(grouped[providerId].models.map((model) => model.id));
-        grouped[providerId].availableModels = catalog.filter((model) => !addedIds.has(model.id));
-      }
+      const providers = mediaProviders?.providers && typeof mediaProviders.providers === "object"
+        ? mediaProviders.providers
+        : await buildLegacyProviderSummary(ctx);
 
       return c.json({
-        providers: grouped,
+        providers: annotateAdapterAvailability(providers, ctx),
         config: {
           ...(ctx.config.get() || {}),
           resolvedOutputDir: resolveGeneratedDir(ctx),
@@ -228,8 +265,10 @@ export default function registerMediaRoutes(app, ctx) {
     try {
       const body = await c.req.json();
       const next = { ...(body?.values && typeof body.values === "object" && !Array.isArray(body.values) ? body.values : body || {}) };
-      const agentId = c.req.query("agentId") || undefined;
+      const defaultValidationError = await validateDefaultImageModelConfig(next, ctx);
+      if (defaultValidationError) return c.json({ error: defaultValidationError }, 400);
 
+      const agentId = c.req.query("agentId") || undefined;
       if (Object.prototype.hasOwnProperty.call(next, "outputDir")) {
         const previousDir = resolveGeneratedDir(ctx);
         const validation = await validateOutputDir(ctx, next.outputDir, { agentId });

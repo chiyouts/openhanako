@@ -628,6 +628,70 @@ describe("normalizeProviderPayload — 通用层", () => {
       video_url: { url: "data:video/webm;base64,AAAA" },
     });
   });
+
+  it("Zhipu payloads remove OpenAI-only fields and normalize reasoning/output controls", () => {
+    const payload = {
+      model: "glm-4.7-flash",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "lookup",
+          strict: true,
+          parameters: {
+            type: "object",
+            properties: {},
+          },
+        },
+      }],
+      store: true,
+      stream_options: { include_usage: true },
+      reasoning_effort: "high",
+      max_completion_tokens: 32000,
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "glm-4.7-flash",
+      provider: "zhipu",
+      api: "openai-completions",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      reasoning: true,
+    }, { mode: "chat", reasoningLevel: "high", outputBudgetSource: "system" });
+
+    expect(result).not.toBe(payload);
+    expect(result).not.toHaveProperty("store");
+    expect(result).not.toHaveProperty("stream_options");
+    expect(result).not.toHaveProperty("reasoning_effort");
+    expect(result.max_tokens).toBe(32000);
+    expect(result.thinking).toEqual({ type: "enabled" });
+    expect(result.tools[0].function).not.toHaveProperty("strict");
+    expect(payload.store).toBe(true);
+    expect(payload.tools[0].function.strict).toBe(true);
+  });
+
+  it("Zhipu utility payloads explicitly disable thinking instead of falling back to hidden provider defaults", () => {
+    const payload = {
+      model: "glm-4.7-flash",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+      max_completion_tokens: 100,
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "glm-4.7-flash",
+      provider: "custom",
+      api: "openai-completions",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      reasoning: true,
+    }, { mode: "utility" });
+
+    expect(result).toMatchObject({
+      max_tokens: 100,
+      thinking: { type: "disabled" },
+    });
+    expect(result).not.toHaveProperty("reasoning_effort");
+    expect(result).not.toHaveProperty("max_completion_tokens");
+  });
 });
 
 describe("normalizeProviderPayload — DeepSeek Anthropic 模式", () => {
@@ -1002,5 +1066,96 @@ describe("normalizeProviderPayload — 边界条件", () => {
     }, { mode: "chat" });
     // 没 messages 数组，DeepSeek 兼容层直接放过
     expect(result).toBe(payload);
+  });
+});
+
+describe("normalizeProviderPayload — 孤儿 toolResult 配对兜底（#1285，通用补丁）", () => {
+  it("DeepSeek payload 里父 tool_calls 已丢失的孤儿 role:tool 被删除", () => {
+    // 复现 #1285：error assistant 被 SDK transform-messages 丢弃后，序列化 payload
+    // 里残留孤儿 role:"tool"，DeepSeek 会返回 400。
+    const payload = {
+      model: "deepseek-chat",
+      messages: [
+        { role: "user", content: "调用工具" },
+        { role: "tool", tool_call_id: "call_orphan", content: "工具结果" },
+        { role: "user", content: "继续" },
+      ],
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      baseUrl: "https://api.deepseek.com/v1",
+      reasoning: false,
+    }, { mode: "chat" });
+
+    expect(result.messages.some((m) => m.role === "tool")).toBe(false);
+    expect(result.messages.map((m) => m.role)).toEqual(["user", "user"]);
+    // 不可变契约：返回新对象，不 mutate 输入
+    expect(payload.messages).toHaveLength(3);
+  });
+
+  it("普通 OpenAI-compatible provider 同样剥离孤儿（provider-agnostic）", () => {
+    const payload = {
+      model: "gpt-4o",
+      messages: [
+        { role: "user", content: "q" },
+        { role: "tool", tool_call_id: "ghost", content: "orphan" },
+        { role: "assistant", content: "answer" },
+      ],
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "gpt-4o",
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: false,
+    }, { mode: "chat" });
+    expect(result.messages.some((m) => m.role === "tool")).toBe(false);
+  });
+
+  it("正常成对 toolCall+toolResult 序列原样保留（关键回归保护）", () => {
+    const payload = {
+      model: "deepseek-chat",
+      messages: [
+        { role: "user", content: "今天几号" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "call_1", type: "function", function: { name: "date", arguments: "{}" } }],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "2026-05-29" },
+        { role: "assistant", content: "今天是 2026-05-29" },
+      ],
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      baseUrl: "https://api.deepseek.com/v1",
+      reasoning: false,
+    }, { mode: "chat" });
+    // 成对序列：tool 消息全部保留
+    expect(result.messages.filter((m) => m.role === "tool")).toHaveLength(1);
+    expect(result.messages.find((m) => m.role === "tool").tool_call_id).toBe("call_1");
+  });
+
+  it("混合场景：删孤儿、留成对", () => {
+    const payload = {
+      model: "deepseek-chat",
+      messages: [
+        { role: "user", content: "q" },
+        { role: "assistant", content: null, tool_calls: [{ id: "good", type: "function", function: { name: "f", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "good", content: "ok" },
+        { role: "tool", tool_call_id: "orphan", content: "leftover" },
+        { role: "user", content: "继续" },
+      ],
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      baseUrl: "https://api.deepseek.com/v1",
+      reasoning: false,
+    }, { mode: "chat" });
+    const toolMsgs = result.messages.filter((m) => m.role === "tool");
+    expect(toolMsgs).toHaveLength(1);
+    expect(toolMsgs[0].tool_call_id).toBe("good");
   });
 });
