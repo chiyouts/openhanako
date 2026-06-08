@@ -19,6 +19,33 @@ function isNodeModulesRelativePath(relativePath) {
   return relativePath.split(/[\\/]/).includes("node_modules");
 }
 
+async function readTraceFileInsideRoot(filePath, rootDir) {
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedFile = path.resolve(filePath);
+  const insideRoot = resolvedFile === resolvedRoot || resolvedFile.startsWith(resolvedRoot + path.sep);
+  if (!insideRoot) return null;
+  try {
+    return await fs.promises.readFile(resolvedFile);
+  } catch (err) {
+    if (err?.code === "ENOENT" || err?.code === "EISDIR" || err?.code === "EBUSY") return null;
+    throw err;
+  }
+}
+
+function pluginTraceOptions(rootDir, extra = {}) {
+  return {
+    base: rootDir,
+    processCwd: rootDir,
+    conditions: ["node", "import"],
+    analysis: {
+      emitGlobs: false,
+      computeFileReferences: false,
+    },
+    readFile: (filePath) => readTraceFileInsideRoot(filePath, rootDir),
+    ...extra,
+  };
+}
+
 function packageNameFromNodeModulesPath(relativePath) {
   const parts = relativePath.split(/[\\/]/);
   const index = parts.indexOf("node_modules");
@@ -87,11 +114,9 @@ export async function collectBundledPluginRuntimeDependencies({
   const pluginEntries = listPluginRuntimeEntries(rootDir);
   if (pluginEntries.length === 0) return [];
 
-  const { fileList } = await nodeFileTrace(pluginEntries, {
-    base: rootDir,
-    conditions: ["node", "import"],
+  const { fileList } = await nodeFileTrace(pluginEntries, pluginTraceOptions(rootDir, {
     ignore: ["node_modules/**"],
-  });
+  }));
 
   const dependencies = new Set();
   for (const tracedFile of fileList) {
@@ -112,10 +137,7 @@ export async function collectBundledPluginPackageDependencies({ rootDir } = {}) 
   const pluginEntries = listPluginRuntimeEntries(rootDir);
   if (pluginEntries.length === 0) return [];
 
-  const { fileList, reasons } = await nodeFileTrace(pluginEntries, {
-    base: rootDir,
-    conditions: ["node", "import"],
-  });
+  const { fileList, reasons } = await nodeFileTrace(pluginEntries, pluginTraceOptions(rootDir));
 
   const packages = new Set();
   for (const tracedFile of fileList) {
