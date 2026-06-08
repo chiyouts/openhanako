@@ -38,6 +38,34 @@ const KNOWN_IMAGE_MODELS = {
   ],
 };
 
+type ImageModelOption = {
+  id: string;
+  name?: string;
+  provider?: string;
+  protocolId?: string;
+  adapterAvailable?: boolean;
+  [key: string]: any;
+};
+
+type ProviderEntry = {
+  id: string;
+  displayName?: string;
+  isBuiltin?: boolean;
+  api?: string;
+  baseUrl?: string;
+  [key: string]: any;
+};
+
+type ProviderSummary = {
+  providerId: string;
+  displayName: string;
+  hasCredentials: boolean;
+  models: ImageModelOption[];
+  availableModels: ImageModelOption[];
+  api: string;
+  baseUrl: string;
+};
+
 function streamPipe(nodeStream, writable) {
   const writer = writable.getWriter();
   nodeStream.on("data", (chunk) => writer.write(chunk));
@@ -55,7 +83,7 @@ function catalogKeyForProvider(entry) {
 }
 
 function openWithSystem(filePath) {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const p = process.platform;
     let cmd; let args;
     if (p === "darwin") {
@@ -77,8 +105,8 @@ function adapterAvailableForModel(providerId, model, ctx) {
 }
 
 function annotateAdapterAvailability(providers, ctx) {
-  const next = {};
-  for (const [providerId, provider] of Object.entries(providers || {})) {
+  const next: Record<string, ProviderSummary> = {};
+  for (const [providerId, provider] of Object.entries((providers || {}) as Record<string, ProviderSummary>)) {
     next[providerId] = {
       ...provider,
       models: (provider?.models || []).map((model) => ({
@@ -93,10 +121,10 @@ function annotateAdapterAvailability(providers, ctx) {
 async function buildLegacyProviderSummary(ctx) {
   const providerList = await ctx.bus.request("provider:list").catch(() => ({ providers: [] }));
   const imageModelsResult = await ctx.bus.request("provider:models-by-type", { type: "image" });
-  const providerEntries = providerList.providers || [];
-  const imageModels = imageModelsResult.models || [];
+  const providerEntries: ProviderEntry[] = providerList.providers || [];
+  const imageModels: ImageModelOption[] = imageModelsResult.models || [];
 
-  const grouped = {};
+  const grouped: Record<string, ProviderSummary> = {};
   const providerIndex = new Map(providerEntries.map((entry) => [entry.id, entry]));
 
   for (const entry of providerEntries) {

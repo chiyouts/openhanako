@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  installOpenAIRelayFetchSanitizer,
   sanitizeOpenAIRelayFetchArgs,
   shouldSanitizeOpenAIRelayRequest,
 } from "../server/openai-relay-fetch.js";
@@ -51,5 +52,34 @@ describe("openai relay fetch sanitizer", () => {
     };
 
     expect(shouldSanitizeOpenAIRelayRequest("https://sub.llzzjj.com/v1/chat/completions", init)).toBe(false);
+  });
+
+  it("wraps global fetch and strips OpenAI SDK headers for relay requests", async () => {
+    const originalFetch = globalThis.fetch;
+    let observedHeaders;
+    globalThis.fetch = async (_input, init) => {
+      observedHeaders = new Headers(init.headers);
+      return new Response("{}", { status: 200 });
+    };
+
+    try {
+      expect(installOpenAIRelayFetchSanitizer()).toBe(true);
+      await globalThis.fetch("https://sub.llzzjj.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer sk-test",
+          "Content-Type": "application/json",
+          "User-Agent": "OpenAI/JS 4.0.0",
+          "X-Stainless-Retry-Count": "0",
+        },
+      });
+
+      expect(observedHeaders.get("authorization")).toBe("Bearer sk-test");
+      expect(observedHeaders.get("content-type")).toBe("application/json");
+      expect(observedHeaders.has("user-agent")).toBe(false);
+      expect(observedHeaders.has("x-stainless-retry-count")).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

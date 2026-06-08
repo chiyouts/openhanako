@@ -180,7 +180,7 @@ function buildModelOverride(modelEntry, modelDefaults = {}) {
  * @param {string|{id:string, name?:string, context?:number, maxOutput?:number}} modelEntry
  * @param {string} provider - provider 名称（查词典用）
  */
-function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-completions", modelDefaults = {}) {
+function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-completions", modelDefaults: Record<string, any> = {}) {
   const isObj = typeof modelEntry === "object" && modelEntry !== null;
   const id = getModelId(modelEntry);
   const known = lookupKnown(provider, id);

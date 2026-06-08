@@ -22,6 +22,7 @@ import { ensureFirstRun } from "../core/first-run.ts";
 import { initDebugLog, createModuleLogger } from "../lib/debug-log.ts";
 import { redactLogLabel, redactLogText } from "../lib/log-redactor.ts";
 import { safeJson } from "./hono-helpers.ts";
+import { installOpenAIRelayFetchSanitizer } from "./openai-relay-fetch.js";
 
 const log = createModuleLogger("server");
 const checkpointLog = createModuleLogger("checkpoint");
@@ -35,6 +36,7 @@ import { authorizeHttpRoute, isPublicHttpRoute } from "./http/route-security.ts"
 
 // Pi SDK 的 fetch 请求会累积 AbortSignal listener，提高上限避免无害警告
 setMaxListeners(50);
+installOpenAIRelayFetchSanitizer();
 
 import { loadLocale } from "../lib/i18n.ts";
 import { createChatRoute } from "./routes/chat.ts";
