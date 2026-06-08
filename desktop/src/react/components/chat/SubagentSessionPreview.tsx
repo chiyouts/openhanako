@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { subscribeStreamKey } from '../../services/stream-key-dispatcher';
 import { renderMarkdown } from '../../utils/markdown';
+import { findOpenToolIndex, toolCallFromStartEvent, toolCallIdFromEvent } from '../../utils/tool-call-identity';
 import type { ChatListItem, ChatMessage, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
 import { loadMessages } from '../../stores/session-actions';
@@ -243,12 +244,12 @@ export function SubagentSessionPreview({ taskId, sessionPath, agentId, streamSta
               const group = blocks[actualIndex] as Extract<ContentBlock, { type: 'tool_group' }>;
               blocks[actualIndex] = {
                 ...group,
-                tools: [...group.tools, { name: event.name, args: event.args, done: false, success: false }],
+                tools: [...group.tools, toolCallFromStartEvent(event)],
               };
             } else {
               blocks.push({
                 type: 'tool_group',
-                tools: [{ name: event.name, args: event.args, done: false, success: false }],
+                tools: [toolCallFromStartEvent(event)],
                 collapsed: false,
               });
             }
@@ -262,11 +263,13 @@ export function SubagentSessionPreview({ taskId, sessionPath, agentId, streamSta
             for (let i = blocks.length - 1; i >= 0; i -= 1) {
               const block = blocks[i];
               if (block.type !== 'tool_group') continue;
-              const toolIndex = block.tools.findIndex((tool) => tool.name === event.name && !tool.done);
+              const toolIndex = findOpenToolIndex(block.tools, event);
               if (toolIndex < 0) continue;
               const tools = [...block.tools];
+              const id = toolCallIdFromEvent(event);
               tools[toolIndex] = {
                 ...tools[toolIndex],
+                ...(id ? { id } : {}),
                 done: true,
                 success: !!event.success,
                 details: event.details,
@@ -322,21 +325,23 @@ export function SubagentSessionPreview({ taskId, sessionPath, agentId, streamSta
     ? [...items, { type: 'message' as const, data: streamMessage }]
     : items;
 
+  const t = window.t ?? ((k: string) => k);
+
   if (!sessionPath) {
     if (streamStatus !== 'running') {
-      return <div>{summary || (streamStatus === 'failed' ? '历史子会话链接不可恢复' : '暂无可打开的 subagent session')}</div>;
+      return <div>{summary || (streamStatus === 'failed' ? t('chat.subagentPreview.historyUnrecoverable') : t('chat.subagentPreview.noSession'))}</div>;
     }
-    return <div>正在连接 subagent session...</div>;
+    return <div>{t('chat.subagentPreview.connecting')}</div>;
   }
 
   return (
     <div ref={contentRef} className={styles.subagentPreviewTranscript}>
       {entry?.loading && mergedItems.length === 0 ? (
-        <div>正在加载会话...</div>
+        <div>{t('chat.subagentPreview.loadingSession')}</div>
       ) : streamStatus === 'running' && mergedItems.length === 0 ? (
-        <div>正在等待会话内容...</div>
+        <div>{t('chat.subagentPreview.waitingContent')}</div>
       ) : mergedItems.length === 0 ? (
-        <div>暂无会话内容</div>
+        <div>{t('chat.subagentPreview.noContent')}</div>
       ) : (
         <ChatTranscript
           items={mergedItems}

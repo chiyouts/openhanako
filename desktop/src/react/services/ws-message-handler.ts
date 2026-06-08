@@ -110,6 +110,18 @@ function upsertCreatedSession(msg: any): void {
   });
 }
 
+function resolveNotificationDesktopFocusPolicy(msg: any): 'always' | 'when_unfocused' {
+  if (msg.desktopFocusPolicy === 'when_session_unfocused') {
+    const completedSessionPath = typeof msg.sessionPath === 'string' && msg.sessionPath.trim()
+      ? msg.sessionPath.trim()
+      : null;
+    const currentSessionPath = useStore.getState().currentSessionPath || null;
+    if (completedSessionPath && currentSessionPath !== completedSessionPath) return 'always';
+    return 'when_unfocused';
+  }
+  return msg.desktopFocusPolicy === 'when_unfocused' ? 'when_unfocused' : 'always';
+}
+
 function hasOptimisticCurrentSession(): boolean {
   const state = useStore.getState();
   const sessionPath = state.currentSessionPath;
@@ -210,6 +222,10 @@ export function applyStreamingStatus(isStreaming: boolean, sessionPath: string |
 
   if (!isStreaming && wasStreaming) {
     requestInputFocusForCurrentSession(sessionPath);
+    const focused = useStore.getState().currentSessionPath;
+    if (sessionPath && sessionPath !== focused) {
+      useStore.getState().markSessionOutputUnread?.(sessionPath);
+    }
   }
 
   // 渲染层：只有焦点 session 才影响 UI 占位 / sessions 列表。
@@ -265,6 +281,39 @@ function replayUserMessageAlreadyHydrated(sessionPath: string, message: any): bo
     sameJsonish(last.data.deskContext, message?.deskContext);
 }
 
+function applyVoiceTranscriptionUpdate(msg: any): void {
+  const sessionPath = typeof msg.sessionPath === 'string' ? msg.sessionPath : '';
+  const fileId = typeof msg.fileId === 'string' ? msg.fileId : '';
+  const transcription = msg.transcription && typeof msg.transcription === 'object' ? msg.transcription : null;
+  if (!sessionPath || !fileId || !transcription) return;
+
+  let changed = false;
+  useStore.setState((s: any) => {
+    const session = s.chatSessions?.[sessionPath];
+    if (!session) return {};
+    const items = session.items.map((item: any) => {
+      if (item?.type !== 'message' || !Array.isArray(item.data?.attachments)) return item;
+      let itemChanged = false;
+      const attachments = item.data.attachments.map((attachment: any) => {
+        if (attachment?.fileId !== fileId) return attachment;
+        itemChanged = true;
+        return { ...attachment, transcription };
+      });
+      if (!itemChanged) return item;
+      changed = true;
+      return { ...item, data: { ...item.data, attachments } };
+    });
+    if (!changed) return {};
+    return {
+      chatSessions: {
+        ...s.chatSessions,
+        [sessionPath]: { ...session, items },
+      },
+    };
+  });
+  if (changed) bumpMessageLiveVersion(sessionPath);
+}
+
 // ── 消息分发（大 switch） ──
 
 export function handleServerMessage(msg: any): void {
@@ -287,7 +336,7 @@ export function handleServerMessage(msg: any): void {
   }
 
   if (msg.type !== 'stream_resume' && isStreamScopedMessage(msg)) {
-    updateSessionStreamMeta(msg);
+    if (!updateSessionStreamMeta(msg)) return;
   }
 
   if (msg.type === 'compaction_start' || msg.type === 'compaction_end') {
@@ -377,17 +426,32 @@ export function handleServerMessage(msg: any): void {
       if (!bsp) { console.warn('[ws] event missing sessionPath:', msg.type); break; }
       const bRunning = !!msg.running;
       const bUrl = msg.url || null;
-      const prevThumbnail = state.browserBySession[bsp]?.thumbnail ?? null;
-      const bThumbnail = bRunning ? (msg.thumbnail || prevThumbnail) : null;
+      const prev = state.browserBySession[bsp] ?? null;
+      const hasFreshThumbnail = bRunning && typeof msg.thumbnail === 'string' && msg.thumbnail.length > 0;
+      const bThumbnail = bRunning ? (hasFreshThumbnail ? msg.thumbnail : prev?.thumbnail ?? null) : null;
+      const thumbnailCapturedAt = bRunning
+        ? hasFreshThumbnail
+          ? (typeof msg.thumbnailCapturedAt === 'number' ? msg.thumbnailCapturedAt : Date.now())
+          : prev?.thumbnailCapturedAt ?? null
+        : null;
+      const thumbnailUrl = bRunning
+        ? hasFreshThumbnail
+          ? (typeof msg.thumbnailUrl === 'string' ? msg.thumbnailUrl : bUrl)
+          : prev?.thumbnailUrl ?? null
+        : null;
+      const thumbnailFresh = bRunning && hasFreshThumbnail;
       updateKeyed('browserBySession', bsp,
-        { running: bRunning, url: bUrl, thumbnail: bThumbnail },
+        { running: bRunning, url: bUrl, thumbnail: bThumbnail, thumbnailCapturedAt, thumbnailUrl, thumbnailFresh },
       );
       // renderBrowserCard — no-op (browser card rendering handled by React)
-      if (window.platform?.updateBrowserViewer) {
+      if (typeof window !== 'undefined' && window.platform?.updateBrowserViewer) {
         window.platform.updateBrowserViewer({
           running: bRunning,
           url: bUrl,
           thumbnail: bThumbnail,
+          thumbnailCapturedAt,
+          thumbnailUrl,
+          thumbnailFresh,
         });
       }
       break;
@@ -445,7 +509,17 @@ export function handleServerMessage(msg: any): void {
 
     case 'activity_update':
       if (msg.activity) {
-        useStore.setState({ activities: [msg.activity, ...state.activities.slice(0, 499)] });
+        useStore.setState((current: any) => {
+          const incoming = msg.activity;
+          const existing = current.activities.find((activity: any) => activity.id === incoming.id);
+          const merged = existing ? { ...existing, ...incoming } : incoming;
+          return {
+            activities: [
+              merged,
+              ...current.activities.filter((activity: any) => activity.id !== incoming.id),
+            ].slice(0, 500),
+          };
+        });
       }
       break;
 
@@ -460,7 +534,9 @@ export function handleServerMessage(msg: any): void {
       if (window.hana?.showNotification) {
         // agentId 标识触发通知的助手，主进程据此读取该 agent 头像作为通知 icon。
         // 缺失时透传 null，主进程退回无 icon，禁止从当前焦点 agent 兜底。
-        window.hana.showNotification(msg.title, msg.body, msg.agentId ?? null);
+        window.hana.showNotification(msg.title, msg.body, msg.agentId ?? null, {
+          desktopFocusPolicy: resolveNotificationDesktopFocusPolicy(msg),
+        });
       }
       break;
 
@@ -515,6 +591,11 @@ export function handleServerMessage(msg: any): void {
       break;
     }
 
+    case 'voice_transcription_update': {
+      applyVoiceTranscriptionUpdate(msg);
+      break;
+    }
+
     case 'bridge_rc_attached': {
       const sp = msg.sessionPath;
       if (sp && msg.sessionKey) {
@@ -546,11 +627,39 @@ export function handleServerMessage(msg: any): void {
       break;
     }
 
+    case 'session_metadata_updated': {
+      const sp = msg.sessionPath;
+      const metadata = msg.metadata && typeof msg.metadata === 'object' ? msg.metadata : {};
+      if (!sp) { console.warn('[ws] event missing sessionPath:', msg.type); break; }
+      const hasPinnedAt = Object.prototype.hasOwnProperty.call(metadata, 'pinnedAt');
+      const hasProjectId = Object.prototype.hasOwnProperty.call(metadata, 'projectId');
+      if (hasPinnedAt || hasProjectId) {
+        useStore.setState((s) => ({
+          sessions: s.sessions.map((session) => {
+            if (session.path !== sp) return session;
+            return {
+              ...session,
+              ...(hasPinnedAt
+                ? { pinnedAt: typeof metadata.pinnedAt === 'string' ? metadata.pinnedAt : null }
+                : {}),
+              ...(hasProjectId
+                ? { projectId: typeof metadata.projectId === 'string' && metadata.projectId.trim() ? metadata.projectId.trim() : null }
+                : {}),
+            };
+          }),
+        }));
+      }
+      if (sp === useStore.getState().currentSessionPath && typeof metadata.thinkingLevel === 'string') {
+        useStore.getState().setThinkingLevel(metadata.thinkingLevel);
+      }
+      break;
+    }
+
     case 'plan_mode': {
       const sp = msg.sessionPath;
       if (!sp || sp === useStore.getState().currentSessionPath) {
         window.dispatchEvent(new CustomEvent('hana-plan-mode', {
-          detail: { enabled: !!msg.enabled, mode: msg.enabled ? 'read_only' : 'operate' },
+          detail: { enabled: !!msg.enabled, mode: msg.mode || (msg.enabled ? 'read_only' : 'operate') },
         }));
       }
       break;
@@ -581,11 +690,13 @@ export function handleServerMessage(msg: any): void {
 
     case 'channel_new_message': {
       const store = useStore.getState();
+      const knownChannel = store.channels.some((channel) => channel.id === msg.channelName);
       const isVisibleCurrentChannel =
         store.currentTab === 'channels'
         && store.currentChannel === msg.channelName
         && document.visibilityState === 'visible';
       if (msg.channelName && msg.message) {
+        if (!knownChannel) loadChannelsAction();
         appendChannelMessageAction(msg.channelName, msg.message, { markRead: isVisibleCurrentChannel });
       } else if (msg.channelName && isVisibleCurrentChannel) {
         markChannelMessagesDirtyAction(msg.channelName);
@@ -594,6 +705,11 @@ export function handleServerMessage(msg: any): void {
         markChannelMessagesDirtyAction(msg.channelName);
         loadChannelsAction();
       }
+      break;
+    }
+
+    case 'channel_created': {
+      loadChannelsAction();
       break;
     }
 
@@ -646,7 +762,7 @@ export function handleServerMessage(msg: any): void {
       // 更新所有 session 中匹配 confirmId 的确认卡片状态。确认块可能不在最后一条消息，
       // 输入区也从消息块派生 pending 状态，所以这里按 session/message/block 三层显式定位。
       const nextStatusFor = (blockType: string): string => {
-        if (msg.action === 'confirmed') return blockType === 'cron_confirm' ? 'approved' : 'confirmed';
+        if (msg.action === 'confirmed') return blockType === 'cron_confirm' || blockType === 'suggestion_card' ? 'approved' : 'confirmed';
         if (msg.action === 'timeout') return 'timeout';
         return 'rejected';
       };
@@ -664,6 +780,7 @@ export function handleServerMessage(msg: any): void {
             const blocks = item.data.blocks.map((b: any) => {
               const matchesType = b.type === 'settings_confirm'
                 || b.type === 'cron_confirm'
+                || b.type === 'suggestion_card'
                 || b.type === 'session_confirmation';
               if (!matchesType || b.confirmId !== msg.confirmId) return b;
               messageChanged = true;
@@ -731,6 +848,8 @@ function applyContentBlockSessionFile(msg: any): void {
     mime: block.mime,
     kind: block.kind,
     storageKind: block.storageKind,
+    presentation: block.presentation,
+    listed: block.listed,
     status: block.status,
     missingAt: block.missingAt,
     mtimeMs: block.mtimeMs,

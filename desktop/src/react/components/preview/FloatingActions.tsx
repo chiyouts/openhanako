@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import styles from './FloatingActions.module.css';
 import { COVER_GALLERY_ITEMS, type CoverGalleryItem } from './cover-gallery-assets';
 import {
@@ -8,14 +8,26 @@ import {
   requestMarkdownCoverGeneration,
 } from '../../utils/markdown-cover-generation';
 import { hanaFetch } from '../../hooks/use-hana-fetch';
+import { useI18n } from '../../hooks/use-i18n';
 import { Tooltip } from '../../ui';
 import { extOfName, inferKindByExt } from '../../utils/file-kind';
+import type { RemoteContentRef, RemoteWorkbenchContentRef } from '../../types';
+import {
+  isRemoteWorkbenchContentRef,
+  normalizeWorkbenchContentRef,
+} from '../../utils/remote-file-preview';
+import type {
+  MarkdownCoverImageInput,
+  MarkdownCoverTargetInput,
+  WorkbenchMarkdownCoverTarget,
+} from '../../utils/markdown-cover-generation';
 
 interface Props {
   content: string;
   filePath?: string;
   contentType?: string;
   language?: string | null;
+  remoteContentRef?: RemoteContentRef | null;
   showMarkdownPreviewToggle?: boolean;
   markdownPreviewActive?: boolean;
   onToggleMarkdownPreview?: () => void;
@@ -105,11 +117,38 @@ function UploadCoverIcon() {
   );
 }
 
+function fileNameFromPath(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() || 'cover.png';
+}
+
+function remoteRefToCoverTarget(ref: RemoteWorkbenchContentRef): WorkbenchMarkdownCoverTarget {
+  const normalized = normalizeWorkbenchContentRef(ref);
+  return {
+    kind: 'workbench-file',
+    mountId: normalized.mountId || normalized.rootId || 'default',
+    subdir: normalized.subdir,
+    name: normalized.name,
+  };
+}
+
+function readBrowserFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('failed to read cover image'));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',').pop() || '' : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function FloatingActions({
   content,
   filePath,
   contentType,
   language,
+  remoteContentRef,
   showMarkdownPreviewToggle = false,
   markdownPreviewActive = false,
   onToggleMarkdownPreview,
@@ -123,6 +162,15 @@ export function FloatingActions({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coverMenuRef = useRef<HTMLDivElement | null>(null);
   const floatingActionsRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { t } = useI18n();
+  const coverTarget = useMemo<MarkdownCoverTargetInput | null>(() => {
+    if (filePath) return { filePath };
+    if (isRemoteWorkbenchContentRef(remoteContentRef)) {
+      return { target: remoteRefToCoverTarget(remoteContentRef) };
+    }
+    return null;
+  }, [filePath, remoteContentRef]);
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
@@ -138,7 +186,7 @@ export function FloatingActions({
   }, [coverGalleryOpen, coverMenuOpen]);
 
   useEffect(() => {
-    if (contentType !== 'markdown' || !filePath) {
+    if (contentType !== 'markdown' || !coverTarget) {
       setCoverStatus(null);
       return;
     }
@@ -154,7 +202,7 @@ export function FloatingActions({
     return () => {
       cancelled = true;
     };
-  }, [contentType, filePath]);
+  }, [contentType, coverTarget]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(content).then(() => {
@@ -177,12 +225,12 @@ export function FloatingActions({
   const handleGenerateCover = useCallback(async () => {
     const generationStatus = coverStatus?.agentGenerate ?? {};
     const generationEnabled = Boolean(generationStatus.enabled ?? coverStatus?.enabled);
-    if (!filePath || contentType !== 'markdown' || !generationEnabled) return;
+    if (!coverTarget || contentType !== 'markdown' || !generationEnabled) return;
     setCoverMenuOpen(false);
     setCoverBusy(true);
     try {
       const executorAgentId = generationStatus.executorAgentId || coverStatus?.agentId || undefined;
-      const result = await requestMarkdownCoverGeneration({ filePath, executorAgentId });
+      const result = await requestMarkdownCoverGeneration({ ...coverTarget, executorAgentId });
       dispatchCoverNotice(
         result.ok ? '已创建 cover 后台任务。' : `Cover 生成失败：${result.error}`,
         result.ok ? 'success' : 'error',
@@ -192,22 +240,13 @@ export function FloatingActions({
     } finally {
       setCoverBusy(false);
     }
-  }, [contentType, coverStatus, filePath]);
+  }, [contentType, coverStatus, coverTarget]);
 
-  const handleUploadCover = useCallback(async () => {
-    if (!filePath || contentType !== 'markdown') return;
-    setCoverMenuOpen(false);
-    const paths = await window.platform?.selectFiles?.();
-    const imageFilePath = paths?.[0];
-    if (!imageFilePath) return;
-    const kind = inferKindByExt(extOfName(imageFilePath));
-    if (kind !== 'image' && kind !== 'svg') {
-      dispatchCoverNotice('请选择图片文件作为 cover。', 'error');
-      return;
-    }
+  const applySelectedCoverImage = useCallback(async (image: MarkdownCoverImageInput) => {
+    if (!coverTarget) return;
     setCoverBusy(true);
     try {
-      const result = await applyMarkdownCoverImage({ filePath, imageFilePath });
+      const result = await applyMarkdownCoverImage({ ...coverTarget, ...image });
       dispatchCoverNotice(
         result.ok ? '已应用上传图片为 cover。' : `Cover 应用失败：${result.error}`,
         result.ok ? 'success' : 'error',
@@ -217,7 +256,66 @@ export function FloatingActions({
     } finally {
       setCoverBusy(false);
     }
-  }, [contentType, filePath]);
+  }, [coverTarget]);
+
+  const handleUploadCover = useCallback(async () => {
+    if (!coverTarget || contentType !== 'markdown') return;
+    setCoverMenuOpen(false);
+    if (typeof window.platform?.selectFiles === 'function') {
+      const paths = await window.platform.selectFiles();
+      const imageFilePath = paths?.[0];
+      if (!imageFilePath) return;
+      const kind = inferKindByExt(extOfName(imageFilePath));
+      if (kind !== 'image' && kind !== 'svg') {
+        dispatchCoverNotice('请选择图片文件作为 cover。', 'error');
+        return;
+      }
+      if ('filePath' in coverTarget && coverTarget.filePath) {
+        await applySelectedCoverImage({ imageFilePath });
+        return;
+      }
+      const contentBase64 = await window.platform.readFileBase64?.(imageFilePath);
+      if (!contentBase64) {
+        dispatchCoverNotice('读取图片失败。', 'error');
+        return;
+      }
+      await applySelectedCoverImage({
+        image: {
+          filename: fileNameFromPath(imageFilePath),
+          contentBase64,
+        },
+      });
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [applySelectedCoverImage, contentType, coverTarget]);
+
+  const handleBrowserCoverInputChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!coverTarget) return;
+    const file = event.currentTarget.files?.[0] || null;
+    event.currentTarget.value = '';
+    if (!file) return;
+    const kind = inferKindByExt(extOfName(file.name));
+    if (kind !== 'image' && kind !== 'svg') {
+      dispatchCoverNotice('请选择图片文件作为 cover。', 'error');
+      return;
+    }
+    try {
+      const contentBase64 = await readBrowserFileAsBase64(file);
+      if (!contentBase64) {
+        dispatchCoverNotice('读取图片失败。', 'error');
+        return;
+      }
+      await applySelectedCoverImage({
+        image: {
+          filename: file.name || 'cover.png',
+          contentBase64,
+        },
+      });
+    } catch (err) {
+      dispatchCoverNotice(`Cover 应用失败：${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }, [applySelectedCoverImage, coverTarget]);
 
   const handlePresetCover = useCallback(() => {
     setCoverMenuOpen(false);
@@ -225,10 +323,10 @@ export function FloatingActions({
   }, []);
 
   const handleApplyPresetCover = useCallback(async (item: CoverGalleryItem) => {
-    if (!filePath || contentType !== 'markdown') return;
+    if (!coverTarget || contentType !== 'markdown') return;
     setCoverBusy(true);
     try {
-      const result = await applyMarkdownCoverPreset({ filePath, presetId: item.id });
+      const result = await applyMarkdownCoverPreset({ ...coverTarget, presetId: item.id });
       dispatchCoverNotice(
         result.ok ? `已应用「${item.title}」为 cover。` : `Cover 应用失败：${result.error}`,
         result.ok ? 'success' : 'error',
@@ -239,7 +337,7 @@ export function FloatingActions({
     } finally {
       setCoverBusy(false);
     }
-  }, [contentType, filePath]);
+  }, [contentType, coverTarget]);
 
   const visibleCoverGalleryItems = useMemo(
     () => COVER_GALLERY_ITEMS.filter(item => !brokenCoverGalleryIds.has(item.id)),
@@ -250,6 +348,8 @@ export function FloatingActions({
   const agentGenerateStatus = coverStatus?.agentGenerate ?? {};
   const agentGenerateEnabled = Boolean(agentGenerateStatus.enabled ?? coverStatus?.enabled);
   const agentGenerateDisabledText = getAgentGenerateDisabledText(agentGenerateStatus);
+  const canSelectCoverFile = typeof window.platform?.selectFiles === 'function'
+    || typeof window.FileReader === 'function';
 
   const handleCoverGalleryImageError = useCallback((itemId: string) => {
     setBrokenCoverGalleryIds((current) => {
@@ -260,152 +360,166 @@ export function FloatingActions({
     });
   }, []);
 
-  const t = window.t ?? ((p: string) => p);
+  const floatingActionsClassName = [
+    styles.floatingActions,
+    (coverMenuOpen || coverGalleryOpen || coverBusy || copyLabel) ? styles.floatingActionsPinned : '',
+  ].filter(Boolean).join(' ');
 
   return (
-    <div className={styles.floatingActions} data-react-managed ref={floatingActionsRef}>
-      <button className={styles.actionBtn} onClick={handleCopy}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
-        <span>{copyLabel ?? t('attach.copy')}</span>
-      </button>
-      {contentType === 'markdown' && filePath && systemCoverAvailable && (
-        <div className={styles.coverActionWrap} ref={coverMenuRef}>
-          <Tooltip content={t('cover.make')} placement="bottom" align="end">
+    <div className={floatingActionsClassName} data-react-managed ref={floatingActionsRef}>
+      <div className={styles.floatingActionsSurface}>
+        <button className={styles.actionBtn} onClick={handleCopy}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          <span>{copyLabel ?? t('attach.copy')}</span>
+        </button>
+        {contentType === 'markdown' && coverTarget && systemCoverAvailable && (
+          <div className={styles.coverActionWrap} ref={coverMenuRef}>
+            <Tooltip content={t('cover.make')} placement="top" align="end">
+              {({ ref, ...tooltipProps }) => (
+                <button
+                  ref={(node) => ref(node)}
+                  className={`${styles.actionBtn}${coverBusy ? ` ${styles.actionBtnBusy}` : ''}${coverMenuOpen ? ` ${styles.actionBtnActive}` : ''}`}
+                  onClick={() => setCoverMenuOpen(open => !open)}
+                  aria-label={t('cover.make')}
+                  disabled={coverBusy}
+                  {...tooltipProps}
+                >
+                  <CoverPaletteIcon />
+                </button>
+              )}
+            </Tooltip>
+            {coverMenuOpen && (
+              <div className={styles.coverMenu}>
+                <Tooltip
+                  content={agentGenerateDisabledText}
+                  disabled={agentGenerateEnabled}
+                  placement="left"
+                  align="center"
+                >
+                  {({ ref, ...tooltipProps }) => (
+                    <span
+                      className={styles.coverMenuTooltipAnchor}
+                      ref={(node) => ref(node)}
+                      {...tooltipProps}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleGenerateCover}
+                        disabled={coverBusy || !agentGenerateEnabled}
+                      >
+                        <span className={styles.coverMenuIcon}><GenerateCoverIcon /></span>
+                        <span>{t('cover.agentGenerate.label')}</span>
+                      </button>
+                    </span>
+                  )}
+                </Tooltip>
+                <button type="button" onClick={handlePresetCover}>
+                  <span className={styles.coverMenuIcon}><GalleryCoverIcon /></span>
+                  <span>{t('cover.gallery.title')}</span>
+                </button>
+                {canSelectCoverFile && (
+                  <button type="button" onClick={handleUploadCover}>
+                    <span className={styles.coverMenuIcon}><UploadCoverIcon /></span>
+                    <span>{t('cover.gallery.upload')}</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {coverGalleryOpen && (
+          <div className={styles.coverGalleryCard} role="dialog" aria-label={t('cover.gallery.title')}>
+            <div className={styles.coverGalleryHeader}>
+              <div>
+                <div className={styles.coverGalleryTitle}>{t('cover.gallery.title')}</div>
+              </div>
+              <button
+                type="button"
+                className={styles.coverGalleryClose}
+                onClick={() => setCoverGalleryOpen(false)}
+                aria-label={t('cover.gallery.close')}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6L6 18" />
+                  <path d="M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className={styles.coverGalleryGrid}>
+              {visibleCoverGalleryItems.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={styles.coverGalleryItem}
+                  onClick={() => handleApplyPresetCover(item)}
+                  disabled={coverBusy}
+                  aria-label={item.title}
+                  title={item.title}
+                >
+                  <span className={styles.coverGalleryThumb}>
+                    <img
+                      src={item.src}
+                      alt=""
+                      draggable={false}
+                      loading="lazy"
+                      decoding="async"
+                      onError={() => handleCoverGalleryImageError(item.id)}
+                    />
+                  </span>
+                  <span className={styles.coverGalleryName}>{item.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {showMarkdownPreviewToggle && (
+          <Tooltip content={t(markdownPreviewActive ? 'preview.exitMarkdownPreview' : 'preview.markdownPreview')} placement="top" align="end">
             {({ ref, ...tooltipProps }) => (
               <button
                 ref={(node) => ref(node)}
-                className={`${styles.actionBtn}${coverBusy ? ` ${styles.actionBtnBusy}` : ''}${coverMenuOpen ? ` ${styles.actionBtnActive}` : ''}`}
-                onClick={() => setCoverMenuOpen(open => !open)}
-                aria-label={t('cover.make')}
-                disabled={coverBusy}
+                className={`${styles.actionBtn}${markdownPreviewActive ? ` ${styles.actionBtnActive}` : ''}`}
+                onClick={onToggleMarkdownPreview}
+                aria-label={t('preview.markdownPreview')}
                 {...tooltipProps}
               >
-                <CoverPaletteIcon />
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
               </button>
             )}
           </Tooltip>
-          {coverMenuOpen && (
-            <div className={styles.coverMenu}>
-              <Tooltip
-                content={agentGenerateDisabledText}
-                disabled={agentGenerateEnabled}
-                placement="left"
-                align="center"
-              >
-                {({ ref, ...tooltipProps }) => (
-                  <span
-                    className={styles.coverMenuTooltipAnchor}
-                    ref={(node) => ref(node)}
-                    {...tooltipProps}
-                  >
-                    <button
-                      type="button"
-                      onClick={handleGenerateCover}
-                      disabled={coverBusy || !agentGenerateEnabled}
-                    >
-                      <span className={styles.coverMenuIcon}><GenerateCoverIcon /></span>
-                      <span>Agent 生成</span>
-                    </button>
-                  </span>
-                )}
-              </Tooltip>
-              <button type="button" onClick={handlePresetCover}>
-                <span className={styles.coverMenuIcon}><GalleryCoverIcon /></span>
-                <span>小花美术馆</span>
-              </button>
-              <button type="button" onClick={handleUploadCover}>
-                <span className={styles.coverMenuIcon}><UploadCoverIcon /></span>
-                <span>自己上传</span>
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-      {coverGalleryOpen && (
-        <div className={styles.coverGalleryCard} role="dialog" aria-label="小花美术馆">
-          <div className={styles.coverGalleryHeader}>
-            <div>
-              <div className={styles.coverGalleryTitle}>小花美术馆</div>
-            </div>
-            <button
-              type="button"
-              className={styles.coverGalleryClose}
-              onClick={() => setCoverGalleryOpen(false)}
-              aria-label="关闭小花美术馆"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M18 6L6 18" />
-                <path d="M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div className={styles.coverGalleryGrid}>
-            {visibleCoverGalleryItems.map(item => (
-              <button
-                key={item.id}
-                type="button"
-                className={styles.coverGalleryItem}
-                onClick={() => handleApplyPresetCover(item)}
-                disabled={coverBusy}
-                aria-label={item.title}
-                title={item.title}
-              >
-                <span className={styles.coverGalleryThumb}>
-                  <img
-                    src={item.src}
-                    alt=""
-                    draggable={false}
-                    loading="lazy"
-                    decoding="async"
-                    onError={() => handleCoverGalleryImageError(item.id)}
-                  />
-                </span>
-                <span className={styles.coverGalleryName}>{item.title}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {showMarkdownPreviewToggle && (
-        <Tooltip content={t(markdownPreviewActive ? 'preview.exitMarkdownPreview' : 'preview.markdownPreview')} placement="bottom" align="end">
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.svg"
+          hidden
+          onChange={handleBrowserCoverInputChange}
+        />
+        <Tooltip content={t('common.screenshot')} placement="top" align="end">
           {({ ref, ...tooltipProps }) => (
             <button
               ref={(node) => ref(node)}
-              className={`${styles.actionBtn}${markdownPreviewActive ? ` ${styles.actionBtnActive}` : ''}`}
-              onClick={onToggleMarkdownPreview}
-              aria-label={t('preview.markdownPreview')}
+              className={styles.actionBtn}
+              onClick={handleScreenshot}
+              aria-label={t('common.screenshot')}
               {...tooltipProps}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" />
-                <circle cx="12" cy="12" r="3" />
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
               </svg>
             </button>
           )}
         </Tooltip>
-      )}
-      <Tooltip content={t('common.screenshot')} placement="bottom" align="end">
-        {({ ref, ...tooltipProps }) => (
-          <button
-            ref={(node) => ref(node)}
-            className={styles.actionBtn}
-            onClick={handleScreenshot}
-            aria-label={t('common.screenshot')}
-            {...tooltipProps}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-              <circle cx="12" cy="13" r="4" />
-            </svg>
-          </button>
-        )}
-      </Tooltip>
+      </div>
     </div>
   );
 }

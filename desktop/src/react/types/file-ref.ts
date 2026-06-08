@@ -34,6 +34,8 @@ export interface FileRef {
   missingAt?: number | null;
   origin?: string;
   operations?: string[];
+  presentation?: 'attachment' | 'voice-input' | string;
+  listed?: boolean;
   createdAt?: number;
   timestamp?: number;
   version?: FileVersion | null;

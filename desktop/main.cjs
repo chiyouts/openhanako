@@ -8,7 +8,7 @@
  * 4. 关闭 splash，显示主窗口
  * 5. 优雅关闭
  */
-const { app, BrowserWindow, WebContentsView, globalShortcut, ipcMain, dialog, session, shell, nativeTheme, Tray, Menu, nativeImage, systemPreferences, Notification, webContents, screen } = require("electron");
+const { app, BrowserWindow, WebContentsView, globalShortcut, ipcMain, dialog, session, shell, nativeTheme, Tray, Menu, nativeImage, systemPreferences, Notification, webContents, screen, powerSaveBlocker } = require("electron");
 const os = require("os");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
@@ -20,7 +20,9 @@ const {
   getAutoLaunchStatus,
   setAutoLaunchEnabled,
 } = require("./login-item-settings.cjs");
+const { createKeepAwakeManager } = require("./keep-awake.cjs");
 const { createFileWatchRegistry } = require("./file-watch-registry.cjs");
+const { createStableFileWatcher } = require("./file-watch-adapter.cjs");
 const { createWorkspaceWatchRegistry } = require("./workspace-watch-registry.cjs");
 const { readTextFileSnapshot, writeTextFileIfUnchanged } = require("./file-text-io.cjs");
 const chokidar = require("chokidar");
@@ -32,6 +34,10 @@ const {
 } = require("./src/shared/onboarding-completion.cjs");
 const { resolveTrashItemPath } = require("./src/shared/trash-item-path.cjs");
 const { resolveAgentAvatarPath } = require("./src/shared/agent-avatar-path.cjs");
+const {
+  normalizeDesktopNotificationOptions,
+  shouldSuppressDesktopNotification,
+} = require("./src/shared/desktop-notification-policy.cjs");
 const { redactLogText } = require("../shared/log-redactor.cjs");
 const {
   configureClientSingleInstance,
@@ -81,6 +87,9 @@ const {
 const {
   sanitizeWindowState,
 } = require("./src/shared/window-state.cjs");
+const {
+  normalizeQuickChatPreferences,
+} = require("../shared/quick-chat-preferences.cjs");
 const {
   decorateScreenshotMarkdownIt,
   escapeAttr,
@@ -139,6 +148,8 @@ process.env.HANA_HOME = hanakoHome;
 ensureHanaPiSdkDirs(hanakoHome);
 configureProcessPiSdkEnv(hanakoHome);
 
+const keepAwakeManager = createKeepAwakeManager({ powerSaveBlocker });
+
 function redactMainLogText(value) {
   return redactLogText(value, { homeDir: os.homedir(), extraPaths: [hanakoHome] });
 }
@@ -147,6 +158,18 @@ function readNetworkProxyPreference() {
   const prefsPath = path.join(hanakoHome, "user", "preferences.json");
   const prefs = safeReadJSON(prefsPath, {});
   return normalizeNetworkProxyConfig(prefs?.network_proxy);
+}
+
+function readKeepAwakePreference() {
+  const prefsPath = path.join(hanakoHome, "user", "preferences.json");
+  const prefs = safeReadJSON(prefsPath, {});
+  return prefs?.keep_awake === true;
+}
+
+function readQuickChatPreferences() {
+  const prefsPath = path.join(hanakoHome, "user", "preferences.json");
+  const prefs = safeReadJSON(prefsPath, {});
+  return normalizeQuickChatPreferences(prefs?.quick_chat);
 }
 
 async function applyDesktopNetworkProxy(config, { reason = "runtime" } = {}) {
@@ -314,6 +337,9 @@ app.on("gpu-info-update", () => {
 let splashWindow = null;
 let mainWindow = null;
 let onboardingWindow = null;
+let quickChatWindow = null;
+let quickChatMode = "compact";
+let registeredQuickChatShortcut = null;
 
 let settingsWindow = null;
 
@@ -325,6 +351,12 @@ let _currentBrowserSession = null; // 当前浏览器绑定的 sessionPath
 /** Vite 入口页面统一加载（dev → Vite dev server，其他优先 dist-renderer，最后才回退 src） */
 const _isDev = process.argv.includes("--dev");
 const _distRenderer = path.join(__dirname, "dist-renderer");
+
+const QUICK_CHAT_WIDTH = 480;
+const QUICK_CHAT_COMPACT_HEIGHT = 142;
+const QUICK_CHAT_CHAT_HEIGHT = 520;
+const QUICK_CHAT_MIN_WIDTH = 360;
+const QUICK_CHAT_MIN_HEIGHT = 118;
 
 function loadWindowURL(win, pageName, opts) {
   if (_isDev && process.env.VITE_DEV_URL) {
@@ -536,6 +568,15 @@ function applyWindowThemeColors(win, rawTheme) {
     } catch (err) {
       console.warn("[desktop] set window border color failed:", redactMainLogText(err.message));
     }
+  }
+}
+
+function applyTransparentWindowBackground(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.setBackgroundColor("#00000000");
+  } catch (err) {
+    console.warn("[desktop] set transparent window background failed:", redactMainLogText(err.message));
   }
 }
 
@@ -959,9 +1000,9 @@ async function _spawnServerOnce(serverInfoPath) {
     // native addon 被 Electron 自带 Node 误加载。
     const devRoot = path.join(__dirname, "..");
     serverBin = process.env.HANA_DEV_NODE_BIN || process.env.npm_node_execpath || "node";
-    serverArgs = [path.join(devRoot, "server", "bootstrap.js")];
+    serverArgs = [path.join(devRoot, "server", "bootstrap.ts")];
     serverEnv.HANA_ROOT = devRoot;
-    serverEnv.HANA_SERVER_ENTRY = path.join(devRoot, "server", "index.js");
+    serverEnv.HANA_SERVER_ENTRY = path.join(devRoot, "server", "index.ts");
     // Keep dev and packaged startup contracts identical.
     serverEnv.HANA_CREATE_STARTUP_SESSION = "0";
     delete serverEnv.ELECTRON_RUN_AS_NODE;
@@ -1048,11 +1089,11 @@ function monitorServer() {
         monitorServer(); // 重新挂监控
         // 通知前端重连
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("server-restarted", { port: serverPort });
+          mainWindow.webContents.send("server-restarted", { port: serverPort, token: serverToken });
         }
         // 设置窗口也需要知道新端口（否则旧端口的 API 全部失败）
         if (settingsWindow && !settingsWindow.isDestroyed()) {
-          settingsWindow.webContents.send("server-restarted", { port: serverPort });
+          settingsWindow.webContents.send("server-restarted", { port: serverPort, token: serverToken });
         }
       } catch (err) {
         console.error("[desktop] Server 重启失败:", err.message);
@@ -1079,12 +1120,6 @@ function showPrimaryWindow() {
   if (process.platform === "darwin") app.dock.show();
   const win = mainWindow || onboardingWindow;
   focusExistingWindow(win);
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.show();
-  if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.show();
-  for (const [, vw] of _viewerWindows) {
-    if (vw && !vw.isDestroyed()) vw.show();
-  }
 }
 
 /**
@@ -1310,6 +1345,243 @@ function saveWindowState() {
   }, 500);
 }
 
+// ── Quick Chat 小窗状态与全局快捷键 ──
+const quickChatWindowStatePath = path.join(hanakoHome, "user", "quick-chat-window-state.json");
+
+function quickChatHeightForMode(mode, requestedHeight = null) {
+  const base = mode === "chat" ? QUICK_CHAT_CHAT_HEIGHT : QUICK_CHAT_COMPACT_HEIGHT;
+  const height = Number.isFinite(requestedHeight) ? Math.max(base, Math.round(requestedHeight)) : base;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const area = display?.workArea || display?.bounds || { height };
+  const maxHeight = Math.max(QUICK_CHAT_MIN_HEIGHT, (area.height || height) - 24);
+  return Math.min(height, maxHeight);
+}
+
+function loadQuickChatWindowState() {
+  try {
+    return JSON.parse(fs.readFileSync(quickChatWindowStatePath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function defaultQuickChatWindowState(mode, requestedHeight = null) {
+  const height = quickChatHeightForMode(mode, requestedHeight);
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const area = display?.workArea || display?.bounds || { x: 0, y: 0, width: QUICK_CHAT_WIDTH, height };
+  return {
+    width: QUICK_CHAT_WIDTH,
+    height,
+    x: Math.round(area.x + (area.width - QUICK_CHAT_WIDTH) / 2),
+    y: Math.round(area.y + (area.height - height) / 3),
+  };
+}
+
+function resolveQuickChatWindowBounds(mode, state = loadQuickChatWindowState(), requestedHeight = null) {
+  const height = quickChatHeightForMode(mode, requestedHeight);
+  const base = state || defaultQuickChatWindowState(mode, requestedHeight);
+  const sanitized = sanitizeWindowState(
+    { ...base, width: QUICK_CHAT_WIDTH, height },
+    screen.getAllDisplays(),
+    {
+      defaultWidth: QUICK_CHAT_WIDTH,
+      defaultHeight: height,
+      minWidth: QUICK_CHAT_MIN_WIDTH,
+      minHeight: Math.min(QUICK_CHAT_MIN_HEIGHT, height),
+      minVisibleWidth: 96,
+      minVisibleHeight: 72,
+    },
+  ) || defaultQuickChatWindowState(mode, requestedHeight);
+  return {
+    x: sanitized.x,
+    y: sanitized.y,
+    width: Math.max(QUICK_CHAT_MIN_WIDTH, Math.min(QUICK_CHAT_WIDTH, sanitized.width || QUICK_CHAT_WIDTH)),
+    height: sanitized.height || height,
+  };
+}
+
+let _saveQuickChatWindowStateTimer = null;
+let _saveQuickChatWindowStateChain = Promise.resolve();
+function saveQuickChatWindowState() {
+  if (_saveQuickChatWindowStateTimer) clearTimeout(_saveQuickChatWindowStateTimer);
+  _saveQuickChatWindowStateTimer = setTimeout(() => {
+    _saveQuickChatWindowStateTimer = null;
+    if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
+    const bounds = quickChatWindow.getBounds();
+    const state = {
+      x: bounds.x,
+      y: bounds.y,
+      width: QUICK_CHAT_WIDTH,
+      height: quickChatHeightForMode(quickChatMode),
+    };
+    _saveQuickChatWindowStateChain = _saveQuickChatWindowStateChain.then(async () => {
+      await fs.promises.mkdir(path.dirname(quickChatWindowStatePath), { recursive: true });
+      await fs.promises.writeFile(quickChatWindowStatePath, JSON.stringify(state, null, 2) + "\n");
+    }).catch(e => {
+      console.error("[desktop] 保存 Quick Chat 窗口状态失败:", e.message);
+    });
+  }, 300);
+}
+
+function normalizeQuickChatResizeRequest(request) {
+  if (request && typeof request === "object") {
+    return {
+      mode: request.mode === "chat" ? "chat" : "compact",
+      height: Number.isFinite(request.height) ? request.height : null,
+    };
+  }
+  return {
+    mode: request === "chat" ? "chat" : "compact",
+    height: null,
+  };
+}
+
+function applyQuickChatMode(request) {
+  if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
+  const { mode, height } = normalizeQuickChatResizeRequest(request);
+  quickChatMode = mode;
+  const bounds = resolveQuickChatWindowBounds(quickChatMode, quickChatWindow.getBounds(), height);
+  quickChatWindow.setBounds(bounds, true);
+  saveQuickChatWindowState();
+}
+
+function createQuickChatWindow() {
+  if (quickChatWindow && !quickChatWindow.isDestroyed()) return quickChatWindow;
+
+  quickChatMode = "compact";
+  const bounds = resolveQuickChatWindowBounds(quickChatMode);
+
+  quickChatWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: QUICK_CHAT_MIN_WIDTH,
+    minHeight: QUICK_CHAT_MIN_HEIGHT,
+    maxWidth: QUICK_CHAT_WIDTH,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: process.platform !== "darwin",
+    frame: false,
+    alwaysOnTop: true,
+    title: "Hana Quick Chat",
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    show: false,
+    acceptFirstMouse: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.bundle.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  attachRendererLaunchDiagnostics(quickChatWindow, "quick-chat");
+  applyTransparentWindowBackground(quickChatWindow);
+  loadWindowURL(quickChatWindow, "quick-chat");
+
+  quickChatWindow.on("move", saveQuickChatWindowState);
+  quickChatWindow.on("close", (event) => {
+    if (!isQuitting && !_isUpdating && !forceQuitApp) {
+      event.preventDefault();
+      hideQuickChatWindow();
+    }
+  });
+  quickChatWindow.on("closed", () => {
+    quickChatWindow = null;
+  });
+
+  return quickChatWindow;
+}
+
+function suspendMainWindowFocusForQuickChatHide() {
+  if (process.platform !== "darwin") return;
+  if (!quickChatWindow || quickChatWindow.isDestroyed() || !quickChatWindow.isFocused()) return;
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  try {
+    mainWindow.setFocusable(false);
+    setTimeout(() => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setFocusable(true);
+      } catch {}
+    }, 300);
+  } catch (err) {
+    console.warn("[desktop] Quick Chat 隐藏时焦点保护失败:", redactMainLogText(err.message));
+  }
+}
+
+function hideQuickChatWindow() {
+  if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
+  saveQuickChatWindowState();
+  suspendMainWindowFocusForQuickChatHide();
+  quickChatWindow.hide();
+}
+
+function showQuickChatWindow() {
+  const win = createQuickChatWindow();
+  if (win.isMinimized()) win.restore();
+  try {
+    win.setAlwaysOnTop(true, "floating");
+    if (process.platform === "darwin") {
+      app.dock.show();
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+  } catch (err) {
+    console.warn("[desktop] Quick Chat 浮窗置顶失败:", redactMainLogText(err.message));
+  }
+  if (process.platform === "darwin") {
+    app.focus({ steal: true });
+  }
+  win.show();
+  win.focus();
+  win.webContents.send("quick-chat-shown");
+}
+
+function toggleQuickChatWindow() {
+  if (quickChatWindow && !quickChatWindow.isDestroyed() && quickChatWindow.isVisible() && quickChatWindow.isFocused()) {
+    hideQuickChatWindow();
+    return;
+  }
+  showQuickChatWindow();
+}
+
+function registerQuickChatShortcut(shortcut = readQuickChatPreferences().shortcut) {
+  if (registeredQuickChatShortcut && registeredQuickChatShortcut !== shortcut) {
+    globalShortcut.unregister(registeredQuickChatShortcut);
+    registeredQuickChatShortcut = null;
+  }
+
+  if (!shortcut || typeof shortcut !== "string") {
+    return { ok: false, shortcut: shortcut || "", error: "invalid shortcut" };
+  }
+
+  if (registeredQuickChatShortcut === shortcut && globalShortcut.isRegistered(shortcut)) {
+    return { ok: true, shortcut };
+  }
+
+  if (registeredQuickChatShortcut) {
+    globalShortcut.unregister(registeredQuickChatShortcut);
+    registeredQuickChatShortcut = null;
+  }
+
+  const ok = globalShortcut.register(shortcut, toggleQuickChatWindow);
+  if (!ok) {
+    return { ok: false, shortcut, error: "shortcut is unavailable" };
+  }
+  registeredQuickChatShortcut = shortcut;
+  return { ok: true, shortcut };
+}
+
+function reloadQuickChatShortcut() {
+  return registerQuickChatShortcut(readQuickChatPreferences().shortcut);
+}
+
+function registerQuickChatShortcutBestEffort() {
+  const result = reloadQuickChatShortcut();
+  if (!result.ok) {
+    console.error("[desktop] Quick Chat 快捷键注册失败:", redactMainLogText(result.error || result.shortcut || "unknown"));
+  }
+  return result;
+}
+
 // ── 创建主窗口 ──
 function createMainWindow() {
   const saved = sanitizeWindowState(loadWindowState(), screen.getAllDisplays(), {
@@ -1433,6 +1705,7 @@ function createMainWindow() {
       // 同时隐藏子窗口
       if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.hide();
       if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.hide();
+      hideQuickChatWindow();
       // 派生 viewer 跟着主窗口一起隐藏（不保留后台 viewer）
       for (const [, vw] of _viewerWindows) {
         if (vw && !vw.isDestroyed()) vw.hide();
@@ -1450,6 +1723,10 @@ function createMainWindow() {
     if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
       browserViewerWindow.destroy();
       browserViewerWindow = null;
+    }
+    if (quickChatWindow && !quickChatWindow.isDestroyed()) {
+      quickChatWindow.destroy();
+      quickChatWindow = null;
     }
     // 销毁所有派生 viewer
     for (const [, vw] of _viewerWindows) {
@@ -1894,23 +2171,33 @@ function _isBrowserViewDestroyed(view) {
   }
 }
 
+function _detachActiveBrowserView({ view = _browserWebView, sessionPath = _currentBrowserSession, destroy = false, hideIfVisible = false, reason = null } = {}) {
+  if (!view || view !== _browserWebView) return false;
+  if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+    try { browserViewerWindow.contentView.removeChildView(view); } catch {}
+  }
+  _browserWebView = null;
+  _currentBrowserSession = null;
+  if (destroy) {
+    try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
+    if (sessionPath) _browserViews.delete(sessionPath);
+  }
+  if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+    browserViewerWindow.webContents.send("browser-update", { running: false, reason });
+    if (hideIfVisible) browserViewerWindow.hide();
+  }
+  return true;
+}
+
 function _forgetBrowserView(view, reason) {
   if (!view) return;
   const wasActive = view === _browserWebView;
-  if (wasActive && browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-    try { browserViewerWindow.contentView.removeChildView(view); } catch {}
-  }
+  const activeSessionPath = wasActive ? _currentBrowserSession : null;
+  if (wasActive) _detachActiveBrowserView({ view, sessionPath: activeSessionPath, hideIfVisible: true, reason });
   for (const [sp, candidate] of _browserViews) {
     if (candidate === view) _browserViews.delete(sp);
   }
   try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
-  if (wasActive) {
-    _browserWebView = null;
-    _currentBrowserSession = null;
-    if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-      browserViewerWindow.webContents.send("browser-update", { running: false, reason });
-    }
-  }
 }
 
 function _bindBrowserViewLifecycle(view, sessionPath) {
@@ -2161,20 +2448,12 @@ async function handleBrowserCommand(cmd, params) {
       const sp = params.sessionPath;
       const view = sp ? _getViewForSession(sp) : _browserWebView;
       if (view) {
-        // 如果是当前活跃 view，从窗口移除
         if (view === _browserWebView) {
-          if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-            try { browserViewerWindow.contentView.removeChildView(view); } catch {}
-          }
-          _browserWebView = null;
-          _currentBrowserSession = null;
+          _detachActiveBrowserView({ view, sessionPath: sp || _currentBrowserSession, destroy: true, hideIfVisible: true });
+        } else {
+          try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
+          if (sp) _browserViews.delete(sp);
         }
-        try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
-        if (sp) _browserViews.delete(sp);
-      }
-      // 通知浮窗状态变化，但不自动隐藏（让用户自己决定关不关）
-      if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-        browserViewerWindow.webContents.send("browser-update", { running: false });
       }
       return {};
     }
@@ -2184,16 +2463,7 @@ async function handleBrowserCommand(cmd, params) {
       const sp = params.sessionPath;
       const view = sp ? _getViewForSession(sp) : _browserWebView;
       if (view && view === _browserWebView) {
-        // 只有当前活跃 view 需要从窗口摘下
-        if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-          try { browserViewerWindow.contentView.removeChildView(view); } catch {}
-        }
-        _browserWebView = null;
-        _currentBrowserSession = null;
-      }
-      // 非活跃 view 本来就不在窗口上，suspend 是 no-op（view 留在 Map 里）
-      if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-        browserViewerWindow.webContents.send("browser-update", { running: false });
+        _detachActiveBrowserView({ view, sessionPath: sp || _currentBrowserSession, hideIfVisible: true });
       }
       return {};
     }
@@ -2430,18 +2700,11 @@ async function handleBrowserCommand(cmd, params) {
         const view = _getViewForSession(sp);
         if (!view) return {};
         if (view === _browserWebView) {
-          if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-            try { browserViewerWindow.contentView.removeChildView(view); } catch {}
-          }
-          _browserWebView = null;
-          _currentBrowserSession = null;
-          if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-            browserViewerWindow.webContents.send("browser-update", { running: false });
-            browserViewerWindow.hide();
-          }
+          _detachActiveBrowserView({ view, sessionPath: sp, destroy: true, hideIfVisible: true });
+        } else {
+          try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
+          _browserViews.delete(sp);
         }
-        try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
-        _browserViews.delete(sp);
       }
       return {};
     }
@@ -2673,7 +2936,8 @@ function buildScreenshotHTML(payload) {
 
   const katexCSS = _getKatexCSS();
 
-  let extraCSS = `:root { --screenshot-page-bg: ${themeConf.backgroundColor}; }`;
+  const screenshotFontFamily = sanitizeScreenshotFontFamily(payload.fontFamily);
+  let extraCSS = `:root { --screenshot-page-bg: ${themeConf.backgroundColor}; --screenshot-font-family: ${screenshotFontFamily}; }`;
   if (themeName.startsWith("sakura-")) {
     const isDesktop = themeName.endsWith("-desktop");
     const branchFile = isDesktop ? "sakura-branch-desktop.png" : "sakura-branch-mobile.png";
@@ -2698,10 +2962,116 @@ function buildScreenshotHTML(payload) {
     logoUrl = `data:image/png;base64,${logoBuf.toString("base64")}`;
   } catch { /* logo 加载失败时水印无图 */ }
 
+  const screenshotAttachmentKinds = new Set(["image", "svg", "video", "audio", "pdf", "doc", "code", "markdown", "directory", "other"]);
+
+  function normalizeScreenshotAttachmentKind(kind) {
+    const normalized = typeof kind === "string" ? kind : "other";
+    return screenshotAttachmentKinds.has(normalized)
+      ? normalized
+      : "other";
+  }
+
+  function renderScreenshotAttachmentIcon(kind) {
+    const common = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+    if (kind === "audio") {
+      return `<svg ${common}><path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 5v14"/><path d="M16 8v8"/><path d="M20 11v2"/></svg>`;
+    }
+    if (kind === "markdown") {
+      return `<svg ${common}><path d="M4 5h16v14H4z"/><path d="M7 15V9l3 3 3-3v6"/><path d="M16 9v6"/><path d="M14.5 13.5 16 15l1.5-1.5"/></svg>`;
+    }
+    if (kind === "code") {
+      return `<svg ${common}><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+    }
+    if (kind === "pdf" || kind === "doc" || kind === "other") {
+      return `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></svg>`;
+    }
+    if (kind === "directory") {
+      return `<svg ${common}><path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+    }
+    if (kind === "video") {
+      return `<svg ${common}><rect x="3" y="5" width="18" height="14" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>`;
+    }
+    return `<svg ${common}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+  }
+
+  function renderScreenshotAttachmentStatus(status) {
+    if (status !== "expired") return "";
+    const locale = String(payload.locale || "").toLowerCase();
+    const label = locale.startsWith("zh") ? "已过期" : "expired";
+    return `<span class="chat-attachment-status">${escapeAttr(label)}</span>`;
+  }
+
+  function normalizeScreenshotWaveformPeaks(waveform) {
+    const fallback = [0.28, 0.62, 0.44, 0.82, 0.36, 0.72, 0.32, 0.54, 0.78, 0.44, 0.66, 0.28];
+    if (!waveform || typeof waveform !== "object" || !Array.isArray(waveform.peaks) || !waveform.peaks.length) return fallback;
+    const peaks = waveform.peaks
+      .slice(0, 80)
+      .map((peak) => Number(peak))
+      .filter((peak) => Number.isFinite(peak))
+      .map((peak) => Math.max(0, Math.min(1, peak)));
+    return peaks.length ? peaks : fallback;
+  }
+
+  function renderScreenshotAudioWave(waveform) {
+    return normalizeScreenshotWaveformPeaks(waveform)
+      .map((peak) => `<span style="height:${Math.max(4, Math.round(4 + peak * 18))}px"></span>`)
+      .join("");
+  }
+
+  function renderScreenshotAudioCard(b, { name, statusHTML, expiredClass, showName }) {
+    return `
+      <span class="chat-audio-card${expiredClass}" title="${escapeAttr(name)}">
+        <span class="chat-audio-play">${renderScreenshotAttachmentIcon("audio")}</span>
+        <span class="chat-audio-wave" aria-hidden="true">${renderScreenshotAudioWave(b.waveform)}</span>
+        ${showName ? `<span class="chat-attachment-name">${escapeAttr(name)}</span>` : ""}
+        ${statusHTML}
+      </span>
+    `;
+  }
+
+  function renderScreenshotAttachment(b) {
+    const kind = normalizeScreenshotAttachmentKind(b.kind);
+    const name = typeof b.name === "string" && b.name.trim() ? b.name.trim() : "attachment";
+    const presentation = typeof b.presentation === "string" ? b.presentation : "attachment";
+    const status = typeof b.status === "string" ? b.status : "";
+    const expiredClass = status === "expired" ? " chat-attachment-expired" : "";
+    const statusHTML = renderScreenshotAttachmentStatus(status);
+
+    if (kind === "audio") {
+      const transcript = b.transcription?.status === "ready" && typeof b.transcription.text === "string"
+        ? b.transcription.text.trim()
+        : "";
+      const audioCard = renderScreenshotAudioCard(b, {
+        name,
+        statusHTML,
+        expiredClass,
+        showName: presentation !== "voice-input",
+      });
+      if (transcript) {
+        return `
+          <span class="chat-voice-card${expiredClass}" title="${escapeAttr(name)}">
+            <span class="chat-voice-transcript">${escapeAttr(transcript)}</span>
+            ${audioCard}
+          </span>
+        `;
+      }
+      return audioCard;
+    }
+
+    return `
+      <span class="chat-attachment${expiredClass}" title="${escapeAttr(name)}">
+        <span class="chat-attachment-icon">${renderScreenshotAttachmentIcon(kind)}</span>
+        <span class="chat-attachment-name">${escapeAttr(name)}</span>
+        ${statusHTML}
+      </span>
+    `;
+  }
+
   function renderBlock(b) {
     if (b.type === "html") return b.content;
     if (b.type === "markdown") return md.render(b.content, { sourceFilePath: payload.filePath || null });
     if (b.type === "image") return `<img src="${escapeAttr(b.content)}" class="chat-image" />`;
+    if (b.type === "attachment") return renderScreenshotAttachment(b);
     return "";
   }
 
@@ -2747,6 +3117,109 @@ function buildScreenshotHTML(payload) {
     .chat-body { padding-left: 0; }
     .chat-body p:last-child { margin-bottom: 0; }
     .chat-image { width: ${themeName.endsWith("-desktop") ? "66.666%" : "100%"}; max-width: 100%; height: auto; border-radius: 6px; margin: 0.8em 0; display: block; }
+    .chat-attachment,
+    .chat-audio-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.38em;
+      max-width: 100%;
+      min-height: 2em;
+      margin: 0.25em 0.38em 0.45em 0;
+      padding: 0.3em 0.55em;
+      color: currentColor;
+      background: color-mix(in srgb, currentColor 7%, transparent);
+      border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+      font-size: 0.78em;
+      line-height: 1;
+      vertical-align: middle;
+    }
+    .chat-attachment-expired {
+      opacity: 0.68;
+      border-style: dashed;
+      box-shadow: none;
+    }
+    .chat-attachment-icon,
+    .chat-audio-play {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 1.2em;
+      height: 1.2em;
+    }
+    .chat-attachment-icon svg,
+    .chat-audio-play svg {
+      width: 1em;
+      height: 1em;
+    }
+    .chat-attachment-name {
+      min-width: 0;
+      max-width: 18em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-attachment-status {
+      flex: 0 0 auto;
+      opacity: 0.72;
+      font-size: 0.9em;
+    }
+    .chat-audio-card {
+      gap: 0.32em;
+      padding-right: 0.6em;
+      border: none;
+    }
+    .chat-audio-play {
+      background: color-mix(in srgb, currentColor 10%, transparent);
+      border-radius: 6px;
+    }
+    .chat-audio-wave {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      width: 4.2em;
+      height: 1.18em;
+      overflow: hidden;
+    }
+    .chat-audio-wave span {
+      display: block;
+      width: 2px;
+      min-height: 4px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0.58;
+    }
+    .chat-voice-card {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.42em;
+      max-width: min(18em, 100%);
+      margin: 0.25em 0.38em 0.45em 0;
+      padding: 0.72em 0.72em 0.52em;
+      color: currentColor;
+      background: color-mix(in srgb, currentColor 7%, transparent);
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+      vertical-align: middle;
+    }
+    .chat-voice-card .chat-audio-card {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .chat-voice-transcript {
+      padding: 0 0.08em;
+      color: currentColor;
+      font-size: 1em;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     .screenshot-cover {
       display: block;
       overflow: visible;
@@ -2806,6 +3279,15 @@ function buildScreenshotHTML(payload) {
   </footer>
 </body>
 </html>`;
+}
+
+function sanitizeScreenshotFontFamily(value) {
+  const fallback = `"Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "Lora", "Georgia", serif`;
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  if (/[;{}()<>\n\r]/.test(trimmed)) return fallback;
+  return trimmed;
 }
 
 async function screenshotCapture(htmlContent, width) {
@@ -2896,6 +3378,26 @@ wrapIpcHandler("check-update", () => {
 });
 wrapIpcHandler("get-auto-launch-status", () => getAutoLaunchStatus({ app }));
 wrapIpcHandler("set-auto-launch-enabled", (_event, enabled) => setAutoLaunchEnabled({ app, enabled: enabled === true }));
+wrapIpcHandler("get-keep-awake-status", () => keepAwakeManager.getStatus());
+wrapIpcHandler("set-keep-awake-enabled", (_event, enabled) => keepAwakeManager.setEnabled(enabled === true));
+wrapIpcHandler("quick-chat-reload-shortcut", () => reloadQuickChatShortcut());
+wrapIpcHandler("quick-chat-shortcut-status", () => ({
+  shortcut: registeredQuickChatShortcut || readQuickChatPreferences().shortcut,
+  registered: !!registeredQuickChatShortcut && globalShortcut.isRegistered(registeredQuickChatShortcut),
+}));
+wrapIpcBestEffortHandler("quick-chat-show", () => showQuickChatWindow());
+wrapIpcBestEffortHandler("quick-chat-hide", () => hideQuickChatWindow());
+wrapIpcBestEffortHandler("quick-chat-resize", (_event, mode) => applyQuickChatMode(mode));
+wrapIpcBestEffortHandler("quick-chat-open-session", (_event, sessionPath) => {
+  if (typeof sessionPath !== "string" || !sessionPath.trim()) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("quick-chat-open-session", { sessionPath });
+  }
+  hideQuickChatWindow();
+});
 
 wrapIpcBestEffortHandler("open-settings", (_event, tab, theme) => createSettingsWindow(tab, theme));
 
@@ -2940,18 +3442,7 @@ wrapIpcBestEffortHandler("browser-emergency-stop", () => {
   }
   // 兼容无 sessionPath 的旧浏览器实例：没有 server 状态可同步，只能本地清理。
   if (_browserWebView) {
-    if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-      try { browserViewerWindow.contentView.removeChildView(_browserWebView); } catch {}
-    }
-    _browserWebView.webContents.close();
-    if (_currentBrowserSession) {
-      _browserViews.delete(_currentBrowserSession);
-    }
-    _browserWebView = null;
-    _currentBrowserSession = null;
-  }
-  if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-    browserViewerWindow.webContents.send("browser-update", { running: false });
+    _detachActiveBrowserView({ destroy: true, hideIfVisible: true, reason: "emergency-stop" });
   }
 });
 
@@ -3014,6 +3505,10 @@ wrapIpcBestEffortHandler("viewer-close", (event) => {
 
 wrapIpcOn("window-theme-changed", (event, theme) => {
   const win = BrowserWindow.fromWebContents(event.sender);
+  if (quickChatWindow && win && win.id === quickChatWindow.id) {
+    applyTransparentWindowBackground(win);
+    return;
+  }
   applyWindowThemeColors(win, theme);
 });
 
@@ -3037,6 +3532,19 @@ wrapIpcOn("settings-changed", (_event, type, data) => {
     applyDesktopNetworkProxy(data?.network_proxy || readNetworkProxyPreference(), { reason: "settings" }).catch(err => {
       console.error("[desktop] apply network proxy failed:", redactMainLogText(err.message));
     });
+  }
+  if (type === "keep-awake-changed") {
+    try {
+      keepAwakeManager.setEnabled(data?.keep_awake === true);
+    } catch (err) {
+      console.error("[desktop] apply keep awake failed:", redactMainLogText(err.message));
+    }
+  }
+  if (type === "quick-chat-shortcut-changed") {
+    const result = reloadQuickChatShortcut();
+    if (!result.ok) {
+      console.error("[desktop] Quick Chat 快捷键注册失败:", redactMainLogText(result.error || result.shortcut || "unknown"));
+    }
   }
   if (type === "locale-changed") {
     resetMainI18n();
@@ -3414,7 +3922,7 @@ wrapIpcHandler("screenshot-render", (_event, payload) => {
 // 文件监听（artifact 编辑 — 外部变更刷新用）
 const _watchedRendererIds = new Set();
 const _fileWatchRegistry = createFileWatchRegistry({
-  watch: (filePath, options, onChange) => fs.watch(filePath, options, onChange),
+  watch: createStableFileWatcher,
   notifySubscriber: (subscriberId, filePath) => {
     const wc = webContents.fromId(subscriberId);
     if (!wc || wc.isDestroyed()) {
@@ -3540,8 +4048,12 @@ wrapIpcBestEffortHandler("reload-main-window", () => {
 // agentId 标识触发的助手；据此读取该 agent 头像作为通知 icon，让多 agent 并发通知可分辨身份。
 // agentId 缺失或头像不存在时退回无 icon，禁止用当前焦点 agent 兜底（会张冠李戴）。
 // Windows 自定义 icon 依赖 AppUserModelID 已注册（见上方 app.setAppUserModelId），已满足；三平台同一套逻辑。
-wrapIpcBestEffortHandler("show-notification", (_event, title, body, agentId) => {
-  if (!Notification.isSupported()) return;
+wrapIpcBestEffortHandler("show-notification", (_event, title, body, agentId, rawOptions) => {
+  const notificationOptions = normalizeDesktopNotificationOptions(rawOptions);
+  if (shouldSuppressDesktopNotification(notificationOptions, { getFocusedWindow: () => BrowserWindow.getFocusedWindow() })) {
+    return { shown: false, reason: "hana_focused" };
+  }
+  if (!Notification.isSupported()) return { shown: false, reason: "unsupported" };
   /** @type {Electron.NotificationConstructorOptions} */
   const options = {
     title: title || "Hana",
@@ -3563,6 +4075,7 @@ wrapIpcBestEffortHandler("show-notification", (_event, title, body, agentId) => 
     }
   });
   notif.show();
+  return { shown: true };
 });
 
 // Debug: 打开 Onboarding 窗口（DevTools 用）
@@ -3590,6 +4103,7 @@ wrapIpcHandler("onboarding-complete", async () => {
     serverToken,
     createMainWindow,
   });
+  registerQuickChatShortcutBestEffort();
 });
 
 // ── 窗口控制 IPC（Windows/Linux 自绘标题栏用）──
@@ -3661,6 +4175,7 @@ app.whenReady().then(async () => {
     const splashShownAt = Date.now();
     await resolveLoginShellPath();
     await applyDesktopNetworkProxy(readNetworkProxyPreference(), { reason: "startup" });
+    keepAwakeManager.setEnabled(readKeepAwakePreference());
 
     // 2. 后台启动 server（PATH 已就绪）
     if (process.platform === "win32") {
@@ -3701,6 +4216,7 @@ app.whenReady().then(async () => {
     if (isSetupComplete() || migratedSetupComplete) {
       // 已完成配置：直接创建主窗口
       createMainWindow();
+      registerQuickChatShortcutBestEffort();
       if (process.platform === "win32") {
         markGpuStartupPhase({
           hanakoHome,
@@ -3796,6 +4312,7 @@ app.on("activate", () => {
 
 // ── 优雅关闭 ──
 app.on("will-quit", () => {
+  keepAwakeManager.dispose();
   globalShortcut.unregisterAll();
   // 销毁托盘图标
   if (tray && !tray.isDestroyed()) {

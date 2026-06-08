@@ -2,16 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   appendConnectionAuth,
+  buildScopedConnectSources,
   buildConnectionUrl,
   buildConnectionWsUrl,
   connectDeviceServerConnection,
   createDeviceServerConnection,
   createLocalServerConnection,
   hasServerConnection,
+  isLocalOwnerConnection,
   mergeServerIdentity,
   persistServerConnectionSelection,
   readPersistedServerConnectionState,
   refreshLocalServerConnection,
+  refreshLocalServerConnectionState,
   resolveServerConnection,
   upsertServerConnection,
   writePersistedServerConnectionState,
@@ -175,6 +178,87 @@ describe('server connection helpers', () => {
     expect(buildConnectionWsUrl(remote, '/ws')).toBe('wss://hana.example/ws');
   });
 
+  it('identifies the local owner connection by the same contract as server route security', () => {
+    const local = createLocalServerConnection({
+      serverPort: '3210',
+      serverToken: 'local-token',
+    })!;
+    const remote = {
+      ...local,
+      connectionId: 'lan:node_lan:studio_lan',
+      kind: 'lan' as const,
+      label: 'LAN Studio',
+      baseUrl: 'http://192.168.31.75:14500',
+      wsUrl: 'ws://192.168.31.75:14500',
+      token: 'remote-token',
+      trustState: 'lan' as const,
+      credentialKind: 'device_credential' as const,
+    };
+
+    expect(isLocalOwnerConnection(local)).toBe(true);
+    expect(isLocalOwnerConnection(remote)).toBe(false);
+    expect(isLocalOwnerConnection(null)).toBe(false);
+  });
+
+  it('builds scoped CSP connect sources for only the active configured remote origin', () => {
+    const local = createLocalServerConnection({
+      serverPort: '3210',
+      serverToken: 'local-token',
+    })!;
+    const remote = {
+      ...local,
+      connectionId: 'lan:node_lan:studio_lan',
+      kind: 'lan' as const,
+      label: 'LAN Studio',
+      baseUrl: 'http://192.168.31.75:14500',
+      wsUrl: 'ws://192.168.31.75:14500',
+      token: 'remote-token',
+      trustState: 'lan' as const,
+      credentialKind: 'device_credential' as const,
+    };
+
+    expect(buildScopedConnectSources(remote)).toEqual([
+      'http://192.168.31.75:14500',
+      'ws://192.168.31.75:14500',
+    ]);
+    expect(buildScopedConnectSources(remote)).not.toContain('http:');
+    expect(buildScopedConnectSources(remote)).not.toContain('ws:');
+  });
+
+  it('updates the local restart token without stealing an active remote connection', () => {
+    const local = createLocalServerConnection({
+      serverPort: '3210',
+      serverToken: 'old-local-token',
+    })!;
+    const remote = {
+      ...local,
+      connectionId: 'lan:node_lan:studio_lan',
+      kind: 'lan' as const,
+      label: 'LAN Studio',
+      baseUrl: 'http://192.168.31.75:14500',
+      wsUrl: 'ws://192.168.31.75:14500',
+      token: 'remote-token',
+      trustState: 'lan' as const,
+      credentialKind: 'device_credential' as const,
+    };
+
+    const next = refreshLocalServerConnectionState({
+      serverConnections: { local, [remote.connectionId]: remote },
+      activeServerConnectionId: remote.connectionId,
+      activeServerConnection: remote,
+      serverPort: '63001',
+      serverToken: 'new-local-token',
+    });
+
+    expect(next.serverConnections.local).toEqual(expect.objectContaining({
+      baseUrl: 'http://127.0.0.1:63001',
+      wsUrl: 'ws://127.0.0.1:63001',
+      token: 'new-local-token',
+    }));
+    expect(next.activeServerConnectionId).toBe(remote.connectionId);
+    expect(next.activeServerConnection).toBe(next.serverConnections[remote.connectionId]);
+  });
+
   it('creates a LAN device ServerConnection from manual URL, credential, and server identity', () => {
     const connection = createDeviceServerConnection({
       baseUrl: '192.168.31.75:14500/mobile/',
@@ -208,6 +292,60 @@ describe('server connection helpers', () => {
       credentialKind: 'device_credential',
       capabilities: ['chat', 'resources', 'files'],
     });
+  });
+
+  it('preserves fine-grained desktop owner scopes as browser capabilities', async () => {
+    const { createBrowserServerConnection } = await import('../../services/server-connection');
+
+    const connection = createBrowserServerConnection({
+      origin: 'http://192.168.31.75:14500/desktop/',
+      identity: {
+        connectionKind: 'lan',
+        serverId: 'server_lan',
+        serverNodeId: 'node_lan',
+        userId: 'user_lan',
+        studioId: 'studio_lan',
+        label: 'LAN Server',
+        trustState: 'lan',
+        authState: 'paired',
+        credentialKind: 'user_session',
+        capabilities: ['chat'],
+      },
+      principal: {
+        kind: 'account_user',
+        credentialKind: 'user_session',
+        connectionKind: 'lan',
+        trustState: 'lan',
+        scopes: [
+          'chat',
+          'resources.read',
+          'files.read',
+          'files.write',
+          'studio.owner',
+          'settings.read',
+          'settings.write',
+          'providers.manage',
+          'secrets.write',
+          'bridge.manage',
+        ],
+      },
+    });
+
+    expect(connection.capabilities).toEqual(expect.arrayContaining([
+      'chat',
+      'resources',
+      'resources.read',
+      'files',
+      'files.read',
+      'files.write',
+      'studio.owner',
+      'settings',
+      'settings.read',
+      'settings.write',
+      'providers.manage',
+      'secrets.write',
+      'bridge.manage',
+    ]));
   });
 
   it('normalizes the browser desktop PWA URL when creating a manual LAN connection', () => {

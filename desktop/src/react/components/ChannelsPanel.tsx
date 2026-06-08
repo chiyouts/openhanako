@@ -6,6 +6,7 @@ import { fetchConfig } from '../hooks/use-config';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import { useI18n } from '../hooks/use-i18n';
 import { renderMarkdown } from '../utils/markdown';
+import { findOpenToolIndex, toolCallFromStartEvent, toolCallIdFromEvent } from '../utils/tool-call-identity';
 import { MarkdownContent } from './chat/MarkdownContent';
 import {
   addChannelMember,
@@ -47,21 +48,24 @@ function resolveDmOwnerId(channel: Channel | undefined, currentAgentId: string |
 export function ChannelsPanel() {
   const channelsEnabled = useStore(s => s.channelsEnabled);
   const activeServerConnection = useStore(s => s.activeServerConnection);
+  const activeServerConnectionId = useStore(s => s.activeServerConnectionId);
 
   // 启动时从后端读频道开关状态；开启时加载频道列表
   useEffect(() => {
     if (!activeServerConnection) return;
-    fetchConfig().then(cfg => {
+    const cacheKey = activeServerConnectionId || activeServerConnection.connectionId || 'local';
+    useStore.getState().setChannelsEnabled(undefined);
+    fetchConfig({ cacheKey }).then(cfg => {
       // 默认关：只有显式 true 才算启用
       const enabled = cfg?.channels?.enabled === true;
       useStore.getState().setChannelsEnabled(enabled);
       if (enabled) loadChannels();
     }).catch(err => console.warn('[channels] init failed:', err));
-  }, [activeServerConnection]);
+  }, [activeServerConnection, activeServerConnectionId]);
 
   // 开关变化后加载频道列表
   useEffect(() => {
-    if (channelsEnabled && activeServerConnection) loadChannels();
+    if (channelsEnabled === true && activeServerConnection) loadChannels();
   }, [channelsEnabled, activeServerConnection]);
 
   return null;
@@ -539,7 +543,7 @@ export function AgentPhoneSessionPreview({ sessionPath, agentId, agentYuan }: {
               ...(message.blocks || []),
               {
                 type: 'tool_group',
-                tools: [{ name: event.name, args: event.args, done: false, success: false }],
+                tools: [toolCallFromStartEvent(event)],
                 collapsed: false,
               },
             ],
@@ -551,11 +555,13 @@ export function AgentPhoneSessionPreview({ sessionPath, agentId, agentYuan }: {
             for (let i = blocks.length - 1; i >= 0; i -= 1) {
               const block = blocks[i];
               if (block.type !== 'tool_group') continue;
-              const toolIndex = block.tools.findIndex((tool) => tool.name === event.name && !tool.done);
+              const toolIndex = findOpenToolIndex(block.tools, event);
               if (toolIndex < 0) continue;
               const tools = [...block.tools];
+              const id = toolCallIdFromEvent(event);
               tools[toolIndex] = {
                 ...tools[toolIndex],
+                ...(id ? { id } : {}),
                 done: true,
                 success: !!event.success,
                 details: event.details,

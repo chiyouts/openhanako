@@ -51,7 +51,8 @@ import {
   applyMarkdownCoverImageDrop,
   hasMarkdownCoverDropImage,
 } from '../utils/markdown-cover-drop';
-import type { FileVersion, VersionedWriteResult } from '../types';
+import { isRemoteWorkbenchContentRef } from '../utils/remote-file-preview';
+import type { FileVersion, RemoteWorkbenchContentRef, VersionedWriteResult } from '../types';
 
 /* ── Types ── */
 
@@ -73,16 +74,18 @@ export type PreviewEditorSaveDocument = (
 export interface PreviewEditorProps {
   content: string;
   filePath?: string;
+  remoteContentRef?: RemoteWorkbenchContentRef | null;
   fileVersion?: FileVersion | null;
   saveDocument?: PreviewEditorSaveDocument;
   mode: 'markdown' | 'code' | 'csv' | 'text';
   language?: string | null;
   onSelectionChange?: (view: EditorView) => void;
+  onSelectionCommit?: (view: EditorView) => void;
   onStatsChange?: (stats: PreviewEditorStats) => void;
   onContentChange?: (content: string, fileVersion?: FileVersion | null) => void;
   /**
-   * 只读模式：禁用编辑、不挂 autosave listener、不挂 file watch。
-   * 调用方（如派生 viewer 窗口）自己管 watchFile → setContent 即可。
+   * 只读模式：禁用编辑、不挂 autosave listener。
+   * 调用方（如派生 viewer 窗口）自己把新 content 作为 prop 传入即可。
    */
   readOnly?: boolean;
 }
@@ -256,27 +259,15 @@ function clearEditorCoverDropState(view: EditorView): void {
 function isEditorCoverRailDrop(view: EditorView, event: DragEvent): boolean {
   if (parseMarkdownCover(view.state.doc.toString())) return false;
   const rect = view.scrollDOM.getBoundingClientRect();
-  const y = Number.isFinite(event.clientY) ? event.clientY : rect.top;
+  if (!Number.isFinite(event.clientY)) return false;
+  const y = event.clientY;
   return y >= rect.top && y <= rect.top + 40;
-}
-
-/* ── File change emitter (global singleton) ── */
-
-const _fileChangeEmitter = new EventTarget();
-let _fileChangeListenerSetup = false;
-
-function setupFileChangeListener() {
-  if (_fileChangeListenerSetup) return;
-  _fileChangeListenerSetup = true;
-  window.platform?.onFileChanged((filePath: string) => {
-    _fileChangeEmitter.dispatchEvent(new CustomEvent('change', { detail: filePath }));
-  });
 }
 
 /* ── Editor Component ── */
 
 export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>(
-  function PreviewEditor({ content, filePath, fileVersion, saveDocument, mode, language, onSelectionChange, onStatsChange, onContentChange, readOnly = false }, ref) {
+  function PreviewEditor({ content, filePath, remoteContentRef, fileVersion, saveDocument, mode, language, onSelectionChange, onSelectionCommit, onStatsChange, onContentChange, readOnly = false }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -289,10 +280,14 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
     const lastCheckpointAtRef = useRef<number>(0);
     const filePathRef = useRef(filePath);
     filePathRef.current = filePath;
+    const remoteContentRefRef = useRef(remoteContentRef);
+    remoteContentRefRef.current = remoteContentRef;
     const saveDocumentRef = useRef(saveDocument);
     saveDocumentRef.current = saveDocument;
     const selectionCbRef = useRef(onSelectionChange);
     selectionCbRef.current = onSelectionChange;
+    const selectionCommitCbRef = useRef(onSelectionCommit);
+    selectionCommitCbRef.current = onSelectionCommit;
     const statsCbRef = useRef(onStatsChange);
     statsCbRef.current = onStatsChange;
     const lastStatsRef = useRef<PreviewEditorStats | null>(null);
@@ -403,7 +398,6 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
           }
           nextVersion = result.version ?? null;
           if (result.version) diskVersionRef.current = result.version;
-          rememberSelfWrite(text);
         } else {
           if (!fp) return;
           if (window.platform?.writeFileIfUnchanged) {
@@ -417,15 +411,14 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
             }
             nextVersion = result.version ?? null;
             if (result.version) diskVersionRef.current = result.version;
-            rememberSelfWrite(text);
           } else {
-            rememberSelfWrite(text);
             const ok = await window.platform?.writeFile(fp, text);
             if (ok === false) throw new Error('write-file returned false');
             nextVersion = undefined;
           }
         }
         lastSavedContentRef.current = text;
+        rememberSelfWrite(text);
 
         if (revision === docRevisionRef.current && fp === filePathRef.current && nextVersion !== undefined) {
           contentCbRef.current?.(text, nextVersion);
@@ -459,6 +452,10 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
       const current = view.state.doc.toString();
       if (current === nextContent) {
         if (options.publish) lastSavedContentRef.current = nextContent;
+        return;
+      }
+
+      if (selfWriteContentsRef.current.has(nextContent)) {
         return;
       }
 
@@ -505,7 +502,7 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
       const isCsv = mode === 'csv';
 
       const extensions = [
-        drawSelection(),
+        ...(isMd ? [] : [drawSelection()]),
         history(),
         bracketMatching(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -600,9 +597,13 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
 
       const state = EditorState.create({ doc: content, extensions });
       const view = new EditorView({ state, parent: containerRef.current });
+      const onSelectionCommitEvent = () => {
+        selectionCommitCbRef.current?.(view);
+      };
       const onCoverDragOver = (event: DragEvent) => {
+        const canApplyCover = Boolean(filePathRef.current || isRemoteWorkbenchContentRef(remoteContentRefRef.current));
         const coverElement = editorCoverElementFromEvent(event);
-        if (coverElement && filePathRef.current && hasMarkdownCoverDropImage(event.dataTransfer)) {
+        if (coverElement && canApplyCover && hasMarkdownCoverDropImage(event.dataTransfer)) {
           event.preventDefault();
           event.stopPropagation();
           if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
@@ -611,7 +612,7 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
           return;
         }
 
-        if (filePathRef.current && hasMarkdownCoverDropImage(event.dataTransfer) && isEditorCoverRailDrop(view, event)) {
+        if (canApplyCover && hasMarkdownCoverDropImage(event.dataTransfer) && isEditorCoverRailDrop(view, event)) {
           event.preventDefault();
           event.stopPropagation();
           if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
@@ -631,19 +632,26 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
         }
       };
       const onCoverDrop = (event: DragEvent) => {
+        const remoteRef = isRemoteWorkbenchContentRef(remoteContentRefRef.current)
+          ? remoteContentRefRef.current
+          : null;
         const coverElement = editorCoverElementFromEvent(event);
         const isCoverTarget = Boolean(coverElement)
           || (hasMarkdownCoverDropImage(event.dataTransfer) && isEditorCoverRailDrop(view, event));
-        if (!filePathRef.current || !isCoverTarget || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
+        if ((!filePathRef.current && !remoteRef) || !isCoverTarget || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
         clearEditorCoverDropState(view);
         void applyMarkdownCoverImageDrop({
           filePath: filePathRef.current,
+          target: remoteRef,
           dataTransfer: event.dataTransfer,
         });
       };
+      view.dom.addEventListener('mouseup', onSelectionCommitEvent);
+      view.dom.addEventListener('touchend', onSelectionCommitEvent);
+      view.dom.addEventListener('keyup', onSelectionCommitEvent);
       view.dom.addEventListener('dragover', onCoverDragOver, true);
       view.dom.addEventListener('dragleave', onCoverDragLeave, true);
       view.dom.addEventListener('drop', onCoverDrop, true);
@@ -657,54 +665,21 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
           saveTimerRef.current = null;
           saveToFile(view.state.doc.toString(), docRevisionRef.current);
         }
+        view.dom.removeEventListener('mouseup', onSelectionCommitEvent);
+        view.dom.removeEventListener('touchend', onSelectionCommitEvent);
+        view.dom.removeEventListener('keyup', onSelectionCommitEvent);
         view.dom.removeEventListener('dragover', onCoverDragOver, true);
         view.dom.removeEventListener('dragleave', onCoverDragLeave, true);
         view.dom.removeEventListener('drop', onCoverDrop, true);
         view.destroy();
         viewRef.current = null;
       };
-    }, [mode, language, readOnly, filePath, emitStatsIfChanged, insertMarkdownAttachments]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 mode/language/readOnly/filePath 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
+    }, [mode, language, readOnly, filePath, remoteContentRef, emitStatsIfChanged, insertMarkdownAttachments]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 mode/language/readOnly/filePath/remoteContentRef 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
 
     // content prop change → update editor (skip if already in sync)
     useEffect(() => {
       applyIncomingContent(content);
     }, [content, applyIncomingContent]);
-
-    // File watching（只读模式下由调用方自理，这里跳过避免重复监听）
-    useEffect(() => {
-      if (!filePath || readOnly) return;
-      setupFileChangeListener();
-      window.platform?.watchFile(filePath);
-
-      const handler = (e: Event) => {
-        const changedPath = (e as CustomEvent).detail;
-        if (changedPath !== filePath) return;
-        void (async () => {
-          const snapshot = await window.platform?.readFileSnapshot?.(filePath);
-          const newContent = snapshot?.content ?? await window.platform?.readFile(filePath);
-          if (snapshot?.version) diskVersionRef.current = snapshot.version;
-          return newContent;
-        })()
-          .then((newContent) => {
-            if (newContent == null) return;
-            // Content comparison: same as last write → self-write, ignore
-            if (newContent === lastSavedContentRef.current || selfWriteContentsRef.current.has(newContent)) {
-              lastSavedContentRef.current = newContent;
-              return;
-            }
-            applyIncomingContent(newContent, { publish: true });
-          })
-          .catch((err) => {
-            console.warn('[PreviewEditor] reload watched file failed:', err);
-          });
-      };
-
-      _fileChangeEmitter.addEventListener('change', handler);
-      return () => {
-        _fileChangeEmitter.removeEventListener('change', handler);
-        window.platform?.unwatchFile(filePath);
-      };
-    }, [filePath, readOnly, applyIncomingContent]);
 
     return <div className={`preview-editor mode-${mode}`} ref={containerRef} />;
   },

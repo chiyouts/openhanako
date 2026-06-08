@@ -324,7 +324,7 @@ describe('handleAppEvent', () => {
     expect(mockState.selectedFolder).toBe('/new-home');
     expect(mockState.workspaceFolders).toEqual([]);
     expect(mockState.cwdHistory).toEqual(['/old-home']);
-    expect(mockActivateWorkspaceDesk).toHaveBeenCalledWith('/new-home');
+    expect(mockActivateWorkspaceDesk).toHaveBeenCalledWith('/new-home', { mountId: null });
 
     mockActivateWorkspaceDesk.mockClear();
     handleAppEvent('agent-workspace-changed', {
@@ -343,6 +343,18 @@ describe('handleAppEvent', () => {
     const { handleAppEvent } = await import('../../services/app-event-actions');
 
     handleAppEvent('markdown-cover-updated', { filePath: '/notes/demo.md' });
+
+    expect(mockRefreshPreviewItemsFromFile).toHaveBeenCalledWith('/notes/demo.md');
+  });
+
+  it('refreshes open preview items when an agent updates a session file', async () => {
+    const { handleAppEvent } = await import('../../services/app-event-actions');
+
+    handleAppEvent('session-file-updated', {
+      sessionPath: '/sessions/a.jsonl',
+      filePath: '/notes/demo.md',
+      origin: 'agent_edit',
+    });
 
     expect(mockRefreshPreviewItemsFromFile).toHaveBeenCalledWith('/notes/demo.md');
   });

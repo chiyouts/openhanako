@@ -8,10 +8,11 @@
  * app-ws-shim 直接调用 streamBufferManager.handle(msg)。
  */
 
-import type { ChatMessage, ContentBlock } from '../stores/chat-types';
+import type { ChatListItem, ChatMessage, ContentBlock } from '../stores/chat-types';
 import { useStore } from '../stores';
 import { renderMarkdown } from '../utils/markdown';
 import { cleanMoodText } from '../utils/message-parser';
+import { findOpenToolIndex, toolCallFromStartEvent, toolCallIdFromEvent } from '../utils/tool-call-identity';
 import {
   registerStreamBufferInvalidator,
   registerStreamBufferSnapshot,
@@ -22,6 +23,13 @@ import { bumpMessageLiveVersion } from '../stores/message-live-version';
 /* eslint-disable @typescript-eslint/no-explicit-any -- 流式消息 handle(msg) 接收动态 JSON */
 
 const FLUSH_INTERVAL = 200;
+let streamMessageSeq = 0;
+type InterludeContentBlock = Extract<ContentBlock, { type: 'interlude' }>;
+
+function nextStreamMessageId(): string {
+  streamMessageSeq = (streamMessageSeq + 1) % Number.MAX_SAFE_INTEGER;
+  return `stream-${Date.now()}-${streamMessageSeq}`;
+}
 
 interface Buffer {
   sessionPath: string;
@@ -38,6 +46,7 @@ interface Buffer {
   flushTimer: ReturnType<typeof setTimeout> | null;
   /** 当前 turn 绑定的 assistant message id */
   messageId: string | null;
+  pendingInterludesByTaskId: Map<string, InterludeContentBlock[]>;
 }
 
 function createBuffer(sessionPath: string): Buffer {
@@ -55,6 +64,7 @@ function createBuffer(sessionPath: string): Buffer {
     lastFlushTime: 0,
     flushTimer: null,
     messageId: null,
+    pendingInterludesByTaskId: new Map(),
   };
 }
 
@@ -124,17 +134,20 @@ class StreamBufferManager {
     const session = store.chatSessions[buf.sessionPath];
     if (!session) return; // session 未初始化（loadMessages 尚未完成）
 
-    const existingId = buf.messageId;
-    const existing = existingId
+    const targetId = buf.messageId || trailingDeferredTextRebindTargetId(session.items);
+    const existing = targetId
       ? session.items.find((item) =>
         item.type === 'message' &&
-        item.data.id === existingId &&
+        item.data.id === targetId &&
         item.data.role === 'assistant',
       )
       : null;
-    if (existing) return;
+    if (existing) {
+      buf.messageId = targetId;
+      return;
+    }
 
-    const id = existingId || `stream-${Date.now()}`;
+    const id = targetId || nextStreamMessageId();
     const msg: ChatMessage = { id, role: 'assistant', blocks: [], timestamp: Date.now() };
     store.appendItem(buf.sessionPath, { type: 'message', data: msg });
     bumpMessageLiveVersion(buf.sessionPath);
@@ -150,6 +163,44 @@ class StreamBufferManager {
       return;
     }
     bumpMessageLiveVersion(buf.sessionPath);
+  }
+
+  private tryInsertInterlude(buf: Buffer, block: InterludeContentBlock): boolean {
+    const consumed = useStore.getState().insertInterludeItemNearTaskResult(buf.sessionPath, block.taskId || null, block);
+    if (consumed) bumpMessageLiveVersion(buf.sessionPath);
+    return consumed;
+  }
+
+  private queuePendingInterlude(buf: Buffer, block: InterludeContentBlock): void {
+    const taskId = block.taskId;
+    if (!taskId) return;
+    const existing = buf.pendingInterludesByTaskId.get(taskId) || [];
+    const alreadyQueued = existing.some((item) => (
+      (block.id && item.id === block.id) ||
+      (!!block.taskId && item.taskId === block.taskId && item.status === block.status)
+    ));
+    if (alreadyQueued) return;
+    buf.pendingInterludesByTaskId.set(taskId, [...existing, block]);
+  }
+
+  private drainPendingInterludesForTask(buf: Buffer, taskId: string | null): void {
+    if (!taskId) return;
+    const pending = buf.pendingInterludesByTaskId.get(taskId);
+    if (!pending?.length) return;
+
+    const remaining: InterludeContentBlock[] = [];
+    for (const block of pending) {
+      if (!this.tryInsertInterlude(buf, block)) remaining.push(block);
+    }
+    if (remaining.length > 0) {
+      buf.pendingInterludesByTaskId.set(taskId, remaining);
+    } else {
+      buf.pendingInterludesByTaskId.delete(taskId);
+    }
+  }
+
+  private drainPendingInterludesForBlock(buf: Buffer, block: ContentBlock): void {
+    this.drainPendingInterludesForTask(buf, interludeAnchorTaskId(block));
   }
 
   /** 调度节流 flush */
@@ -320,7 +371,7 @@ class StreamBufferManager {
             if (tg.tools.some(t => !t.done)) {
               blocks[lastTg] = {
                 ...tg,
-                tools: [...tg.tools, { name: msg.name, args: msg.args, done: false, success: false }],
+                tools: [...tg.tools, toolCallFromStartEvent(msg)],
               };
               return { ...m, blocks };
             }
@@ -328,7 +379,7 @@ class StreamBufferManager {
           // 新建 tool_group
           blocks.push({
             type: 'tool_group',
-            tools: [{ name: msg.name, args: msg.args, done: false, success: false }],
+            tools: [toolCallFromStartEvent(msg)],
             collapsed: false,
           });
           return { ...m, blocks };
@@ -342,10 +393,17 @@ class StreamBufferManager {
           for (let i = blocks.length - 1; i >= 0; i--) {
             if (blocks[i].type !== 'tool_group') continue;
             const tg = blocks[i] as Extract<ContentBlock, { type: 'tool_group' }>;
-            const toolIdx = tg.tools.findIndex(t => t.name === msg.name && !t.done);
+            const toolIdx = findOpenToolIndex(tg.tools, msg);
             if (toolIdx >= 0) {
               const tools = [...tg.tools];
-              tools[toolIdx] = { ...tools[toolIdx], done: true, success: !!msg.success, details: msg.details };
+              const id = toolCallIdFromEvent(msg);
+              tools[toolIdx] = {
+                ...tools[toolIdx],
+                ...(id ? { id } : {}),
+                done: true,
+                success: !!msg.success,
+                details: msg.details,
+              };
               const allDone = tools.every(t => t.done);
               blocks[i] = { ...tg, tools, collapsed: allDone && tools.length > 1 };
               return { ...m, blocks };
@@ -367,11 +425,19 @@ class StreamBufferManager {
           }
         }
 
+        if (isInterludeBlock(block)) {
+          if (this.hasTurnState(buf)) this.flush(buf);
+          if (this.tryInsertInterlude(buf, block)) break;
+          this.queuePendingInterlude(buf, block);
+          break;
+        }
+
         const taskId = replacementTaskId(block);
         if (taskId) {
           if (this.hasTurnState(buf)) this.flush(buf);
           const consumed = useStore.getState().resolveBlockByTaskId(buf.sessionPath, taskId, block);
           if (consumed) {
+            this.drainPendingInterludesForBlock(buf, block);
             bumpMessageLiveVersion(buf.sessionPath);
             break;
           }
@@ -383,6 +449,7 @@ class StreamBufferManager {
           ...m,
           blocks: mergeContentBlock([...(m.blocks || [])], block),
         }));
+        this.drainPendingInterludesForBlock(buf, block);
         break;
       }
 
@@ -454,6 +521,7 @@ class StreamBufferManager {
 export const streamBufferManager = new StreamBufferManager();
 
 function mergeContentBlock(blocks: ContentBlock[], block: ContentBlock): ContentBlock[] {
+  if (isInterludeBlock(block)) return blocks;
   if (block.type === 'media_generation' && block.status === 'pending') {
     const resolved = blocks.some((existing) => isResolvedTaskBlock(existing, block.taskId));
     if (resolved) return blocks;
@@ -476,12 +544,52 @@ function replacementTaskId(block: ContentBlock): string | null {
   return null;
 }
 
+function interludeAnchorTaskId(block: ContentBlock): string | null {
+  if (block.type === 'file') return block.replacesTaskId || null;
+  if (block.type === 'media_generation') return block.taskId || null;
+  if (block.type === 'subagent' || block.type === 'workflow') return block.taskId || null;
+  return null;
+}
+
 function isResolvedTaskBlock(block: ContentBlock, taskId: string): boolean {
   if (block.type === 'file') return block.replacesTaskId === taskId;
   return block.type === 'media_generation' &&
     block.taskId === taskId &&
     block.status !== 'pending';
 }
+
+function isInterludeBlock(block: ContentBlock): block is Extract<ContentBlock, { type: 'interlude' }> {
+  return block.type === 'interlude';
+}
+
+function trailingDeferredTextRebindTargetId(items: ChatListItem[]): string | null {
+  const taskIds = new Set<string>();
+  let idx = items.length - 1;
+
+  while (idx >= 0 && items[idx]?.type === 'interlude') {
+    const item = items[idx];
+    if (item.type === 'interlude' && item.data.taskId) {
+      taskIds.add(item.data.taskId);
+    }
+    idx -= 1;
+  }
+
+  if (taskIds.size === 0) return null;
+
+  const candidate = items[idx];
+  if (!candidate || candidate.type !== 'message' || candidate.data.role !== 'assistant') {
+    return null;
+  }
+
+  const hasDeferredTextAnchor = (candidate.data.blocks || []).some((block) => (
+    (block.type === 'workflow' || block.type === 'subagent') &&
+    !!block.taskId &&
+    taskIds.has(block.taskId)
+  ));
+
+  return hasDeferredTextAnchor ? candidate.data.id : null;
+}
+
 
 // 让 chat-slice / session-actions 通过桥接模块触达 manager，打破循环依赖。
 registerStreamBufferInvalidator((sessionPath) => {

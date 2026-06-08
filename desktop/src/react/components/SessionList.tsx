@@ -7,6 +7,7 @@
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Collapse } from '@/ui';
 import { useStore } from '../stores';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import { useI18n } from '../hooks/use-i18n';
@@ -35,7 +36,8 @@ import {
 } from '../stores/session-project-actions';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { renderMarkdown } from '../utils/markdown';
-import { cwdFromAutoProjectId } from '../../../../shared/session-projects.js';
+import { cwdFromAutoProjectId } from '../../../../shared/session-projects.ts';
+import { FolderIcon } from './shared/FolderIcon';
 import styles from './SessionList.module.css';
 
 const SESSION_VIEW_MODE_KEY = 'hana-session-sidebar-view-mode';
@@ -132,6 +134,10 @@ function normalizeSessionSearchResults(data: unknown): SessionSearchResult[] {
       pinnedAt: typeof item.pinnedAt === 'string' ? item.pinnedAt : null,
       hasSummary: item.hasSummary === true,
       rcAttachment: null,
+      agentDeleted: item.agentDeleted === true,
+      readOnlyReason: typeof item.readOnlyReason === 'string' ? item.readOnlyReason : undefined,
+      continuationAvailable: item.continuationAvailable === true,
+      deletedAt: typeof item.deletedAt === 'string' ? item.deletedAt : undefined,
       matchKind: item.matchKind === 'content' ? 'content' : 'title',
       snippet: typeof item.snippet === 'string' ? item.snippet : '',
       score: typeof item.score === 'number' ? item.score : undefined,
@@ -223,6 +229,7 @@ function SessionListInner() {
   const pendingNewSession = useStore(s => s.pendingNewSession);
   const agents = useStore(s => s.agents);
   const streamingSessions = useStore(s => s.streamingSessions);
+  const unreadOutputSessionPaths = useStore(s => s.unreadOutputSessionPaths);
   const browserBySession = useStore(s => s.browserBySession);
   const projectCatalog = useStore(s => s.sessionProjectCatalog);
   const projectCatalogLoaded = useStore(s => s.sessionProjectCatalogLoaded);
@@ -606,10 +613,11 @@ function SessionListInner() {
       isActive={!pendingNewSession && s.path === activeSessionPath}
       isStreaming={streamingSessions.includes(s.path)}
       isPinned={!!s.pinnedAt}
+      hasUnreadOutput={unreadOutputSessionPaths.includes(s.path)}
       agents={agents}
       browserState={browserSessions[s.path] || null}
       onCloseBrowser={handleCloseBrowserSession}
-      draggable={options.draggable === true}
+      draggable={options.draggable === true && s.agentDeleted !== true}
       onDragStart={handleSessionDragStart}
       onDragEnd={clearDragState}
     />
@@ -1066,12 +1074,6 @@ function ProjectBlock({
   onCreateProjectSession: (project: SessionProjectGroup) => void;
   onOpenProjectMenu: (position: { x: number; y: number }, project: SessionProjectGroup) => void;
 }) {
-  const visibleItems = collapsed
-    ? []
-    : showAll
-      ? project.items
-      : project.items.slice(0, PROJECT_SESSION_PREVIEW_LIMIT);
-  const hasMore = !collapsed && !showAll && project.items.length > PROJECT_SESSION_PREVIEW_LIMIT;
   const lastDragEndAtRef = useRef(0);
   const { t } = useI18n();
   return (
@@ -1108,7 +1110,7 @@ function ProjectBlock({
         onDragLeave={() => setDropTargetId(null)}
         onDrop={(event) => onDropProject(event, project)}
       >
-        <FolderIcon />
+        <FolderIcon className={styles.projectIcon} size={16} open={!collapsed} />
         <span className={styles.projectName}>{project.name}</span>
         <button
           type="button"
@@ -1134,14 +1136,16 @@ function ProjectBlock({
           <NewChatIcon />
         </button>
       </div>
-      <div className={styles.projectSessionList}>
-        {visibleItems.map(session => renderSessionItem(session))}
-        {hasMore && (
-          <button type="button" className={styles.projectShowMoreButton} onClick={onShowAll}>
-            {t('sidebar.projects.showMore')}
-          </button>
-        )}
-      </div>
+      <Collapse open={!collapsed}>
+        <div className={styles.projectSessionList}>
+          {(showAll ? project.items : project.items.slice(0, PROJECT_SESSION_PREVIEW_LIMIT)).map(session => renderSessionItem(session))}
+          {!showAll && project.items.length > PROJECT_SESSION_PREVIEW_LIMIT && (
+            <button type="button" className={styles.projectShowMoreButton} onClick={onShowAll}>
+              {t('sidebar.projects.showMore')}
+            </button>
+          )}
+        </div>
+      </Collapse>
     </div>
   );
 }
@@ -1223,10 +1227,10 @@ function FolderBlock({
         onDragLeave={() => setDropTargetId(null)}
         onDrop={(event) => onDropFolder(event, folder)}
       >
-        <FolderIcon />
+        <FolderIcon className={styles.projectIcon} size={16} open={!collapsed} />
         <span className={styles.projectName}>{folder.name}</span>
       </div>
-      {!collapsed && (
+      <Collapse open={!collapsed}>
         <div className={styles.folderProjectList}>
           {folder.projects.map(project => (
             <ProjectBlock
@@ -1247,16 +1251,8 @@ function FolderBlock({
             />
           ))}
         </div>
-      )}
+      </Collapse>
     </div>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg className={styles.projectIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 7.5a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-    </svg>
   );
 }
 
@@ -1274,6 +1270,16 @@ function PinIcon() {
   return (
     <svg className={styles.pinnedTitleIcon} width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path fill="currentColor" d="M15.9894 4.9502L16.52 4.42014V4.42014L15.9894 4.9502ZM19.0716 8.03562L18.541 8.56568L19.0716 8.03562ZM8.73837 19.429L8.20777 19.9591L8.73837 19.429ZM4.62169 15.3081L5.15229 14.7781L4.62169 15.3081ZM17.5669 14.9943L17.3032 14.2922L17.5669 14.9943ZM15.6498 15.7146L15.9136 16.4167H15.9136L15.6498 15.7146ZM8.3322 8.38177L7.62798 8.12375L8.3322 8.38177ZM9.02665 6.48636L9.73087 6.74438V6.74438L9.02665 6.48636ZM5.84504 10.6735L6.04438 11.3965L5.84504 10.6735ZM7.30167 10.1351L6.86346 9.52646L6.86346 9.52646L7.30167 10.1351ZM7.67582 9.79038L8.24665 10.2768H8.24665L7.67582 9.79038ZM14.251 16.3805L14.742 16.9475L14.742 16.9475L14.251 16.3805ZM13.3806 18.2012L12.6574 18.0022V18.0022L13.3806 18.2012ZM13.9169 16.7466L13.3075 16.3094L13.3075 16.3094L13.9169 16.7466ZM2.71846 12.7552L1.96848 12.76L1.96848 12.76L2.71846 12.7552ZM2.93045 11.9521L2.28053 11.5778H2.28053L2.93045 11.9521ZM11.3052 21.3431L11.3064 20.5931H11.3064L11.3052 21.3431ZM12.0933 21.1347L11.7215 20.4833L11.7215 20.4833L12.0933 21.1347ZM11.6973 2.03606L11.8588 2.76845L11.6973 2.03606ZM1.4694 21.4699C1.17666 21.763 1.1769 22.2379 1.46994 22.5306C1.76298 22.8233 2.23786 22.8231 2.5306 22.5301L1.4694 21.4699ZM7.18383 17.8721C7.47657 17.5791 7.47633 17.1042 7.18329 16.8114C6.89024 16.5187 6.41537 16.5189 6.12263 16.812L7.18383 17.8721ZM15.4588 5.48026L18.541 8.56568L19.6022 7.50556L16.52 4.42014L15.4588 5.48026ZM9.26897 18.8989L5.15229 14.7781L4.09109 15.8382L8.20777 19.9591L9.26897 18.8989ZM17.3032 14.2922L15.386 15.0125L15.9136 16.4167L17.8307 15.6964L17.3032 14.2922ZM9.03642 8.63979L9.73087 6.74438L8.32243 6.22834L7.62798 8.12375L9.03642 8.63979ZM6.04438 11.3965C6.75583 11.2003 7.29719 11.0625 7.73987 10.7438L6.86346 9.52646C6.69053 9.65097 6.46601 9.72428 5.6457 9.95044L6.04438 11.3965ZM7.62798 8.12375C7.33502 8.92332 7.24338 9.14153 7.10499 9.30391L8.24665 10.2768C8.60041 9.86175 8.7823 9.33337 9.03642 8.63979L7.62798 8.12375ZM7.73987 10.7438C7.92696 10.6091 8.09712 10.4523 8.24665 10.2768L7.10499 9.30391C7.0337 9.38757 6.9526 9.46229 6.86346 9.52646L7.73987 10.7438ZM15.386 15.0125C14.697 15.2714 14.1716 15.4571 13.76 15.8135L14.742 16.9475C14.9028 16.8082 15.1192 16.7152 15.9136 16.4167L15.386 15.0125ZM14.1037 18.4001C14.329 17.5813 14.4021 17.3569 14.5263 17.1838L13.3075 16.3094C12.9902 16.7517 12.8529 17.2919 12.6574 18.0022L14.1037 18.4001ZM13.76 15.8135C13.5903 15.9605 13.4384 16.1269 13.3075 16.3094L14.5263 17.1838C14.5887 17.0968 14.6611 17.0175 14.742 16.9475L13.76 15.8135ZM5.15229 14.7781C4.50615 14.1313 4.06799 13.691 3.78366 13.3338C3.49835 12.9753 3.46889 12.8201 3.46845 12.7505L1.96848 12.76C1.97215 13.3422 2.26127 13.8297 2.61002 14.2679C2.95976 14.7073 3.47115 15.2176 4.09109 15.8382L5.15229 14.7781ZM5.6457 9.95044C4.80048 10.1835 4.10396 10.3743 3.58296 10.5835C3.06341 10.792 2.57116 11.0732 2.28053 11.5778L3.58038 12.3264C3.615 12.2663 3.71693 12.146 4.1418 11.9755C4.56523 11.8055 5.16337 11.6394 6.04438 11.3965L5.6457 9.95044ZM3.46845 12.7505C3.46751 12.6016 3.50616 12.4553 3.58038 12.3264L2.28053 11.5778C2.07354 11.9372 1.96586 12.3452 1.96848 12.76L3.46845 12.7505ZM8.20777 19.9591C8.83164 20.5836 9.34464 21.0987 9.78647 21.4506C10.227 21.8015 10.7179 22.0922 11.3041 22.0931L11.3064 20.5931C11.2369 20.593 11.0814 20.5644 10.721 20.2773C10.3618 19.9912 9.91923 19.5499 9.26897 18.8989L8.20777 19.9591ZM12.6574 18.0022C12.4133 18.8897 12.2462 19.4924 12.0751 19.9188C11.9033 20.3467 11.7821 20.4487 11.7215 20.4833L12.465 21.7861C12.974 21.4956 13.2573 21.0004 13.4671 20.4775C13.6776 19.9532 13.8694 19.2516 14.1037 18.4001L12.6574 18.0022ZM11.3041 22.0931C11.7112 22.0937 12.1114 21.9879 12.465 21.7861L11.7215 20.4833C11.595 20.5555 11.4519 20.5933 11.3064 20.5931L11.3041 22.0931ZM18.541 8.56568C19.6045 9.63022 20.3403 10.3695 20.7917 10.9788C21.2353 11.5774 21.2863 11.8959 21.2321 12.1464L22.6982 12.4634C22.8881 11.5854 22.5382 10.8162 21.9969 10.0857C21.4635 9.36592 20.6305 8.53486 19.6022 7.50556L18.541 8.56568ZM17.8307 15.6964C19.1921 15.1849 20.294 14.773 21.0771 14.3384C21.8718 13.8973 22.5083 13.3416 22.6982 12.4634L21.2321 12.1464C21.178 12.3968 21.0001 12.6655 20.3491 13.0268C19.6865 13.3946 18.7112 13.7632 17.3032 14.2922L17.8307 15.6964ZM16.52 4.42014C15.4841 3.3832 14.6481 2.54353 13.9246 2.00638C13.1908 1.46165 12.4175 1.10912 11.5357 1.30367L11.8588 2.76845C12.1086 2.71335 12.4277 2.7633 13.0304 3.21075C13.6433 3.66579 14.3876 4.40801 15.4588 5.48026L16.52 4.42014ZM9.73087 6.74438C10.2525 5.32075 10.6161 4.33403 10.9812 3.66315C11.3402 3.00338 11.609 2.82357 11.8588 2.76845L11.5357 1.30367C10.654 1.49819 10.1005 2.14332 9.66362 2.94618C9.23278 3.73793 8.82688 4.85154 8.32243 6.22834L9.73087 6.74438ZM2.5306 22.5301L7.18383 17.8721L6.12263 16.812L1.4694 21.4699L2.5306 22.5301Z" />
+    </svg>
+  );
+}
+
+function BrowserStatusIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M4 9h16" />
+      <path d="M8 7h.01M11 7h.01" />
     </svg>
   );
 }
@@ -1433,6 +1439,7 @@ const SessionSearchItem = memo(function SessionSearchItem({
 }) {
   const { t } = useI18n();
   const parts: string[] = [];
+  if (result.agentDeleted === true) parts.push(t('session.deletedAgent.meta'));
   if (result.agentName || result.agentId) parts.push(result.agentName || result.agentId!);
   if (result.cwd) {
     const dirName = result.cwd.split(/[/\\]/).filter(Boolean).pop();
@@ -1468,11 +1475,12 @@ const SessionSearchItem = memo(function SessionSearchItem({
 
 // ── Session Item ──
 
-const SessionItem = memo(function SessionItem({ session: s, isActive, isStreaming, isPinned, agents, browserState, onCloseBrowser, draggable = false, onDragStart, onDragEnd }: {
+const SessionItem = memo(function SessionItem({ session: s, isActive, isStreaming, isPinned, hasUnreadOutput, agents, browserState, onCloseBrowser, draggable = false, onDragStart, onDragEnd }: {
   session: Session;
   isActive: boolean;
   isStreaming: boolean;
   isPinned: boolean;
+  hasUnreadOutput: boolean;
   agents: Agent[];
   browserState: BrowserSessionState | null;
   onCloseBrowser: (sessionPath: string) => void;
@@ -1486,6 +1494,7 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [summaryPreviewPosition, setSummaryPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isDeletedAgentSession = s.agentDeleted === true;
 
   const handleClick = useCallback(() => {
     if (editing) return;
@@ -1494,23 +1503,21 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
 
   const handleArchive = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isDeletedAgentSession) return;
     archiveSession(s.path);
-  }, [s.path]);
+  }, [isDeletedAgentSession, s.path]);
 
   const handlePin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isDeletedAgentSession) return;
     pinSession(s.path, !isPinned);
-  }, [s.path, isPinned]);
+  }, [isDeletedAgentSession, s.path, isPinned]);
 
   const beginRename = useCallback(() => {
+    if (isDeletedAgentSession) return;
     setEditValue(s.title || s.firstMessage || '');
     setEditing(true);
-  }, [s.title, s.firstMessage]);
-
-  const startRename = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    beginRename();
-  }, [beginRename]);
+  }, [isDeletedAgentSession, s.title, s.firstMessage]);
 
   const commitRename = useCallback(() => {
     const trimmed = editValue.trim();
@@ -1547,6 +1554,7 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
 
   // Meta line
   const parts: string[] = [];
+  if (isDeletedAgentSession) parts.push(t('session.deletedAgent.meta'));
   if (s.agentName || s.agentId) parts.push(s.agentName || s.agentId!);
   if (s.cwd) {
     const dirName = s.cwd.split(/[/\\]/).filter(Boolean).pop();
@@ -1555,6 +1563,9 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
   if (s.modified) parts.push(formatSessionDate(s.modified));
   const rcLabel = s.rcAttachment ? `${formatRcPlatform(s.rcAttachment.platform)} 接管中` : null;
   const browserUrl = browserState?.url || null;
+  const hasStatusSlot = !!browserUrl;
+  const showStatusDot = isStreaming || hasUnreadOutput;
+  const statusDotState = isStreaming ? 'running' : 'unread';
   const browserTitle = [
     browserUrl,
     browserState?.unavailableReason,
@@ -1575,19 +1586,27 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
   return (
     <>
       <button
-        className={`${styles.sessionItem}${isActive ? ` ${styles.sessionItemActive}` : ''}`}
+        className={`${styles.sessionItem}${isActive ? ` ${styles.sessionItemActive}` : ''}${isDeletedAgentSession ? ` ${styles.sessionItemReadOnly}` : ''}`}
         data-session-path={s.path}
-        draggable={draggable && !editing}
+        data-unread-output={hasUnreadOutput ? 'true' : 'false'}
+        draggable={draggable && !editing && !isDeletedAgentSession}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
-        onDragStart={draggable ? (event) => onDragStart?.(event, s) : undefined}
-        onDragEnd={draggable ? onDragEnd : undefined}
+        onDragStart={draggable && !isDeletedAgentSession ? (event) => onDragStart?.(event, s) : undefined}
+        onDragEnd={draggable && !isDeletedAgentSession ? onDragEnd : undefined}
       >
         <div className={styles.sessionItemHeader}>
           {s.agentId && (
             <AgentBadge agentId={s.agentId} agentName={s.agentName} agents={agents} />
           )}
-          {isStreaming && <span className={styles.sessionStreamingDot} />}
+          {showStatusDot && (
+            <span
+              className={styles.sessionStreamingDot}
+              data-session-status-dot=""
+              data-state={statusDotState}
+              aria-hidden="true"
+            />
+          )}
           {editing ? (
             <input
               ref={inputRef}
@@ -1603,34 +1622,42 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
               {s.title || s.firstMessage || t('session.untitled')}
             </div>
           )}
+          {hasStatusSlot && (
+            <div className={styles.sessionStatusSlot}>
+              {browserUrl && (
+                <span
+                  className={styles.sessionBrowserBadge}
+                  title={browserTitle}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('browser.close')}
+                  data-running={browserState?.running ? 'true' : 'false'}
+                  data-resumable={browserState?.resumable ? 'true' : 'false'}
+                  onClick={handleBrowserClose}
+                  onKeyDown={handleBrowserKeyDown}
+                >
+                  <BrowserStatusIcon />
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        {!editing && (
+        {!editing && !isDeletedAgentSession && (
           <div className={styles.sessionPinBtn} title={t(isPinned ? 'session.unpin' : 'session.pin')} onClick={handlePin}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 17v5" />
-              <path d="M5 17h14" />
-              <path d="M7 3h10l-2 9H9L7 3z" />
-              <path d="M9 12l-2 5h10l-2-5" />
-            </svg>
+            <PinIcon />
           </div>
         )}
 
-        {!editing && (
-          <div className={styles.sessionRenameBtn} title={t('session.rename')} onClick={startRename}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+        {!isDeletedAgentSession && (
+          <div className={styles.sessionArchiveBtn} title={t('session.archive')} onClick={handleArchive}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="21 8 21 21 3 21 3 8" />
+              <rect x="1" y="3" width="22" height="5" />
+              <line x1="10" y1="12" x2="14" y2="12" />
             </svg>
           </div>
         )}
-
-        <div className={styles.sessionArchiveBtn} title={t('session.archive')} onClick={handleArchive}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="21 8 21 21 3 21 3 8" />
-            <rect x="1" y="3" width="22" height="5" />
-            <line x1="10" y1="12" x2="14" y2="12" />
-          </svg>
-        </div>
 
         <div className={styles.sessionItemMeta}>
           {parts.join(' · ')}
@@ -1642,25 +1669,6 @@ const SessionItem = memo(function SessionItem({ session: s, isActive, isStreamin
           </div>
         )}
 
-        {browserUrl && (
-          <span
-            className={styles.sessionBrowserBadge}
-            title={browserTitle}
-            role="button"
-            tabIndex={0}
-            aria-label={t('browser.close')}
-            data-running={browserState?.running ? 'true' : 'false'}
-            data-resumable={browserState?.resumable ? 'true' : 'false'}
-            onClick={handleBrowserClose}
-            onKeyDown={handleBrowserKeyDown}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-            </svg>
-          </span>
-        )}
       </button>
       {menuPosition && (
         <SessionContextMenu
@@ -1712,26 +1720,28 @@ const SessionContextMenu = memo(function SessionContextMenu({
   onShowSummary: (position: { x: number; y: number }) => void;
 }) {
   const { t } = useI18n();
-  const items = useMemo<ContextMenuItem[]>(() => [
-    {
+  const items = useMemo<ContextMenuItem[]>(() => {
+    const menuItems: ContextMenuItem[] = [{
       label: t('session.summary.open'),
       disabled: session.hasSummary !== true,
       action: () => onShowSummary(position),
-    },
-    {
+    }];
+    if (session.agentDeleted === true) return menuItems;
+    menuItems.push({
       label: t(isPinned ? 'session.unpin' : 'session.pin'),
       action: () => pinSession(session.path, !isPinned),
-    },
-    {
+    });
+    menuItems.push({
       label: t('session.rename'),
       action: onRename,
-    },
-    {
+    });
+    menuItems.push({
       label: t('session.archive'),
       danger: true,
       action: () => archiveSession(session.path),
-    },
-  ], [isPinned, onRename, onShowSummary, position, session.path, t]);
+    });
+    return menuItems;
+  }, [isPinned, onRename, onShowSummary, position, session.agentDeleted, session.hasSummary, session.path, t]);
 
   return (
     <ContextMenu

@@ -7,6 +7,7 @@ import { useStore } from '../../stores';
 import { jumpToDeskSearchResult, loadDeskFiles, searchDeskFiles } from '../../stores/desk-actions';
 import { togglePreviewPanel } from '../../stores/preview-actions';
 import type { DeskSearchResult } from '../../types';
+import { isWebRuntime } from '../../utils/platform-runtime';
 import {
   ICONS,
   getSortOptions,
@@ -22,11 +23,14 @@ import s from './Desk.module.css';
 // ── Open in Finder 按钮 ──
 
 export function DeskOpenButton() {
+  const isMountWorkspace = useStore(s => !!s.deskWorkspaceMountId);
   const handleClick = useCallback(() => {
     const s = useStore.getState();
-    if (!s.deskBasePath) return;
+    if (!s.deskBasePath || s.deskWorkspaceMountId) return;
     window.platform?.openFolder?.(s.deskBasePath);
   }, []);
+
+  if (isWebRuntime() || isMountWorkspace) return null;
 
   return (
     <button className={s.openBtn} onClick={handleClick}>
@@ -37,13 +41,16 @@ export function DeskOpenButton() {
 }
 
 export function DeskOpenIconButton() {
-  const hasDesk = useStore(s => !!s.deskBasePath);
+  const hasDesk = useStore(s => !!s.deskBasePath && !s.deskWorkspaceMountId);
   const label = (window.t ?? ((p: string) => p))('desk.openInFinder');
   const handleClick = useCallback(() => {
     const s = useStore.getState();
-    if (!s.deskBasePath) return;
+    if (!s.deskBasePath || s.deskWorkspaceMountId) return;
     window.platform?.openFolder?.(s.deskBasePath);
   }, []);
+
+  const isMountWorkspace = useStore(s => !!s.deskWorkspaceMountId);
+  if (isWebRuntime() || isMountWorkspace) return null;
 
   return (
     <button className={`${s.sortBtn} ${s.iconBtn}`} onClick={handleClick} title={label} aria-label={label} disabled={!hasDesk}>
@@ -179,7 +186,7 @@ export function DeskFilterButton({ filters, onFiltersChange, onShowMenu }: {
   );
 }
 
-// ── 工作区搜索 ──
+// ── 工作台搜索 ──
 
 export function DeskSearchBox() {
   const hasDesk = useStore(s => !!s.deskBasePath);

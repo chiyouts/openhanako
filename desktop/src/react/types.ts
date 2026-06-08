@@ -23,9 +23,22 @@ export interface AutoLaunchStatus {
   executableWillLaunchAtLogin?: boolean | null;
 }
 
+export interface KeepAwakeStatus {
+  enabled: boolean;
+  active: boolean;
+  blockerId: number | null;
+  type: 'prevent-app-suspension';
+}
+
+export type DesktopNotificationFocusPolicy = 'always' | 'when_unfocused';
+
+export interface DesktopNotificationOptions {
+  desktopFocusPolicy?: DesktopNotificationFocusPolicy;
+}
+
 // ── 核心数据结构 ──
 
-export type SessionPermissionMode = 'operate' | 'ask' | 'read_only';
+export type SessionPermissionMode = 'auto' | 'operate' | 'ask' | 'read_only';
 
 export interface Session {
   path: string;
@@ -36,10 +49,16 @@ export interface Session {
   agentId: string | null;
   agentName: string | null;
   cwd: string | null;
+  workspaceMountId?: string | null;
+  workspaceLabel?: string | null;
   projectId?: string | null;
   permissionMode?: SessionPermissionMode | null;
   pinnedAt?: string | null;
   hasSummary?: boolean;
+  agentDeleted?: boolean;
+  readOnlyReason?: 'agent_deleted' | string | null;
+  continuationAvailable?: boolean;
+  deletedAt?: string | null;
   rcAttachment?: {
     sessionKey: string;
     platform: string;
@@ -71,7 +90,10 @@ export interface Model {
   isCurrent?: boolean;
   reasoning?: boolean;
   xhigh?: boolean;
-  /** 输入模态数组（Pi SDK 标准字段）。包含 "image" / "video" 表示模型支持对应媒体输入。 */
+  audio?: boolean;
+  audioTransport?: string | null;
+  audioTransportSupported?: boolean;
+  /** 输入模态数组（Pi SDK 标准字段）。包含 "image" / "video" 表示模型支持对应媒体输入；音频走 Hana 兼容能力字段。 */
   input?: ("text" | "image" | "video")[];
 }
 
@@ -180,6 +202,17 @@ export interface DeskFile {
   mtime?: string;
 }
 
+export interface StudioWorkspace {
+  workspaceId: string;
+  mountId: string;
+  label: string;
+  sourceKind?: string | null;
+  provider?: string | null;
+  presentation?: string | null;
+  capabilities?: string[];
+  isDefault?: boolean;
+}
+
 export interface WorkspaceChangePayload {
   rootPath: string;
   changedPath: string;
@@ -227,8 +260,9 @@ export interface VersionedWriteResult {
 }
 
 export interface RemoteWorkbenchContentRef {
-  kind: 'mobile-workbench';
-  rootId: string;
+  kind: 'workbench-file' | 'mobile-workbench';
+  mountId?: string;
+  rootId?: string;
   subdir: string;
   name: string;
   contentPath: string;
@@ -320,7 +354,7 @@ export interface PlatformApi {
   onSettingsChanged(callback: (event: string, payload: unknown) => void): void | (() => void);
   onOpenSettingsModal?(callback: (tab?: string) => void): void | (() => void);
   onSwitchTab?(callback: (tab: string) => void): void | (() => void);
-  onServerRestarted?(callback: (data: { port: number }) => void): void | (() => void);
+  onServerRestarted?(callback: (data: { port: number; token?: string | null }) => void): void | (() => void);
   getFilePath?(file: File): string | null;
   startDrag?(filePaths: string | string[]): void;
   appReady(): void;
@@ -334,7 +368,14 @@ export interface PlatformApi {
   onMaximizeChange?(callback: (maximized: boolean) => void): void;
 
   // ── Browser viewer ──
-  updateBrowserViewer?(data: { running?: boolean; url?: string | null; thumbnail?: string | null }): void;
+  updateBrowserViewer?(data: {
+    running?: boolean;
+    url?: string | null;
+    thumbnail?: string | null;
+    thumbnailCapturedAt?: number | null;
+    thumbnailUrl?: string | null;
+    thumbnailFresh?: boolean;
+  }): void;
   onBrowserUpdate?(callback: (data: { title?: string; canGoBack?: boolean; canGoForward?: boolean; running?: boolean }) => void): void;
   closeBrowserViewer?(): void;
   closeBrowser?(): void;
@@ -353,7 +394,7 @@ export interface PlatformApi {
   onboardingComplete?(): Promise<void>;
 
   // ── Notification ──
-  showNotification?(title: string, body: string, agentId?: string | null): void;
+  showNotification?(title: string, body: string, agentId?: string | null, options?: DesktopNotificationOptions): void;
 
   // ── App info ──
   getAppVersion?(): Promise<string>;
@@ -368,6 +409,16 @@ export interface PlatformApi {
   onAutoUpdateState?(callback: (state: AutoUpdateState) => void): (() => void) | void;
   getAutoLaunchStatus?(): Promise<AutoLaunchStatus>;
   setAutoLaunchEnabled?(enabled: boolean): Promise<AutoLaunchStatus>;
+  getKeepAwakeStatus?(): Promise<KeepAwakeStatus>;
+  setKeepAwakeEnabled?(enabled: boolean): Promise<KeepAwakeStatus>;
+  quickChatReloadShortcut?(): Promise<{ ok: boolean; shortcut: string; error?: string }>;
+  quickChatShortcutStatus?(): Promise<{ shortcut: string; registered: boolean }>;
+  quickChatShow?(): void;
+  quickChatHide?(): void;
+  quickChatResize?(request: 'compact' | 'chat' | { mode: 'compact' | 'chat'; height?: number }): void;
+  quickChatOpenSession?(sessionPath: string): void;
+  onQuickChatOpenSession?(callback: (payload: { sessionPath?: string }) => void): (() => void) | void;
+  onQuickChatShown?(callback: () => void): (() => void) | void;
 
   // ── Skill viewer overlay ──
   onShowSkillViewer?(callback: (data: unknown) => void): void;

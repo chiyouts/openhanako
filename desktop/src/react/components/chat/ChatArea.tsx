@@ -6,10 +6,10 @@
  */
 
 import { memo, useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useStore } from '../../stores';
 import { loadMoreMessages } from '../../stores/session-actions';
-import { captureChatSelection } from '../../stores/selection-actions';
+import { getSelectionCommitAnchorRect, scheduleCaptureChatSelection } from '../../stores/selection-actions';
 import { useContinuousBottomScroll } from '../../hooks/use-continuous-bottom-scroll';
 import { useBoxSelection } from '../../hooks/use-box-selection';
 
@@ -83,6 +83,7 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
   const loadingMore = useStore(s => s.chatSessions[path]?.loadingMore ?? false);
   const isSessionStreaming = useStore(s => s.streamingSessions.includes(path));
   const sessionAgentId = useStore(s => s.sessions.find(se => se.path === path)?.agentId ?? null);
+  const sessionReadOnly = useStore(s => s.sessions.find(se => se.path === path)?.agentDeleted === true);
   const ref = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const messageElementsRef = useRef(new Map<string, HTMLDivElement>());
@@ -109,9 +110,9 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
     return ids;
   }, [items]);
   const boxSelection = useBoxSelection({ messageElementsRef, orderedIds, sessionPath: path, active });
-  const handleCaptureSelection = useCallback(() => {
+  const handleCaptureSelection = useCallback((event: ReactMouseEvent<HTMLDivElement> | ReactKeyboardEvent<HTMLDivElement>) => {
     if (!active) return;
-    captureChatSelection(path);
+    scheduleCaptureChatSelection(path, getSelectionCommitAnchorRect(event.nativeEvent));
   }, [active, path]);
   const handleShellPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -166,7 +167,7 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
   // prepend 后保持滚动位置：监听 items 变化，如果头部变了就修正 scrollTop
   const prevFirstId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const firstId = items[0]?.type === 'message' ? items[0].data.id : undefined;
+    const firstId = items.find((item) => item.type === 'message')?.data.id;
     const el = ref.current;
     if (el && prevFirstId.current && firstId !== prevFirstId.current) {
       // 头部 id 变了 → prepend 发生，修正 scrollTop 让原来的内容不跳
@@ -253,7 +254,9 @@ const Panel = memo(function Panel({ path, active }: { path: string; active: bool
             items={items}
             sessionPath={path}
             agentId={sessionAgentId}
+            readOnly={sessionReadOnly}
             registerMessageElement={registerMessageElement}
+            enableProcessFold
           />
           {isSessionStreaming && (
             <div className={styles.typingIndicator} />

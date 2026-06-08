@@ -7,6 +7,7 @@ import { ContextMenu, type ContextMenuItem } from '../../ui';
 import { isMediaKind } from '../../utils/file-kind';
 import { fileRefDownloadUrl, isWebRuntime, openFileRefPreview } from '../../utils/remote-file-preview';
 import { hanaFetch } from '../../hooks/use-hana-fetch';
+import { FileKindIcon } from '../shared/FileKindIcon';
 import {
   clearAppFileDragPayload,
   writeAppFileDragPayload,
@@ -88,11 +89,11 @@ function canPreviewFile(file: FileRef): boolean {
 }
 
 function canUseFilePath(file: FileRef): boolean {
-  return !isExpired(file) && !!file.path;
+  return !isWebRuntime() && !isExpired(file) && !!file.path;
 }
 
 function canCopyFilePath(file: FileRef): boolean {
-  return !!file.path;
+  return !isWebRuntime() && !!file.path;
 }
 
 function canDragFile(file: FileRef): boolean {
@@ -202,40 +203,6 @@ function SortIcon() {
   );
 }
 
-function FileKindIcon({ file }: { file: FileRef }) {
-  if (file.kind === 'image' || file.kind === 'svg') {
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <circle cx="8.5" cy="8.5" r="1.5" />
-        <polyline points="21 15 16 10 5 21" />
-      </svg>
-    );
-  }
-  if (file.kind === 'video') {
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <polygon points="10 9 15 12 10 15 10 9" />
-      </svg>
-    );
-  }
-  if (file.kind === 'code') {
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <polyline points="16 18 22 12 16 6" />
-        <polyline points="8 6 2 12 8 18" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
 function ActionIcon({ type }: { type: 'preview' | 'open' | 'reveal' | 'copy' | 'download' }) {
   if (type === 'preview') {
     return (
@@ -298,6 +265,7 @@ function SessionFileRow({
   const canDrag = canDragFile(file);
   const canUsePath = canUseFilePath(file);
   const canCopyPath = canCopyFilePath(file);
+  const showPathActions = !isWebRuntime();
   const downloadUrl = fileRefDownloadUrl(file);
 
   const stopAction = (event: React.MouseEvent, action: () => void) => {
@@ -330,7 +298,7 @@ function SessionFileRow({
       onDragStart={(event) => onDragStart(event, file)}
     >
       <div className={styles.fileIcon} aria-hidden="true">
-        <FileKindIcon file={file} />
+        <FileKindIcon kind={file.kind} size={16} />
       </div>
       <div className={styles.fileMain}>
         <div className={styles.fileName} data-testid="session-file-name" title={file.name}>{file.name}</div>
@@ -352,28 +320,32 @@ function SessionFileRow({
         >
           <ActionIcon type="preview" />
         </button>
-        <button
-          type="button"
-          className={styles.fileAction}
-          data-session-file-action=""
-          aria-label={actionLabel('rightWorkspace.sessionFiles.actions.open', file)}
-          title={actionLabel('rightWorkspace.sessionFiles.actions.open', file)}
-          disabled={!canUsePath}
-          onClick={(event) => stopAction(event, () => openFile(file))}
-        >
-          <ActionIcon type="open" />
-        </button>
-        <button
-          type="button"
-          className={styles.fileAction}
-          data-session-file-action=""
-          aria-label={actionLabel('rightWorkspace.sessionFiles.actions.reveal', file)}
-          title={actionLabel('rightWorkspace.sessionFiles.actions.reveal', file)}
-          disabled={!canUsePath}
-          onClick={(event) => stopAction(event, () => revealFile(file))}
-        >
-          <ActionIcon type="reveal" />
-        </button>
+        {showPathActions && (
+          <>
+            <button
+              type="button"
+              className={styles.fileAction}
+              data-session-file-action=""
+              aria-label={actionLabel('rightWorkspace.sessionFiles.actions.open', file)}
+              title={actionLabel('rightWorkspace.sessionFiles.actions.open', file)}
+              disabled={!canUsePath}
+              onClick={(event) => stopAction(event, () => openFile(file))}
+            >
+              <ActionIcon type="open" />
+            </button>
+            <button
+              type="button"
+              className={styles.fileAction}
+              data-session-file-action=""
+              aria-label={actionLabel('rightWorkspace.sessionFiles.actions.reveal', file)}
+              title={actionLabel('rightWorkspace.sessionFiles.actions.reveal', file)}
+              disabled={!canUsePath}
+              onClick={(event) => stopAction(event, () => revealFile(file))}
+            >
+              <ActionIcon type="reveal" />
+            </button>
+          </>
+        )}
         {downloadUrl && (
           <a
             className={styles.fileAction}
@@ -387,17 +359,19 @@ function SessionFileRow({
             <ActionIcon type="download" />
           </a>
         )}
-        <button
-          type="button"
-          className={styles.fileAction}
-          data-session-file-action=""
-          aria-label={actionLabel('rightWorkspace.sessionFiles.actions.copyPath', file)}
-          title={actionLabel('rightWorkspace.sessionFiles.actions.copyPath', file)}
-          disabled={!canCopyPath}
-          onClick={(event) => stopAction(event, () => copyPaths([file]))}
-        >
-          <ActionIcon type="copy" />
-        </button>
+        {showPathActions && (
+          <button
+            type="button"
+            className={styles.fileAction}
+            data-session-file-action=""
+            aria-label={actionLabel('rightWorkspace.sessionFiles.actions.copyPath', file)}
+            title={actionLabel('rightWorkspace.sessionFiles.actions.copyPath', file)}
+            disabled={!canCopyPath}
+            onClick={(event) => stopAction(event, () => copyPaths([file]))}
+          >
+            <ActionIcon type="copy" />
+          </button>
+        )}
       </div>
     </article>
   );
@@ -635,8 +609,10 @@ export function SessionRegistryFilesPanel() {
 
     return [
       { label: tr('rightWorkspace.sessionFiles.actions.preview'), disabled: !canPreviewFile(file), action: () => previewFile(file, currentSessionPath) },
-      { label: tr('rightWorkspace.sessionFiles.actions.open'), disabled: !canUseFilePath(file), action: () => openFile(file) },
-      { label: tr('rightWorkspace.sessionFiles.actions.reveal'), disabled: !canUseFilePath(file), action: () => revealFile(file) },
+      ...(!isWebRuntime() ? [
+        { label: tr('rightWorkspace.sessionFiles.actions.open'), disabled: !canUseFilePath(file), action: () => openFile(file) },
+        { label: tr('rightWorkspace.sessionFiles.actions.reveal'), disabled: !canUseFilePath(file), action: () => revealFile(file) },
+      ] : []),
       {
         label: tr('rightWorkspace.sessionFiles.actions.downloadToDevice'),
         disabled: !downloadUrl,
@@ -650,13 +626,13 @@ export function SessionRegistryFilesPanel() {
           a.click();
         },
       },
-      {
+      ...(!isWebRuntime() ? [{
         label: pathFiles.length > 1
           ? tr('rightWorkspace.sessionFiles.actions.copySelectedPaths', { n: pathFiles.length })
           : tr('rightWorkspace.sessionFiles.actions.copyPath'),
         disabled: pathFiles.length === 0,
         action: () => copyPaths(pathFiles),
-      },
+      }] : []),
       { divider: true },
       {
         label: tr('rightWorkspace.sessionFiles.actions.sendToBridge'),

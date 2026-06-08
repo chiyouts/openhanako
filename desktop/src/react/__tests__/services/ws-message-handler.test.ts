@@ -52,6 +52,7 @@ import { loadSessions } from '../../stores/session-actions';
 afterEach(() => {
   resetSessionRefreshSchedulerForTest();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe('ws-message-handler applyStreamingStatus', () => {
@@ -62,6 +63,7 @@ describe('ws-message-handler applyStreamingStatus', () => {
       pendingNewSession: false,
       sessions: [],
       streamingSessions: [],
+      unreadOutputSessionPaths: [],
       inlineErrors: {},
     } as never);
   });
@@ -93,6 +95,24 @@ describe('ws-message-handler applyStreamingStatus', () => {
     useStore.setState({ streamingSessions: ['/focused.jsonl'] } as never);
     expect(() => applyStreamingStatus(false, null)).not.toThrow();
     expect(useStore.getState().streamingSessions).toEqual(['/focused.jsonl']);
+  });
+
+  it('后台 session 从 streaming 变为完成时标记未读输出', () => {
+    useStore.setState({ streamingSessions: ['/other.jsonl'], unreadOutputSessionPaths: [] } as never);
+    applyStreamingStatus(false, '/other.jsonl');
+    expect(useStore.getState().unreadOutputSessionPaths).toEqual(['/other.jsonl']);
+  });
+
+  it('当前焦点 session 完成时不标记未读输出', () => {
+    useStore.setState({ streamingSessions: ['/focused.jsonl'], unreadOutputSessionPaths: [] } as never);
+    applyStreamingStatus(false, '/focused.jsonl');
+    expect(useStore.getState().unreadOutputSessionPaths).toEqual([]);
+  });
+
+  it('收到 isStreaming=true 只维护运行集合，不产生未读输出标记', () => {
+    applyStreamingStatus(true, '/other.jsonl');
+    expect(useStore.getState().streamingSessions).toEqual(['/other.jsonl']);
+    expect(useStore.getState().unreadOutputSessionPaths).toEqual([]);
   });
 });
 
@@ -140,6 +160,65 @@ describe('ws-message-handler session-scoped desktop events', () => {
     expect(first.data.text).toBe('hello from bridge');
     expect(first.data.quotedText).toBe('quote');
     expect(first.data.attachments).toEqual([{ path: '/tmp/a.png', name: 'a.png', isDir: false }]);
+  });
+
+  it('session_user_message 保存附件-only 消息时不生成 textHtml', () => {
+    handleServerMessage({
+      type: 'session_user_message',
+      sessionPath: '/session/a.jsonl',
+      message: {
+        text: '',
+        attachments: [{ path: '/tmp/voice.wav', name: 'voice.wav', isDir: false, mimeType: 'audio/wav' }],
+      },
+    });
+
+    const items = useStore.getState().chatSessions['/session/a.jsonl']?.items || [];
+    const first = items[0];
+    expect(first?.type).toBe('message');
+    if (!first || first.type !== 'message') throw new Error('expected message item');
+    expect(first.data.text).toBe('');
+    expect(first.data.textHtml).toBeUndefined();
+    expect(first.data.attachments).toEqual([{ path: '/tmp/voice.wav', name: 'voice.wav', isDir: false, mimeType: 'audio/wav' }]);
+  });
+
+  it('voice_transcription_update 按 fileId 回填现有用户语音附件', () => {
+    handleServerMessage({
+      type: 'session_user_message',
+      sessionPath: '/session/a.jsonl',
+      message: {
+        text: '',
+        attachments: [{
+          fileId: 'sf_voice',
+          path: '/tmp/voice.wav',
+          name: '录音 1.wav',
+          isDir: false,
+          mimeType: 'audio/wav',
+          presentation: 'voice-input',
+        }],
+      },
+    });
+
+    handleServerMessage({
+      type: 'voice_transcription_update',
+      sessionPath: '/session/a.jsonl',
+      fileId: 'sf_voice',
+      transcription: {
+        status: 'ready',
+        text: '今晚我们先把语音输入跑通。',
+      },
+    });
+
+    const items = useStore.getState().chatSessions['/session/a.jsonl']?.items || [];
+    expect(items).toHaveLength(1);
+    const first = items[0];
+    if (!first || first.type !== 'message') throw new Error('expected message item');
+    expect(first.data.attachments?.[0]).toMatchObject({
+      fileId: 'sf_voice',
+      transcription: {
+        status: 'ready',
+        text: '今晚我们先把语音输入跑通。',
+      },
+    });
   });
 
   it('session_created 乐观插入后延迟刷新 session 列表，避免同一波事件重复全量拉取', async () => {
@@ -397,6 +476,132 @@ describe('ws-message-handler session-scoped desktop events', () => {
     });
 
     expect(useStore.getState().sessions[0]?.rcAttachment).toBeNull();
+  });
+
+  it('patches session metadata updates and syncs focused thinking level', () => {
+    useStore.setState({
+      currentSessionPath: '/session/a.jsonl',
+      thinkingLevel: 'medium',
+      sessions: [
+        {
+          path: '/session/a.jsonl',
+          title: 'A',
+          firstMessage: 'hello',
+          modified: '2026-04-24T10:00:00.000Z',
+          messageCount: 1,
+          agentId: 'a1',
+          agentName: 'Hana',
+          cwd: null,
+          pinnedAt: null,
+        },
+        {
+          path: '/session/b.jsonl',
+          title: 'B',
+          firstMessage: 'other',
+          modified: '2026-04-24T10:00:00.000Z',
+          messageCount: 1,
+          agentId: 'a1',
+          agentName: 'Hana',
+          cwd: null,
+          pinnedAt: null,
+        },
+      ],
+    } as never);
+
+    handleServerMessage({
+      type: 'session_metadata_updated',
+      sessionPath: '/session/a.jsonl',
+      metadata: {
+        pinnedAt: '2026-04-29T08:00:00.000Z',
+        thinkingLevel: 'high',
+      },
+    });
+
+    expect(useStore.getState().sessions.map(session => ({
+      path: session.path,
+      pinnedAt: session.pinnedAt,
+    }))).toEqual([
+      { path: '/session/a.jsonl', pinnedAt: '2026-04-29T08:00:00.000Z' },
+      { path: '/session/b.jsonl', pinnedAt: null },
+    ]);
+    expect(useStore.getState().thinkingLevel).toBe('high');
+
+    handleServerMessage({
+      type: 'session_metadata_updated',
+      sessionPath: '/session/b.jsonl',
+      metadata: {
+        thinkingLevel: 'off',
+      },
+    });
+
+    expect(useStore.getState().thinkingLevel).toBe('high');
+  });
+});
+
+describe('ws-message-handler activity updates', () => {
+  beforeEach(() => {
+    useStore.setState({
+      activities: [
+        { id: 'activity-1', type: 'beautify', status: 'running', summary: '旧状态' },
+        { id: 'activity-2', type: 'cron', status: 'done', summary: '另一条活动' },
+      ],
+    } as never);
+  });
+
+  it('merges activity_update by id so stale running cards do not remain in the panel', () => {
+    handleServerMessage({
+      type: 'activity_update',
+      activity: { id: 'activity-1', type: 'beautify', status: 'done', summary: '新状态' },
+    });
+
+    expect(useStore.getState().activities).toEqual([
+      { id: 'activity-1', type: 'beautify', status: 'done', summary: '新状态' },
+      { id: 'activity-2', type: 'cron', status: 'done', summary: '另一条活动' },
+    ]);
+  });
+});
+
+describe('ws-message-handler permission mode events', () => {
+  let windowTarget: EventTarget;
+
+  beforeEach(() => {
+    windowTarget = new EventTarget();
+    vi.stubGlobal('window', windowTarget);
+    useStore.setState({
+      currentSessionPath: '/session/a.jsonl',
+      pendingNewSession: false,
+    } as never);
+  });
+
+  it('keeps explicit auto mode from legacy plan_mode messages instead of collapsing to operate', () => {
+    const details: unknown[] = [];
+    windowTarget.addEventListener('hana-plan-mode', (event) => {
+      details.push((event as CustomEvent).detail);
+    });
+
+    handleServerMessage({
+      type: 'plan_mode',
+      sessionPath: '/session/a.jsonl',
+      enabled: false,
+      mode: 'auto',
+    });
+
+    expect(details).toEqual([{ enabled: false, mode: 'auto' }]);
+  });
+
+  it('syncs explicit permission_mode messages for the focused session', () => {
+    const details: unknown[] = [];
+    windowTarget.addEventListener('hana-plan-mode', (event) => {
+      details.push((event as CustomEvent).detail);
+    });
+
+    handleServerMessage({
+      type: 'permission_mode',
+      sessionPath: '/session/a.jsonl',
+      mode: 'ask',
+    });
+
+    expect(details).toEqual([{ enabled: false, mode: 'ask' }]);
   });
 });
 
@@ -676,6 +881,38 @@ describe('ws-message-handler turn_end side effects', () => {
     });
 
     expect(requestContextUsage).toHaveBeenCalledWith('/session/a.jsonl');
+  });
+
+  it('does not mark an old browser thumbnail as fresh when a running update omits thumbnail data', () => {
+    vi.stubGlobal('window', { platform: {} });
+    useStore.setState({
+      browserBySession: {
+        '/session/a.jsonl': {
+          running: true,
+          url: 'https://old.example',
+          thumbnail: 'OLD_THUMB',
+          thumbnailCapturedAt: 111,
+          thumbnailUrl: 'https://old.example',
+          thumbnailFresh: true,
+        },
+      },
+    } as never);
+
+    handleServerMessage({
+      type: 'browser_status',
+      sessionPath: '/session/a.jsonl',
+      running: true,
+      url: 'https://new.example',
+    });
+
+    expect(useStore.getState().browserBySession['/session/a.jsonl']).toMatchObject({
+      running: true,
+      url: 'https://new.example',
+      thumbnail: 'OLD_THUMB',
+      thumbnailCapturedAt: 111,
+      thumbnailUrl: 'https://old.example',
+      thumbnailFresh: false,
+    });
   });
 
   it('coalesces rapid turn_end session refreshes into one list request', async () => {

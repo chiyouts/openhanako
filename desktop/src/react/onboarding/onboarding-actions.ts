@@ -3,7 +3,7 @@
  */
 
 import { AGENT_ID } from './constants';
-import { DEFAULT_HEARTBEAT_INTERVAL_MINUTES } from '../../../../shared/default-workspace-constants.js';
+import { DEFAULT_HEARTBEAT_INTERVAL_MINUTES } from '../../../../shared/default-workspace-constants.ts';
 
 export type HanaFetch = (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -113,6 +113,7 @@ export interface AddedModelObject {
   context?: number;
   maxOutput?: number;
   image?: boolean;
+  audio?: boolean;
   reasoning?: boolean;
 }
 
@@ -135,6 +136,7 @@ function compactModelEntry(entry: AddedModelEntry): AddedModelEntry {
   if (typeof entry.context === 'number' && Number.isFinite(entry.context)) next.context = entry.context;
   if (typeof entry.maxOutput === 'number' && Number.isFinite(entry.maxOutput)) next.maxOutput = entry.maxOutput;
   if (typeof entry.image === 'boolean') next.image = entry.image;
+  if (typeof entry.audio === 'boolean') next.audio = entry.audio;
   if (typeof entry.reasoning === 'boolean') next.reasoning = entry.reasoning;
   return Object.keys(next).length === 1 ? next.id : next;
 }

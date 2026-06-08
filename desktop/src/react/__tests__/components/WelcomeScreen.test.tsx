@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStore } from '../../stores';
@@ -30,6 +30,7 @@ const translations: Record<string, string | string[] | Record<string, { avatar: 
   'input.selectProject': '选择项目',
   'input.noCustomProjects': '暂无自定义项目',
   'input.selectOtherFolder': '选择其他文件夹',
+  'input.removeRecentWorkspace': '从列表移除',
   'input.extraFolders': '额外文件夹',
   'input.addExternalFolder': '添加工作台以外的文件夹',
   'welcome.messages': ['想到什么就说什么吧~'],
@@ -62,9 +63,16 @@ describe('WelcomeScreen workspace picker', () => {
       selectedAgentId: null,
       memoryEnabled: true,
       selectedFolder: '/workspace/Desktop',
+      selectedWorkspaceMountId: null,
+      selectedWorkspaceLabel: null,
+      deskWorkspaceMountId: null,
+      deskWorkspaceLabel: null,
+      studioWorkspaces: [],
       homeFolder: '/workspace/Desktop/project-hana',
       cwdHistory: ['/workspace/Desktop/project-hana'],
       workspaceFolders: ['/workspace/Reference'],
+      serverPort: 62950,
+      serverToken: 'test-token',
       pendingProjectId: null,
       sessionProjectCatalog: {
         folders: [],
@@ -98,25 +106,69 @@ describe('WelcomeScreen workspace picker', () => {
     expect(extraLabel.compareDocumentPosition(addExternal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('shows the cwd project as the default new-session project', async () => {
+  it('selects a Studio workspace by mountId instead of a local path', async () => {
+    mocks.hanaFetch.mockImplementation(async (path: string) => {
+      if (path === '/api/studio/workspaces') {
+        return new Response(JSON.stringify({
+          workspaces: [{ workspaceId: 'mount_docs', mountId: 'mount_docs', label: 'Docs', capabilities: ['list', 'read', 'write'] }],
+        }), { status: 200 });
+      }
+      if (path.startsWith('/api/preferences/workspace-ui-state')) {
+        return new Response(JSON.stringify({ state: null }), { status: 200 });
+      }
+      if (path === '/api/workbench/files?mountId=mount_docs') {
+        return new Response(JSON.stringify({
+          mountId: 'mount_docs',
+          mount: { label: 'Docs' },
+          files: [{ name: 'remote.md', isDir: false }],
+        }), { status: 200 });
+      }
+      if (path.startsWith('/api/workbench/content')) {
+        return new Response('', { status: 404 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
     const { WelcomeScreen } = await import('../../components/WelcomeScreen');
 
     render(<WelcomeScreen />);
+    await waitFor(() => expect(useStore.getState().studioWorkspaces).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: /工作台：Desktop/ }));
+    fireEvent.click(screen.getByText('Docs'));
 
-    expect(screen.getByRole('button', { name: /项目：Desktop/ })).toBeInTheDocument();
-    expect(useStore.getState().pendingProjectId).toBeNull();
+    await waitFor(() => {
+      expect(useStore.getState().selectedWorkspaceMountId).toBe('mount_docs');
+      expect(useStore.getState().deskBasePath).toBe('studio:mount_docs');
+    });
+    expect(mocks.hanaFetch.mock.calls.some(([path]) => path === '/api/workbench/files?mountId=mount_docs')).toBe(true);
   });
 
-  it('lets the pending new-session draft choose a custom project without changing the workspace', async () => {
+  it('removes a recent workspace from the picker without switching workspace', async () => {
+    mocks.hanaFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: true,
+      cwd_history: [],
+    }), { status: 200 }));
     const { WelcomeScreen } = await import('../../components/WelcomeScreen');
 
     render(<WelcomeScreen />);
-    fireEvent.click(screen.getByRole('button', { name: /项目：Desktop/ }));
-    fireEvent.click(screen.getByText('写作项目'));
+    fireEvent.click(screen.getByRole('button', { name: /工作台：Desktop/ }));
+    fireEvent.click(screen.getByRole('button', { name: '从列表移除' }));
 
-    expect(useStore.getState().pendingProjectId).toBe('project-writing');
     expect(useStore.getState().selectedFolder).toBe('/workspace/Desktop');
-    expect(screen.getByRole('button', { name: /项目：写作项目/ })).toBeInTheDocument();
+    expect(useStore.getState().cwdHistory).toEqual([]);
+    expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/config/workspaces/recent', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ path: '/workspace/Desktop/project-hana' }),
+    }));
+  });
+
+  it('does not show a project picker while creating a new session', async () => {
+    const { WelcomeScreen } = await import('../../components/WelcomeScreen');
+
+    render(<WelcomeScreen />);
+
+    expect(screen.queryByRole('button', { name: /项目：/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('自定义项目')).not.toBeInTheDocument();
+    expect(useStore.getState().pendingProjectId).toBeNull();
   });
 
   it('disables the memory toggle when the selected agent has memory disabled in settings', async () => {

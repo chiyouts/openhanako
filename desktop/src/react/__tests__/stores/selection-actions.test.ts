@@ -3,7 +3,13 @@
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { captureChatSelection, captureSelection, clearSelection, initQuotedSelectionLifecycle } from '../../stores/selection-actions';
+import {
+  captureChatSelection,
+  captureSelection,
+  clearSelection,
+  initQuotedSelectionLifecycle,
+  scheduleCaptureSelection,
+} from '../../stores/selection-actions';
 import { useStore } from '../../stores';
 import type { PreviewItem } from '../../types';
 
@@ -44,6 +50,7 @@ describe('captureSelection', () => {
       sourceFilePath: '/notes/note.md',
       lineStart: 2,
       lineEnd: 2,
+      selectionAnchorKind: 'codemirror',
       charCount: 4,
     });
   });
@@ -94,12 +101,13 @@ describe('captureSelection', () => {
       sourceSessionPath: '/session/a.jsonl',
       sourceMessageId: 'assistant-1',
       sourceRole: 'assistant',
+      selectionAnchorKind: 'native',
       charCount: 8,
     });
     expect(useStore.getState().quotedSelections).toEqual([]);
   });
 
-  it('captures chat text from the document-level mouseup lifecycle when release happens outside the chat panel', () => {
+  it('captures document-level chat quote immediately after mouseup commit', () => {
     const dispose = initQuotedSelectionLifecycle(document);
     try {
       seedChatFixture();
@@ -120,6 +128,76 @@ describe('captureSelection', () => {
         sourceKind: 'chat',
         sourceSessionPath: '/session/a.jsonl',
         sourceMessageId: 'assistant-1',
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('does not create a document-level chat candidate when mouseup commits an empty selection', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      seedChatFixture();
+      document.body.innerHTML = `
+        <section data-chat-selection-root="" data-session-path="/session/a.jsonl">
+          <article data-message-id="assistant-1">
+            <p><span id="selected-text">document mouseup quote</span></p>
+          </article>
+        </section>
+      `;
+      window.getSelection()?.removeAllRanges();
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+      expect(useStore.getState().quoteCandidate).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('captures preview quote immediately when the preview selection is committed', () => {
+    document.body.innerHTML = '<main><span id="selected-text">preview quote</span></main>';
+    selectElementText(document.getElementById('selected-text')!);
+
+    scheduleCaptureSelection(previewItem);
+
+    expect(useStore.getState().quoteCandidate).toMatchObject({
+      text: 'preview quote',
+      sourceKind: 'preview',
+      sourceFilePath: '/notes/note.md',
+      selectionAnchorKind: 'native',
+    });
+
+    clearSelection({ sourceKind: 'preview', sourceFilePath: '/notes/note.md' });
+
+    expect(useStore.getState().quoteCandidate).toBeNull();
+  });
+
+  it('keeps CodeMirror preview capture independent from an empty native selection', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      useStore.getState().setQuoteCandidate({
+        text: 'old native quote',
+        sourceTitle: 'Assistant message',
+        sourceKind: 'chat',
+        sourceSessionPath: '/session/a.jsonl',
+        sourceMessageId: 'assistant-1',
+        sourceRole: 'assistant',
+        charCount: 16,
+      });
+      const state = EditorState.create({
+        doc: 'alpha\nbeta',
+        selection: { anchor: 0, head: 5 },
+      });
+
+      scheduleCaptureSelection(previewItem, { state } as EditorView);
+      window.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event('selectionchange'));
+
+      expect(useStore.getState().quoteCandidate).toMatchObject({
+        text: 'alpha',
+        sourceKind: 'preview',
+        sourceFilePath: '/notes/note.md',
+        selectionAnchorKind: 'codemirror',
       });
     } finally {
       dispose();
@@ -166,6 +244,98 @@ describe('captureSelection', () => {
       width: 200,
       height: 48,
     });
+  });
+
+  it('anchors a forward multi-line chat quote to the focus edge instead of the whole selection bounds', () => {
+    seedChatFixture();
+    document.body.innerHTML = `
+      <section data-chat-selection-root="" data-session-path="/session/a.jsonl">
+        <article data-message-id="assistant-1">
+          <p><span id="start-text">first selected line</span></p>
+          <p><span id="end-text">second selected line</span></p>
+        </article>
+      </section>
+    `;
+    const range = selectAcrossElements(
+      document.getElementById('start-text')!,
+      document.getElementById('end-text')!,
+    );
+    Object.defineProperty(range, 'getClientRects', {
+      configurable: true,
+      value: () => [
+        domRect({ left: 96, right: 420, top: 100, bottom: 128, width: 324, height: 28 }),
+        domRect({ left: 96, right: 260, top: 140, bottom: 168, width: 164, height: 28 }),
+      ] as unknown as DOMRectList,
+    });
+    Object.defineProperty(range, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => domRect({
+        left: 96,
+        right: 420,
+        top: 100,
+        bottom: 168,
+        width: 324,
+        height: 68,
+      }),
+    });
+
+    captureChatSelection('/session/a.jsonl');
+
+    expect(useStore.getState().quoteCandidate?.anchorRect).toEqual({
+      left: 260,
+      right: 261,
+      top: 140,
+      bottom: 141,
+      width: 1,
+      height: 1,
+    });
+  });
+
+  it('uses the mouseup point when the browser cannot expose a selection endpoint rect', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      seedChatFixture();
+      document.body.innerHTML = `
+        <section data-chat-selection-root="" data-session-path="/session/a.jsonl">
+          <article data-message-id="assistant-1">
+            <p><span id="selected-text">document mouseup quote</span></p>
+          </article>
+        </section>
+      `;
+      const range = selectElementText(document.getElementById('selected-text')!);
+      Object.defineProperty(range, 'getClientRects', {
+        configurable: true,
+        value: () => [] as unknown as DOMRectList,
+      });
+      Object.defineProperty(range, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => domRect({
+          left: 96,
+          right: 420,
+          top: 100,
+          bottom: 168,
+          width: 324,
+          height: 68,
+        }),
+      });
+
+      window.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 380,
+        clientY: 220,
+      }));
+
+      expect(useStore.getState().quoteCandidate?.anchorRect).toEqual({
+        left: 380,
+        right: 381,
+        top: 220,
+        bottom: 221,
+        width: 1,
+        height: 1,
+      });
+    } finally {
+      dispose();
+    }
   });
 
   it('keeps added quotes when composer focus cancels the native selection candidate', () => {
@@ -231,6 +401,88 @@ describe('captureSelection', () => {
       placeCollapsedSelection(document.getElementById('caret-host')!);
 
       document.dispatchEvent(new Event('selectionchange'));
+
+      expect(useStore.getState().quoteCandidate).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('clears a transient chat candidate when pointer focus leaves the chat selection surface', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      seedChatFixture();
+      document.body.innerHTML = `
+        <section data-chat-selection-root="" data-session-path="/session/a.jsonl">
+          <article data-message-id="assistant-1">
+            <span id="selected-text">document mouseup quote</span>
+          </article>
+        </section>
+        <button id="settings-button" type="button">Settings</button>
+      `;
+      selectElementText(document.getElementById('selected-text')!);
+      useStore.getState().setQuoteCandidate({
+        text: 'document mouseup quote',
+        sourceTitle: 'Assistant message',
+        sourceKind: 'chat',
+        sourceSessionPath: '/session/a.jsonl',
+        sourceMessageId: 'assistant-1',
+        sourceRole: 'assistant',
+        charCount: 22,
+      });
+
+      document.getElementById('settings-button')?.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, cancelable: true }),
+      );
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+      expect(useStore.getState().quoteCandidate).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('clears a transient chat candidate when keyboard focus leaves the chat selection surface', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      useStore.getState().setQuoteCandidate({
+        text: 'old quote',
+        sourceTitle: 'Assistant message',
+        sourceKind: 'chat',
+        sourceSessionPath: '/session/a.jsonl',
+        sourceMessageId: 'assistant-1',
+        sourceRole: 'assistant',
+        charCount: 9,
+      });
+      document.body.innerHTML = `
+        <section data-chat-selection-root="" data-session-path="/session/a.jsonl"></section>
+        <input id="settings-input" />
+      `;
+
+      document.getElementById('settings-input')?.dispatchEvent(
+        new FocusEvent('focusin', { bubbles: true }),
+      );
+
+      expect(useStore.getState().quoteCandidate).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('clears a transient chat candidate when the app window loses focus', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      useStore.getState().setQuoteCandidate({
+        text: 'old quote',
+        sourceTitle: 'Assistant message',
+        sourceKind: 'chat',
+        sourceSessionPath: '/session/a.jsonl',
+        sourceMessageId: 'assistant-1',
+        sourceRole: 'assistant',
+        charCount: 9,
+      });
+
+      window.dispatchEvent(new Event('blur'));
 
       expect(useStore.getState().quoteCandidate).toBeNull();
     } finally {
@@ -387,7 +639,7 @@ function selectElementText(element: HTMLElement): Range {
   return range;
 }
 
-function selectAcrossElements(startElement: HTMLElement, endElement: HTMLElement): void {
+function selectAcrossElements(startElement: HTMLElement, endElement: HTMLElement): Range {
   const startNode = startElement.firstChild;
   const endNode = endElement.firstChild;
   if (!startNode || !endNode) throw new Error('test fixture must contain text nodes');
@@ -397,6 +649,7 @@ function selectAcrossElements(startElement: HTMLElement, endElement: HTMLElement
   const selection = window.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
+  return range;
 }
 
 function placeCollapsedSelection(element: HTMLElement): void {

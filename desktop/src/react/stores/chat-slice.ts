@@ -4,7 +4,7 @@
 
 import type { ChatListItem, ChatMessage, ContentBlock, SessionMessages, SessionModel, SessionRegistryFile } from './chat-types';
 import { invalidateSessionCache } from './selectors/file-refs';
-import { invalidateStreamBuffer } from './stream-invalidator';
+import { invalidateStreamBuffer, invalidateStreamResumeMeta } from './stream-invalidator';
 import { clearMessageLiveVersion } from './message-live-version';
 
 export interface ChatSlice {
@@ -28,6 +28,7 @@ export interface ChatSlice {
   updateLastMessage: (path: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   updateMessageById: (path: string, messageId: string, updater: (msg: ChatMessage) => ChatMessage) => boolean;
   truncateSessionFromMessage: (path: string, messageId: string) => boolean;
+  insertInterludeItemNearTaskResult: (sessionPath: string, taskId: string | null, block: Extract<ContentBlock, { type: 'interlude' }>) => boolean;
   resolveBlockByTaskId: (sessionPath: string, taskId: string, resolution: ContentBlock) => boolean;
   patchBlockByTaskId: (sessionPath: string, taskId: string, patch: Record<string, any>) => void;
   _pendingBlockPatches: Record<string, Record<string, any>>;
@@ -61,7 +62,7 @@ export const createChatSlice = (
       items,
       hasMore,
       loadingMore: false,
-      oldestId: items[0]?.type === 'message' ? items[0].data.id : undefined,
+      oldestId: firstMessageId(items),
     };
     // LRU 淘汰：只淘汰消息缓存，不动模型快照（模型是轻量常驻数据）。
     // 被淘汰的 session 的 FileRef 缓存（含 inlineData base64）必须同步清，
@@ -75,6 +76,7 @@ export const createChatSlice = (
         delete scrollPositions[oldest];
         invalidateSessionCache(oldest);
         invalidateStreamBuffer(oldest);
+        invalidateStreamResumeMeta(oldest);
       }
     }
     return { chatSessions: sessions, sessionRegistryFilesByPath: registryFiles, scrollPositions };
@@ -92,7 +94,7 @@ export const createChatSlice = (
           items: merged,
           hasMore,
           loadingMore: false,
-          oldestId: items[0]?.type === 'message' ? items[0].data.id : session.oldestId,
+          oldestId: firstMessageId(items) || session.oldestId,
         },
       },
     };
@@ -179,13 +181,14 @@ export const createChatSlice = (
       const items = latest.items.slice(0, latestIdx);
       invalidateSessionCache(path);
       invalidateStreamBuffer(path);
+      invalidateStreamResumeMeta(path);
       return {
         chatSessions: {
           ...s.chatSessions,
           [path]: {
             ...latest,
             items,
-            oldestId: items[0]?.type === 'message' ? items[0].data.id : undefined,
+            oldestId: firstMessageId(items),
           },
         },
       };
@@ -195,6 +198,55 @@ export const createChatSlice = (
 
   // 缓存：block_update 到达时 block 可能还没添加到 store（时序竞争）
   _pendingBlockPatches: {} as Record<string, Record<string, any>>,
+
+  insertInterludeItemNearTaskResult: (sessionPath, taskId, block) => {
+    if (!get().chatSessions[sessionPath]) return false;
+
+    let consumed = false;
+    set((s) => {
+      const session = s.chatSessions[sessionPath];
+      if (!session) return {};
+      const items = [...session.items];
+
+      if (hasEquivalentInterludeItem(items, block)) {
+        consumed = true;
+        return {};
+      }
+
+      let insertAt = items.length;
+      let foundAnchor = !taskId;
+      for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i];
+        if (item.type !== 'message' || item.data.role !== 'assistant') continue;
+        const blocks = item.data.blocks;
+        if (!blocks) continue;
+        if (!taskId) continue;
+
+        const blockIdx = blocks.findIndex((existing) => isInterludeResultAnchorBlock(existing, taskId));
+        if (blockIdx < 0) continue;
+
+        foundAnchor = true;
+        insertAt = shouldPlaceInterludeBeforeAnchor(blocks[blockIdx])
+          ? i
+          : insertAfterAssistantRun(items, i);
+        break;
+      }
+
+      if (!foundAnchor) return {};
+
+      items.splice(insertAt, 0, { type: 'interlude', id: block.id, data: block });
+      consumed = true;
+      invalidateSessionCache(sessionPath);
+      return {
+        chatSessions: {
+          ...s.chatSessions,
+          [sessionPath]: { ...session, items },
+        },
+      };
+    });
+
+    return consumed;
+  },
 
   resolveBlockByTaskId: (sessionPath, taskId, resolution) => {
     if (!get().chatSessions[sessionPath]) return false;
@@ -350,6 +402,7 @@ export const createChatSlice = (
     // FileRef 缓存和 streamBuffer 都绑定 session 生命周期，归属方主动清
     invalidateSessionCache(path);
     invalidateStreamBuffer(path);
+    invalidateStreamResumeMeta(path);
     clearMessageLiveVersion(path);
     return {
       chatSessions: sessions,
@@ -372,6 +425,10 @@ function registryFileKey(file: SessionRegistryFile): string | null {
   return filePath ? `path:${filePath}` : null;
 }
 
+function firstMessageId(items: ChatListItem[]): string | undefined {
+  return items.find((item) => item.type === 'message')?.data.id;
+}
+
 function isPendingMediaGenerationBlock(block: ContentBlock, taskId: string): boolean {
   return block.type === 'media_generation' &&
     block.taskId === taskId &&
@@ -387,4 +444,65 @@ function isResolvedTaskBlock(block: ContentBlock, taskId: string): boolean {
 
 function isResolvedFileTaskBlock(block: ContentBlock, taskId: string): boolean {
   return block.type === 'file' && block.replacesTaskId === taskId;
+}
+
+function isInterludeBlock(block: ContentBlock): block is Extract<ContentBlock, { type: 'interlude' }> {
+  return block.type === 'interlude';
+}
+
+function hasEquivalentInterludeBlock(blocks: ContentBlock[], block: ContentBlock): boolean {
+  if (!isInterludeBlock(block)) return false;
+  return blocks.some((existing) => (
+    isInterludeBlock(existing) &&
+    (
+      (block.id && existing.id === block.id) ||
+      (!!block.taskId && existing.taskId === block.taskId && existing.status === block.status)
+    )
+  ));
+}
+
+function hasEquivalentInterludeItem(items: ChatListItem[], block: ContentBlock): boolean {
+  if (!isInterludeBlock(block)) return false;
+  return items.some((item) => {
+    if (item.type === 'interlude') {
+      return isEquivalentInterlude(item.data, block);
+    }
+    if (item.type !== 'message' || item.data.role !== 'assistant') return false;
+    return hasEquivalentInterludeBlock(item.data.blocks || [], block);
+  });
+}
+
+function isEquivalentInterlude(existing: Extract<ContentBlock, { type: 'interlude' }>, block: Extract<ContentBlock, { type: 'interlude' }>): boolean {
+  return (
+    (block.id && existing.id === block.id) ||
+    (!!block.taskId && existing.taskId === block.taskId && existing.status === block.status)
+  );
+}
+
+function isMediaTaskAnchorBlock(block: ContentBlock, taskId: string): boolean {
+  return (
+    (block.type === 'media_generation' && block.taskId === taskId) ||
+    (block.type === 'file' && block.replacesTaskId === taskId)
+  );
+}
+
+function isInterludeResultAnchorBlock(block: ContentBlock, taskId: string): boolean {
+  return (
+    isMediaTaskAnchorBlock(block, taskId) ||
+    ((block.type === 'subagent' || block.type === 'workflow') && block.taskId === taskId)
+  );
+}
+
+function shouldPlaceInterludeBeforeAnchor(block: ContentBlock): boolean {
+  return block.type === 'media_generation' || block.type === 'file';
+}
+
+function insertAfterAssistantRun(items: ChatListItem[], anchorIndex: number): number {
+  let insertAt = anchorIndex + 1;
+  while (insertAt < items.length) {
+    const item = items[insertAt];
+    if (item.type !== 'message' || item.data.role !== 'assistant') break;
+    insertAt += 1;
+  }
+  return insertAt;
 }

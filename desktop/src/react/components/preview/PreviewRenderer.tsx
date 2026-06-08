@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { renderMarkdownPreview } from '../../utils/markdown';
 import {
   parseMarkdownCover,
+  removeMarkdownCover,
   resolveMarkdownCoverImagePath,
   stripMarkdownFrontMatterForPreview,
   updateMarkdownCoverLayout,
@@ -17,8 +18,13 @@ import {
 } from '../../utils/markdown-cover';
 import {
   dispatchCoverNotice,
-  requestMarkdownCoverGeneration,
+  type MarkdownCoverTargetInput,
 } from '../../utils/markdown-cover-generation';
+import {
+  isExternalCoverImagePath,
+  regenerateMarkdownCoverWithPrompt,
+  saveMarkdownCoverImage,
+} from '../../utils/markdown-cover-actions';
 import {
   applyMarkdownCoverImageDrop,
   hasMarkdownCoverDropImage,
@@ -30,10 +36,12 @@ import { openInternalLink, resolveLinkTarget, type LinkOpenContext } from '../..
 import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { useStore } from '../../stores';
 import { upsertPreviewItem } from '../../stores/preview-actions';
-import { subscribeFileChanges } from '../../services/file-change-events';
+import { isRemoteWorkbenchContentRef, normalizeWorkbenchContentRef, saveRemoteWorkbenchContent } from '../../utils/remote-file-preview';
 import { useMermaidDiagrams } from '../../hooks/use-mermaid-diagrams';
 import { LinkContextMenu, type LinkContextMenuState } from '../shared/LinkContextMenu';
 import type { PreviewItem } from '../../types';
+
+declare function t(key: string, vars?: Record<string, string | number>): string;
 
 // ── LegacyMediaFallback ──
 // image / svg 旧类型 previewItem 的隔离渲染组件。
@@ -148,14 +156,44 @@ function coverLayout(cover: MarkdownCover): Required<MarkdownCoverLayoutPatch> {
   };
 }
 
-function localBasename(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-  return normalized.slice(normalized.lastIndexOf('/') + 1) || 'cover.png';
+function remoteWorkbenchCoverImageUrl(previewItem: PreviewItem, image: string | null | undefined): string | null {
+  if (!image || !isRemoteWorkbenchContentRef(previewItem.remoteContentRef)) return null;
+  if (isExternalCoverImagePath(image)) return image;
+  const normalized = normalizeWorkbenchContentRef(previewItem.remoteContentRef);
+  const parts = image.replace(/^\.?\//, '').split('/').filter(Boolean);
+  const name = parts.pop();
+  if (!name) return null;
+  const subdir = [normalized.subdir, ...parts].filter(Boolean).join('/');
+  const params = new URLSearchParams();
+  params.set('mountId', normalized.mountId || normalized.rootId || 'default');
+  params.set('subdir', subdir);
+  params.set('name', name);
+  return `/api/workbench/content?${params.toString()}`;
 }
 
-function joinLocalPath(dirPath: string, fileName: string): string {
-  const sep = dirPath.includes('\\') && !dirPath.includes('/') ? '\\' : '/';
-  return `${dirPath.replace(/[\\/]+$/, '')}${sep}${fileName}`;
+function markdownCoverTargetForPreviewItem(previewItem: PreviewItem): MarkdownCoverTargetInput | null {
+  if (previewItem.filePath) return { filePath: previewItem.filePath };
+  if (!isRemoteWorkbenchContentRef(previewItem.remoteContentRef)) return null;
+  const normalized = normalizeWorkbenchContentRef(previewItem.remoteContentRef);
+  return {
+    target: {
+      kind: 'workbench-file',
+      mountId: normalized.mountId || normalized.rootId || 'default',
+      rootId: normalized.rootId || normalized.mountId || 'default',
+      subdir: normalized.subdir || '',
+      name: normalized.name,
+    },
+  };
+}
+
+async function writeMarkdownPreviewContent(previewItem: PreviewItem, content: string) {
+  if (isRemoteWorkbenchContentRef(previewItem.remoteContentRef)) {
+    const result = await saveRemoteWorkbenchContent(previewItem.remoteContentRef, content, previewItem.fileVersion ?? null);
+    return { result, nextVersion: result.version ?? null };
+  }
+  if (!previewItem.filePath || !window.platform?.writeFileIfUnchanged) return null;
+  const result = await window.platform.writeFileIfUnchanged(previewItem.filePath, content, previewItem.fileVersion || null);
+  return { result, nextVersion: result?.version ?? null };
 }
 
 function MarkdownCoverView({ previewItem, cover }: { previewItem: PreviewItem; cover: MarkdownCover }) {
@@ -184,32 +222,58 @@ function MarkdownCoverView({ previewItem, cover }: { previewItem: PreviewItem; c
     return () => window.removeEventListener('pointerdown', close);
   }, [menu]);
 
-  const imagePath = resolveMarkdownCoverImagePath(previewItem.filePath, cover.image);
-  const imageUrl = imagePath && /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(imagePath)
+  const remoteImageUrl = remoteWorkbenchCoverImageUrl(previewItem, cover.image);
+  const imagePath = remoteImageUrl ? null : resolveMarkdownCoverImagePath(previewItem.filePath, cover.image);
+  const imageUrl = remoteImageUrl || (imagePath && isExternalCoverImagePath(imagePath)
     ? imagePath
-    : imagePath ? window.platform?.getFileUrl?.(imagePath) || imagePath : null;
+    : imagePath ? window.platform?.getFileUrl?.(imagePath) || imagePath : null);
+  const coverTarget = useMemo(() => markdownCoverTargetForPreviewItem(previewItem), [previewItem]);
 
   const persistLayout = useCallback(async (nextLayout: Required<MarkdownCoverLayoutPatch>) => {
-    if (!previewItem.filePath || !window.platform?.writeFileIfUnchanged) return;
     const writeNext = async (content: string, version: PreviewItem['fileVersion']) => {
       const nextContent = updateMarkdownCoverLayout(content, nextLayout);
-      const result = await window.platform?.writeFileIfUnchanged?.(previewItem.filePath!, nextContent, version || null);
-      return { result, nextContent };
+      const result = await writeMarkdownPreviewContent({ ...previewItem, fileVersion: version }, nextContent);
+      return { result: result?.result, nextContent, nextVersion: result?.nextVersion };
     };
 
-    let { result, nextContent } = await writeNext(previewItem.content, previewItem.fileVersion);
-    if (!result?.ok && result?.conflict && window.platform?.readFileSnapshot) {
+    let { result, nextContent, nextVersion } = await writeNext(previewItem.content, previewItem.fileVersion);
+    if (!result?.ok && result?.conflict && previewItem.filePath && window.platform?.readFileSnapshot) {
       const snapshot = await window.platform.readFileSnapshot(previewItem.filePath);
       if (snapshot?.content != null) {
-        ({ result, nextContent } = await writeNext(snapshot.content, snapshot.version));
+        ({ result, nextContent, nextVersion } = await writeNext(snapshot.content, snapshot.version));
       }
     }
 
     if (result?.ok) {
-      upsertPreviewItem({ ...previewItem, content: nextContent, fileVersion: result.version });
+      upsertPreviewItem({ ...previewItem, content: nextContent, fileVersion: nextVersion });
       return;
     }
     dispatchCoverNotice('Cover 布局保存失败，文件可能已被外部修改。', 'error');
+  }, [previewItem]);
+
+  const deleteCover = useCallback(async () => {
+    setMenu(null);
+    const writeNext = async (content: string, version: PreviewItem['fileVersion']) => {
+      const nextContent = removeMarkdownCover(content);
+      if (nextContent === content) return { result: { ok: true, version }, nextContent, nextVersion: version };
+      const result = await writeMarkdownPreviewContent({ ...previewItem, fileVersion: version }, nextContent);
+      return { result: result?.result, nextContent, nextVersion: result?.nextVersion };
+    };
+
+    let { result, nextContent, nextVersion } = await writeNext(previewItem.content, previewItem.fileVersion);
+    if (!result?.ok && result?.conflict && previewItem.filePath && window.platform?.readFileSnapshot) {
+      const snapshot = await window.platform.readFileSnapshot(previewItem.filePath);
+      if (snapshot?.content != null) {
+        ({ result, nextContent, nextVersion } = await writeNext(snapshot.content, snapshot.version));
+      }
+    }
+
+    if (result?.ok) {
+      upsertPreviewItem({ ...previewItem, content: nextContent, fileVersion: nextVersion });
+      dispatchCoverNotice('已删除封面。', 'success');
+      return;
+    }
+    dispatchCoverNotice('封面删除失败，文件可能已被外部修改。', 'error');
   }, [previewItem]);
 
   const finishDrag = useCallback(() => {
@@ -258,35 +322,21 @@ function MarkdownCoverView({ previewItem, cover }: { previewItem: PreviewItem; c
 
   const saveImage = useCallback(async () => {
     setMenu(null);
-    if (!imagePath || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(imagePath)) {
-      dispatchCoverNotice('当前 cover 不是本地图片，无法直接保存。', 'error');
-      return;
-    }
-    const folder = await window.platform?.selectFolder?.();
-    if (!folder || !window.platform?.copyFile) return;
-    const ok = await window.platform.copyFile(imagePath, joinLocalPath(folder, localBasename(imagePath)));
-    dispatchCoverNotice(ok ? 'Cover 图片已保存。' : 'Cover 图片保存失败。', ok ? 'success' : 'error');
+    await saveMarkdownCoverImage(imagePath);
   }, [imagePath]);
 
   const regenerateWithPrompt = useCallback(async () => {
     setMenu(null);
-    if (!previewItem.filePath) return;
-    const prompt = window.prompt('这张 cover 想往哪个方向调整？');
-    if (prompt === null) return;
-    const result = await requestMarkdownCoverGeneration({
-      filePath: previewItem.filePath,
-      userGuidance: prompt,
-    });
-    dispatchCoverNotice(result.ok ? '已提交新的 cover 生成任务。' : `Cover 生成失败：${result.error}`, result.ok ? 'success' : 'error');
-  }, [previewItem.filePath]);
+    await regenerateMarkdownCoverWithPrompt(coverTarget);
+  }, [coverTarget]);
 
   const handleCoverDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!previewItem.filePath || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
+    if (!coverTarget || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
     setCoverDropActive(true);
-  }, [previewItem.filePath]);
+  }, [coverTarget]);
 
   const handleCoverDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
@@ -294,15 +344,15 @@ function MarkdownCoverView({ previewItem, cover }: { previewItem: PreviewItem; c
   }, []);
 
   const handleCoverDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!previewItem.filePath || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
+    if (!coverTarget || !hasMarkdownCoverDropImage(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     setCoverDropActive(false);
     void applyMarkdownCoverImageDrop({
-      filePath: previewItem.filePath,
+      ...coverTarget,
       dataTransfer: event.dataTransfer,
     });
-  }, [previewItem.filePath]);
+  }, [coverTarget]);
 
   if (!imageUrl) return null;
 
@@ -342,8 +392,9 @@ function MarkdownCoverView({ previewItem, cover }: { previewItem: PreviewItem; c
           style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button type="button" onClick={saveImage}>保存图片</button>
-          <button type="button" onClick={regenerateWithPrompt}>自定义提示词生成图片</button>
+          <button type="button" onClick={saveImage}>{t('preview.cover.saveImage')}</button>
+          <button type="button" onClick={regenerateWithPrompt}>{t('preview.cover.regenerateWithPrompt')}</button>
+          <button type="button" className="markdown-cover-menu-danger" onClick={deleteCover}>{t('preview.cover.deleteCover')}</button>
         </div>
       )}
     </div>
@@ -365,11 +416,11 @@ function MarkdownCoverDropRail({ active }: { active: boolean }) {
   );
 }
 
-function MarkdownNoCoverDropHost({ filePath, children }: { filePath?: string; children: ReactNode }) {
+function MarkdownNoCoverDropHost({ coverTarget, children }: { coverTarget: MarkdownCoverTargetInput | null; children: ReactNode }) {
   const [active, setActive] = useState(false);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!filePath || !hasMarkdownCoverDropImage(event.dataTransfer) || !isMarkdownTopCoverDrop(event)) {
+    if (!coverTarget || !hasMarkdownCoverDropImage(event.dataTransfer) || !isMarkdownTopCoverDrop(event)) {
       setActive(false);
       return;
     }
@@ -377,7 +428,7 @@ function MarkdownNoCoverDropHost({ filePath, children }: { filePath?: string; ch
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
     setActive(true);
-  }, [filePath]);
+  }, [coverTarget]);
 
   const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
@@ -385,17 +436,17 @@ function MarkdownNoCoverDropHost({ filePath, children }: { filePath?: string; ch
   }, []);
 
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!filePath || !hasMarkdownCoverDropImage(event.dataTransfer) || !isMarkdownTopCoverDrop(event)) return;
+    if (!coverTarget || !hasMarkdownCoverDropImage(event.dataTransfer) || !isMarkdownTopCoverDrop(event)) return;
     event.preventDefault();
     event.stopPropagation();
     setActive(false);
     void applyMarkdownCoverImageDrop({
-      filePath,
+      ...coverTarget,
       dataTransfer: event.dataTransfer,
     });
-  }, [filePath]);
+  }, [coverTarget]);
 
-  if (!filePath) return <>{children}</>;
+  if (!coverTarget) return <>{children}</>;
   return (
     <div
       className="markdown-cover-drop-host"
@@ -413,6 +464,7 @@ function MarkdownPreview({ previewItem }: { previewItem: PreviewItem }) {
   const divRef = useRef<HTMLDivElement>(null);
   const [linkMenu, setLinkMenu] = useState<LinkContextMenuState | null>(null);
   const cover = useMemo(() => parseMarkdownCover(previewItem.content), [previewItem.content]);
+  const coverTarget = useMemo(() => markdownCoverTargetForPreviewItem(previewItem), [previewItem]);
   const body = useMemo(() => stripMarkdownFrontMatterForPreview(previewItem.content), [previewItem.content]);
   const linkContext = useMemo<LinkOpenContext>(() => ({
     origin: 'desk',
@@ -464,38 +516,13 @@ function MarkdownPreview({ previewItem }: { previewItem: PreviewItem }) {
   }, [body]);
   useMermaidDiagrams(divRef, [body]);
 
-  useEffect(() => {
-    const filePath = previewItem.filePath;
-    if (!filePath) return;
-    window.platform?.watchFile?.(filePath);
-    const unsubscribe = subscribeFileChanges((changedPath) => {
-      if (changedPath !== filePath) return;
-      void (async () => {
-        const snapshot = await window.platform?.readFileSnapshot?.(filePath);
-        const nextContent = snapshot?.content ?? await window.platform?.readFile?.(filePath);
-        if (nextContent == null || nextContent === previewItem.content) return;
-        upsertPreviewItem({
-          ...previewItem,
-          content: nextContent,
-          fileVersion: snapshot?.version ?? previewItem.fileVersion,
-        });
-      })().catch((err) => {
-        console.warn('[PreviewRenderer] markdown reload failed:', err);
-      });
-    });
-    return () => {
-      unsubscribe();
-      window.platform?.unwatchFile?.(filePath);
-    };
-  }, [previewItem]);
-
   return (
     <>
       {cover && <MarkdownCoverView previewItem={previewItem} cover={cover} />}
       {cover ? (
         <div
           ref={divRef}
-          className="preview-markdown md-content"
+          className="preview-markdown md-content markdown-has-cover"
           onClick={handleLinkClick}
           onContextMenu={handleLinkContextMenu}
           dangerouslySetInnerHTML={{
@@ -506,7 +533,7 @@ function MarkdownPreview({ previewItem }: { previewItem: PreviewItem }) {
           }}
         />
       ) : (
-        <MarkdownNoCoverDropHost filePath={previewItem.filePath}>
+        <MarkdownNoCoverDropHost coverTarget={coverTarget}>
           <div
             ref={divRef}
             className="preview-markdown md-content"

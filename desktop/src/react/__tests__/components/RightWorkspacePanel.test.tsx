@@ -4,6 +4,8 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { useStore } from '../../stores';
 import type { ChatListItem } from '../../stores/chat-types';
 import { RightWorkspacePanel } from '../../components/right-workspace/RightWorkspacePanel';
@@ -128,6 +130,7 @@ describe('RightWorkspacePanel', () => {
     vi.mocked(openMediaViewerForRef).mockClear();
     vi.mocked(hanaFetch).mockReset();
     vi.mocked(hanaFetch).mockImplementation(async () => jsonResponse({ sessions: [] }));
+    document.documentElement.removeAttribute('data-platform');
     window.platform = {
       openFolder: () => undefined,
       openFile: vi.fn(),
@@ -161,6 +164,14 @@ describe('RightWorkspacePanel', () => {
     expect(screen.queryByText(/工作台 ·/)).not.toBeInTheDocument();
   });
 
+  it('hides desktop-only open-folder controls in the PWA workspace', () => {
+    document.documentElement.setAttribute('data-platform', 'web');
+
+    render(<RightWorkspacePanel />);
+
+    expect(screen.queryByRole('button', { name: '打开文件夹' })).not.toBeInTheDocument();
+  });
+
   it('moves the tab slider when switching between session files and workspace', () => {
     render(<RightWorkspacePanel />);
 
@@ -171,6 +182,50 @@ describe('RightWorkspacePanel', () => {
 
     expect((tabList as HTMLElement).style.getPropertyValue('--right-workspace-active-tab-index')).toBe('0');
     expect(screen.getByRole('tab', { name: '对话文件' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('lets file names use the row width until hover or focus reveals file actions', () => {
+    const css = fs.readFileSync(
+      path.join(__dirname, '../../components/right-workspace/RightWorkspacePanel.module.css'),
+      'utf-8',
+    );
+
+    expect(css).toMatch(/\.fileActions\s*\{[\s\S]*position:\s*absolute/);
+    expect(css).toMatch(/\.fileActions\s*\{[\s\S]*opacity:\s*0/);
+    expect(css).toMatch(/\.fileRow:hover \.fileMain,\s*\.fileRow:focus-within \.fileMain\s*\{[\s\S]*padding-right:\s*122px/);
+    expect(css).toMatch(/\.fileRow:hover \.fileActions,\s*\.fileRow:focus-within \.fileActions\s*\{[\s\S]*opacity:\s*1/);
+    expect(css).not.toMatch(/\.fileRowSelected \.fileActions\s*\{[\s\S]*opacity:\s*1/);
+  });
+
+  it('keeps right workspace panel spacing on the shared panel gap contract', () => {
+    const panelCss = fs.readFileSync(
+      path.join(__dirname, '../../components/right-workspace/RightWorkspacePanel.module.css'),
+      'utf-8',
+    );
+    const globalCss = fs.readFileSync(
+      path.join(__dirname, '../../../styles.css'),
+      'utf-8',
+    );
+    const shellBlock = panelCss.match(/\.shell\s*\{[\s\S]*?\}/)?.[0] ?? '';
+    const jianInnerBlock = globalCss.match(/\.jian-sidebar-inner\s*\{[\s\S]*?\}/)?.[0] ?? '';
+    const floatRightBlock = globalCss.match(/\.float-sidebar\[data-side="right"\]\s*\{[\s\S]*?\}/)?.[0] ?? '';
+    const rootBlock = globalCss.match(/:root\s*\{[\s\S]*?\}/)?.[0] ?? '';
+    const jianCardBlock = globalCss.match(/\.jian-card\s*\{[\s\S]*?\}/)?.[0] ?? '';
+
+    expect(rootBlock).toMatch(/--panel-edge-gap:\s*var\(--space-sm\);/);
+    expect(rootBlock).toMatch(/--panel-card-bg:\s*var\(--bg-card,\s*var\(--bg\)\);/);
+    expect(rootBlock).toMatch(/--panel-card-radius:\s*var\(--radius-lg\);/);
+    expect(rootBlock).toMatch(/--panel-card-border:\s*1px solid rgba\(0,\s*0,\s*0,\s*0\.08\);/);
+    expect(rootBlock).toMatch(/--panel-card-shadow:\s*none;/);
+    expect(shellBlock).toMatch(/padding:\s*var\(--panel-edge-gap\) 0;/);
+    expect(shellBlock).toMatch(/gap:\s*var\(--panel-edge-gap\);/);
+    expect(panelCss).toMatch(/--right-workspace-jian-bottom:\s*var\(--panel-edge-gap\);/);
+    expect(jianInnerBlock).toMatch(/padding:\s*0 var\(--panel-edge-gap\) 0 0;/);
+    expect(floatRightBlock).toMatch(/padding:\s*0 var\(--panel-edge-gap\);/);
+    expect(jianCardBlock).toMatch(/background(?:-color)?:\s*var\(--panel-card-bg\);/);
+    expect(jianCardBlock).toMatch(/border-radius:\s*var\(--panel-card-radius\);/);
+    expect(jianCardBlock).toMatch(/border:\s*var\(--panel-card-border\);/);
+    expect(jianCardBlock).toMatch(/box-shadow:\s*var\(--panel-card-shadow\);/);
   });
 
   it('places the preview toggle before the open-folder icon in the workspace toolbar', () => {
@@ -227,6 +282,36 @@ describe('RightWorkspacePanel', () => {
     expect(screen.getByText('report.pdf')).toBeInTheDocument();
     expect(screen.getByText('session-block-file')).toBeInTheDocument();
     expect(screen.getByText('可用')).toBeInTheDocument();
+  });
+
+  it('uses file-kind icons for audio session files', () => {
+    resetStore([
+      {
+        type: 'message',
+        data: {
+          id: 'a1',
+          role: 'assistant',
+          timestamp: 1700000000000,
+          blocks: [
+            {
+              type: 'file',
+              fileId: 'sf_audio',
+              filePath: '/tmp/session-files/recording.wav',
+              label: 'recording.wav',
+              ext: 'wav',
+              status: 'available',
+            },
+          ],
+        },
+      },
+    ]);
+
+    const { container } = render(<RightWorkspacePanel />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '对话文件' }));
+
+    expect(screen.getByText('recording.wav')).toBeInTheDocument();
+    expect(container.querySelector('svg[data-file-kind="audio"]')).not.toBeNull();
   });
 
   it('wires session file actions to preview, open, reveal and copy path consumers', () => {
@@ -325,6 +410,63 @@ describe('RightWorkspacePanel', () => {
     const download = screen.getByRole('link', { name: '下载到本机 report.pdf' });
     expect(download).toHaveAttribute('href', 'http://hana.local:14500/api/resources/res_sf_report/content');
     expect(download).toHaveAttribute('download', 'report.pdf');
+  });
+
+  it('uses preview and download actions without local path controls in the PWA session file panel', () => {
+    document.documentElement.setAttribute('data-platform', 'web');
+    resetStore([]);
+    useStore.setState({
+      activeServerConnection: {
+        connectionId: 'browser:server_lan',
+        kind: 'lan',
+        serverId: 'server_lan',
+        userId: 'user_lan',
+        studioId: 'studio_lan',
+        label: 'LAN Hana',
+        baseUrl: 'http://hana.local:14500',
+        wsUrl: 'ws://hana.local:14500',
+        token: null,
+        authState: 'paired',
+        trustState: 'lan',
+        credentialKind: 'device_credential',
+        platformAccountId: null,
+        officialServiceKind: null,
+        capabilities: ['resources', 'files'],
+      },
+      sessionRegistryFilesByPath: {
+        '/sessions/main.jsonl': [{
+          fileId: 'sf_report',
+          filePath: '/remote/cache/report.pdf',
+          label: 'report.pdf',
+          ext: 'pdf',
+          status: 'available',
+          resource: {
+            schemaVersion: 1,
+            resourceId: 'res_sf_report',
+            name: 'studios/studio_lan/resources/res_sf_report',
+            studioId: 'studio_lan',
+            type: 'file',
+            source: 'session_file',
+            fileId: 'sf_report',
+            lifecycle: { status: 'available', missingAt: null },
+            storage: { provider: 'session_file', localOnly: true },
+            links: {
+              self: '/api/resources/res_sf_report',
+              content: '/api/resources/res_sf_report/content',
+            },
+          },
+        }],
+      },
+    } as never);
+
+    render(<RightWorkspacePanel />);
+    fireEvent.click(screen.getByRole('tab', { name: '对话文件' }));
+
+    expect(screen.getByRole('button', { name: '预览 report.pdf' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '下载到本机 report.pdf' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开 report.pdf' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '定位 report.pdf' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制路径 report.pdf' })).not.toBeInTheDocument();
   });
 
   it('sorts session files without a manual refresh or add entry', () => {

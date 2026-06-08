@@ -83,7 +83,7 @@
     height: 40px;
     flex-shrink: 0;
     border: 1px solid transparent;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: transparent;
     color: var(--text-muted);
     cursor: default;
@@ -136,7 +136,7 @@
     font-family: inherit;
     text-align: left;
     padding: 8px 12px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     font-size: 0.88rem;
     color: var(--text-muted);
     background: none;
@@ -181,12 +181,14 @@
 }
 
 .settings-main > .settings-tab-title,
+.settings-main > .settings-tab-heading,
 .settings-main > .settings-tab-content {
     width: 100%;
     max-width: 640px;
 }
 
 .settings-main-wide > .settings-tab-title,
+.settings-main-wide > .settings-tab-heading,
 .settings-main-wide > .settings-tab-content {
     max-width: 960px;
 }
@@ -265,25 +267,35 @@
     opacity: 0.6;
 }
 
-/* Tab 顶部大标题（每个 tab 右侧面板第一行：工作台、界面、助手…）
- * 粗体衬线（宋体），所有 tab 统一 */
+/* Tab 顶部大标题（每个 tab 右侧面板第一行：工作台、界面、助手…） */
+.settings-tab-heading {
+    margin: 0 0 var(--space-xl) 0;
+}
+
 .settings-tab-title {
-    font-family: "Songti SC", "STSong", serif;
+    font-family: var(--font-ui);
     font-size: 1.4rem;
     font-weight: 700;
     color: var(--text);
-    margin: 0 0 var(--space-xl) 0;
-    letter-spacing: 0.05em;
+    margin: 0;
+    letter-spacing: 0;
+}
+
+.settings-tab-description {
+    margin: var(--space-md) 0 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
 }
 
 .settings-header-tab-title {
-    font-family: "Songti SC", "STSong", serif;
+    font-family: var(--font-ui);
     font-size: 1.4rem;
     font-weight: 700;
     color: var(--text);
     line-height: 1;
     margin: 0;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
     white-space: nowrap;
     -webkit-app-region: no-drag;
 }
@@ -322,7 +334,7 @@
     cursor: default;
     color: var(--text-muted);
     padding: 4px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     display: flex;
     align-items: center;
     transition: color var(--duration-fast);
@@ -336,6 +348,110 @@
     color: var(--text-muted);
     margin: var(--space-sm) 0 var(--space-md);
     text-align: center;
+}
+
+.shortcut-keycaps {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+}
+
+.shortcut-keycap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 8px;
+    border: var(--border-width, 1px) solid color-mix(in srgb, var(--accent) 24%, var(--border));
+    border-radius: var(--radius-input, 6px);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.quick-chat-shortcut-control {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.quick-chat-shortcut-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 132px;
+    height: 34px;
+    padding: 0 10px;
+    border: var(--border-width, 1px) solid color-mix(in srgb, var(--accent) 20%, var(--border));
+    border-radius: var(--radius-input, 6px);
+    background: color-mix(in srgb, var(--accent) 5%, var(--bg-card));
+    color: var(--text);
+    font: inherit;
+    cursor: default;
+}
+
+.quick-chat-shortcut-button.recording {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    background: color-mix(in srgb, var(--accent) 11%, var(--bg-card));
+}
+
+.quick-chat-shortcut-button:disabled,
+.quick-chat-reset-button:disabled {
+    opacity: 0.48;
+}
+
+.quick-chat-reset-button {
+    height: 34px;
+    padding: 0 10px;
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-input, 6px);
+    color: var(--text-light);
+    background: var(--bg-card);
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: default;
+}
+
+.quick-chat-timeout-control {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.quick-chat-timeout-input {
+    width: 72px;
+    height: 34px;
+    padding: 0 10px;
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-input, 6px);
+    color: var(--text);
+    background: var(--bg-card);
+    font: inherit;
+    font-size: 0.86rem;
+}
+
+.quick-chat-timeout-input:focus {
+    border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+    outline: none;
+}
+
+.quick-chat-timeout-input:disabled {
+    opacity: 0.48;
+}
+
+.quick-chat-timeout-unit {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
 }
 
 /* 头像居中（单头像，助手页和我的页面各用一个） */
@@ -381,7 +497,8 @@
     transition: width var(--duration-slow) var(--ease-out) 0.8s;
 }
 
-.agent-cards:hover {
+.agent-cards:hover,
+.agent-cards-expanded {
     width: max(240px, calc(var(--cards-spread-width, 240) * 1px));
     transition-delay: 0s;
     /* overflow scroll for 9+ cards */
@@ -391,7 +508,8 @@
     -ms-overflow-style: none;
 }
 
-.agent-cards:hover::-webkit-scrollbar {
+.agent-cards:hover::-webkit-scrollbar,
+.agent-cards-expanded::-webkit-scrollbar {
     display: none;
 }
 
@@ -517,13 +635,15 @@
 }
 
 /* Hover 展开：直线排列（rotate 归零 + translateX 展开） */
-.agent-cards:hover .agent-card {
+.agent-cards:hover .agent-card,
+.agent-cards-expanded .agent-card {
     transform-origin: center center;
     transform: translateX(var(--tx-spread, 0px)) rotate(0deg) translateY(var(--lift, 0px));
     transition-delay: 0s;
 }
 
-.agent-cards:hover .agent-card-name {
+.agent-cards:hover .agent-card-name,
+.agent-cards-expanded .agent-card-name {
     opacity: 1;
 }
 
@@ -568,7 +688,7 @@
 
 .agent-card-action {
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: transparent;
     color: var(--text-muted);
     cursor: default;
@@ -665,7 +785,7 @@
 .agent-create-cancel,
 .agent-create-confirm {
     padding: 0.35rem 0.9rem;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     border: none;
     font-family: inherit;
     font-size: 0.82rem;
@@ -709,7 +829,7 @@
     width: 100%;
     min-height: 74px;
     border: 1.5px dashed color-mix(in srgb, var(--text-muted) 42%, transparent);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: color-mix(in srgb, var(--bg-card) 78%, transparent);
     color: var(--text-muted);
     display: flex;
@@ -1374,7 +1494,7 @@
 .agent-delete-cancel,
 .agent-delete-danger {
     padding: 0.35rem 0.9rem;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     border: none;
     font-family: inherit;
     font-size: 0.82rem;
@@ -1661,7 +1781,7 @@
     width: 7.5rem;
     height: 7.5rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: var(--bg-card);
     padding: 0.35rem;
 }
@@ -1680,7 +1800,7 @@
     gap: 3px;
     padding: var(--space-sm);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--bg-card);
 }
 
@@ -1695,6 +1815,13 @@
     font-size: 0.78rem;
     font-weight: 500;
     color: var(--text);
+}
+
+.access-remote-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: var(--space-md);
 }
 
 .access-device-list {
@@ -1764,7 +1891,7 @@
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     padding: 0.45rem 0.65rem;
     outline: none;
     transition: border-color var(--duration-slow) var(--ease-out);
@@ -1820,7 +1947,7 @@
     gap: 4px;
     padding: 4px 12px;
     border: 1px solid var(--overlay-medium);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: none;
     color: var(--text-muted);
     font-size: 0.75rem;
@@ -1882,7 +2009,7 @@
     padding: var(--space-lg) var(--space-md);
     min-height: 5rem;
     border: 1.5px dashed var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     color: var(--text-muted);
     font-size: 0.82rem;
     cursor: default;
@@ -1912,13 +2039,13 @@
 
 /* 首尾 item 作为 SettingsSection body 直接子元素时，需要自带圆角贴合白卡 border-radius */
 .capability-row:first-child {
-    border-top-left-radius: var(--radius-card, 10px);
-    border-top-right-radius: var(--radius-card, 10px);
+    border-top-left-radius: var(--radius-card, 8px);
+    border-top-right-radius: var(--radius-card, 8px);
 }
 
 .capability-row:last-child {
-    border-bottom-left-radius: var(--radius-card, 10px);
-    border-bottom-right-radius: var(--radius-card, 10px);
+    border-bottom-left-radius: var(--radius-card, 8px);
+    border-bottom-right-radius: var(--radius-card, 8px);
 }
 
 /* 缩进子项（如 allow_github_fetch） */
@@ -1955,7 +2082,7 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     overflow: hidden;
 }
 
@@ -1987,13 +2114,13 @@
 /* 作为 SettingsSection body 直接子元素时，首尾 item 需要自带圆角对齐白卡 border-radius。
  * 在 .skills-list-block 里有 overflow:hidden 裁掉，不影响视觉 */
 .skills-list-item:first-child {
-    border-top-left-radius: var(--radius-card, 10px);
-    border-top-right-radius: var(--radius-card, 10px);
+    border-top-left-radius: var(--radius-card, 8px);
+    border-top-right-radius: var(--radius-card, 8px);
 }
 
 .skills-list-item:last-child {
-    border-bottom-left-radius: var(--radius-card, 10px);
-    border-bottom-right-radius: var(--radius-card, 10px);
+    border-bottom-left-radius: var(--radius-card, 8px);
+    border-bottom-right-radius: var(--radius-card, 8px);
 }
 
 .skills-list-item:hover {
@@ -2051,7 +2178,7 @@
 .skill-bundle-create,
 .skill-bundle-icon-button {
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--bg-card);
     color: var(--text-muted);
     cursor: default;
@@ -2216,7 +2343,7 @@
     width: 26px;
     height: 26px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--bg-card);
     color: var(--text-muted);
     cursor: default;
@@ -2234,7 +2361,7 @@
     box-sizing: border-box;
     padding: 0.55rem 0.65rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--bg);
     color: var(--text);
     font: inherit;
@@ -2258,7 +2385,7 @@
     min-width: 72px;
     padding: 0.45rem 0.8rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--bg-card);
     color: var(--text-muted);
     font: inherit;
@@ -2364,7 +2491,7 @@
     color: var(--text-muted);
     font-size: 0.7rem;
     cursor: default;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     opacity: 0;
     transition: all var(--duration-fast);
 }
@@ -2403,7 +2530,7 @@
 /* 兼容技能路径管理 */
 .compat-paths-group {
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     overflow: hidden;
     margin-top: 0.4rem;
     box-shadow: 0 1px 4px var(--shadow);
@@ -2624,7 +2751,7 @@
     width: 32px;
     height: 32px;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background-color: var(--bg-card);
     color: var(--text-muted);
     cursor: default;
@@ -2650,7 +2777,7 @@
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     padding: 0.55rem 0.65rem;
     outline: none;
     resize: vertical;
@@ -2718,29 +2845,33 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-md) var(--space-sm);
-    border: none;
-    border-radius: var(--radius-card, 10px);
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     text-align: center;
-    transition: all var(--duration-fast) var(--ease-out);
+    outline: 2px solid transparent;
+    outline-offset: -2px;
+    transition:
+        border-color var(--duration-fast) var(--ease-out),
+        outline-color var(--duration-fast) var(--ease-out),
+        background-color var(--duration-fast) var(--ease-out);
     font-family: inherit;
     min-height: 72px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .theme-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
 }
 
 .theme-card.active {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 2px var(--accent);
+    border-color: var(--accent);
+    outline-color: var(--accent);
 }
 
 /* 暖纸：用暖纸主题的真实配色 */
 .theme-card[data-theme="warm-paper"] {
-    background: #F8F5ED;
+    background: #F8F4ED;
 }
 
 .theme-card[data-theme="warm-paper"] .theme-card-name {
@@ -2766,7 +2897,7 @@
 
 /* 素白（高对比）：用高对比主题的真实配色 */
 .theme-card[data-theme="high-contrast"] {
-    background: #FAF9F6;
+    background: #FAF8F7;
 }
 
 .theme-card[data-theme="high-contrast"] .theme-card-name {
@@ -2870,7 +3001,7 @@
 
 /* 自动：左暖纸右蓝调，硬拼色 */
 .theme-card[data-theme="auto"] {
-    background: #F4F0E4;
+    background: #F8F4ED;
 }
 
 .theme-card[data-theme="auto"]::after {
@@ -2881,7 +3012,7 @@
     width: 50%;
     height: 100%;
     background: #171C2A;
-    border-radius: 0 var(--radius-card, 10px) var(--radius-card, 10px) 0;
+    border-radius: 0 var(--radius-card, 8px) var(--radius-card, 8px) 0;
 }
 
 .theme-card[data-theme="auto"] .theme-card-name,
@@ -2919,6 +3050,68 @@
     letter-spacing: 0.02em;
 }
 
+/* Font cards */
+.font-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+}
+
+.font-card {
+    min-width: 0;
+    min-height: 74px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: var(--space-sm);
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-card, 8px);
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: default;
+    text-align: center;
+    outline: 2px solid transparent;
+    outline-offset: -2px;
+    transition:
+        border-color var(--duration-fast) var(--ease-out),
+        outline-color var(--duration-fast) var(--ease-out),
+        background-color var(--duration-fast) var(--ease-out);
+}
+
+.font-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
+}
+
+.font-card.active {
+    border-color: var(--accent);
+    outline-color: var(--accent);
+}
+
+.font-card-sample {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.font-card-desc {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-ui);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.25;
+}
+
 /* 悬浮保存按钮（sticky 在底部） */
 .settings-section-footer {
     position: sticky;
@@ -2943,7 +3136,7 @@
     color: var(--accent);
     background: transparent;
     border: 1.5px solid var(--accent);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
     letter-spacing: 0.02em;
@@ -2969,7 +3162,7 @@
     color: var(--text-muted);
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
     white-space: nowrap;
@@ -2996,7 +3189,7 @@
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
     letter-spacing: 0.02em;
@@ -3033,7 +3226,7 @@
     color: var(--accent);
     background: transparent;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: background var(--duration-fast) var(--ease-out);
     letter-spacing: 0.02em;
@@ -3053,7 +3246,7 @@
 .thinking-level-bar {
     display: flex;
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     overflow: hidden;
 }
 
@@ -3093,7 +3286,7 @@
     color: var(--accent);
     background: none;
     border: 1.5px solid var(--accent);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
 }
@@ -3312,7 +3505,7 @@ a.about-link:hover {
     margin-top: var(--space-sm);
     padding: var(--space-md);
     background: var(--overlay-light);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     font-size: 0.68rem;
     line-height: 1.6;
     color: var(--text-muted);
@@ -3351,7 +3544,7 @@ a.about-link:hover {
    ======================================== */
 .provider-list {
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     overflow: hidden;
     box-shadow: 0 1px 4px var(--shadow);
 }
@@ -3419,7 +3612,7 @@ a.about-link:hover {
     height: 26px;
     background: none;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     color: var(--text-muted);
     cursor: default;
     font-size: 0.82rem;
@@ -3460,7 +3653,7 @@ a.about-link:hover {
     color: var(--accent);
     background: var(--accent-light);
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
     letter-spacing: 0.02em;
@@ -3475,7 +3668,7 @@ a.about-link:hover {
    ======================================== */
 .oauth-list {
     background: var(--bg-card, var(--bg));
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 1px 4px var(--shadow);
     overflow: hidden;
 }
@@ -3516,7 +3709,7 @@ a.about-link:hover {
     align-items: center;
     gap: var(--space-sm);
     padding: 3px 6px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
 }
 
 .oauth-custom-model-item:hover { background: var(--bg-hover); }
@@ -3562,7 +3755,7 @@ a.about-link:hover {
     padding: 4px 10px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     color: var(--text-secondary);
     cursor: default;
     white-space: nowrap;
@@ -3597,7 +3790,7 @@ a.about-link:hover {
     color: var(--success, #5a9);
     background: rgba(90, 170, 153, 0.1);
     padding: 2px 8px;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     flex-shrink: 0;
 }
 
@@ -3607,7 +3800,7 @@ a.about-link:hover {
     font-family: inherit;
     font-size: 0.78rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: all var(--duration-fast);
     flex-shrink: 0;
@@ -3652,7 +3845,7 @@ a.about-link:hover {
     color: #fff;
     background: var(--accent);
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: opacity var(--duration-fast);
     flex-shrink: 0;
@@ -3683,7 +3876,7 @@ a.about-link:hover {
     padding: var(--space-xs) var(--space-md);
     background: var(--bg-secondary, #f5f5f5);
     border: 1px dashed var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     user-select: all;
     transition: background var(--duration-fast);
@@ -3715,7 +3908,7 @@ a.about-link:hover {
     height: 420px;
     background: var(--bg-card, var(--bg));
     border: 1px solid var(--overlay-light);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 1px 4px var(--shadow);
     position: relative;
     overflow: hidden;
@@ -3806,6 +3999,13 @@ a.about-link:hover {
     opacity: 1;
 }
 
+.pv-list-item-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
 .pv-config-alert {
     margin: 0 0 var(--space-md);
     padding: 8px 10px;
@@ -3877,7 +4077,7 @@ a.about-link:hover {
     border: none;
     cursor: default;
     padding: 4px 8px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
@@ -3917,7 +4117,7 @@ a.about-link:hover {
     color: var(--text-muted);
     background: transparent;
     border: 1px solid var(--border-light, var(--overlay-light));
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
 }
@@ -4174,7 +4374,7 @@ a.about-link:hover {
     grid-template-columns: repeat(2, minmax(44px, auto));
     gap: 2px;
     padding: 2px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--overlay-light);
 }
 
@@ -4507,7 +4707,7 @@ a.about-link:hover {
     font-size: 0.72rem;
     padding: 4px 10px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: transparent;
     color: var(--text-secondary);
     cursor: default;
@@ -4561,7 +4761,7 @@ a.about-link:hover {
     background: var(--accent);
     color: #fff;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: opacity var(--duration-fast);
 }
@@ -4619,6 +4819,10 @@ a.about-link:hover {
     min-height: 28px;
 }
 
+.pv-cred-row-top {
+    align-items: flex-start;
+}
+
 .pv-cred-label {
     font-size: 0.72rem;
     color: var(--text-muted);
@@ -4645,6 +4849,12 @@ a.about-link:hover {
 .pv-cred-url-row .settings-input {
     width: 100%;
     font-size: 0.75rem;
+}
+
+.pv-headers-textarea {
+    min-height: 66px;
+    font-size: 0.75rem;
+    resize: vertical;
 }
 
 .pv-cred-badge {
@@ -4678,7 +4888,7 @@ a.about-link:hover {
     height: 28px;
     background: none;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     color: var(--text-muted);
     cursor: default;
     flex-shrink: 0;
@@ -4708,7 +4918,7 @@ a.about-link:hover {
     background: var(--accent);
     color: #fff;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     white-space: nowrap;
     transition: opacity var(--duration-fast);
@@ -4725,7 +4935,7 @@ a.about-link:hover {
     background: transparent;
     color: var(--accent);
     border: 1px solid var(--accent);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: all var(--duration-fast);
 }
@@ -4740,7 +4950,7 @@ a.about-link:hover {
     font-size: 0.72rem;
     padding: 3px 8px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: transparent;
     color: var(--text-secondary);
     cursor: default;
@@ -4785,7 +4995,7 @@ a.about-link:hover {
     align-items: center;
     gap: 6px;
     padding: 3px 6px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     min-width: 0;
 }
 
@@ -4861,7 +5071,7 @@ a.about-link:hover {
 .pv-model-edit-card {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 8px 24px var(--shadow);
     padding: 12px;
     display: flex;
@@ -4891,6 +5101,15 @@ a.about-link:hover {
 .pv-model-edit-row {
     display: flex;
     gap: 8px;
+}
+
+.pv-model-edit-capabilities {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pv-model-edit-capabilities .pv-model-edit-field {
+    min-width: 0;
 }
 
 .pv-model-edit-actions {
@@ -4927,7 +5146,7 @@ a.about-link:hover {
     color: var(--text-muted);
     background: var(--bg-input, var(--bg));
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     padding: 0 10px;
     white-space: nowrap;
@@ -4962,7 +5181,7 @@ a.about-link:hover {
     align-items: center;
     justify-content: center;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: transparent;
     color: var(--text-secondary);
     cursor: default;
@@ -4986,7 +5205,7 @@ a.about-link:hover {
     color: var(--text-muted);
     background: var(--bg-input, var(--bg));
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     transition: border-color var(--duration-fast);
 }
@@ -4997,7 +5216,7 @@ a.about-link:hover {
     /* position/left/top/width/maxHeight/zIndex set by JS */
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 4px 16px var(--shadow);
     overflow: hidden;
     display: flex;
@@ -5074,7 +5293,7 @@ a.about-link:hover {
     flex: 1;
     padding: 4px 8px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     font-family: inherit;
     font-size: 0.75rem;
     color: var(--text);
@@ -5111,7 +5330,7 @@ a.about-link:hover {
     border: none;
     cursor: default;
     padding: 2px 6px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
 }
 
 .pv-fetch-btn:hover { color: var(--accent); background: var(--accent-light); }
@@ -5122,7 +5341,7 @@ a.about-link:hover {
     padding: 4px 8px;
     margin-bottom: var(--space-xs);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     background: var(--bg-input, var(--bg));
     color: var(--text);
     font-family: inherit;
@@ -5148,7 +5367,7 @@ a.about-link:hover {
     align-items: center;
     gap: 6px;
     padding: 4px 6px;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
 }
 
 .pv-model-item:hover { background: var(--accent-light); }
@@ -5220,7 +5439,7 @@ a.about-link:hover {
     justify-content: center;
     background: none;
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     color: var(--text-muted);
     cursor: default;
     flex-shrink: 0;
@@ -5235,7 +5454,7 @@ a.about-link:hover {
     color: var(--danger, #c55);
     background: transparent;
     border: 1px solid var(--danger, #c55);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     cursor: default;
     padding: 3px 10px;
     opacity: 0.6;
@@ -5257,7 +5476,7 @@ a.about-link:hover {
     z-index: 9999;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 8px 24px var(--shadow);
     padding: 16px 20px;
     width: 320px;
@@ -5293,7 +5512,7 @@ a.about-link:hover {
    Pin 列表（置顶记忆管理）
    ======================================== */
 .pin-list {
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     overflow: hidden;
 }
 
@@ -5362,7 +5581,7 @@ a.about-link:hover {
     height: 26px;
     background: none;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     color: var(--text-muted);
     cursor: default;
     font-size: 0.82rem;
@@ -5400,7 +5619,7 @@ a.about-link:hover {
     color: var(--accent);
     background: var(--accent-light);
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
     flex-shrink: 0;
@@ -5430,7 +5649,7 @@ a.about-link:hover {
 
 .exp-block {
     background: var(--bg-card, var(--bg));
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 1px 4px var(--shadow);
     padding: 0.6rem var(--space-md) 0.5rem;
     transition: box-shadow var(--duration-fast) var(--ease-out);
@@ -5476,7 +5695,7 @@ a.about-link:hover {
     height: 26px;
     background: none;
     border: none;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     color: var(--text-muted);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
@@ -5526,7 +5745,7 @@ a.about-link:hover {
     color: var(--text);
     background: transparent;
     border: 1px solid var(--overlay-light);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     padding: 0.4rem 0.55rem;
     resize: vertical;
     width: 100%;
@@ -5564,7 +5783,7 @@ a.about-link:hover {
     padding: 0.4rem var(--space-md);
     font-size: 0.82rem;
     border: 1px solid var(--overlay-light);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: var(--bg-card, var(--bg));
     color: var(--text);
     cursor: default;
@@ -5587,6 +5806,75 @@ a.about-link:hover {
 
 .memory-action-btn.danger:hover {
     background: rgba(var(--coral-rgb), 0.08);
+}
+
+.memory-health-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.58rem 0.68rem;
+    margin-bottom: var(--space-lg);
+    border: 1px solid var(--overlay-light);
+    border-radius: 6px;
+    background: var(--overlay-subtle);
+    color: var(--text-light);
+}
+
+.memory-health-main {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.memory-health-dot {
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--text-muted);
+}
+
+.memory-health-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.memory-health-detail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.8rem;
+    padding-left: 0.87rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
+.memory-health-ok .memory-health-dot {
+    background: var(--sage, #8aa083);
+}
+
+.memory-health-attention {
+    border-color: rgba(var(--gold-rgb, 180, 138, 68), 0.35);
+    background: rgba(var(--gold-rgb, 180, 138, 68), 0.08);
+}
+
+.memory-health-attention .memory-health-dot {
+    background: var(--gold, #b48a44);
+}
+
+.memory-health-error {
+    border-color: rgba(var(--coral-rgb), 0.35);
+    background: rgba(var(--coral-rgb), 0.08);
+}
+
+.memory-health-error .memory-health-dot {
+    background: var(--coral);
+}
+
+.memory-health-muted .memory-health-dot {
+    background: var(--text-muted);
 }
 
 /* 清除确认浮层 */
@@ -5632,7 +5920,7 @@ a.about-link:hover {
     padding: 0.35rem var(--space-lg);
     font-size: 0.82rem;
     border: 1px solid var(--overlay-light);
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: var(--bg-card, var(--bg));
     color: var(--text);
     cursor: default;
@@ -5647,7 +5935,7 @@ a.about-link:hover {
     padding: 0.35rem var(--space-lg);
     font-size: 0.82rem;
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: var(--coral);
     color: white;
     cursor: default;
@@ -5662,7 +5950,7 @@ a.about-link:hover {
     padding: 0.35rem var(--space-lg);
     font-size: 0.82rem;
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: var(--accent);
     color: white;
     cursor: default;
@@ -5732,7 +6020,7 @@ a.about-link:hover {
     color: var(--text-muted);
     font-size: 0.9rem;
     cursor: default;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     transition: all var(--duration-fast);
 }
 
@@ -5768,7 +6056,7 @@ a.about-link:hover {
     color: var(--danger, #c44);
     background: none;
     border: 1px solid var(--overlay-light);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     padding: 2px 8px;
     cursor: default;
     opacity: 0.7;
@@ -5818,6 +6106,86 @@ a.about-link:hover {
 
 .compiled-view-btn {
     width: 100%;
+}
+
+/* 实验功能：Cache Snapshot 观察区 */
+.experiments-observation {
+    padding: var(--space-md);
+    border-top: var(--border-width, 1px) solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.experiments-observation-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.experiments-observation-meta span {
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-input, 6px);
+    padding: 2px 6px;
+    background: var(--overlay-subtle);
+}
+
+.experiments-observation-error {
+    color: var(--danger, #b56b66);
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+
+.experiments-preview-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.experiments-preview-block h3 {
+    margin: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-light);
+}
+
+.experiments-preview-block pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.65;
+    background: var(--overlay-subtle);
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-input, 6px);
+    padding: var(--space-sm);
+}
+
+.experiments-empty {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    padding: var(--space-sm) var(--space-md);
+}
+
+.experiments-clear-btn {
+    align-self: flex-start;
+    color: var(--text-muted);
+    border: var(--border-width, 1px) solid var(--border);
+    background: transparent;
+    border-radius: var(--radius-input, 6px);
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    cursor: default;
+}
+
+.experiments-clear-btn:hover {
+    color: var(--text);
+    background: var(--overlay-subtle);
 }
 
 :global(.memory-date-group) {
@@ -5920,7 +6288,7 @@ a.about-link:hover {
     color: var(--text-muted);
     font-size: 0.9rem;
     cursor: default;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     transition: all var(--duration-fast);
 }
 
@@ -5934,7 +6302,7 @@ a.about-link:hover {
     width: 256px;
     height: 256px;
     overflow: hidden;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     background: var(--overlay-subtle);
     cursor: grab;
     touch-action: none;
@@ -5980,7 +6348,7 @@ a.about-link:hover {
     font-family: inherit;
     font-size: 0.8rem;
     padding: 0.35rem 1rem;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     border: none;
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
@@ -6037,7 +6405,7 @@ a.about-link:hover {
     color: var(--accent);
     background: var(--accent-light);
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     cursor: default;
     transition: all var(--duration-fast) var(--ease-out);
 }
@@ -6057,7 +6425,7 @@ a.about-link:hover {
     max-height: 320px;
     background-color: var(--bg-card);
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     box-shadow: 0 4px 16px var(--shadow);
     z-index: 60;
     overflow: hidden;
@@ -6153,18 +6521,18 @@ a.about-link:hover {
 .cml-col-list {
     min-width: 0;
     border: none;
-    border-radius: var(--radius-card, 10px);
+    border-radius: var(--radius-card, 8px);
     overflow: visible;
     box-shadow: 0 1px 4px var(--shadow);
 }
 
 .cml-col-list > .cml-list-header:first-child {
-    border-radius: var(--radius-card, 10px) var(--radius-card, 10px) 0 0;
+    border-radius: var(--radius-card, 8px) var(--radius-card, 8px) 0 0;
 }
 
 .cml-col-list > .cml-item:last-of-type,
 .cml-col-list > .cml-item:last-of-type + .cml-edit-panel {
-    border-radius: 0 0 var(--radius-card, 10px) var(--radius-card, 10px);
+    border-radius: 0 0 var(--radius-card, 8px) var(--radius-card, 8px);
 }
 
 .cml-list-header,
@@ -6226,7 +6594,7 @@ a.about-link:hover {
     border: none;
     cursor: default;
     padding: 0.1rem 0.25rem;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     transition: all var(--duration-fast);
     line-height: 1;
     opacity: 0;
@@ -6250,7 +6618,7 @@ a.about-link:hover {
     border: none;
     cursor: default;
     padding: 0.1rem 0.25rem;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     transition: all var(--duration-fast);
     line-height: 1;
     opacity: 0;
@@ -6269,7 +6637,7 @@ a.about-link:hover {
     border: none;
     cursor: default;
     padding: 0.1rem 0.25rem;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     transition: all var(--duration-fast);
     line-height: 1;
     opacity: 0;
@@ -6312,7 +6680,7 @@ a.about-link:hover {
     color: var(--text);
     background-color: var(--bg-card);
     border: none;
-    border-radius: var(--radius-input, 4px) 0 0 var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px) 0 0 var(--radius-input, 6px);
     padding: 0.25rem 0.45rem;
     outline: none;
     box-shadow: 0 1px 3px var(--shadow);
@@ -6335,7 +6703,7 @@ a.about-link:hover {
     font-size: 0.68rem;
     padding: 0 0.35rem;
     border: none;
-    border-radius: 0 var(--radius-input, 4px) var(--radius-input, 4px) 0;
+    border-radius: 0 var(--radius-input, 6px) var(--radius-input, 6px) 0;
     background: var(--overlay-light);
     color: var(--text-muted);
     cursor: default;
@@ -6356,7 +6724,7 @@ a.about-link:hover {
     right: 0;
     margin-bottom: 2px;
     background-color: var(--bg-card);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     box-shadow: 0 4px 12px var(--shadow);
     z-index: 100;
     overflow: hidden;
@@ -6403,7 +6771,7 @@ a.about-link:hover {
     font-family: inherit;
     font-size: 0.72rem;
     padding: 0.2rem 0.6rem;
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     border: none;
     background: var(--overlay-subtle);
     color: var(--text-muted);
@@ -6434,7 +6802,7 @@ a.about-link:hover {
     margin-left: auto;
     padding: 1px 6px;
     background: var(--bg-secondary);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -6474,7 +6842,7 @@ a.about-link:hover {
     color: var(--text);
     background-color: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     padding: 0.45rem 0.65rem;
     cursor: default;
     text-align: left;
@@ -6517,7 +6885,7 @@ a.about-link:hover {
     max-height: 320px;
     background-color: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px);
     z-index: 60;
     margin-top: 4px;
     overflow: hidden;
@@ -6637,7 +7005,7 @@ a.about-link:hover {
     color: var(--text);
     background-color: var(--bg-card);
     border: none;
-    border-radius: var(--radius-input, 4px) 0 0 var(--radius-input, 4px);
+    border-radius: var(--radius-input, 6px) 0 0 var(--radius-input, 6px);
     padding: 0.3rem 0.5rem;
     outline: none;
     box-shadow: 0 1px 3px var(--shadow);
@@ -6652,7 +7020,7 @@ a.about-link:hover {
     font-size: 0.75rem;
     padding: 0.3rem 0.5rem;
     border: none;
-    border-radius: 0 var(--radius-input, 4px) var(--radius-input, 4px) 0;
+    border-radius: 0 var(--radius-input, 6px) var(--radius-input, 6px) 0;
     background: var(--overlay-light);
     color: var(--text-muted);
     cursor: default;
@@ -6755,22 +7123,26 @@ a.about-link:hover {
   gap: var(--space-md);
   padding: var(--space-sm);
   background: var(--bg-card, #fcfaf5);
-  border: none;
-  border-radius: var(--radius-card, 10px);
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: var(--radius-card, 8px);
   cursor: default;
   text-align: left;
   font-family: inherit;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    outline-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
 }
 
 .ss-layout-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
 }
 
 .ss-layout-card.active {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 2px var(--accent);
+  border-color: var(--accent);
+  outline-color: var(--accent);
 }
 
 .ss-layout-preview {
@@ -6780,8 +7152,7 @@ a.about-link:hover {
   border-radius: 6px;
   overflow: hidden;
   background: var(--bg, #f8f5ed);
-  border: 3px solid var(--bg-card);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  border: var(--border-width, 1px) solid var(--border);
 }
 
 .ss-layout-preview img {
@@ -6848,6 +7219,8 @@ a.about-link:hover {
 }
 
 .bridge-agent-name {
+    flex: 1;
+    min-width: 0;
     font-size: 0.82rem;
     font-weight: 500;
     color: var(--text-primary);
@@ -6865,10 +7238,11 @@ a.about-link:hover {
 
 .bridge-agent-arrow {
     flex-shrink: 0;
-    font-size: 0.9rem;
+    width: 14px;
+    height: 14px;
     color: var(--text-muted);
     margin-left: var(--space-sm);
-    transition: transform var(--duration-slow);
+    transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .bridge-agent-arrow.open {
