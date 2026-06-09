@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSettingsStore } from '../../store';
 import { hanaFetch } from '../../api';
-import { loadSettingsConfig } from '../../actions';
+import { loadSettingsConfig, updateSettingsSnapshot } from '../../actions';
 import { t } from '../../helpers';
 import type { BridgePermissionMode, KnownUser } from './BridgeWidgets';
 
@@ -148,6 +148,9 @@ export function useBridgeState() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: publicIshiki }),
       });
+      updateSettingsSnapshot(snapshot => (
+        snapshot.agentId === agentId ? { ...snapshot, publicIshiki } : snapshot
+      ));
       setPublicIshikiOriginal(publicIshiki);
       showToast(t('settings.saved'), 'success');
     } catch (err: unknown) {

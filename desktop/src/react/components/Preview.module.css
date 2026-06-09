@@ -54,11 +54,10 @@
     box-shadow: var(--panel-card-shadow);
 }
 
-/* iframe 预览（HTML previewItem） */
-.previewPanelBody iframe {
+/* Native HTML 预览：实际页面由主进程 WebContentsView 覆盖到此占位层。 */
+.previewPanelBody :global(.preview-html-native-host) {
     width: 100%;
     height: 100%;
-    border: none;
     background: #fff;
 }
 

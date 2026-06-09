@@ -55,4 +55,24 @@ describe("first run default workspace", () => {
     expect(cfg.desk.heartbeat_interval).toBe(31);
     expect(cfg.memory.enabled).toBe(true);
   });
+
+  it("keeps userName as a dynamic identity placeholder for first-run Hanako", async () => {
+    fs.mkdirSync(path.join(productDir, "identity-templates"), { recursive: true });
+    fs.writeFileSync(
+      path.join(productDir, "identity-templates", "hanako.md"),
+      "# {{agentName}}\n\n{{userName}}的个人助手。\n",
+      "utf-8",
+    );
+    const { ensureFirstRun } = await import("../core/first-run.ts");
+
+    ensureFirstRun(hanakoHome, productDir);
+
+    const identity = fs.readFileSync(
+      path.join(hanakoHome, "agents", "hanako", "identity.md"),
+      "utf-8",
+    );
+    expect(identity).toContain("# {{agentName}}");
+    expect(identity).toContain("{{userName}}的个人助手");
+    expect(identity).not.toContain("\n\n的个人助手");
+  });
 });

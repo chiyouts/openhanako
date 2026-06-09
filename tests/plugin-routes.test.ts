@@ -915,6 +915,119 @@ describe("plugin management API", () => {
       });
     });
 
+    it("clears stale install records for reconciled missing community plugins", async () => {
+      const plugin = {
+        id: "demo",
+        name: "Demo",
+        publisher: "Hana",
+        version: "1.0.0",
+        description: "Demo plugin",
+        trust: "restricted",
+        permissions: [],
+        contributions: ["tools"],
+        distribution: { kind: "source", path: "plugins/demo", resolvedPath: "/tmp/demo" },
+        readme: "# Demo",
+      };
+      let installRecord: any = {
+        pluginId: "demo",
+        installedVersion: "0.9.0",
+        source: "marketplace",
+      };
+      const removePluginInstallRecord = vi.fn((pluginId) => {
+        if (pluginId === "demo") installRecord = null;
+      });
+      const reconcileMissingPluginDirectories = vi.fn(() => [{
+        id: "demo",
+        pluginKey: "community:demo",
+        source: "community",
+        pluginDir: "/missing/demo",
+      }]);
+      const engine = mockEngine({
+        plugins: [],
+        getPluginInstallRecord: vi.fn(() => installRecord),
+        pm: { reconcileMissingPluginDirectories },
+      });
+      (engine as any).removePluginInstallRecord = removePluginInstallRecord;
+      (engine as any).pluginMarketplace = {
+        load: async () => ({ source: { kind: "file", configured: true }, schemaVersion: 1, plugins: [plugin], warnings: [] }),
+        getReadme: async () => "# Demo",
+        getPlugin: async () => plugin,
+        resolveSourceDistribution: () => "/tmp/demo",
+      };
+      const app = createApp(engine);
+
+      const listRes = await app.request("/api/plugins/marketplace");
+
+      expect(listRes.status).toBe(200);
+      expect(reconcileMissingPluginDirectories).toHaveBeenCalled();
+      expect(removePluginInstallRecord).toHaveBeenCalledWith("demo");
+      expect(await listRes.json()).toMatchObject({
+        plugins: [{
+          id: "demo",
+          installed: false,
+          installedVersion: null,
+          installAction: "install",
+        }],
+      });
+    });
+
+    it("clears stale marketplace install records when the startup scan has no live entry", async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hana-missing-marketplace-record-"));
+      try {
+        const plugin = {
+          id: "demo",
+          name: "Demo",
+          publisher: "Hana",
+          version: "1.0.0",
+          description: "Demo plugin",
+          trust: "restricted",
+          permissions: [],
+          contributions: ["tools"],
+          distribution: { kind: "source", path: "plugins/demo", resolvedPath: "/tmp/demo" },
+          readme: "# Demo",
+        };
+        let installRecord: any = {
+          pluginId: "demo",
+          installedVersion: "0.9.0",
+          source: "marketplace",
+        };
+        const removePluginInstallRecord = vi.fn((pluginId) => {
+          if (pluginId === "demo") installRecord = null;
+        });
+        const engine = mockEngine({
+          plugins: [],
+          getPluginInstallRecord: vi.fn(() => installRecord),
+          pm: {
+            getUserPluginsDir: () => path.join(tmp, "plugins"),
+            reconcileMissingPluginDirectories: vi.fn(() => []),
+          },
+        });
+        (engine as any).removePluginInstallRecord = removePluginInstallRecord;
+        (engine as any).pluginMarketplace = {
+          load: async () => ({ source: { kind: "file", configured: true }, schemaVersion: 1, plugins: [plugin], warnings: [] }),
+          getReadme: async () => "# Demo",
+          getPlugin: async () => plugin,
+          resolveSourceDistribution: () => "/tmp/demo",
+        };
+        const app = createApp(engine);
+
+        const listRes = await app.request("/api/plugins/marketplace");
+
+        expect(listRes.status).toBe(200);
+        expect(removePluginInstallRecord).toHaveBeenCalledWith("demo");
+        expect(await listRes.json()).toMatchObject({
+          plugins: [{
+            id: "demo",
+            installed: false,
+            installedVersion: null,
+            installAction: "install",
+          }],
+        });
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
     it("installs release marketplace plugins after downloading and verifying sha256", async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hana-release-plugin-"));
       try {

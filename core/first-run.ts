@@ -118,7 +118,7 @@ function seedDefaultAgent(agentsDir, productDir) {
   const langDir = isZh ? "" : "en/";
   const firstExisting = (paths) => paths.find((p) => fs.existsSync(p));
 
-  // identity.md（填入默认名字）
+  // identity.md 保留动态占位符，在 system prompt 组装时按当前 config 渲染。
   const identitySrc = firstExisting([
     path.join(productDir, "identity-templates", `${langDir}${agentId}.md`),
     path.join(productDir, "identity-templates", `${agentId}.md`),
@@ -126,10 +126,7 @@ function seedDefaultAgent(agentsDir, productDir) {
   ]);
   if (identitySrc) {
     const tmpl = fs.readFileSync(identitySrc, "utf-8");
-    const filled = tmpl
-      .replace(/\{\{agentName\}\}/g, "Hanako")
-      .replace(/\{\{userName\}\}/g, "");
-    fs.writeFileSync(path.join(agentDir, "identity.md"), filled, "utf-8");
+    fs.writeFileSync(path.join(agentDir, "identity.md"), tmpl, "utf-8");
   }
 
   // yuan 由 buildSystemPrompt 实时从 lib/yuan/ 读取，无需复制

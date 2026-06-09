@@ -515,9 +515,9 @@ export function createSessionsRoute(engine, hub = null) {
           modelProvider: s.modelProvider || null,
           workspaceMountId: s.workspaceMountId || null,
           workspaceLabel: s.workspaceLabel || null,
-          permissionMode: typeof engine.getSessionPermissionMode === "function"
+          permissionMode: s.permissionMode || (typeof engine.getSessionPermissionMode === "function"
             ? engine.getSessionPermissionMode(s.path)
-            : engine.permissionMode || null,
+            : engine.permissionMode || null),
           pinnedAt: s.pinnedAt || null,
           agentDeleted: s.agentDeleted === true,
           readOnlyReason: s.readOnlyReason || (s.agentDeleted === true ? "agent_deleted" : null),
@@ -799,6 +799,7 @@ export function createSessionsRoute(engine, hub = null) {
           reason: parsed.reason || metadataTask?.reason || null,
           meta,
         };
+        if (!meta.interlude) return;
         const block = buildDeferredResultInterludeBlock(event, { receiverName });
         if (!block) return;
         blocks.push({ ...block, afterIndex });

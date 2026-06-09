@@ -26,6 +26,7 @@ import { useStore } from '../../stores';
 import { selectSessionFiles } from '../../stores/selectors/file-refs';
 import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { openFilePreview, openSkillPreview } from '../../utils/file-preview';
+import { writeAppFileDragPayload, clearAppFileDragPayload } from '../../utils/app-file-drag';
 import { openMediaViewerForRef } from '../../utils/open-media-viewer';
 import { buildFileRefId, isImageOrSvgExt } from '../../utils/file-kind';
 import { resolveServerConnection } from '../../services/server-connection';
@@ -430,12 +431,31 @@ const ImageOutputCard = memo(function ImageOutputCard({ fileId, filePath, label,
     ctx,
   });
 
+  const handleDragStart = useCallback((event: React.DragEvent) => {
+    const payload = writeAppFileDragPayload(event.dataTransfer, {
+      source: 'session-file',
+      files: [{
+        id: fileId || filePath,
+        fileId,
+        name: displayName,
+        path: filePath,
+      }],
+    });
+    event.currentTarget.addEventListener('dragend', () => clearAppFileDragPayload(payload.dragId), { once: true });
+    if (filePath) {
+      event.preventDefault();
+      window.platform?.startDrag?.(filePath);
+    }
+  }, [fileId, filePath, displayName]);
+
   if (status === 'expired') return <FileOutputCard filePath={filePath} label={label} ext={ext} status={status} ctx={ctx} />;
   if (failed) return <FileOutputCard filePath={filePath} label={label} ext={ext} status={status} ctx={ctx} />;
 
   return (
     <div
       className={styles.imageOutputCard}
+      draggable
+      onDragStart={handleDragStart}
       onClick={() => openFilePreview(filePath, label, ext, {
         origin: 'session',
         sessionPath: ctx.sessionPath,
@@ -450,6 +470,7 @@ const ImageOutputCard = memo(function ImageOutputCard({ fileId, filePath, label,
           className={styles.imageOutputDownloadButton}
           href={downloadUrl}
           download={displayName}
+          draggable={false}
           aria-label={`${window.t('chat.fileActions.downloadToDevice')} ${displayName}`}
           title={window.t('chat.fileActions.downloadToDevice')}
           onClick={(event) => event.stopPropagation()}
@@ -867,21 +888,7 @@ const CronConfirmBlock = memo(function CronConfirmBlock({ block, sessionPath }: 
     try {
       const editedJobData = buildDraftJobData();
       if (isSuggestionCard) {
-        let createdByConfirm = false;
-        if (block.confirmId && status === 'pending') {
-          const res = await hanaFetch(`/api/confirm/${block.confirmId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'confirmed', value: { jobData: editedJobData } }),
-            throwOnHttpError: false,
-          });
-          if (res.ok) {
-            createdByConfirm = true;
-          } else if (res.status !== 404) {
-            throw new Error(`confirm failed: ${res.status}`);
-          }
-        }
-        if (!createdByConfirm) await submitDraftJob(editedJobData);
+        await submitDraftJob(editedJobData);
       } else if (block.confirmId) {
         await hanaFetch(`/api/confirm/${block.confirmId}`, {
           method: 'POST',
@@ -898,17 +905,6 @@ const CronConfirmBlock = memo(function CronConfirmBlock({ block, sessionPath }: 
 
   const handleReject = async () => {
     if (isSuggestionCard) {
-      if (block.confirmId && status === 'pending') {
-        try {
-          await hanaFetch(`/api/confirm/${block.confirmId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'rejected' }),
-            throwOnHttpError: false,
-          });
-        } catch { /* silent */ }
-      }
-      setStatus('rejected');
       setModalOpen(false);
       return;
     }
@@ -929,7 +925,8 @@ const CronConfirmBlock = memo(function CronConfirmBlock({ block, sessionPath }: 
     <ChatResourceCard
       icon={<AutomationDraftIcon />}
       title={label || window.t('automation.draftTitle')}
-      titleMeta={isSuggestionCard || pending ? window.t('automation.suggested') : undefined}
+      titleMeta={!isSuggestionCard && pending ? window.t('automation.suggested') : undefined}
+      titleTail={isSuggestionCard ? window.t('automation.viewSuggestion') : undefined}
       subtitle={`${agentInfo.displayName} · ${schedulePreview}`}
       statusLabel={!isSuggestionCard && !pending ? (status === 'approved' ? window.t('common.approved') : window.t('common.rejected')) : undefined}
       statusTone={!isSuggestionCard && !pending ? (status === 'approved' ? 'success' : 'muted') : 'accent'}

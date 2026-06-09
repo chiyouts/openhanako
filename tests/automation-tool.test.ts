@@ -11,29 +11,26 @@ function makeStore(initialJobs: any[] = [], id = "studio_job_1") {
   return store;
 }
 
-function deferredDecision() {
-  let resolve!: (value: any) => void;
-  const promise = new Promise<any>((r) => { resolve = r; });
-  return { promise, resolve };
-}
-
-async function flushMicrotasks() {
-  await Promise.resolve();
-  await Promise.resolve();
+function makeSuggestionStore(id = "automation_suggestion_1", shortCode = "3827") {
+  const created: any[] = [];
+  const store = {
+    create: vi.fn((entry) => {
+      const suggestion = { ...entry, suggestionId: id, shortCode };
+      created.push(suggestion);
+      return suggestion;
+    }),
+  };
+  return { store, created };
 }
 
 describe("automation tool", () => {
-  it("creates generic Agent-run automation drafts and asks for confirmation by default", async () => {
+  it("creates generic Agent-run automation suggestions by default", async () => {
     const store = makeStore();
-    const decision = deferredDecision();
-    const confirmStore = {
-      create: vi.fn(() => ({
-        confirmId: "confirm_1",
-        promise: decision.promise,
-      })),
-    };
+    const { store: suggestionStore } = makeSuggestionStore();
+    const confirmStore = { create: vi.fn() };
     const tool = createAutomationTool(store, {
       confirmStore,
+      automationSuggestionStore: suggestionStore,
       getAgentId: () => "agent-a",
       getSessionCwd: () => "/workspace/current",
       getSessionWorkspaceFolders: () => ["/workspace/ref"],
@@ -57,75 +54,48 @@ describe("automation tool", () => {
           getSessionFile: () => "/sessions/agent-a.jsonl",
           getCwd: () => "/workspace/current",
         },
+        bridgeContext: {
+          isBridgeSession: true,
+          sessionKey: "wechat_dm_owner@agent-a",
+          platform: "wechat",
+        },
       },
     );
 
-    expect(confirmStore.create).toHaveBeenCalledWith(
-      "cron",
+    expect(confirmStore.create).not.toHaveBeenCalled();
+    expect(suggestionStore.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        sessionPath: "/sessions/agent-a.jsonl",
+        bridgeSessionKey: "wechat_dm_owner@agent-a",
         operation: "create",
         jobData: expect.objectContaining({
           label: "Morning Review",
           actorAgentId: "agent-b",
         }),
+        apply: expect.any(Function),
       }),
-      "/sessions/agent-a.jsonl",
     );
     expect(result.details).toMatchObject({
       action: "pending_add",
       operation: "create",
-      confirmId: "confirm_1",
+      suggestionId: "automation_suggestion_1",
+      suggestionShortCode: "3827",
+      automationSuggestion: {
+        suggestionId: "automation_suggestion_1",
+        shortCode: "3827",
+        operation: "create",
+      },
     });
+    expect("confirmId" in result.details).toBe(false);
+    expect(result.content[0].text).not.toContain("/confirm");
     expect(store.addJob).not.toHaveBeenCalled();
-
-    decision.resolve({ action: "confirmed" });
-    await flushMicrotasks();
-
-    expect(store.addJob).toHaveBeenCalledWith(expect.objectContaining({
-      type: "cron",
-      schedule: "0 9 * * *",
-      prompt: "Review my notes and send a short summary.",
-      label: "Morning Review",
-      actorAgentId: "agent-b",
-      executionContext: {
-        kind: "session_workspace",
-        cwd: "/home/agent-b",
-        workspaceFolders: [],
-        sourceSessionPath: "/sessions/agent-a.jsonl",
-        createdByAgentId: "agent-b",
-      },
-      executor: {
-        kind: "agent_session",
-        agentId: "agent-b",
-        prompt: "Review my notes and send a short summary.",
-        model: "",
-        executionContext: {
-          kind: "session_workspace",
-          cwd: "/home/agent-b",
-          workspaceFolders: [],
-          sourceSessionPath: "/sessions/agent-a.jsonl",
-          createdByAgentId: "agent-b",
-        },
-      },
-      createdBy: {
-        kind: "agent",
-        agentId: "agent-b",
-        sourceSessionPath: "/sessions/agent-a.jsonl",
-      },
-    }));
   });
 
-  it("uses edited draft fields when a confirmation card is approved", async () => {
+  it("uses edited suggestion fields when an automation suggestion is applied", async () => {
     const store = makeStore();
-    const decision = deferredDecision();
-    const confirmStore = {
-      create: vi.fn(() => ({
-        confirmId: "confirm_2",
-        promise: decision.promise,
-      })),
-    };
+    const { store: suggestionStore, created } = makeSuggestionStore("automation_suggestion_2", "4812");
     const tool = createAutomationTool(store, {
-      confirmStore,
+      automationSuggestionStore: suggestionStore,
       getAgentId: () => "agent-a",
       getSessionCwd: () => "/workspace/current",
       getSessionWorkspaceFolders: () => [],
@@ -146,25 +116,23 @@ describe("automation tool", () => {
       { sessionManager: { getSessionFile: () => "/sessions/agent-a.jsonl" } },
     );
 
-    decision.resolve({
-      action: "confirmed",
-      value: {
-        jobData: {
-          label: "Edited Reminder",
-          schedule: "30 10 * * *",
-          prompt: "edited agent run prompt",
-          actorAgentId: "agent-b",
-          executionContext: {
-            kind: "session_workspace",
-            cwd: "/home/agent-b",
-            workspaceFolders: [],
-            sourceSessionPath: "/sessions/agent-a.jsonl",
-            createdByAgentId: "agent-b",
-          },
+    expect(store.addJob).not.toHaveBeenCalled();
+
+    await created[0].apply({
+      jobData: {
+        label: "Edited Reminder",
+        schedule: "30 10 * * *",
+        prompt: "edited agent run prompt",
+        actorAgentId: "agent-b",
+        executionContext: {
+          kind: "session_workspace",
+          cwd: "/home/agent-b",
+          workspaceFolders: [],
+          sourceSessionPath: "/sessions/agent-a.jsonl",
+          createdByAgentId: "agent-b",
         },
       },
     });
-    await flushMicrotasks();
 
     expect(store.addJob).toHaveBeenCalledWith(expect.objectContaining({
       label: "Edited Reminder",
@@ -186,7 +154,7 @@ describe("automation tool", () => {
     }));
   });
 
-  it("updates existing automations only after the update draft is confirmed", async () => {
+  it("updates existing automations only after the update suggestion is applied", async () => {
     const existingJob = {
       id: "studio_job_9",
       type: "cron",
@@ -216,15 +184,9 @@ describe("automation tool", () => {
       },
     };
     const store = makeStore([existingJob]);
-    const decision = deferredDecision();
-    const confirmStore = {
-      create: vi.fn(() => ({
-        confirmId: "confirm_update",
-        promise: decision.promise,
-      })),
-    };
+    const { store: suggestionStore, created } = makeSuggestionStore("automation_suggestion_update", "9031");
     const tool = createAutomationTool(store, {
-      confirmStore,
+      automationSuggestionStore: suggestionStore,
       getAgentId: () => "agent-a",
       getSessionCwd: () => "/workspace/current",
       getSessionWorkspaceFolders: () => [],
@@ -250,16 +212,17 @@ describe("automation tool", () => {
     expect(result.details).toMatchObject({
       action: "pending_update",
       operation: "update",
-      confirmId: "confirm_update",
+      suggestionId: "automation_suggestion_update",
+      suggestionShortCode: "9031",
       jobData: expect.objectContaining({
         id: "studio_job_9",
         actorAgentId: "agent-b",
       }),
     });
+    expect("confirmId" in result.details).toBe(false);
     expect(store.updateJob).not.toHaveBeenCalled();
 
-    decision.resolve({ action: "confirmed" });
-    await flushMicrotasks();
+    await created[0].apply();
 
     expect(store.updateJob).toHaveBeenCalledWith("studio_job_9", expect.objectContaining({
       type: "cron",
@@ -276,7 +239,7 @@ describe("automation tool", () => {
     expect(store.addJob).not.toHaveBeenCalled();
   });
 
-  it("preserves existing fields when an update draft only changes the schedule", async () => {
+  it("preserves existing fields when an update suggestion only changes the schedule", async () => {
     const existingJob = {
       id: "studio_job_keep_fields",
       type: "cron",
@@ -306,15 +269,9 @@ describe("automation tool", () => {
       },
     };
     const store = makeStore([existingJob]);
-    const decision = deferredDecision();
-    const confirmStore = {
-      create: vi.fn(() => ({
-        confirmId: "confirm_keep_fields",
-        promise: decision.promise,
-      })),
-    };
+    const { store: suggestionStore, created } = makeSuggestionStore("automation_suggestion_keep", "1204");
     const tool = createAutomationTool(store, {
-      confirmStore,
+      automationSuggestionStore: suggestionStore,
       getAgentId: () => "agent-a",
       getSessionCwd: () => "/workspace/current",
       getSessionWorkspaceFolders: () => [],
@@ -334,8 +291,7 @@ describe("automation tool", () => {
       { sessionManager: { getSessionFile: () => "/sessions/agent-a.jsonl" } },
     );
 
-    decision.resolve({ action: "confirmed" });
-    await flushMicrotasks();
+    await created[0].apply();
 
     expect(store.updateJob).toHaveBeenCalledWith("studio_job_keep_fields", expect.objectContaining({
       schedule: "30 9 * * *",
@@ -345,17 +301,44 @@ describe("automation tool", () => {
     }));
   });
 
+  it("falls back to an inline suggestion result when no suggestion store is available", async () => {
+    const store = makeStore();
+    const tool = createAutomationTool(store, {
+      getAgentId: () => "agent-a",
+      getSessionCwd: () => "/workspace/current",
+    });
+
+    const result = await tool.execute(
+      "call_inline",
+      {
+        action: "create",
+        scheduleType: "cron",
+        schedule: "0 8 * * *",
+        label: "Breakfast",
+        prompt: "eat breakfast",
+      },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionFile: () => "/sessions/agent-a.jsonl" } },
+    );
+
+    expect(result.details).toMatchObject({
+      action: "pending_add",
+      suggestionId: "",
+      suggestionShortCode: "",
+    });
+    expect("confirmId" in result.details).toBe(false);
+    expect(store.addJob).not.toHaveBeenCalled();
+  });
+
   it("creates immediately only when auto approve is explicitly enabled", async () => {
     const store = makeStore();
-    const confirmStore = {
-      create: vi.fn(() => ({
-        confirmId: "confirm_3",
-        promise: Promise.resolve({ action: "confirmed" }),
-      })),
-    };
+    const { store: suggestionStore } = makeSuggestionStore("automation_suggestion_3", "6001");
+    const confirmStore = { create: vi.fn() };
     const tool = createAutomationTool(store, {
       getAutoApprove: () => true,
       confirmStore,
+      automationSuggestionStore: suggestionStore,
       getAgentId: () => "agent-a",
       getSessionCwd: () => "/workspace/current",
       getSessionWorkspaceFolders: () => [],
@@ -376,6 +359,7 @@ describe("automation tool", () => {
     );
 
     expect(confirmStore.create).not.toHaveBeenCalled();
+    expect(suggestionStore.create).not.toHaveBeenCalled();
     expect(store.addJob).toHaveBeenCalledOnce();
   });
 

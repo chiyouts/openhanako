@@ -205,6 +205,23 @@ export function createProvidersRoute(engine: any) {
     return c.json({ providers: result });
   });
 
+  /**
+   * 显式查看已保存的供应商 API Key。
+   * summary 仍然只返回脱敏值；明文读取必须走这个受权限保护的窄端点。
+   */
+  route.get("/providers/:name/api-key", (c) => {
+    const scopeDenied = denyWithoutScope(c, "providers.manage");
+    if (scopeDenied) return scopeDenied;
+    const secretDenied = denyWithoutScope(c, "secrets.write", {
+      error: "secret_read_scope_required",
+    });
+    if (secretDenied) return secretDenied;
+
+    const providerName = c.req.param("name");
+    const creds = engine.resolveProviderCredentials?.(providerName) || {};
+    return c.json({ api_key: typeof creds.api_key === "string" ? creds.api_key : "" });
+  });
+
   // ── Fetch / Test ──
 
   function normalizeRegistryModels(models: any[]) {

@@ -484,6 +484,9 @@
     "copy": "复制",
     "copied": "已复制 ✓"
   },
+  "codeBlock": {
+    "wordWrap": "自动换行"
+  },
   "cron": {
     "typeAt": "单次",
     "typeEvery": "间隔",
@@ -851,6 +854,7 @@
     "tabs": {
       "interface": "界面",
       "general": "通用",
+      "browser": "浏览器",
       "agent": "助手",
       "me": "我",
       "providers": "供应商",
@@ -868,6 +872,20 @@
       "about": "关于",
       "security": "安全",
       "pluginMarketplace": "插件市场"
+    },
+    "browser": {
+      "cookiesTitle": "Cookies",
+      "acceptCookies": "接受 Cookies",
+      "acceptCookiesHint": "打开后，内置浏览器会像普通浏览器一样保存和发送网站 Cookies。",
+      "clearCookies": "清除 Cookies",
+      "clearCookiesHint": "清除内置浏览器已经保存的 Cookies 和站点数据。",
+      "clearCookiesButton": "清除",
+      "clearCookiesSuccess": "已清除 Cookies",
+      "agentTitle": "Agent 默认行为",
+      "agentOpenBehavior": "打开网页时",
+      "agentOpenBehaviorHint": "控制 Agent 使用浏览器时默认复用当前标签页，还是每次新开标签页。",
+      "agentOpenBehaviorCurrentTab": "在当前标签页操作",
+      "agentOpenBehaviorNewTab": "新开标签页"
     },
     "experiments": {
       "title": "实验",
@@ -1111,6 +1129,10 @@
           "install_skill": {
             "label": "安装技能",
             "summary": "从 GitHub 或技能库安装新技能"
+          },
+          "office": {
+            "label": "Office",
+            "summary": "让 Agent 读取文档、转换 HTML 到 PDF"
           },
           "update_settings": {
             "label": "修改设置",
@@ -1363,7 +1385,7 @@
       "totalTokens": "Tokens",
       "cacheRead": "缓存命中",
       "cacheHitRate": "命中率",
-      "estimatedCost": "预估成本",
+
       "uncached": "未缓存消耗",
       "modelMix": "模型分布",
       "dailyUsage": "每日用量",
@@ -2148,6 +2170,7 @@
     "draftTitle": "自动化草稿",
     "suggestionTitle": "建议",
     "suggested": "建议",
+    "viewSuggestion": "查看建议",
     "openDraft": "打开自动化草稿",
     "closeDraft": "关闭自动化草稿",
     "confirmCreate": "确认添加",
@@ -2216,7 +2239,8 @@
       "title": "后台动态"
     },
     "todo": {
-      "title": "待办"
+      "title": "进程",
+      "waitForOutput": "输出完成后再标记"
     },
     "subagent": {
       "title": "子助手"
@@ -2356,6 +2380,8 @@
     "back": "后退",
     "forward": "前进",
     "reload": "刷新",
+    "newTab": "新标签页",
+    "closeTab": "关闭标签页",
     "emergencyStop": "紧急停止 AI 控制",
     "backgroundHint": "后台浏览器运行中，点击查看",
     "background": "后台浏览器"
@@ -2975,6 +3001,7 @@
       "qualityDesc": "画质档位：low, medium, high, auto（由 adapter 映射为供应商参数）",
       "modelDesc": "模型 ID 或简称（如 5.0、dall-e-3）。省略时使用已配置的默认模型",
       "providerDesc": "指定 provider（可选）",
+      "suggestedFilenameDesc": "生成文件的人类可读文件名提示，不带扩展名。用简短 slug 或标题，不要传完整 prompt。",
       "submitted": "已提交 {count} 张图片生成，完成后会自动显示在下方卡片中。"
     },
     "generateVideo": {

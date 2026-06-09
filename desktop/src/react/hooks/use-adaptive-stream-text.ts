@@ -1,20 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { splitGraphemes } from '../utils/grapheme';
 
-export interface TypewriterTextOptions {
+export interface AdaptiveStreamTextOptions {
   active?: boolean;
   displayFps?: number;
   minBatch?: number;
   maxBatch?: number;
   catchUpThreshold?: number;
-  locale?: string;
+  hardCatchUpThreshold?: number;
   useIntlSegmenter?: boolean;
 }
 
 const DEFAULT_DISPLAY_FPS = 30;
 const DEFAULT_MIN_BATCH = 1;
-const DEFAULT_MAX_BATCH = 24;
+const DEFAULT_MAX_BATCH = 48;
 const DEFAULT_CATCH_UP_THRESHOLD = 24;
+const DEFAULT_HARD_CATCH_UP_THRESHOLD = 80;
 const ASCII_WORD_CHAR = /^[A-Za-z0-9_'’-]$/;
 const WHITESPACE = /^\s+$/;
 const CJK_GRAPHEME = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]$/u;
@@ -27,36 +28,10 @@ type SegmenterConstructor = new (
   options: { granularity: 'word' },
 ) => SegmenterLike;
 
-export interface TypewriterChunkOptions {
-  locale?: string;
-  useIntlSegmenter?: boolean;
-}
-
-export interface TypewriterAdvanceOptions extends TypewriterChunkOptions {
-  minBatch: number;
-  maxBatch: number;
-  catchUpThreshold: number;
-}
-
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-function chooseBatchSize(
-  backlog: number,
-  minBatch: number,
-  maxBatch: number,
-  catchUpThreshold: number,
-): number {
-  if (backlog <= 0) return 0;
-  if (backlog <= 12) return minBatch;
-  if (backlog <= catchUpThreshold) return Math.min(maxBatch, Math.max(minBatch, 2));
-  if (backlog <= catchUpThreshold * 2) {
-    return Math.min(maxBatch, Math.max(4, Math.ceil(backlog / 12)));
-  }
-  return Math.min(maxBatch, Math.max(8, Math.ceil(backlog / 8)));
 }
 
 function isAsciiWordChar(value: string): boolean {
@@ -100,11 +75,11 @@ function normalizeStreamingChunks(segments: readonly string[]): string[] {
   return chunks;
 }
 
-function splitWithIntlSegmenter(text: string, locale?: string): string[] {
+function splitWithIntlSegmenter(text: string): string[] {
   const Segmenter = (Intl as unknown as { Segmenter?: SegmenterConstructor }).Segmenter;
   if (!Segmenter) return [];
   try {
-    const segmenter = new Segmenter(locale, { granularity: 'word' });
+    const segmenter = new Segmenter(undefined, { granularity: 'word' });
     return normalizeStreamingChunks(Array.from(segmenter.segment(text), part => part.segment));
   } catch {
     return [];
@@ -159,17 +134,35 @@ function splitWithFallback(text: string): string[] {
   return normalizeStreamingChunks(raw);
 }
 
-export function splitTypewriterChunks(text: string, options: TypewriterChunkOptions = {}): string[] {
+export function splitAdaptiveStreamChunks(text: string, useIntlSegmenter = true): string[] {
   if (!text) return [];
-  if (options.useIntlSegmenter !== false) {
-    const intlChunks = splitWithIntlSegmenter(text, options.locale);
+  if (useIntlSegmenter) {
+    const intlChunks = splitWithIntlSegmenter(text);
     if (intlChunks.length > 0) return intlChunks;
   }
   return splitWithFallback(text);
 }
 
-export function planTypewriterAdvance(remaining: string, options: TypewriterAdvanceOptions): string {
-  const chunks = splitTypewriterChunks(remaining, options);
+function chooseBatchSize(
+  backlog: number,
+  minBatch: number,
+  maxBatch: number,
+  catchUpThreshold: number,
+): number {
+  if (backlog <= 0) return 0;
+  if (backlog <= 12) return minBatch;
+  if (backlog <= catchUpThreshold) return Math.min(maxBatch, Math.max(minBatch, 2));
+  if (backlog <= catchUpThreshold * 2) {
+    return Math.min(maxBatch, Math.max(6, Math.ceil(backlog / 8)));
+  }
+  return Math.min(maxBatch, Math.max(12, Math.ceil(backlog / 4)));
+}
+
+export function planAdaptiveStreamAdvance(
+  remaining: string,
+  options: Required<Pick<AdaptiveStreamTextOptions, 'minBatch' | 'maxBatch' | 'catchUpThreshold' | 'useIntlSegmenter'>>,
+): string {
+  const chunks = splitAdaptiveStreamChunks(remaining, options.useIntlSegmenter);
   const batchSize = chooseBatchSize(
     chunks.length,
     options.minBatch,
@@ -179,98 +172,129 @@ export function planTypewriterAdvance(remaining: string, options: TypewriterAdva
   return chunks.slice(0, batchSize).join('');
 }
 
-export function useTypewriterText(target: string, options: TypewriterTextOptions = {}): string {
+function shouldHardCatchUp(remaining: string, threshold: number): boolean {
+  return splitGraphemes(remaining).length >= threshold;
+}
+
+export function useAdaptiveStreamText(target: string, options: AdaptiveStreamTextOptions = {}): string {
   const {
     active = true,
     displayFps = DEFAULT_DISPLAY_FPS,
     minBatch = DEFAULT_MIN_BATCH,
     maxBatch = DEFAULT_MAX_BATCH,
     catchUpThreshold = DEFAULT_CATCH_UP_THRESHOLD,
-    locale,
-    useIntlSegmenter,
+    hardCatchUpThreshold = DEFAULT_HARD_CATCH_UP_THRESHOLD,
+    useIntlSegmenter = true,
   } = options;
 
   const [visible, setVisible] = useState(target);
   const visibleRef = useRef(target);
   const targetRef = useRef(target);
-  const rafRef = useRef<number | null>(null);
-  const lastAdvanceTimeRef = useRef<number | null>(null);
-  const configRef = useRef({ active, displayFps, minBatch, maxBatch, catchUpThreshold, locale, useIntlSegmenter });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const configRef = useRef({
+    active,
+    displayFps,
+    minBatch,
+    maxBatch,
+    catchUpThreshold,
+    hardCatchUpThreshold,
+    useIntlSegmenter,
+  });
 
-  configRef.current = { active, displayFps, minBatch, maxBatch, catchUpThreshold, locale, useIntlSegmenter };
+  configRef.current = {
+    active,
+    displayFps,
+    minBatch,
+    maxBatch,
+    catchUpThreshold,
+    hardCatchUpThreshold,
+    useIntlSegmenter,
+  };
   targetRef.current = target;
 
-  useEffect(() => {
-    const cancel = () => {
-      if (rafRef.current != null) {
-        window.cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    };
-
-    const setFullTarget = () => {
-      cancel();
-      lastAdvanceTimeRef.current = null;
-      visibleRef.current = targetRef.current;
-      setVisible(targetRef.current);
-    };
-
-    const advance = (timestamp: number) => {
-      rafRef.current = null;
-      const config = configRef.current;
-      const current = visibleRef.current;
-      const nextTarget = targetRef.current;
-
-      if (!config.active || prefersReducedMotion()) {
-        setFullTarget();
-        return;
-      }
-      if (current === nextTarget) {
-        lastAdvanceTimeRef.current = null;
-        return;
-      }
-      if (!nextTarget.startsWith(current)) {
-        setFullTarget();
-        return;
-      }
-
-      const intervalMs = 1000 / Math.max(1, config.displayFps);
-      const lastAdvanceTime = lastAdvanceTimeRef.current;
-      if (lastAdvanceTime == null || timestamp - lastAdvanceTime >= intervalMs) {
-        lastAdvanceTimeRef.current = timestamp;
-        const remaining = nextTarget.slice(current.length);
-        const advanceText = planTypewriterAdvance(remaining, {
-          minBatch: config.minBatch,
-          maxBatch: config.maxBatch,
-          catchUpThreshold: config.catchUpThreshold,
-          locale: config.locale,
-          useIntlSegmenter: config.useIntlSegmenter,
-        });
-        const nextVisible = current + advanceText;
-        visibleRef.current = nextVisible;
-        setVisible(nextVisible);
-      }
-
-      if (visibleRef.current !== targetRef.current && rafRef.current == null) {
-        rafRef.current = window.requestAnimationFrame(advance);
-      }
-    };
-
-    const current = visibleRef.current;
-    if (!active || prefersReducedMotion()) {
-      setFullTarget();
-      return cancel;
+  const clearTimer = () => {
+    if (timerRef.current != null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
-    if (target === current) return cancel;
+  };
+
+  const setVisibleText = (text: string) => {
+    if (visibleRef.current === text) return;
+    visibleRef.current = text;
+    setVisible(text);
+  };
+
+  const setFullTarget = () => {
+    clearTimer();
+    setVisibleText(targetRef.current);
+  };
+
+  const advanceOnce = () => {
+    timerRef.current = null;
+    const config = configRef.current;
+    const current = visibleRef.current;
+    const nextTarget = targetRef.current;
+
+    if (!config.active || prefersReducedMotion()) {
+      setFullTarget();
+      return;
+    }
+    if (current === nextTarget) return;
+    if (!nextTarget.startsWith(current)) {
+      setFullTarget();
+      return;
+    }
+
+    const remaining = nextTarget.slice(current.length);
+    if (shouldHardCatchUp(remaining, config.hardCatchUpThreshold)) {
+      setFullTarget();
+      return;
+    }
+
+    const advanceText = planAdaptiveStreamAdvance(remaining, {
+      minBatch: config.minBatch,
+      maxBatch: config.maxBatch,
+      catchUpThreshold: config.catchUpThreshold,
+      useIntlSegmenter: config.useIntlSegmenter,
+    });
+    if (!advanceText) return;
+
+    setVisibleText(current + advanceText);
+    if (visibleRef.current !== targetRef.current) scheduleAdvance();
+  };
+
+  const scheduleAdvance = () => {
+    if (timerRef.current != null) return;
+    const intervalMs = Math.round(1000 / Math.max(1, configRef.current.displayFps));
+    timerRef.current = setTimeout(advanceOnce, intervalMs);
+  };
+
+  useLayoutEffect(() => {
+    targetRef.current = target;
+    const current = visibleRef.current;
+    const config = configRef.current;
+
+    if (!config.active || prefersReducedMotion()) {
+      setFullTarget();
+      return;
+    }
+    if (target === current) return;
     if (!target.startsWith(current)) {
       setFullTarget();
-      return cancel;
+      return;
     }
-    if (rafRef.current == null) {
-      rafRef.current = window.requestAnimationFrame(advance);
+
+    const remaining = target.slice(current.length);
+    if (shouldHardCatchUp(remaining, config.hardCatchUpThreshold)) {
+      setFullTarget();
+      return;
     }
-    return cancel;
-  }, [active, target]);
+
+    scheduleAdvance();
+  });
+
+  useLayoutEffect(() => () => clearTimer(), []);
 
   return visible;
 }

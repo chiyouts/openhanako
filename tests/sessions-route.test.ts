@@ -640,6 +640,39 @@ describe("sessions route", () => {
     expect(getSessionPermissionMode).toHaveBeenCalledWith(session.path);
   });
 
+  it("keeps cold-start session permission mode from the session list projection", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.ts");
+    const app = new Hono();
+    const session = {
+      path: "/tmp/agents/hana/sessions/auto.jsonl",
+      title: "Auto review chat",
+      firstMessage: "",
+      modified: new Date("2026-06-08T08:00:00.000Z"),
+      messageCount: 1,
+      cwd: "/tmp/work",
+      agentId: "hana",
+      agentName: "Hana",
+      permissionMode: "auto",
+    };
+    const getSessionPermissionMode = vi.fn(() => "ask");
+
+    app.route("/api", createSessionsRoute({
+      listSessions: vi.fn(async () => [session]),
+      getSessionPermissionMode,
+      rcState: null,
+    }));
+
+    const res = await app.request("/api/sessions");
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data[0]).toMatchObject({
+      path: session.path,
+      permissionMode: "auto",
+    });
+    expect(getSessionPermissionMode).not.toHaveBeenCalled();
+  });
+
   it("marks deleted-agent sessions read-only in the session list response", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.ts");
     const app = new Hono();
@@ -1173,6 +1206,7 @@ describe("sessions route", () => {
           result: "子助手完整回复",
           meta: {
             type: "subagent",
+            interlude: true,
             executorAgentNameSnapshot: "明",
             label: "大纲评估",
             summary: "请阅读整份长任务说明并输出完整评估",
@@ -1588,7 +1622,87 @@ describe("sessions route", () => {
     })]);
   });
 
-  it("hydrates legacy file blocks without fileId from the session file sidecar by path", async () => {
+  it("preserves repeated stage_files cards for the same SessionFile in history", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.ts");
+    const msgUtils = await import("../core/message-utils.ts");
+    const app = new Hono();
+    const sessionPath = "/tmp/agents/hana/sessions/repeated-stage.jsonl";
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "first delivery", images: [], thinking: "", toolUses: [] })
+      .mockReturnValueOnce({ text: "second delivery", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "assistant", content: "first delivery" },
+      {
+        role: "toolResult",
+        toolName: "stage_files",
+        details: {
+          files: [
+            { fileId: "sf_doc", filePath: "/workspace/doc.html", label: "doc.html", ext: "html" },
+          ],
+        },
+      },
+      { role: "assistant", content: "second delivery" },
+      {
+        role: "toolResult",
+        toolName: "stage_files",
+        details: {
+          files: [
+            { fileId: "sf_doc", filePath: "/workspace/doc.html", label: "doc.html", ext: "html" },
+          ],
+        },
+      },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      currentSessionPath: sessionPath,
+      runtimeContext: { studioId: "studio_route" },
+      deferredResults: null,
+      getSessionFile: vi.fn((fileId, options) => {
+        expect(fileId).toBe("sf_doc");
+        expect(options).toEqual({ sessionPath });
+        return {
+          id: "sf_doc",
+          filePath: "/workspace/doc.html",
+          label: "doc.html",
+          ext: "html",
+          mime: "text/html",
+          kind: "document",
+          storageKind: "external",
+          status: "available",
+        };
+      }),
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request(`/api/sessions/messages?path=${encodeURIComponent(sessionPath)}`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.messages).toHaveLength(2);
+    expect(data.blocks).toEqual([
+      expect.objectContaining({
+        type: "file",
+        afterIndex: 0,
+        fileId: "sf_doc",
+        filePath: "/workspace/doc.html",
+        label: "doc.html",
+        status: "available",
+      }),
+      expect.objectContaining({
+        type: "file",
+        afterIndex: 1,
+        fileId: "sf_doc",
+        filePath: "/workspace/doc.html",
+        label: "doc.html",
+        status: "available",
+      }),
+    ]);
+  });
+
+  it("hydrates every legacy file block without fileId from the session file sidecar by path", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.ts");
     const msgUtils = await import("../core/message-utils.ts");
     const app = new Hono();
@@ -1604,6 +1718,7 @@ describe("sessions route", () => {
         details: {
           files: [
             { filePath: "/cache/legacy.png", label: "legacy.png", ext: "png" },
+            { filePath: "/cache/second.png", label: "second.png", ext: "png" },
           ],
         },
       },
@@ -1615,19 +1730,34 @@ describe("sessions route", () => {
       deferredResults: null,
       getSessionFile: vi.fn(),
       getSessionFileByPath: vi.fn((filePath, options) => {
-        expect(filePath).toBe("/cache/legacy.png");
         expect(options).toEqual({ sessionPath });
-        return {
-          id: "sf_legacy",
-          filePath,
-          label: "legacy.png",
-          ext: "png",
-          mime: "image/png",
-          kind: "image",
-          storageKind: "managed_cache",
-          status: "expired",
-          missingAt: 4321,
-        };
+        if (filePath === "/cache/legacy.png") {
+          return {
+            id: "sf_legacy",
+            filePath,
+            label: "legacy.png",
+            ext: "png",
+            mime: "image/png",
+            kind: "image",
+            storageKind: "managed_cache",
+            status: "expired",
+            missingAt: 4321,
+          };
+        }
+        if (filePath === "/cache/second.png") {
+          return {
+            id: "sf_second",
+            filePath,
+            label: "second.png",
+            ext: "png",
+            mime: "image/png",
+            kind: "image",
+            storageKind: "managed_cache",
+            status: "available",
+            missingAt: null,
+          };
+        }
+        return null;
       }),
     };
 
@@ -1643,6 +1773,12 @@ describe("sessions route", () => {
       filePath: "/cache/legacy.png",
       status: "expired",
       missingAt: 4321,
+    });
+    expect(data.blocks[1]).toMatchObject({
+      type: "file",
+      fileId: "sf_second",
+      filePath: "/cache/second.png",
+      status: "available",
     });
   });
 
@@ -1701,15 +1837,6 @@ describe("sessions route", () => {
 
     expect(res.status).toBe(200);
     expect(data.blocks).toEqual([
-      expect.objectContaining({
-        type: "interlude",
-        afterIndex: 0,
-        taskId: "task-img",
-        sourceKind: "tool",
-        sourceLabel: "图片生成",
-        text: "Hana 收到了来自 图片生成 工具的结果",
-        detailMarkdown: expect.stringContaining("generated.png"),
-      }),
       {
         type: "file",
         afterIndex: 0,
@@ -1833,15 +1960,6 @@ describe("sessions route", () => {
 
     expect(res.status).toBe(200);
     expect(data.blocks).toEqual([
-      expect.objectContaining({
-        type: "interlude",
-        afterIndex: 0,
-        taskId: "task-img",
-        sourceKind: "tool",
-        sourceLabel: "图片生成",
-        text: "Hana 收到了来自 图片生成 工具的结果",
-        detailMarkdown: "生成文件：\n- generated.png (image)",
-      }),
       {
         type: "file",
         afterIndex: 0,

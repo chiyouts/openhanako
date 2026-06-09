@@ -215,6 +215,143 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
   }
 }
 
+export async function submitDesktopSessionInterjection(engine: any, opts: {
+  sessionPath?: string;
+  text?: string;
+  images?: Array<{ type: string; data: string; mimeType: string }>;
+  imageAttachmentPaths?: string[];
+  videos?: Array<{ type: string; data: string; mimeType: string }>;
+  videoAttachmentPaths?: string[];
+  audios?: Array<{ type: string; data: string; mimeType: string }>;
+  audioAttachmentPaths?: string[];
+  inboundFiles?: Array<{ type: string; filename?: string; mimeType?: string; buffer: any }>;
+  displayMessage?: any;
+  sessionFileRefs?: Array<{ fileId?: string; sessionPath?: string; label?: string; kind?: string }>;
+  uiContext?: any;
+  context?: any;
+} = {}) {
+  const {
+    sessionPath,
+    text,
+    images,
+    imageAttachmentPaths,
+    videos,
+    videoAttachmentPaths,
+    audios,
+    audioAttachmentPaths,
+    inboundFiles,
+    displayMessage,
+    sessionFileRefs,
+    uiContext,
+    context,
+  } = opts;
+
+  if (!engine || typeof engine.ensureSessionLoaded !== "function" || typeof engine.steerSession !== "function") {
+    throw new Error("desktop-session-submit: engine interjection API unavailable");
+  }
+  if (!sessionPath) throw new Error("desktop-session-submit: sessionPath is required");
+  if (!text && !images?.length && !videos?.length && !audios?.length) throw new Error("desktop-session-submit: text, images, videos, or audios required");
+
+  if (typeof engine.isSessionStreaming === "function" && !engine.isSessionStreaming(sessionPath)) {
+    return submitDesktopSessionMessage(engine, opts);
+  }
+
+  if (!await engine.ensureSessionLoaded(sessionPath)) {
+    throw new Error(`desktop-session-submit: failed to load session ${sessionPath}`);
+  }
+
+  if (uiContext !== undefined) {
+    engine.setUiContext?.(sessionPath, uiContext ?? null);
+  }
+
+  let promptImageAttachmentPaths = imageAttachmentPaths || [];
+  let promptVideoAttachmentPaths = videoAttachmentPaths || [];
+  let promptAudioAttachmentPaths = audioAttachmentPaths || [];
+  let displayAttachments = displayMessage?.attachments;
+  let promptText = text || "";
+  let promptSessionFileRefs = normalizeSessionFileRefs(sessionFileRefs, sessionPath);
+
+  if (displayAttachments?.length) {
+    const registeredDisplay = registerDisplayAttachments({
+      hanakoHome: engine.hanakoHome,
+      sessionPath,
+      attachments: displayAttachments,
+      registerSessionFile: engine.registerSessionFile?.bind(engine),
+    });
+    displayAttachments = registeredDisplay.attachments;
+    promptImageAttachmentPaths = uniquePaths([
+      ...promptImageAttachmentPaths,
+      ...registeredDisplay.imageAttachmentPaths,
+    ]);
+    promptVideoAttachmentPaths = uniquePaths([
+      ...promptVideoAttachmentPaths,
+      ...registeredDisplay.videoAttachmentPaths,
+    ]);
+    if (audios?.length || promptAudioAttachmentPaths.length) {
+      promptAudioAttachmentPaths = uniquePaths([
+        ...promptAudioAttachmentPaths,
+        ...registeredDisplay.audioAttachmentPaths,
+      ]);
+    }
+    promptSessionFileRefs = mergeSessionFileRefs(
+      promptSessionFileRefs,
+      sessionFileRefsFromAttachments(displayAttachments, sessionPath),
+    );
+  }
+
+  if (inboundFiles?.length) {
+    const materialized = await materializeBridgeInboundFiles({
+      hanakoHome: engine.hanakoHome,
+      sessionPath,
+      files: inboundFiles,
+      registerSessionFile: engine.registerSessionFile?.bind(engine),
+    });
+    promptImageAttachmentPaths = uniquePaths([
+      ...promptImageAttachmentPaths,
+      ...materialized.imageAttachmentPaths,
+    ]);
+    displayAttachments = [
+      ...(displayAttachments || []),
+      ...materialized.displayAttachments,
+    ];
+    promptSessionFileRefs = mergeSessionFileRefs(
+      promptSessionFileRefs,
+      sessionFileRefsFromAttachments(materialized.displayAttachments, sessionPath),
+    );
+  }
+
+  engine.emitEvent?.({
+    type: "session_user_message",
+    message: {
+      text: displayMessage?.text ?? text ?? "",
+      timestamp: Date.now(),
+      attachments: displayAttachments,
+      quotedText: displayMessage?.quotedText,
+      skills: displayMessage?.skills,
+      deskContext: displayMessage?.deskContext ?? null,
+      source: displayMessage?.source || "desktop",
+      bridgeSessionKey: displayMessage?.bridgeSessionKey || null,
+    },
+  }, sessionPath);
+  queueVoiceInputTranscriptions({
+    speechRecognition: engine.speechRecognition,
+    sessionPath,
+    attachments: displayAttachments,
+  });
+
+  promptText = addAttachedImageMarkers(promptText, promptImageAttachmentPaths);
+  promptText = addAttachedVideoMarkers(promptText, promptVideoAttachmentPaths);
+  promptText = addAttachedAudioMarkers(promptText, promptAudioAttachmentPaths);
+  promptText = addSessionFileRefMarkers(promptText, promptSessionFileRefs);
+  if (context?.beforeUser) {
+    promptText = `${context.beforeUser}\n\n${promptText}`;
+  }
+
+  const steered = engine.steerSession(sessionPath, promptText);
+  if (!steered) throw new Error("session_busy");
+  return { text: null, toolMedia: [], steered: true };
+}
+
 function buildPromptOptions({
   images,
   videos,

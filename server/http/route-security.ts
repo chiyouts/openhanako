@@ -397,7 +397,10 @@ function isProviderManagementRoute(verb, routePath) {
     || routePath === "/api/providers/fetch-models"
   )) return true;
   if (
-    (verb === "GET" && /^\/api\/providers\/[^/]+\/discovered-models$/.test(routePath))
+    (verb === "GET" && (
+      /^\/api\/providers\/[^/]+\/discovered-models$/.test(routePath)
+      || /^\/api\/providers\/[^/]+\/api-key$/.test(routePath)
+    ))
     || ((verb === "PUT" || verb === "DELETE") && /^\/api\/providers\/[^/]+\/models\/[^/]+$/.test(routePath))
   ) {
     return true;

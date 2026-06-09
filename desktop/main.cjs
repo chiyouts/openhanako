@@ -11,6 +11,7 @@
 const { app, BrowserWindow, WebContentsView, globalShortcut, ipcMain, dialog, session, shell, nativeTheme, Tray, Menu, nativeImage, systemPreferences, Notification, webContents, screen, powerSaveBlocker } = require("electron");
 const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
@@ -345,8 +346,12 @@ let settingsWindow = null;
 
 let browserViewerWindow = null;
 let _browserWebView = null;        // 当前活跃的 WebContentsView
-const _browserViews = new Map();   // sessionPath → WebContentsView（挂起的浏览器）
+const _browserViews = new Map();   // sessionPath -> BrowserWorkspace; BrowserWorkspace.tabs: tabId -> WebContentsView
 let _currentBrowserSession = null; // 当前浏览器绑定的 sessionPath
+let _currentBrowserTabId = null;   // 当前浏览器绑定的 tabId
+let _browserAcceptCookies = true;
+let _browserCookiePolicyInstalled = false;
+const _htmlPreviewViews = new Map(); // previewId -> { view, ownerWebContentsId, ownerWindow }
 
 /** Vite 入口页面统一加载（dev → Vite dev server，其他优先 dist-renderer，最后才回退 src） */
 const _isDev = process.argv.includes("--dev");
@@ -430,6 +435,130 @@ function isAllowedBrowserUrl(url) {
     return p.protocol === "http:" || p.protocol === "https:";
   } catch { return false; }
 }
+
+function _htmlPreviewPartition(previewId) {
+  const digest = crypto.createHash("sha256").update(String(previewId || "")).digest("hex").slice(0, 16);
+  return `hana-html-preview:${digest}`;
+}
+
+function _isAllowedHtmlPreviewUrl(previewUrl) {
+  if (!serverPort) return false;
+  try {
+    const url = new URL(previewUrl);
+    const localHost = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+    return url.protocol === "http:"
+      && localHost
+      && url.port === String(serverPort)
+      && url.pathname.startsWith("/preview/html/");
+  } catch {
+    return false;
+  }
+}
+
+function _sanitizeHtmlPreviewBounds(bounds, ownerWindow) {
+  if (!bounds || typeof bounds !== "object" || !ownerWindow || ownerWindow.isDestroyed()) return null;
+  const rawX = Number(bounds.x);
+  const rawY = Number(bounds.y);
+  const rawWidth = Number(bounds.width);
+  const rawHeight = Number(bounds.height);
+  if (![rawX, rawY, rawWidth, rawHeight].every(Number.isFinite)) return null;
+
+  const [contentWidth, contentHeight] = ownerWindow.getContentSize();
+  const x = Math.max(0, Math.min(Math.round(rawX), contentWidth));
+  const y = Math.max(0, Math.min(Math.round(rawY), contentHeight));
+  const width = Math.max(0, Math.min(Math.round(rawWidth), contentWidth - x));
+  const height = Math.max(0, Math.min(Math.round(rawHeight), contentHeight - y));
+  if (width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
+
+function _isHtmlPreviewViewDestroyed(view) {
+  return !view || !view.webContents || view.webContents.isDestroyed();
+}
+
+function _createHtmlPreviewWebContentsView(previewId) {
+  const view = new WebContentsView({
+    webPreferences: {
+      session: session.fromPartition(_htmlPreviewPartition(previewId)),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  view.webContents.on("will-navigate", (event, url) => {
+    if (!_isAllowedHtmlPreviewUrl(url)) event.preventDefault();
+  });
+  return view;
+}
+
+function _detachHtmlPreviewView(record) {
+  if (!record?.ownerWindow || record.ownerWindow.isDestroyed() || _isHtmlPreviewViewDestroyed(record.view)) return;
+  try { record.ownerWindow.contentView.removeChildView(record.view); } catch {}
+}
+
+function _closeHtmlPreviewView(previewId, ownerWebContentsId = null) {
+  const record = _htmlPreviewViews.get(previewId);
+  if (!record) return true;
+  if (ownerWebContentsId != null && record.ownerWebContentsId !== ownerWebContentsId) return false;
+  _detachHtmlPreviewView(record);
+  try {
+    if (!_isHtmlPreviewViewDestroyed(record.view)) record.view.webContents.close();
+  } catch {}
+  _htmlPreviewViews.delete(previewId);
+  return true;
+}
+
+function _closeAllHtmlPreviewViews(ownerWebContentsId = null) {
+  for (const [previewId, record] of _htmlPreviewViews.entries()) {
+    if (ownerWebContentsId != null && record.ownerWebContentsId !== ownerWebContentsId) continue;
+    _closeHtmlPreviewView(previewId, ownerWebContentsId);
+  }
+}
+
+function _showHtmlPreviewView(event, payload) {
+  const previewId = typeof payload?.previewId === "string" ? payload.previewId : "";
+  const previewUrl = typeof payload?.previewUrl === "string" ? payload.previewUrl : "";
+  if (!previewId || !_isAllowedHtmlPreviewUrl(previewUrl)) return false;
+
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+  const bounds = _sanitizeHtmlPreviewBounds(payload.bounds, ownerWindow);
+  if (!ownerWindow || ownerWindow.isDestroyed() || !bounds) return false;
+
+  let record = _htmlPreviewViews.get(previewId);
+  if (record && (record.ownerWebContentsId !== event.sender.id || _isHtmlPreviewViewDestroyed(record.view))) {
+    _closeHtmlPreviewView(previewId);
+    record = null;
+  }
+
+  if (!record) {
+    const view = _createHtmlPreviewWebContentsView(previewId);
+    record = { view, ownerWebContentsId: event.sender.id, ownerWindow };
+    _htmlPreviewViews.set(previewId, record);
+    event.sender.once("destroyed", () => {
+      _closeAllHtmlPreviewViews(event.sender.id);
+    });
+  }
+
+  if (record.view.webContents.getURL() !== previewUrl) {
+    void record.view.webContents.loadURL(previewUrl);
+  }
+  try { ownerWindow.contentView.removeChildView(record.view); } catch {}
+  ownerWindow.contentView.addChildView(record.view);
+  record.view.setBounds(bounds);
+  return true;
+}
+
+function _updateHtmlPreviewBounds(event, previewId, bounds) {
+  if (typeof previewId !== "string" || !previewId) return false;
+  const record = _htmlPreviewViews.get(previewId);
+  if (!record || record.ownerWebContentsId !== event.sender.id || _isHtmlPreviewViewDestroyed(record.view)) return false;
+  const nextBounds = _sanitizeHtmlPreviewBounds(bounds, record.ownerWindow);
+  if (!nextBounds) return false;
+  record.view.setBounds(nextBounds);
+  return true;
+}
+
 let _browserViewerTheme = themeRegistry.DEFAULT_THEME; // 当前主题（用于 backgroundColor）
 const TITLEBAR_HEIGHT = 44;        // 浏览器窗口标题栏高度（px）
 let serverProcess = null;
@@ -957,6 +1086,9 @@ async function _spawnServerOnce(serverInfoPath) {
     HANA_HOME: hanakoHome,
     HANA_SERVER_OWNER: "desktop",
     HANA_SERVER_OWNER_PID: String(process.pid),
+    HANA_DESKTOP_EXEC_PATH: process.execPath,
+    HANA_DESKTOP_APP_PATH: app.getAppPath(),
+    HANA_DESKTOP_IS_PACKAGED: app.isPackaged ? "1" : "0",
   };
   serverEnv = await serverEnvironmentForNetworkProxy(serverEnv);
 
@@ -1378,13 +1510,21 @@ function defaultQuickChatWindowState(mode, requestedHeight = null) {
 }
 
 function resolveQuickChatWindowBounds(mode, state = loadQuickChatWindowState(), requestedHeight = null) {
-  const height = quickChatHeightForMode(mode, requestedHeight);
   const base = state || defaultQuickChatWindowState(mode, requestedHeight);
+  const chatWidth = Number.isFinite(base.chatWidth) ? base.chatWidth : base.width;
+  const chatHeight = Number.isFinite(base.chatHeight) ? base.chatHeight : base.height;
+  const width = mode === "chat"
+    ? Math.max(QUICK_CHAT_MIN_WIDTH, Math.round(chatWidth || QUICK_CHAT_WIDTH))
+    : QUICK_CHAT_WIDTH;
+  const requestedModeHeight = quickChatHeightForMode(mode, requestedHeight);
+  const height = mode === "chat"
+    ? quickChatHeightForMode(mode, Math.max(requestedModeHeight, Math.round(chatHeight || 0)))
+    : requestedModeHeight;
   const sanitized = sanitizeWindowState(
-    { ...base, width: QUICK_CHAT_WIDTH, height },
+    { ...base, width, height },
     screen.getAllDisplays(),
     {
-      defaultWidth: QUICK_CHAT_WIDTH,
+      defaultWidth: width,
       defaultHeight: height,
       minWidth: QUICK_CHAT_MIN_WIDTH,
       minHeight: Math.min(QUICK_CHAT_MIN_HEIGHT, height),
@@ -1395,7 +1535,9 @@ function resolveQuickChatWindowBounds(mode, state = loadQuickChatWindowState(), 
   return {
     x: sanitized.x,
     y: sanitized.y,
-    width: Math.max(QUICK_CHAT_MIN_WIDTH, Math.min(QUICK_CHAT_WIDTH, sanitized.width || QUICK_CHAT_WIDTH)),
+    width: mode === "chat"
+      ? Math.max(QUICK_CHAT_MIN_WIDTH, sanitized.width || width)
+      : QUICK_CHAT_WIDTH,
     height: sanitized.height || height,
   };
 }
@@ -1408,12 +1550,24 @@ function saveQuickChatWindowState() {
     _saveQuickChatWindowStateTimer = null;
     if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
     const bounds = quickChatWindow.getBounds();
+    const previous = loadQuickChatWindowState() || {};
     const state = {
+      ...previous,
       x: bounds.x,
       y: bounds.y,
-      width: QUICK_CHAT_WIDTH,
-      height: quickChatHeightForMode(quickChatMode),
+      width: bounds.width,
+      height: bounds.height,
     };
+    const previousLooksLikeChat = Number.isFinite(previous.width)
+      && Number.isFinite(previous.height)
+      && (previous.width > QUICK_CHAT_WIDTH || previous.height > QUICK_CHAT_COMPACT_HEIGHT);
+    if (quickChatMode === "chat") {
+      state.chatWidth = bounds.width;
+      state.chatHeight = bounds.height;
+    } else if (!Number.isFinite(state.chatWidth) && previousLooksLikeChat) {
+      state.chatWidth = previous.width;
+      state.chatHeight = previous.height;
+    }
     _saveQuickChatWindowStateChain = _saveQuickChatWindowStateChain.then(async () => {
       await fs.promises.mkdir(path.dirname(quickChatWindowStatePath), { recursive: true });
       await fs.promises.writeFile(quickChatWindowStatePath, JSON.stringify(state, null, 2) + "\n");
@@ -1439,8 +1593,27 @@ function normalizeQuickChatResizeRequest(request) {
 function applyQuickChatMode(request) {
   if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
   const { mode, height } = normalizeQuickChatResizeRequest(request);
+  const prevMode = quickChatMode;
   quickChatMode = mode;
-  const bounds = resolveQuickChatWindowBounds(quickChatMode, quickChatWindow.getBounds(), height);
+  const currentBounds = quickChatWindow.getBounds();
+  const savedState = mode === "chat" ? loadQuickChatWindowState() : null;
+  const stateForMode = savedState
+    ? { ...savedState, x: currentBounds.x, y: currentBounds.y }
+    : currentBounds;
+  const bounds = resolveQuickChatWindowBounds(quickChatMode, stateForMode, height);
+
+  if (mode === "chat") {
+    // chat 模式：允许用户手动调整大小，且只增不缩（尊重用户手动拉大的尺寸）
+    if (prevMode === "chat") {
+      bounds.height = Math.max(bounds.height, currentBounds.height);
+      bounds.width = Math.max(bounds.width, currentBounds.width);
+    }
+    quickChatWindow.setResizable(true);
+  } else {
+    // compact 模式：固定大小
+    quickChatWindow.setResizable(false);
+  }
+
   quickChatWindow.setBounds(bounds, true);
   saveQuickChatWindowState();
 }
@@ -1455,7 +1628,6 @@ function createQuickChatWindow() {
     ...bounds,
     minWidth: QUICK_CHAT_MIN_WIDTH,
     minHeight: QUICK_CHAT_MIN_HEIGHT,
-    maxWidth: QUICK_CHAT_WIDTH,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -1479,6 +1651,7 @@ function createQuickChatWindow() {
   loadWindowURL(quickChatWindow, "quick-chat");
 
   quickChatWindow.on("move", saveQuickChatWindowState);
+  quickChatWindow.on("resize", saveQuickChatWindowState);
   quickChatWindow.on("close", (event) => {
     if (!isQuitting && !_isUpdating && !forceQuitApp) {
       event.preventDefault();
@@ -1532,6 +1705,7 @@ function showQuickChatWindow() {
   }
   win.show();
   win.focus();
+  win.webContents.focus();
   win.webContents.send("quick-chat-shown");
 }
 
@@ -1715,6 +1889,7 @@ function createMainWindow() {
 
   mainWindow.on("closed", () => {
     setUpdaterMainWindow(null);
+    _closeAllHtmlPreviewViews();
     mainWindow = null;
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.destroy();
@@ -1880,7 +2055,7 @@ function createBrowserViewerWindow(opts = {}) {
   }
 
   browserViewerWindow = new BrowserWindow({
-    width: 1200,
+    width: 1440,
     height: 1080,
     minWidth: 480,
     minHeight: 360,
@@ -2121,15 +2296,89 @@ const SNAPSHOT_SCRIPT = `(function() {
   };
 })()`;
 
-/** 按 sessionPath 查找 view，fallback 到当前活跃 view（兼容旧调用） */
-function _getViewForSession(sessionPath) {
-  if (sessionPath && _browserViews.has(sessionPath)) {
-    const view = _browserViews.get(sessionPath);
-    if (_isBrowserViewDestroyed(view)) {
-      _forgetBrowserView(view, "destroyed");
+const DEFAULT_BROWSER_WORKSPACE_KEY = "__hana_default_browser__";
+
+function _browserWorkspaceKey(sessionPath) {
+  return sessionPath || DEFAULT_BROWSER_WORKSPACE_KEY;
+}
+
+function _newBrowserTabId() {
+  return `tab-${crypto.randomUUID()}`;
+}
+
+function _createBrowserWorkspace(sessionPath) {
+  return {
+    sessionPath: sessionPath || null,
+    activeTabId: null,
+    tabs: new Map(),
+  };
+}
+
+function _getBrowserWorkspace(sessionPath) {
+  return _browserViews.get(_browserWorkspaceKey(sessionPath)) || null;
+}
+
+function _ensureBrowserWorkspace(sessionPath) {
+  const key = _browserWorkspaceKey(sessionPath);
+  let workspace = _browserViews.get(key);
+  if (!workspace) {
+    workspace = _createBrowserWorkspace(sessionPath);
+    _browserViews.set(key, workspace);
+  }
+  return workspace;
+}
+
+function _tabTitleFromWebContents(view) {
+  const title = view?.webContents?.getTitle?.();
+  return typeof title === "string" && title.trim() ? title.trim() : "New Tab";
+}
+
+function _tabUrlFromWebContents(view) {
+  const url = view?.webContents?.getURL?.();
+  return typeof url === "string" && url.length > 0 ? url : null;
+}
+
+function _serializeBrowserTab(tab) {
+  const view = tab.view;
+  return {
+    tabId: tab.tabId,
+    title: _tabTitleFromWebContents(view) || tab.title || "New Tab",
+    url: _tabUrlFromWebContents(view) || tab.url || null,
+    canGoBack: !!view?.webContents?.canGoBack?.(),
+    canGoForward: !!view?.webContents?.canGoForward?.(),
+    createdAt: tab.createdAt,
+    updatedAt: Date.now(),
+  };
+}
+
+function _serializeBrowserWorkspace(workspace) {
+  const tabs = Array.from(workspace?.tabs?.values?.() || []).map(_serializeBrowserTab);
+  const activeTabId = workspace?.activeTabId && tabs.some(tab => tab.tabId === workspace.activeTabId)
+    ? workspace.activeTabId
+    : tabs[0]?.tabId || null;
+  return {
+    sessionPath: workspace?.sessionPath || null,
+    activeTabId,
+    tabs,
+  };
+}
+
+function _activeBrowserTabRecord(workspace) {
+  if (!workspace || !workspace.tabs || workspace.tabs.size === 0) return null;
+  return workspace.tabs.get(workspace.activeTabId) || workspace.tabs.values().next().value || null;
+}
+
+/** 按 sessionPath 查找当前 active tab view，fallback 到当前活跃 view（兼容旧调用） */
+function _getViewForSession(sessionPath, tabId = null) {
+  const workspace = _getBrowserWorkspace(sessionPath);
+  if (workspace) {
+    const tab = tabId ? workspace.tabs.get(tabId) : _activeBrowserTabRecord(workspace);
+    if (!tab) return null;
+    if (_isBrowserViewDestroyed(tab.view)) {
+      _forgetBrowserView(tab.view, "destroyed");
       return null;
     }
-    return view;
+    return tab.view;
   }
   if (_browserWebView && _isBrowserViewDestroyed(_browserWebView)) {
     _forgetBrowserView(_browserWebView, "destroyed");
@@ -2139,10 +2388,21 @@ function _getViewForSession(sessionPath) {
 }
 
 /** 确保指定 session 有 browser view */
-function _ensureBrowserForSession(sessionPath) {
-  const view = _getViewForSession(sessionPath);
+function _ensureBrowserForSession(sessionPath, tabId = null) {
+  const view = _getViewForSession(sessionPath, tabId);
   if (!view) throw new Error("No browser instance" + (sessionPath ? ` for session ${sessionPath}` : ""));
   return view;
+}
+
+function _ensureBrowserTabForSession(sessionPath, tabId = null) {
+  const workspace = _ensureBrowserWorkspace(sessionPath);
+  let tab = tabId ? workspace.tabs.get(tabId) : _activeBrowserTabRecord(workspace);
+  if (!tab) {
+    tab = _createBrowserTabRecord(sessionPath, { tabId });
+    workspace.tabs.set(tab.tabId, tab);
+    workspace.activeTabId = tab.tabId;
+  }
+  return tab;
 }
 
 function _ensureBrowser() {
@@ -2178,9 +2438,10 @@ function _detachActiveBrowserView({ view = _browserWebView, sessionPath = _curre
   }
   _browserWebView = null;
   _currentBrowserSession = null;
+  _currentBrowserTabId = null;
   if (destroy) {
     try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
-    if (sessionPath) _browserViews.delete(sessionPath);
+    _removeBrowserTabRecord(view);
   }
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
     browserViewerWindow.webContents.send("browser-update", { running: false, reason });
@@ -2194,9 +2455,7 @@ function _forgetBrowserView(view, reason) {
   const wasActive = view === _browserWebView;
   const activeSessionPath = wasActive ? _currentBrowserSession : null;
   if (wasActive) _detachActiveBrowserView({ view, sessionPath: activeSessionPath, hideIfVisible: true, reason });
-  for (const [sp, candidate] of _browserViews) {
-    if (candidate === view) _browserViews.delete(sp);
-  }
+  _removeBrowserTabRecord(view);
   try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
 }
 
@@ -2211,7 +2470,68 @@ function _bindBrowserViewLifecycle(view, sessionPath) {
   if (sessionPath && _isBrowserViewDestroyed(view)) forget("destroyed");
 }
 
-function _createBrowserWebContentsView(sessionPath) {
+function _removeBrowserTabRecord(view) {
+  if (!view) return null;
+  for (const [key, workspace] of _browserViews) {
+    for (const [tabId, tab] of workspace.tabs) {
+      if (tab.view !== view) continue;
+      workspace.tabs.delete(tabId);
+      if (workspace.activeTabId === tabId) {
+        workspace.activeTabId = workspace.tabs.keys().next().value || null;
+      }
+      if (workspace.tabs.size === 0) _browserViews.delete(key);
+      return { workspace, tabId };
+    }
+  }
+  return null;
+}
+
+function _browserSession() {
+  return session.fromPartition("persist:hana-browser");
+}
+
+function _installBrowserCookiePolicy() {
+  if (_browserCookiePolicyInstalled) return;
+  _browserCookiePolicyInstalled = true;
+  const ses = _browserSession();
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (_browserAcceptCookies) {
+      callback({ requestHeaders: details.requestHeaders });
+      return;
+    }
+    const requestHeaders = { ...(details.requestHeaders || {}) };
+    for (const key of Object.keys(requestHeaders)) {
+      if (key.toLowerCase() === "cookie") delete requestHeaders[key];
+    }
+    callback({ requestHeaders });
+  });
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    if (_browserAcceptCookies) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
+    const responseHeaders = { ...(details.responseHeaders || {}) };
+    for (const key of Object.keys(responseHeaders)) {
+      if (key.toLowerCase() === "set-cookie") delete responseHeaders[key];
+    }
+    callback({ responseHeaders });
+  });
+}
+
+function _setBrowserAcceptCookies(enabled) {
+  _browserAcceptCookies = enabled !== false;
+  _installBrowserCookiePolicy();
+}
+
+async function _clearBrowserCookiesAndSiteData() {
+  const ses = _browserSession();
+  await ses.clearStorageData({
+    storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
+  });
+}
+
+function _createBrowserWebContentsView(sessionPath, tabId = null) {
+  _installBrowserCookiePolicy();
   const ses = session.fromPartition("persist:hana-browser");
   const view = new WebContentsView({
     webPreferences: {
@@ -2231,7 +2551,7 @@ function _createBrowserWebContentsView(sessionPath) {
   });
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedBrowserUrl(url)) {
-      view.webContents.loadURL(url);
+      _openUrlInNewBrowserTab(sessionPath, url, { show: view === _browserWebView });
     }
     return { action: "deny" };
   });
@@ -2243,6 +2563,53 @@ function _createBrowserWebContentsView(sessionPath) {
   return view;
 }
 
+function _createBrowserTabRecord(sessionPath, seed = {}) {
+  const tabId = seed.tabId || _newBrowserTabId();
+  const view = _createBrowserWebContentsView(sessionPath, tabId);
+  const now = Date.now();
+  return {
+    tabId,
+    view,
+    title: seed.title || "New Tab",
+    url: seed.url || null,
+    createdAt: seed.createdAt || now,
+    updatedAt: seed.updatedAt || now,
+  };
+}
+
+function _switchActiveBrowserTab(sessionPath, tabId) {
+  const workspace = _getBrowserWorkspace(sessionPath);
+  if (!workspace || !workspace.tabs.has(tabId)) return null;
+  const tab = workspace.tabs.get(tabId);
+  workspace.activeTabId = tabId;
+  if (_browserWebView !== tab.view) {
+    if (_browserWebView && browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+      try { browserViewerWindow.contentView.removeChildView(_browserWebView); } catch {}
+    }
+    _browserWebView = tab.view;
+    _currentBrowserSession = workspace.sessionPath;
+    _currentBrowserTabId = tabId;
+    if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+      browserViewerWindow.contentView.addChildView(tab.view);
+      _updateBrowserViewBounds();
+    }
+  }
+  _notifyViewerUrl(_tabUrlFromWebContents(tab.view) || tab.url || "");
+  return tab;
+}
+
+async function _openUrlInNewBrowserTab(sessionPath, url, options = {}) {
+  const show = options.show !== false;
+  const workspace = _ensureBrowserWorkspace(sessionPath);
+  const tab = _createBrowserTabRecord(sessionPath, { url });
+  workspace.tabs.set(tab.tabId, tab);
+  workspace.activeTabId = tab.tabId;
+  if (show) _switchActiveBrowserTab(sessionPath, tab.tabId);
+  if (url && isAllowedBrowserUrl(url)) await tab.view.webContents.loadURL(url);
+  if (tab.view === _browserWebView) _notifyViewerUrl(tab.view.webContents.getURL());
+  return _serializeBrowserWorkspace(workspace);
+}
+
 function _ensureLiveWebContents(view, sessionPath) {
   if (_isBrowserViewDestroyed(view)) {
     _forgetBrowserView(view, "destroyed");
@@ -2251,8 +2618,8 @@ function _ensureLiveWebContents(view, sessionPath) {
   return view.webContents;
 }
 
-async function _withLiveWebContents(sessionPath, fn) {
-  const view = _ensureBrowserForSession(sessionPath);
+async function _withLiveWebContents(sessionPath, fn, tabId = null) {
+  const view = _ensureBrowserForSession(sessionPath, tabId);
   const wc = _ensureLiveWebContents(view, sessionPath);
   try {
     return await fn(wc, view);
@@ -2287,11 +2654,16 @@ function _updateBrowserViewBounds() {
 
 function _notifyViewerUrl(url) {
   if (browserViewerWindow && !browserViewerWindow.isDestroyed() && _browserWebView) {
+    const workspace = _getBrowserWorkspace(_currentBrowserSession);
+    const serialized = _serializeBrowserWorkspace(workspace);
     browserViewerWindow.webContents.send("browser-update", {
       url,
       title: _browserWebView.webContents.getTitle(),
       canGoBack: _browserWebView.webContents.canGoBack(),
       canGoForward: _browserWebView.webContents.canGoForward(),
+      sessionPath: _currentBrowserSession,
+      activeTabId: _currentBrowserTabId || serialized.activeTabId,
+      tabs: serialized.tabs,
     });
   }
 }
@@ -2406,28 +2778,35 @@ async function handleBrowserCommand(cmd, params) {
     // ── launch ──
     case "launch": {
       const sp = params.sessionPath || null;
-      // 该 session 已有 view → 直接返回
-      if (sp && _browserViews.has(sp)) {
-        const existingView = _getViewForSession(sp);
-        if (existingView) return {};
+      _setBrowserAcceptCookies(params.acceptCookies !== false);
+      const workspace = _ensureBrowserWorkspace(sp);
+      if (workspace.tabs.size > 0) {
+        return _serializeBrowserWorkspace(workspace);
       }
-      // 无 sessionPath 且已有活跃 view → 直接返回（兼容旧调用）
-      if (!sp && _browserWebView && !_isBrowserViewDestroyed(_browserWebView)) return {};
+      const restoreTabs = Array.isArray(params.tabs) && params.tabs.length > 0
+        ? params.tabs
+        : [{ tabId: params.tabId || undefined, url: null, title: "New Tab" }];
+      for (const seed of restoreTabs) {
+        const tab = _createBrowserTabRecord(sp, seed || {});
+        workspace.tabs.set(tab.tabId, tab);
+        if (seed?.url && isAllowedBrowserUrl(seed.url)) {
+          tab.view.webContents.loadURL(seed.url).catch(() => {});
+        }
+      }
+      workspace.activeTabId = params.activeTabId && workspace.tabs.has(params.activeTabId)
+        ? params.activeTabId
+        : workspace.tabs.keys().next().value || null;
 
-      const view = _createBrowserWebContentsView(sp);
-
-      // 存入 Map
-      if (sp) _browserViews.set(sp, view);
-
-      // 如果当前没有活跃 view，设为活跃（挂载到窗口）
       if (!_browserWebView) {
-        _browserWebView = view;
+        const activeTab = _activeBrowserTabRecord(workspace);
+        _browserWebView = activeTab?.view || null;
         _currentBrowserSession = sp;
+        _currentBrowserTabId = activeTab?.tabId || null;
 
         // 始终静默创建窗口（不弹出），等用户手动点击才 show
         createBrowserViewerWindow({ show: false });
         // 如果 HTML 已加载完毕（窗口复用），did-finish-load 不会再触发，手动挂载
-        if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+        if (_browserWebView && browserViewerWindow && !browserViewerWindow.isDestroyed()) {
           try { browserViewerWindow.contentView.removeChildView(_browserWebView); } catch {}
           browserViewerWindow.contentView.addChildView(_browserWebView);
           _updateBrowserViewBounds();
@@ -2440,20 +2819,22 @@ async function handleBrowserCommand(cmd, params) {
         }
       }
       // 否则，新 view 只存在 Map 中，不挂载到窗口（后台可操作）
-      return {};
+      return _serializeBrowserWorkspace(workspace);
     }
 
     // ── close ──（真正销毁指定 session 的浏览器实例）
     case "close": {
       const sp = params.sessionPath;
-      const view = sp ? _getViewForSession(sp) : _browserWebView;
-      if (view) {
-        if (view === _browserWebView) {
-          _detachActiveBrowserView({ view, sessionPath: sp || _currentBrowserSession, destroy: true, hideIfVisible: true });
-        } else {
-          try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
-          if (sp) _browserViews.delete(sp);
+      const workspace = _getBrowserWorkspace(sp);
+      if (workspace) {
+        const active = _activeBrowserTabRecord(workspace);
+        if (active?.view === _browserWebView) {
+          _detachActiveBrowserView({ view: active.view, sessionPath: sp || _currentBrowserSession, destroy: false, hideIfVisible: true });
         }
+        for (const tab of workspace.tabs.values()) {
+          try { if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close(); } catch {}
+        }
+        _browserViews.delete(_browserWorkspaceKey(sp));
       }
       return {};
     }
@@ -2471,13 +2852,19 @@ async function handleBrowserCommand(cmd, params) {
     // ── resume ──（把挂起的 view 挂回窗口，但不自动弹出）
     case "resume": {
       const sp = params.sessionPath;
-      if (!sp || !_browserViews.has(sp)) {
+      const workspace = _getBrowserWorkspace(sp);
+      if (!sp || !workspace || workspace.tabs.size === 0) {
         return { found: false };
       }
-      const view = _getViewForSession(sp);
+      const tabId = params.tabId || workspace.activeTabId;
+      const view = _getViewForSession(sp, tabId);
       if (!view) return { found: false };
+      if (_browserWebView && _browserWebView !== view && browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+        try { browserViewerWindow.contentView.removeChildView(_browserWebView); } catch {}
+      }
       _browserWebView = view;
       _currentBrowserSession = sp;
+      _currentBrowserTabId = tabId;
 
       // 挂载 view 到窗口（不 show，等用户手动打开）
       createBrowserViewerWindow({ show: false });
@@ -2490,7 +2877,68 @@ async function handleBrowserCommand(cmd, params) {
       // 通知标题栏更新
       const url = view.webContents.getURL();
       if (url) _notifyViewerUrl(url);
-      return { found: true, url };
+      return { found: true, url, ..._serializeBrowserWorkspace(workspace) };
+    }
+
+    case "newTab": {
+      const sp = params.sessionPath || null;
+      const workspace = _ensureBrowserWorkspace(sp);
+      const tab = _createBrowserTabRecord(sp, { url: params.url || null });
+      workspace.tabs.set(tab.tabId, tab);
+      workspace.activeTabId = tab.tabId;
+      const shouldShow = _currentBrowserSession === sp || !_browserWebView;
+      if (shouldShow) {
+        _switchActiveBrowserTab(sp, tab.tabId);
+      }
+      if (params.url && isAllowedBrowserUrl(params.url)) {
+        await tab.view.webContents.loadURL(params.url);
+      }
+      if (tab.view === _browserWebView) _notifyViewerUrl(tab.view.webContents.getURL());
+      return _serializeBrowserWorkspace(workspace);
+    }
+
+    case "switchTab": {
+      const sp = params.sessionPath || null;
+      const workspace = _getBrowserWorkspace(sp);
+      if (!workspace || !workspace.tabs.has(params.tabId)) {
+        throw new Error(`No browser tab ${params.tabId}`);
+      }
+      _switchActiveBrowserTab(sp, params.tabId);
+      return _serializeBrowserWorkspace(workspace);
+    }
+
+    case "closeTab": {
+      const sp = params.sessionPath || null;
+      const workspace = _getBrowserWorkspace(sp);
+      if (!workspace || !workspace.tabs.has(params.tabId)) {
+        throw new Error(`No browser tab ${params.tabId}`);
+      }
+      const tab = workspace.tabs.get(params.tabId);
+      const tabIds = Array.from(workspace.tabs.keys());
+      const closedIndex = tabIds.indexOf(params.tabId);
+      const nextTabId = tabIds[closedIndex + 1] || tabIds[closedIndex - 1] || null;
+      if (tab.view === _browserWebView) {
+        _detachActiveBrowserView({ view: tab.view, sessionPath: sp, destroy: false, hideIfVisible: false });
+      }
+      workspace.tabs.delete(params.tabId);
+      try { if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close(); } catch {}
+      if (workspace.tabs.size === 0) {
+        _browserViews.delete(_browserWorkspaceKey(sp));
+        if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+          browserViewerWindow.webContents.send("browser-update", {
+            running: false,
+            sessionPath: sp,
+            activeTabId: null,
+            tabs: [],
+          });
+        }
+        return { activeTabId: null, tabs: [] };
+      }
+      workspace.activeTabId = nextTabId && workspace.tabs.has(nextTabId)
+        ? nextTabId
+        : workspace.tabs.keys().next().value;
+      _switchActiveBrowserTab(sp, workspace.activeTabId);
+      return _serializeBrowserWorkspace(workspace);
     }
 
     // ── navigate ──
@@ -2516,25 +2964,33 @@ async function handleBrowserCommand(cmd, params) {
           url: snap.currentUrl,
           title: snap.title,
           snapshot: snap.text,
+          tabId: params.tabId || _currentBrowserTabId,
+          canGoBack: wc.canGoBack(),
+          canGoForward: wc.canGoForward(),
           diagnostics: { wait },
         };
-      });
+      }, params.tabId || null);
     }
 
     // ── snapshot ──
     case "snapshot": {
       return await _withLiveWebContents(params.sessionPath, async (wc) => {
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text };
-      });
+        return {
+          currentUrl: snap.currentUrl,
+          title: snap.title,
+          tabId: params.tabId || _currentBrowserTabId,
+          text: snap.text,
+        };
+      }, params.tabId || null);
     }
 
     // ── screenshot ──
     case "screenshot": {
       return await _withLiveWebContents(params.sessionPath, async (wc) => {
         const img = await wc.capturePage();
-        return { base64: encodeCapturedPageToJpegBase64(img, 75, "screenshot") };
-      });
+        return { base64: encodeCapturedPageToJpegBase64(img, 75, "screenshot"), tabId: params.tabId || _currentBrowserTabId };
+      }, params.tabId || null);
     }
 
     // ── thumbnail ──
@@ -2543,7 +2999,7 @@ async function handleBrowserCommand(cmd, params) {
         const img = await wc.capturePage();
         const resized = img.resize({ width: 400 });
         return { base64: encodeCapturedPageToJpegBase64(resized, 60, "thumbnail") };
-      });
+      }, params.tabId || null);
     }
 
     // ── click ──
@@ -2557,8 +3013,8 @@ async function handleBrowserCommand(cmd, params) {
         );
         await _delay(800);
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text };
-      });
+        return { currentUrl: snap.currentUrl, title: snap.title, tabId: params.tabId || _currentBrowserTabId, text: snap.text };
+      }, params.tabId || null);
     }
 
     // ── type ──
@@ -2583,8 +3039,8 @@ async function handleBrowserCommand(cmd, params) {
         }
         await _delay(300);
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text };
-      });
+        return { currentUrl: snap.currentUrl, title: snap.title, tabId: params.tabId || _currentBrowserTabId, text: snap.text };
+      }, params.tabId || null);
     }
 
     // ── scroll ──
@@ -2594,8 +3050,8 @@ async function handleBrowserCommand(cmd, params) {
         await wc.executeJavaScript("window.scrollBy({top:" + delta + ",behavior:'smooth'})");
         await _delay(500);
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text };
-      });
+        return { currentUrl: snap.currentUrl, title: snap.title, tabId: params.tabId || _currentBrowserTabId, text: snap.text };
+      }, params.tabId || null);
     }
 
     // ── select ──
@@ -2611,8 +3067,8 @@ async function handleBrowserCommand(cmd, params) {
         );
         await _delay(300);
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text };
-      });
+        return { currentUrl: snap.currentUrl, title: snap.title, tabId: params.tabId || _currentBrowserTabId, text: snap.text };
+      }, params.tabId || null);
     }
 
     // ── pressKey ──
@@ -2627,8 +3083,8 @@ async function handleBrowserCommand(cmd, params) {
         wc.sendInputEvent({ type: "keyUp", keyCode: mappedKey, modifiers });
         await _delay(300);
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text };
-      });
+        return { currentUrl: snap.currentUrl, title: snap.title, tabId: params.tabId || _currentBrowserTabId, text: snap.text };
+      }, params.tabId || null);
     }
 
     // ── wait ──
@@ -2640,8 +3096,8 @@ async function handleBrowserCommand(cmd, params) {
           timeoutMs: timeout,
         });
         const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
-        return { currentUrl: snap.currentUrl, text: snap.text, diagnostics: { wait } };
-      });
+        return { currentUrl: snap.currentUrl, title: snap.title, tabId: params.tabId || _currentBrowserTabId, text: snap.text, diagnostics: { wait } };
+      }, params.tabId || null);
     }
 
     // ── evaluate ──
@@ -2653,15 +3109,21 @@ async function handleBrowserCommand(cmd, params) {
       return await _withLiveWebContents(params.sessionPath, async (wc) => {
         const result = await wc.executeJavaScript(params.expression);
         const serialized = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-        return { value: serialized || "undefined" };
-      });
+        return { value: serialized || "undefined", tabId: params.tabId || _currentBrowserTabId };
+      }, params.tabId || null);
     }
 
     // ── show ──（按 sessionPath 切换显示的 view 并弹出窗口）
     case "show": {
       const sp = params.sessionPath;
-      const view = sp ? _getViewForSession(sp) : _browserWebView;
+      const tabId = params.tabId || null;
+      const view = sp ? _getViewForSession(sp, tabId) : _browserWebView;
       if (!view) return {};
+      const workspace = _getBrowserWorkspace(sp);
+      const activeRecord = workspace
+        ? (tabId ? workspace.tabs.get(tabId) : _activeBrowserTabRecord(workspace))
+        : null;
+      if (workspace && activeRecord) workspace.activeTabId = activeRecord.tabId;
 
       // 如果不是当前活跃 view，先切换
       if (view !== _browserWebView) {
@@ -2671,6 +3133,7 @@ async function handleBrowserCommand(cmd, params) {
         }
         _browserWebView = view;
         _currentBrowserSession = sp;
+        _currentBrowserTabId = activeRecord?.tabId || tabId || null;
         if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
           browserViewerWindow.contentView.addChildView(view);
           _updateBrowserViewBounds();
@@ -2688,25 +3151,37 @@ async function handleBrowserCommand(cmd, params) {
       } else {
         _browserWebView = view;
         _currentBrowserSession = sp;
+        _currentBrowserTabId = activeRecord?.tabId || tabId || _currentBrowserTabId;
         createBrowserViewerWindow();
       }
-      return {};
+      _notifyViewerUrl(view.webContents.getURL());
+      return workspace ? _serializeBrowserWorkspace(workspace) : {};
     }
 
     // ── destroyView ──（销毁指定 session 的挂起 view）
     case "destroyView": {
       const sp = params.sessionPath;
-      if (sp && _browserViews.has(sp)) {
-        const view = _getViewForSession(sp);
-        if (!view) return {};
-        if (view === _browserWebView) {
-          _detachActiveBrowserView({ view, sessionPath: sp, destroy: true, hideIfVisible: true });
-        } else {
-          try { if (!view.webContents.isDestroyed()) view.webContents.close(); } catch {}
-          _browserViews.delete(sp);
+      const workspace = _getBrowserWorkspace(sp);
+      if (workspace) {
+        for (const tab of workspace.tabs.values()) {
+          if (tab.view === _browserWebView) {
+            _detachActiveBrowserView({ view: tab.view, sessionPath: sp, destroy: false, hideIfVisible: true });
+          }
+          try { if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close(); } catch {}
         }
+        _browserViews.delete(_browserWorkspaceKey(sp));
       }
       return {};
+    }
+
+    case "setAcceptCookies": {
+      _setBrowserAcceptCookies(params.enabled !== false);
+      return { ok: true, acceptCookies: _browserAcceptCookies };
+    }
+
+    case "clearBrowserCookiesAndSiteData": {
+      await _clearBrowserCookiesAndSiteData();
+      return { ok: true };
     }
 
     default:
@@ -3401,37 +3876,47 @@ wrapIpcBestEffortHandler("quick-chat-open-session", (_event, sessionPath) => {
 
 wrapIpcBestEffortHandler("open-settings", (_event, tab, theme) => createSettingsWindow(tab, theme));
 
-// 浏览器查看器窗口
+// HTML Preview 原生承载面：renderer 只上报 URL + bounds，实际页面跑在独立 WebContentsView。
+wrapIpcBestEffortHandler("html-preview-show", (event, payload) => _showHtmlPreviewView(event, payload));
+wrapIpcBestEffortHandler("html-preview-update-bounds", (event, previewId, bounds) => _updateHtmlPreviewBounds(event, previewId, bounds));
+wrapIpcBestEffortHandler("html-preview-close", (event, previewId) => _closeHtmlPreviewView(previewId, event.sender.id));
+
+  // 浏览器查看器窗口
 wrapIpcBestEffortHandler("open-browser-viewer", async (_event, theme, url) => {
   if (theme) _browserViewerTheme = theme;
   createBrowserViewerWindow();
-  if (!url || !isAllowedBrowserUrl(url)) return;
 
-  if (_browserWebView && _currentBrowserSession) {
-    if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-      try { browserViewerWindow.contentView.removeChildView(_browserWebView); } catch {}
-    }
-    _browserWebView = null;
-    _currentBrowserSession = null;
+  if (url && isAllowedBrowserUrl(url)) {
+    await _openUrlInNewBrowserTab(null, url);
+    return;
   }
 
   if (!_browserWebView) {
-    _browserWebView = _createBrowserWebContentsView(null);
-    if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
-      try { browserViewerWindow.contentView.removeChildView(_browserWebView); } catch {}
-      browserViewerWindow.contentView.addChildView(_browserWebView);
-      _updateBrowserViewBounds();
-    }
+    const workspace = _ensureBrowserWorkspace(null);
+    const tab = _ensureBrowserTabForSession(null);
+    workspace.activeTabId = tab.tabId;
+    _switchActiveBrowserTab(null, tab.tabId);
+  } else {
+    _notifyViewerUrl(_browserWebView.webContents.getURL());
   }
-
-  await _withLiveWebContents(null, async (wc) => {
-    await wc.loadURL(url);
-  });
-  _notifyViewerUrl(url);
 });
 wrapIpcBestEffortHandler("browser-go-back", () => { if (_browserWebView) _browserWebView.webContents.goBack(); });
 wrapIpcBestEffortHandler("browser-go-forward", () => { if (_browserWebView) _browserWebView.webContents.goForward(); });
 wrapIpcBestEffortHandler("browser-reload", () => { if (_browserWebView) _browserWebView.webContents.reload(); });
+wrapIpcBestEffortHandler("browser-new-tab", async () => {
+  await _openUrlInNewBrowserTab(_currentBrowserSession, null);
+});
+wrapIpcBestEffortHandler("browser-switch-tab", (_event, tabId) => {
+  if (typeof tabId !== "string" || !tabId) return;
+  _switchActiveBrowserTab(_currentBrowserSession, tabId);
+});
+wrapIpcBestEffortHandler("browser-close-tab", (_event, tabId) => {
+  if (typeof tabId !== "string" || !tabId) return;
+  return handleBrowserCommand("closeTab", {
+    sessionPath: _currentBrowserSession,
+    tabId,
+  });
+});
 wrapIpcBestEffortHandler("close-browser-viewer", () => {
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.close();
 });
@@ -4408,12 +4893,16 @@ app.on("before-quit", async (event) => {
   }
 
   // 清理浏览器实例
-  for (const [sp, view] of _browserViews) {
-    try { view.webContents.close(); } catch {}
+  for (const workspace of _browserViews.values()) {
+    for (const tab of workspace.tabs.values()) {
+      try { tab.view.webContents.close(); } catch {}
+    }
   }
   _browserViews.clear();
   _browserWebView = null;
   _currentBrowserSession = null;
+  _currentBrowserTabId = null;
+  _closeAllHtmlPreviewViews();
 
   // server 清理
   if ((serverProcess && !hasChildExitObserved(serverProcess)) || (reusedServerPid && reusedServerOwned)) {

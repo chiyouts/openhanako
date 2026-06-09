@@ -382,6 +382,9 @@
     "copy": "コピー",
     "copied": "コピーしました ✓"
   },
+  "codeBlock": {
+    "wordWrap": "折り返し"
+  },
   "cron": {
     "typeAt": "一回のみ",
     "typeEvery": "一定間隔",
@@ -794,6 +797,7 @@
     "tabs": {
       "interface": "インターフェース",
       "general": "一般",
+      "browser": "ブラウザ",
       "agent": "エージェント",
       "me": "自分",
       "providers": "プロバイダー",
@@ -809,6 +813,20 @@
       "plugins": "プラグイン",
       "about": "概要",
       "security": "セキュリティ"
+    },
+    "browser": {
+      "cookiesTitle": "Cookies",
+      "acceptCookies": "Cookies を受け入れる",
+      "acceptCookiesHint": "オンにすると、内蔵ブラウザは通常のブラウザのようにサイトの Cookies を保存して送信します。",
+      "clearCookies": "Cookies を消去",
+      "clearCookiesHint": "内蔵ブラウザに保存された Cookies とサイトデータを消去します。",
+      "clearCookiesButton": "消去",
+      "clearCookiesSuccess": "Cookies を消去しました",
+      "agentTitle": "Agent の既定動作",
+      "agentOpenBehavior": "Web ページを開く時",
+      "agentOpenBehaviorHint": "Agent がブラウザを使う時に、現在のタブを使うか新しいタブを開くかを選びます。",
+      "agentOpenBehaviorCurrentTab": "現在のタブで操作",
+      "agentOpenBehaviorNewTab": "新しいタブを開く"
     },
     "general": {
       "title": "一般",
@@ -1231,7 +1249,7 @@
       "totalTokens": "合計 Tokens",
       "cacheRead": "キャッシュ読込",
       "cacheHitRate": "ヒット率",
-      "estimatedCost": "推定コスト",
+
       "uncached": "非キャッシュ",
       "modelMix": "モデル分布",
       "dailyUsage": "日別使用量",
@@ -1942,6 +1960,7 @@
     "draftTitle": "自動化ドラフト",
     "suggestionTitle": "提案",
     "suggested": "提案",
+    "viewSuggestion": "提案を見る",
     "openDraft": "自動化ドラフトを開く",
     "closeDraft": "自動化ドラフトを閉じる",
     "confirmCreate": "追加を確認",
@@ -2010,7 +2029,8 @@
       "title": "バックグラウンド"
     },
     "todo": {
-      "title": "ToDo"
+      "title": "ToDo",
+      "waitForOutput": "Wait for output to finish"
     },
     "subagent": {
       "title": "サブエージェント"
@@ -2150,6 +2170,8 @@
     "back": "戻る",
     "forward": "進む",
     "reload": "再読み込み",
+    "newTab": "新しいタブ",
+    "closeTab": "タブを閉じる",
     "emergencyStop": "AI制御の緊急停止",
     "backgroundHint": "バックグラウンドブラウザ実行中、クリックして表示",
     "background": "バックグラウンドブラウザ"

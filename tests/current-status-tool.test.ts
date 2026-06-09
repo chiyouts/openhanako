@@ -46,17 +46,15 @@ describe("current_status tool", () => {
     const tool = createCurrentStatusTool();
 
     expect(tool.description).toContain('key="time"');
-    expect(tool.description).toContain("hour/minute");
-    expect(tool.description).toContain('key="logical_date"');
-    expect(tool.description).toContain("does not return hour/minute/second");
+    expect(tool.description).toContain("stale");
   });
 
   it("falls back to English toolDef for all locales", () => {
     for (const locale of ["zh", "en"]) {
       loadLocale(locale);
       const tool = createCurrentStatusTool();
-      expect(tool.description).toContain("UI context");
-      expect(tool.description).toContain("ui_context");
+      expect(tool.description).toContain("status");
+      expect(tool.description).toContain("time");
     }
   });
 

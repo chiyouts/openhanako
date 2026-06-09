@@ -60,6 +60,62 @@ describe("chat route model switch guard", () => {
     });
   });
 
+  it("routes streaming interject messages through the desktop interjection contract", async () => {
+    let createHandlers;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn(),
+      send: vi.fn(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      ensureSessionLoaded: vi.fn(async () => ({})),
+      emitEvent: vi.fn(),
+      getSessionByPath: vi.fn(() => ({ entries: [] })),
+      isSessionStreaming: vi.fn(() => true),
+      isSessionSwitching: vi.fn(() => false),
+      setUiContext: vi.fn(),
+      steerSession: vi.fn(() => true),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = {
+      readyState: 1,
+      send: vi.fn(),
+    };
+
+    handlers.onMessage({
+      data: JSON.stringify({
+        type: "interject",
+        text: "插一句",
+        sessionPath: "/tmp/session.jsonl",
+        displayMessage: { text: "插一句" },
+        uiContext: { currentTab: "chat" },
+      }),
+    }, ws);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(hub.send).not.toHaveBeenCalled();
+    expect(engine.steerSession).toHaveBeenCalledWith("/tmp/session.jsonl", "插一句");
+    expect(engine.emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "session_user_message",
+        message: expect.objectContaining({ text: "插一句" }),
+      }),
+      "/tmp/session.jsonl",
+    );
+    expect(JSON.parse(ws.send.mock.calls[0][0])).toMatchObject({
+      type: "steered",
+      sessionPath: "/tmp/session.jsonl",
+    });
+  });
+
   it("reports engine runtime streaming separately when resume replay state is missing", async () => {
     let createHandlers;
     const upgradeWebSocket = vi.fn((factory) => {
@@ -292,6 +348,7 @@ describe("chat route model switch guard", () => {
       result: "回来了。",
       meta: {
         type: "subagent",
+        interlude: true,
         executorAgentNameSnapshot: "Hanako",
         label: "凌晨诗行",
         summary: "写一首关于凌晨五点三十九分的三行短诗。要求：不要使用常见意象。",
@@ -635,7 +692,7 @@ describe("chat route model switch guard", () => {
         taskId,
         status: "success",
         result: `result ${taskId}`,
-        meta: { type: "subagent", executorAgentNameSnapshot: "明", label: "回执" },
+        meta: { type: "subagent", interlude: true, executorAgentNameSnapshot: "明", label: "回执" },
       }, "/tmp/standalone-deferred.jsonl");
     }
 

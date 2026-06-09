@@ -138,6 +138,7 @@ import {
 } from "./computer-use/platform-support.ts";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.ts";
 import { serializeSessionFile } from "../lib/session-files/session-file-response.ts";
+import { AutomationSuggestionStore } from "../lib/tools/automation-suggestion-store.ts";
 import { NotificationService } from "../lib/notifications/notification-service.ts";
 import { SpeechRecognitionService } from "./speech-recognition-service.ts";
 import { createCurrentTurnNativeMediaStore } from "./current-turn-native-media.ts";
@@ -170,6 +171,7 @@ export class HanaEngine {
   declare _activityHub: any;
   declare _agentMgr: any;
   declare _approvalGateway: any;
+  declare _automationSuggestionStore: any;
   declare _bridge: any;
   declare _channels: any;
   declare _checkpointStore: any;
@@ -257,6 +259,7 @@ export class HanaEngine {
     });
     this._currentTurnNativeMedia = createCurrentTurnNativeMediaStore();
     this._pluginInstallRecords = new PluginInstallRecords({ hanakoHome });
+    this._automationSuggestionStore = new AutomationSuggestionStore();
     this._approvalGateway = createApprovalGateway({
       smallToolModelReviewer: createModelApprovalReviewer({
         role: "utility",
@@ -511,6 +514,8 @@ export class HanaEngine {
   /** @ui-focus-only 返回 UI 焦点 agent 的 ID */
   get currentAgentId() { return this._agentMgr.activeAgentId; }
   get confirmStore() { return this._confirmStore; }
+  get automationSuggestionStore() { return this._automationSuggestionStore; }
+  getAutomationSuggestionStore() { return this._automationSuggestionStore; }
   get approvalGateway() { return this._approvalGateway; }
   getStudioCronStore() { return this._studioCronService; }
 
@@ -626,6 +631,7 @@ export class HanaEngine {
   }
   getSessionFile(fileId, options) { return this._sessionFiles.get(fileId, options); }
   getSessionFileByPath(filePath, options) { return this._sessionFiles.getByFilePath(filePath, options); }
+  getSessionFileBySourceKey(sourceKey, options) { return this._sessionFiles.getBySourceKey(sourceKey, options); }
   listSessionFiles(sessionPath) { return this._sessionFiles.list(sessionPath); }
   updateSessionFileTranscription(fileId, transcription, options) { return this._sessionFiles.updateTranscription(fileId, transcription, options); }
   beginCurrentTurnNativeMedia(sessionPath, opts) { return this._currentTurnNativeMedia.begin(sessionPath, opts); }
@@ -1120,6 +1126,8 @@ export class HanaEngine {
   setNotificationPreferences(p) { return this._prefs.setNotificationPreferences(p); }
   getQuickChatPreferences() { return this._prefs.getQuickChatPreferences(); }
   setQuickChatPreferences(p) { return this._prefs.setQuickChatPreferences(p); }
+  getBrowserPreferences() { return this._prefs.getBrowserPreferences(); }
+  setBrowserPreferences(p) { return this._prefs.setBrowserPreferences(p); }
   getWorkspaceUiState(workspaceRoot, surface) { return this._prefs.getWorkspaceUiState(workspaceRoot, surface); }
   setWorkspaceUiState(workspaceRoot, surface, state) { return this._prefs.setWorkspaceUiState(workspaceRoot, surface, state); }
   gcWorkspacePersistence( options: any = {}) {
@@ -1137,6 +1145,7 @@ export class HanaEngine {
   setPluginDevToolsEnabled(value) { return this._prefs.setPluginDevToolsEnabled(value); }
   getPluginInstallRecord(pluginId) { return this._pluginInstallRecords.get(pluginId); }
   recordPluginInstall(record) { return this._pluginInstallRecords.recordInstall(record); }
+  removePluginInstallRecord(pluginId) { return this._pluginInstallRecords.remove(pluginId); }
   getTimezone() { return this._prefs.getTimezone(); }
   setTimezone(tz) { this._prefs.setTimezone(tz); }
   getUpdateChannel() { return this._prefs.getUpdateChannel(); }
@@ -1807,6 +1816,28 @@ export class HanaEngine {
     const executionScope = executionBoundary
       ? { serverNodeId: executionBoundary.serverNodeId, executionBoundary }
       : {};
+    const withRuntimeContext = (tool) => {
+      if (!tool?.execute) return tool;
+      return {
+        ...tool,
+        execute: (toolCallId, params, signalOrRuntimeCtx, onUpdate, piCtx) => {
+          const { ctx: runtimeCtx } = normalizeToolRuntimeContext(signalOrRuntimeCtx, piCtx);
+          const sessionPath = runtimeCtx?.sessionPath
+            || getToolSessionPath(runtimeCtx)
+            || getSessionPath()
+            || null;
+          const mergedCtx = {
+            ...runtimeCtx,
+            ...(sessionPath ? { sessionPath } : {}),
+            ...(opts.bridgeContext ? { bridgeContext: opts.bridgeContext } : {}),
+            agentId,
+            ...executionScope,
+          };
+          return tool.execute(toolCallId, params, signalOrRuntimeCtx, onUpdate, mergedCtx);
+        },
+      };
+    };
+    const runtimeCustomTools = ct.map(withRuntimeContext);
     const wrappedPluginTools = pluginTools.map(t => ({
       ...t,
       execute: (toolCallId, params, signalOrRuntimeCtx, onUpdate, piCtx) => {
@@ -1832,7 +1863,7 @@ export class HanaEngine {
         })
       : [];
     const allTools = filterToolObjectsByAvailability(
-      [...ct, ...wrappedPluginTools, ...pluginDevTools],
+      [...runtimeCustomTools, ...wrappedPluginTools, ...pluginDevTools],
       toolAgent?.config || {},
       {
         agentId,
@@ -1948,7 +1979,7 @@ export class HanaEngine {
     // this function, so a single check here catches the whole surface.
     assertAllToolsCategorized([
       ...result.tools.map((t) => t.name).filter(Boolean),
-      ...ct
+      ...runtimeCustomTools
         .filter((t) => !t._pluginId)
         .map((t) => t.name)
         .filter(Boolean),

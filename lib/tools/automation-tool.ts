@@ -1,8 +1,8 @@
 /**
  * automation-tool.js — Agent-created scheduled automations
  *
- * User-facing automations are modeled as Agent runs. The tool returns a draft
- * card and writes only after user confirmation.
+ * User-facing automations are modeled as Agent runs. The tool returns a
+ * suggestion card and writes only when that suggestion is applied.
  */
 
 import { Type, StringEnum } from "../pi-sdk/index.ts";
@@ -57,8 +57,12 @@ function contextForTool(ctx, {
   const workspaceFolders = sessionPath
     ? (usesDifferentAgent ? [] : (getSessionWorkspaceFolders?.(sessionPath) || []))
     : [];
+  const bridgeContext = ctx?.bridgeContext?.isBridgeSession === true
+    ? ctx.bridgeContext
+    : null;
   return {
     sessionPath,
+    bridgeContext,
     actorAgentId,
     executionContext: {
       kind: "session_workspace",
@@ -76,10 +80,8 @@ function targetAgentIdFor(params, fallbackAgentId) {
     : fallbackAgentId;
 }
 
-function pendingConfirmationText(label, confirmId) {
-  const base = `Automation pending confirmation: ${label}`;
-  if (!confirmId) return base;
-  return `${base}\nConfirmation ID: ${confirmId}\nDesktop users can confirm from the card. Remote Bridge users can reply /confirm ${confirmId} or /reject ${confirmId}.`;
+function pendingSuggestionText() {
+  return "我准备了一项自动任务建议，等你确认后再创建。";
 }
 
 function labelFor(params, prompt = "", existing: any = null) {
@@ -97,7 +99,7 @@ function automationDraftSideEffect() {
     kind: "deferred_mutation_draft",
     commit: "requires_user_confirmation",
     ruleId: "automation-draft-no-write",
-    summary: "Automation create/update generates a confirmation card; cron store writes only after the card is confirmed.",
+    summary: "Automation create/update generates a suggestion card; cron store writes only after the suggestion is applied.",
   };
 }
 
@@ -145,23 +147,35 @@ function commitAutomationDraft({ cronStore, operation, jobData, confirmationValu
   return cronStore.addJob(confirmedJobData);
 }
 
-function attachDeferredMutation({ promise, cronStore, operation, jobData }: {
-  promise: Promise<any>;
-  cronStore: any;
+function suggestionDetails({ suggestion, operation, jobData, jobs }: {
+  suggestion?: any;
   operation: "create" | "update";
   jobData: any;
+  jobs: any;
 }) {
-  void promise.then((result) => {
-    if (result?.action !== "confirmed") return;
-    commitAutomationDraft({ cronStore, operation, jobData, confirmationValue: result.value });
-  }).catch(() => {});
+  const suggestionId = suggestion?.suggestionId || "";
+  const shortCode = suggestion?.shortCode || suggestion?.suggestionShortCode || "";
+  return {
+    action: operation === "update" ? "pending_update" : "pending_add",
+    operation,
+    jobs,
+    jobData,
+    suggestionId,
+    suggestionShortCode: shortCode,
+    automationSuggestion: {
+      suggestionId,
+      shortCode,
+      operation,
+      jobData,
+    },
+  };
 }
 
 export function createAutomationTool(cronStore, {
   getAutoApprove,
   autoApprove = false,
-  confirmStore,
-  getConfirmStore,
+  automationSuggestionStore,
+  getAutomationSuggestionStore,
   getSessionPath,
   getAgentId,
   getSessionCwd,
@@ -172,6 +186,8 @@ export function createAutomationTool(cronStore, {
   autoApprove?: boolean;
   confirmStore?: any;
   getConfirmStore?: any;
+  automationSuggestionStore?: any;
+  getAutomationSuggestionStore?: any;
   emitEvent?: any;
   getSessionPath?: any;
   getAgentId?: any;
@@ -182,7 +198,7 @@ export function createAutomationTool(cronStore, {
   return {
     name: "automation",
     label: "Automation",
-    description: "Create and update scheduled automation drafts. The tool returns a user-confirmable Automation card; the task is written only after the user confirms the card. Automations run as background Agent sessions.",
+    description: "Create and update scheduled automation suggestions. The tool returns an Automation suggestion card; the task is written only after the user applies the suggestion. Automations run as background Agent sessions.",
     sessionPermission: {
       describeSideEffect: (params) => {
         if (!isDraftMutationAction(params)) return null;
@@ -192,7 +208,7 @@ export function createAutomationTool(cronStore, {
     },
     parameters: Type.Object({
       action: StringEnum(["list", "create", "update"], {
-        description: "Action to perform. create and update produce a confirmation card instead of directly saving.",
+        description: "Action to perform. create and update produce a suggestion card instead of directly saving.",
       }),
       id: Type.Optional(Type.String({ description: "Automation job id for update." })),
       agentId: Type.Optional(Type.String({ description: "Target Agent id. Defaults to the current Agent." })),
@@ -260,19 +276,31 @@ export function createAutomationTool(cronStore, {
           };
         }
 
-        const runtimeConfirmStore = getConfirmStore?.() || confirmStore || null;
-        if (runtimeConfirmStore && context.sessionPath) {
-          const { confirmId, promise } = runtimeConfirmStore.create("cron", { jobData, operation }, context.sessionPath);
-          attachDeferredMutation({ promise, cronStore, operation, jobData });
-          return {
-            content: [{ type: "text", text: pendingConfirmationText(jobData.label, confirmId) }],
-            details: { action: operation === "update" ? "pending_update" : "pending_add", operation, jobs: cronStore.listJobs(), jobData, confirmId },
-          };
+        const runtimeSuggestionStore = getAutomationSuggestionStore?.() || automationSuggestionStore || null;
+        let suggestion = null;
+        if (runtimeSuggestionStore?.create && context.sessionPath) {
+          suggestion = runtimeSuggestionStore.create({
+            sessionPath: context.sessionPath,
+            bridgeSessionKey: context.bridgeContext?.sessionKey || null,
+            operation,
+            jobData,
+            apply: (value) => commitAutomationDraft({
+              cronStore,
+              operation,
+              jobData,
+              confirmationValue: value,
+            }),
+          });
         }
 
         return {
-          content: [{ type: "text", text: pendingConfirmationText(jobData.label, null) }],
-          details: { action: operation === "update" ? "pending_update" : "pending_add", operation, jobData },
+          content: [{ type: "text", text: pendingSuggestionText() }],
+          details: suggestionDetails({
+            suggestion,
+            operation,
+            jobs: cronStore.listJobs(),
+            jobData,
+          }),
         };
       } catch (err) {
         return {

@@ -60,11 +60,9 @@ import {
 import { attachFilesFromPaths } from '../MainContent';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import styles from './input/InputArea.module.css';
-import type { TodoItem } from '../types';
 import type { ChatListItem, SessionConfirmationBlock } from '../stores/chat-types';
 import type { AudioWaveform } from '../stores/chat-types';
 
-const EMPTY_TODOS: TodoItem[] = [];
 const EMPTY_FILE_REFS: readonly import('../types/file-ref').FileRef[] = Object.freeze([]);
 
 function chatVideoMimeTypeForName(name: string, fallback?: string): string {
@@ -291,7 +289,6 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const screenshotBusy = useStore(s => s.screenshotTaskCount > 0);
   const screenshotProgress = useStore(s => s.screenshotProgress);
   const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? null);
-  const sessionTodos = useStore(s => (s.currentSessionPath && s.todosBySession[s.currentSessionPath]) || EMPTY_TODOS);
   const sessionFiles = useStore(s => (s.currentSessionPath ? selectSessionFiles(s, s.currentSessionPath) : EMPTY_FILE_REFS));
   const attachedFiles = useStore(s => s.attachedFiles);
   const docContextAttached = useStore(s => s.docContextAttached);
@@ -326,7 +323,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   }, [currentSessionItems]);
 
   // Local state
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('ask');
+  const permissionMode = useStore(s => s.sessionPermissionMode);
+  const setPermissionMode = useStore(s => s.setSessionPermissionMode);
   const [sending, setSending] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashSelected, setSlashSelected] = useState(0);
@@ -355,7 +353,6 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const [fileMentionRange, setFileMentionRange] = useState<FileMentionRange | null>(null);
   const [fileMentionQuery, setFileMentionQuery] = useState('');
   const [fileMentionBusy] = useState(false);
-  const [completingTodos, setCompletingTodos] = useState(false);
   const [continuingDeletedAgentSession, setContinuingDeletedAgentSession] = useState(false);
   const [deletedAgentContinueError, setDeletedAgentContinueError] = useState<string | null>(null);
   const [audioRecorderOpen, setAudioRecorderOpen] = useState(false);
@@ -1292,7 +1289,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     };
     window.addEventListener('hana-plan-mode', handler);
     return () => window.removeEventListener('hana-plan-mode', handler);
-  }, [activeServerConnection, setThinkingLevel, surface]);
+  }, [activeServerConnection, setPermissionMode, setThinkingLevel, surface]);
 
   // ── Handle slash selection (builtin vs skill) ──
   const handleSlashSelect = useCallback((item: SlashItem) => {
@@ -1335,30 +1332,33 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     setFileMentionQuery('');
   }, [editor, fileMentionRange, inputLocked]);
 
-  // ── Send message ──
-  const handleSend = useCallback(async () => {
+  // ── Send / interject message ──
+  const submitEditorMessage = useCallback(async (type: 'prompt' | 'interject') => {
     if (inputLocked) return;
     if (!editor) return;
     const editorJson = editor.getJSON();
     const { text: rawText, skills, fileRefs } = serializeEditor(editorJson);
     const text = rawText.trim();
 
-    const slashSelection = resolveSlashSubmitSelection({
-      text,
-      skills,
-      commands: slashCommands,
-      selectedIndex: slashSelected,
-      dismissedText: slashDismissedTextRef.current,
-    });
-    if (slashSelection) {
-      handleSlashSelect(slashSelection);
-      return;
+    if (type === 'prompt') {
+      const slashSelection = resolveSlashSubmitSelection({
+        text,
+        skills,
+        commands: slashCommands,
+        selectedIndex: slashSelected,
+        dismissedText: slashDismissedTextRef.current,
+      });
+      if (slashSelection) {
+        handleSlashSelect(slashSelection);
+        return;
+      }
     }
 
     const inputFiles = mergeEditorFileRefs(attachedFiles, fileRefs);
     const hasFiles = inputFiles.length > 0;
     if ((!text && !hasFiles && !docContextAttached && useStore.getState().quotedSelections.length === 0) || !connected) return;
-    if (isStreaming) return;
+    if (type === 'prompt' && isStreaming) return;
+    if (type === 'interject' && !isStreaming) return;
     if (sending) return;
     if (modelSwitching) return;
     if (useStore.getState().pendingSessionSwitchPath) return;
@@ -1536,7 +1536,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
 
       const ws = getWebSocket();
       const wsMsg: Record<string, unknown> = {
-        type: 'prompt',
+        type,
         text: finalText,
         sessionPath: sessionPathForSend,
         uiContext: collectUiContext(useStore.getState()),
@@ -1572,27 +1572,14 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     }
   }, [editor, inputLocked, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
 
+  const handleSend = useCallback(async () => {
+    await submitEditorMessage('prompt');
+  }, [submitEditorMessage]);
+
   // ── Steer ──
   const handleSteer = useCallback(async () => {
-    if (inputLocked) return;
-    if (!editor) return;
-    const text = editor.getText().trim();
-    if (!text || !isStreaming) return;
-    const ws = getWebSocket();
-    if (!ws) return;
-    const sessionPath = useStore.getState().currentSessionPath;
-    if (sessionPath) {
-      const { renderMarkdown } = await import('../utils/markdown');
-      useStore.getState().appendItem(sessionPath, {
-        type: 'message',
-        data: { id: `user-${Date.now()}`, role: 'user', text, textHtml: renderMarkdown(text), timestamp: Date.now() },
-      });
-    }
-    editor.commands.clearContent();
-    const sp = useStore.getState().currentSessionPath;
-    if (sp) clearDraft(sp);
-    ws.send(JSON.stringify({ type: 'steer', text, sessionPath: sp }));
-  }, [editor, inputLocked, isStreaming, clearDraft]);
+    await submitEditorMessage('interject');
+  }, [submitEditorMessage]);
 
   // ── Stop ──
   const handleStop = useCallback(() => {
@@ -1644,7 +1631,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     }
     if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
       e.preventDefault();
-      if (isStreaming && (editor?.getText().trim())) handleSteer(); else handleSend();
+      if (isStreaming && hasContent) handleSteer(); else handleSend();
       return true;
     }
     return false;
@@ -1660,6 +1647,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     handleSteer,
     handleSlashSelect,
     isStreaming,
+    hasContent,
     inputLocked,
     editor,
     slashMenuOpen,
@@ -1686,26 +1674,6 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     void revealDeskDirectory(slashResult.deskDir);
   }, [slashResult?.deskDir]);
 
-  const handleCompleteTodos = useCallback(async () => {
-    const path = currentSessionPath;
-    if (!path || completingTodos || sessionTodos.length === 0) return;
-    setCompletingTodos(true);
-    try {
-      await hanaFetch('/api/sessions/todos/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      useStore.getState().setSessionTodosForPath(path, []);
-      useStore.getState().bumpTodosLiveVersion(path);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      addToast(message, 'error', 6000);
-    } finally {
-      setCompletingTodos(false);
-    }
-  }, [addToast, completingTodos, currentSessionPath, sessionTodos.length]);
-
   const handleContinueDeletedAgentSession = useCallback(async () => {
     const path = currentSessionPath;
     if (!path || continuingDeletedAgentSession) return;
@@ -1731,9 +1699,6 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         attachedFiles={attachedFiles}
         removeAttachedFile={removeAttachedFile}
         hasQuotedSelection={quotedSelections.length > 0}
-        sessionTodos={sessionTodos}
-        onCompleteTodos={handleCompleteTodos}
-        completingTodos={completingTodos}
       />
       <InputStatusBars
         slashBusy={slashBusy}
@@ -1811,7 +1776,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
             models={models}
             sessionModel={sessionModel}
             isStreaming={isStreaming}
-            hasInput={!!inputText.trim()}
+            hasInput={hasContent}
             canSend={canSend}
             showAudioInput={showAudioInput}
             audioRecordingActive={audioRecordingState === 'recording'}

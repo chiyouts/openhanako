@@ -540,6 +540,14 @@ function sessionExperimentFlagsForMeta(value: any) {
   return flags.deepseekRoleplayReasoningPatch === true ? flags : null;
 }
 
+function hasSessionPermissionModeFields(value: any) {
+  return !!value && typeof value === "object" && (
+    typeof value.permissionMode === "string"
+    || typeof value.accessMode === "string"
+    || value.planMode === true
+  );
+}
+
 function normalizeSessionWorkspaceMount(value: any) {
   const mountId = typeof value?.workspaceMountId === "string" && value.workspaceMountId.trim()
     ? value.workspaceMountId.trim()
@@ -718,22 +726,6 @@ export class SessionCoordinator {
 
   // ── Session 创建 / 切换 ──
 
-  async _shouldIncludeLegacyArtifactToolForRestore(agent: any, sessionPath: any) {
-    if (!sessionPath) return true;
-    try {
-      const metaPath = path.join(agent.sessionDir, "session-meta.json");
-      const raw = await fsp.readFile(metaPath, "utf-8");
-      const meta = JSON.parse(raw);
-      const metaEntry = meta[path.basename(sessionPath)];
-      if (Array.isArray(metaEntry?.toolNames)) {
-        return metaEntry.toolNames.includes("create_artifact");
-      }
-      return true;
-    } catch (err) {
-      return err.code === "ENOENT";
-    }
-  }
-
   async createSession(sessionMgr: any, cwd: any, memoryEnabled = true, model: any = null, {
     restore = false,
     agent: explicitAgent = null,
@@ -839,10 +831,6 @@ export class SessionCoordinator {
         // session-meta 可选：读取或解析失败时沿用上面 fresh 算出的 workspaceScope。
       }
     }
-    const includeLegacyArtifactTool = restore
-      ? await this._shouldIncludeLegacyArtifactToolForRestore(agent, sessionPathForMeta)
-      : false;
-
     // 冻结当前 session 的有效记忆参与态。
     // fresh create: 以"创建当下实际会进入 prompt 前缀的状态"为准（master && session）
     // restore: 以 session-meta 里冻结下来的 memoryEnabled 为准。
@@ -915,12 +903,21 @@ export class SessionCoordinator {
     }; // pre-populated for resourceLoader proxy
     const pluginSessionMeta = normalizePluginSessionMeta({ ownerPluginId, sessionKind, sessionVisibility });
 
+    if (!restore && typeof agent.refreshAppearanceSummary === "function") {
+      try {
+        await agent.refreshAppearanceSummary({ targetModel: effectiveModel, rebuildSystemPrompt: true });
+      } catch (err) {
+        log.warn(`agent appearance summary refresh failed: ${err?.message || err}`);
+      }
+    }
+
     // 快照当前 system prompt，per-session 隔离。
     // 后续记忆编译、技能变更只影响新对话，已有对话的 prompt 不变（保护 prefix cache）。
     const systemPromptSnapshot = restoredPromptSnapshot?.systemPrompt
       ?? agent.buildSystemPrompt({
         forceMemoryEnabled: frozenMemoryEnabled,
         forceExperienceEnabled: frozenExperienceEnabled,
+        targetModel: promptPatchModel,
       });
     const memoryReflectionSnapshot = (!restore && typeof agent.buildMemoryReflectionSnapshot === "function")
       ? agent.buildMemoryReflectionSnapshot({ forceMemoryEnabled: frozenMemoryEnabled })
@@ -1021,9 +1018,6 @@ export class SessionCoordinator {
     const toolSnapshotOptions: any = { forceMemoryEnabled: frozenMemoryEnabled, model: effectiveModel };
     if (agentHasExperienceSwitch) {
       toolSnapshotOptions.forceExperienceEnabled = frozenExperienceEnabled;
-    }
-    if (includeLegacyArtifactTool) {
-      toolSnapshotOptions.includeLegacyArtifactTool = true;
     }
     const agentToolsSnapshot = typeof agent.getToolsSnapshot === "function"
       ? agent.getToolsSnapshot(toolSnapshotOptions)
@@ -2433,7 +2427,7 @@ export class SessionCoordinator {
     return this._applyPermissionModeToEntry(sp, entry, nextMode);
   }
 
-  setSessionPermissionMode(sessionPath: any, mode: any, { persistDefault = false }: any = {}) {
+  setSessionPermissionMode(sessionPath: any, mode: any, _options: any = {}) {
     const nextMode = normalizeSessionPermissionMode(mode);
     if (!sessionPath) {
       return {
@@ -2446,11 +2440,7 @@ export class SessionCoordinator {
     if (!entry) {
       const meta = this._hibernatedSessionMeta.get(sessionPath);
       if (meta) {
-        const result = this._applyPermissionModeToEntry(sessionPath, meta, nextMode);
-        if (result.ok && persistDefault === true) {
-          this._setDefaultPermissionMode(nextMode);
-        }
-        return result;
+        return this._applyPermissionModeToEntry(sessionPath, meta, nextMode);
       }
       return {
         ok: false,
@@ -2458,17 +2448,12 @@ export class SessionCoordinator {
         mode: this.getPermissionMode(sessionPath),
       };
     }
-    const result = this._applyPermissionModeToEntry(sessionPath, entry, nextMode);
-    if (result.ok && persistDefault === true) {
-      this._setDefaultPermissionMode(nextMode);
-    }
-    return result;
+    return this._applyPermissionModeToEntry(sessionPath, entry, nextMode);
   }
 
   setPermissionMode(mode: any) {
     const nextMode = normalizeSessionPermissionMode(mode);
     const sp = this.currentSessionPath;
-    this._setDefaultPermissionMode(nextMode);
     if (sp) {
       const entry = this._sessions.get(sp);
       if (!entry) {
@@ -3070,6 +3055,12 @@ export class SessionCoordinator {
           }
           const sessKey = path.basename(s.path);
           const metaEntry = meta[sessKey];
+          const runtimeEntry = this._sessions.get(s.path) || this._hibernatedSessionMeta.get(s.path);
+          if (hasSessionPermissionModeFields(runtimeEntry)) {
+            s.permissionMode = normalizeSessionPermissionMode(runtimeEntry);
+          } else if (hasSessionPermissionModeFields(metaEntry)) {
+            s.permissionMode = normalizeSessionPermissionMode(metaEntry);
+          }
           s.pinnedAt = typeof metaEntry?.pinnedAt === "string" ? metaEntry.pinnedAt : null;
           s.projectId = typeof metaEntry?.projectId === "string" && metaEntry.projectId.trim()
             ? metaEntry.projectId.trim()

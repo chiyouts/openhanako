@@ -192,9 +192,7 @@ export function createSubagentTool(deps) {
 
   const baseDescription =
     "Create a continuable subagent instance for a delegated task. Returns immediately with taskId and threadId; results are delivered back in the background. Use agent to target an agent, or agent=\"?\" to list agents.";
-  const delegationDescription = !deps.proactiveDelegation ? "" :
-    "\n\nIf the target is already known, use the direct tool: read for a known path, grep or find for a specific symbol or file. For broad exploration or research that would take more than 3 queries, delegate to a subagent with access=\"read\". Otherwise use read/grep/find directly." +
-    "\n\nSubagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when simpler tools suffice.";
+  const delegationDescription = "";
 
   return {
     name: "subagent",
@@ -303,6 +301,7 @@ export function createSubagentTool(deps) {
         applyRequestedAgentMetadata(
           mergeExecutorMetadata({
             type: "subagent",
+            interlude: true,
             threadId,
             threadKind,
             label,
@@ -607,6 +606,7 @@ export function createSubagentReplyTool(deps) {
 
       store.defer(taskId, parentSessionPath, mergeExecutorMetadata({
         type: "subagent",
+        interlude: true,
         threadId,
         threadKind,
         label: initialThread.label || null,

@@ -301,6 +301,47 @@ function readInstalledVersion(pm: any, pluginId: string, targetDir: string) {
   }
 }
 
+function removePluginInstallRecord(engine: any, pluginId: string) {
+  if (!pluginId) return;
+  if (typeof engine?.removePluginInstallRecord === "function") {
+    engine.removePluginInstallRecord(pluginId);
+  }
+}
+
+function reconcileMissingPluginDirectories(engine: any, pm: any) {
+  const removed = typeof pm?.reconcileMissingPluginDirectories === "function"
+    ? pm.reconcileMissingPluginDirectories()
+    : [];
+  if (!Array.isArray(removed) || removed.length === 0) return [];
+  for (const entry of removed) {
+    if ((entry?.source || "community") !== "community") continue;
+    removePluginInstallRecord(engine, entry.id);
+  }
+  return removed;
+}
+
+function defaultCommunityPluginDir(pm: any, pluginId: string) {
+  const userPluginsDir = typeof pm?.getUserPluginsDir === "function"
+    ? pm.getUserPluginsDir()
+    : null;
+  if (!userPluginsDir) return null;
+  return path.join(userPluginsDir, safePathSegment(pluginId, pluginId));
+}
+
+function readLiveOrReconciledInstallRecord(engine: any, pm: any, pluginId: string, installedPlugin: any) {
+  if (installedPlugin) return null;
+  const record = typeof engine?.getPluginInstallRecord === "function"
+    ? engine.getPluginInstallRecord(pluginId)
+    : null;
+  if (!record) return null;
+  const defaultDir = defaultCommunityPluginDir(pm, pluginId);
+  if (defaultDir && !fs.existsSync(defaultDir)) {
+    removePluginInstallRecord(engine, pluginId);
+    return null;
+  }
+  return record;
+}
+
 function getInstallTargetDir(pm: any, desc: any, stagedDir: string, userPluginsDir: string) {
   const idSegment = safePathSegment(desc.id, path.basename(stagedDir));
   const defaultTarget = path.join(userPluginsDir, idSegment);
@@ -713,6 +754,7 @@ export function createPluginsRoute(engine: any) {
    * @param {string} [opts.source] - 按 source 过滤（"community" | "builtin"）
    */
   function visiblePlugins(pm: any, opts: { source?: string } = {}) {
+    reconcileMissingPluginDirectories(engine, pm);
     let plugins = pm.listPlugins().filter((p: any) => !p.hidden);
     if (opts.source) plugins = plugins.filter((p: any) => p.source === opts.source);
     return plugins.map(p => ({
@@ -755,6 +797,7 @@ export function createPluginsRoute(engine: any) {
   route.get("/plugins/diagnostics", (c) => {
     const pm = engine.pluginManager;
     const bus = engine.getEventBus?.() || engine.eventBus || null;
+    reconcileMissingPluginDirectories(engine, pm);
     return c.json({
       plugins: typeof pm?.getDiagnostics === "function"
         ? pm.getDiagnostics().filter(p => !p.hidden)
@@ -922,12 +965,14 @@ export function createPluginsRoute(engine: any) {
     const marketplace = getMarketplace();
     const data = await marketplace.load();
     const appVersion = getEngineAppVersion(engine);
+    reconcileMissingPluginDirectories(engine, pm);
     const installed = new Map<string, any>((pm?.listPlugins?.({ source: "community" }) || []).map((plugin: any) => [plugin.id, plugin]));
     return c.json({
       ...data,
       plugins: data.plugins.map((plugin) => {
         const installedPlugin = installed.get(plugin.id);
-        const installedVersion = installedPlugin?.version || engine.getPluginInstallRecord?.(plugin.id)?.installedVersion || null;
+        const installRecord = readLiveOrReconciledInstallRecord(engine, pm, plugin.id, installedPlugin);
+        const installedVersion = installedPlugin?.version || installRecord?.installedVersion || null;
         const versionState = getMarketplacePluginVersionState(plugin, {
           appVersion,
           installedVersion,
@@ -968,7 +1013,8 @@ export function createPluginsRoute(engine: any) {
     } = await c.req.json().catch(() => ({}));
     try {
       const installedPlugin = (pm.listPlugins?.({ source: "community" }) || []).find((item) => item.id === plugin.id);
-      const installedVersion = installedPlugin?.version || engine.getPluginInstallRecord?.(plugin.id)?.installedVersion || null;
+      const installRecord = readLiveOrReconciledInstallRecord(engine, pm, plugin.id, installedPlugin);
+      const installedVersion = installedPlugin?.version || installRecord?.installedVersion || null;
       const versionState = getMarketplacePluginVersionState(plugin, {
         appVersion: getEngineAppVersion(engine),
         installedVersion,
@@ -1081,6 +1127,7 @@ export function createPluginsRoute(engine: any) {
     try {
       const pluginDir = await pm.removePlugin(id, { source: "community" });
       await engine.syncPluginExtensions();
+      removePluginInstallRecord(engine, id);
       if (pluginDir && fs.existsSync(pluginDir)) {
         fs.rmSync(pluginDir, { recursive: true, force: true });
       }

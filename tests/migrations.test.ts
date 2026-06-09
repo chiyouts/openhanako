@@ -11,7 +11,7 @@ import { getAgentPhoneProjectionPath, safeConversationStem } from "../lib/conver
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 39;
+const LATEST_DATA_VERSION = 41;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -101,6 +101,44 @@ describe("runMigrations runner", () => {
     agentsDir = path.join(tmpDir, "agents");
     userDir = path.join(tmpDir, "user");
     fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  it("migration #40 canonicalizes legacy session permission sidecars without changing explicit session modes", () => {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 39 });
+    const sessionMetaPath = path.join(agentsDir, "hana", "sessions", "session-meta.json");
+    writeJson(sessionMetaPath, {
+      "legacy-readonly.jsonl": { planMode: true },
+      "legacy-operate.jsonl": { accessMode: "operate" },
+      "explicit-ask.jsonl": { permissionMode: "ask", accessMode: "operate" },
+      "unknown.jsonl": { title: "leave me alone" },
+    });
+
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+
+    const meta = readJson(sessionMetaPath);
+    expect(meta["legacy-readonly.jsonl"]).toMatchObject({
+      permissionMode: "read_only",
+      accessMode: "read_only",
+      planMode: true,
+    });
+    expect(meta["legacy-operate.jsonl"]).toMatchObject({
+      permissionMode: "operate",
+      accessMode: "operate",
+      planMode: false,
+    });
+    expect(meta["explicit-ask.jsonl"]).toMatchObject({
+      permissionMode: "ask",
+      accessMode: "operate",
+    });
+    expect(meta["unknown.jsonl"]).toEqual({ title: "leave me alone" });
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
   });
 
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
@@ -675,14 +713,21 @@ describe("migration #12: backfill legacy session files into sidecars", () => {
     writeAgentConfig(agentsDir, "hana", { agent: { name: "Hana" } });
     const sessionPath = path.join(agentsDir, "hana", "sessions", "legacy.jsonl");
     const stagePath = path.join(tmpDir, "legacy-image.png");
+    const presentPath = path.join(tmpDir, "legacy-present.txt");
     const artifactPath = path.join(tmpDir, "legacy-artifact.md");
     fs.writeFileSync(stagePath, "png-bytes");
+    fs.writeFileSync(presentPath, "present");
     fs.writeFileSync(artifactPath, "# Artifact\n");
     writeSessionJsonl(sessionPath, [
       {
         role: "toolResult",
         toolName: "stage_files",
         details: { files: [{ filePath: stagePath, label: "Legacy Image" }] },
+      },
+      {
+        role: "toolResult",
+        toolName: "present_files",
+        details: { filePath: presentPath, label: "Legacy Present" },
       },
       {
         role: "toolResult",
@@ -704,6 +749,7 @@ describe("migration #12: backfill legacy session files into sidecars", () => {
     const files = Object.values(sidecar.files);
     expect(files).toEqual(expect.arrayContaining([
       expect.objectContaining({ filePath: stagePath, origin: "stage_files", status: "available" }),
+      expect.objectContaining({ filePath: presentPath, origin: "stage_files", status: "available" }),
       expect.objectContaining({ filePath: artifactPath, origin: "agent_artifact", status: "available" }),
     ]));
     expect(fs.readFileSync(sessionPath, "utf-8")).toBe(before);
@@ -3773,5 +3819,77 @@ describe("migration #36 — subagent thread registry backfills old run and reusa
     const runs = readJson(path.join(tmpDir, "subagent-runs.json")).runs;
     expect(runs["subagent-old"].threadKind).toBe("direct");
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+});
+
+describe("migration #41 — restore dynamic user name placeholders in identity seeds", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = path.join(tmpDir, "user");
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function runFrom40() {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({ _dataVersion: 40 });
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistry([]),
+      log: () => {},
+    });
+    return prefs;
+  }
+
+  it("repairs first-run identities that lost the userName placeholder", () => {
+    const agentDir = path.join(agentsDir, "hanako");
+    fs.mkdirSync(agentDir, { recursive: true });
+    const identityPath = path.join(agentDir, "identity.md");
+    const legacy = [
+      "# Hanako",
+      "",
+      "的个人助手。感性与理性兼备，既有温度也有判断力。",
+      "",
+    ].join("\n");
+    fs.writeFileSync(identityPath, legacy, "utf-8");
+
+    const prefs = runFrom40();
+
+    const repaired = fs.readFileSync(identityPath, "utf-8");
+    expect(repaired).toContain("{{userName}}的个人助手。感性与理性兼备");
+    expect(repaired).not.toContain("\n的个人助手");
+    expect(fs.readFileSync(`${identityPath}.pre-v41.bak`, "utf-8")).toBe(legacy);
+    expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
+  });
+
+  it("repairs English identities and leaves concrete user names untouched", () => {
+    const brokenDir = path.join(agentsDir, "english");
+    const concreteDir = path.join(agentsDir, "concrete");
+    fs.mkdirSync(brokenDir, { recursive: true });
+    fs.mkdirSync(concreteDir, { recursive: true });
+    const brokenPath = path.join(brokenDir, "identity.md");
+    const concretePath = path.join(concreteDir, "identity.md");
+    fs.writeFileSync(
+      brokenPath,
+      "# Hanako\n\n's personal assistant. Balancing feeling and reasoning.\n",
+      "utf-8",
+    );
+    fs.writeFileSync(
+      concretePath,
+      "# Hanako\n\n黎的个人助手。感性与理性兼备。\n",
+      "utf-8",
+    );
+
+    runFrom40();
+
+    expect(fs.readFileSync(brokenPath, "utf-8")).toContain("{{userName}}'s personal assistant");
+    expect(fs.readFileSync(concretePath, "utf-8")).toContain("黎的个人助手。感性与理性兼备。");
+    expect(fs.existsSync(`${concretePath}.pre-v41.bak`)).toBe(false);
   });
 });

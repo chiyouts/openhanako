@@ -2263,7 +2263,7 @@ export class BridgeManager {
    * @param {string} text - 要发送的文本（会自动 clean mood/pulse 标签）
    * @param {string} [targetAgentId]
    * @param {{ contextPolicy?: "none"|"record_when_delivered", bridgePlatforms?: string[], idempotencyKey?: string }} [opts]
-   * @returns {{ platform: string, chatId: string, sessionKey: string, recorded: boolean } | null} 发送成功返回平台信息，失败返回 null
+   * @returns {{ platform: string, chatId: string, sessionKey: string, recorded: boolean, deliveries?: Array<any> } | null} 发送成功返回平台信息，失败返回 null
    */
   async sendProactive(text, targetAgentId, opts: any = {}) {
     const cleaned = this._cleanReplyForPlatform(text);
@@ -2304,6 +2304,8 @@ export class BridgeManager {
     const deliveryEntries = bridgePlatforms.length
       ? bridgePlatforms.flatMap((platform) => platformEntries.filter((entry) => entry.platform === platform))
       : platformEntries;
+    const fanOut = bridgePlatforms.length > 0;
+    const deliveries = [];
 
     for (const entry of deliveryEntries) {
       if (entry.status !== "connected" || !entry.adapter) continue;
@@ -2364,19 +2366,57 @@ export class BridgeManager {
           isGroup: false, ts: Date.now(),
         });
 
-        const result = { platform, chatId, sessionKey, recorded };
-        if (idempotencyKey) {
-          this._proactiveIdempotency.set(idempotencyKey, {
-            promise: null,
-            createdAt: Date.now(),
-            result,
+        const delivery = { status: "sent", platform, chatId, sessionKey, recorded };
+        deliveries.push(delivery);
+        if (!fanOut) {
+          const result = {
+            platform,
+            chatId,
+            sessionKey,
+            recorded,
+            deliveries: [delivery],
+          };
+          if (idempotencyKey) {
+            this._proactiveIdempotency.set(idempotencyKey, {
+              promise: null,
+              createdAt: Date.now(),
+              result,
+            });
+          }
+          return result;
+        }
+      } catch (err) {
+        if (fanOut) {
+          deliveries.push({
+            status: "failed",
+            platform,
+            chatId,
+            error: err.message,
           });
         }
-        return result;
-      } catch (err) {
         log.error(`proactive send failed (${platform}): ${err.message}`);
         debugLog()?.error("bridge", `proactive send failed (${platform}): ${err.message}`);
       }
+    }
+
+    const successful = deliveries.filter((delivery) => delivery.status === "sent");
+    if (successful.length) {
+      const primary = successful[0];
+      const result = {
+        platform: primary.platform,
+        chatId: primary.chatId,
+        sessionKey: primary.sessionKey,
+        recorded: successful.some((delivery) => delivery.recorded === true),
+        deliveries,
+      };
+      if (idempotencyKey) {
+        this._proactiveIdempotency.set(idempotencyKey, {
+          promise: null,
+          createdAt: Date.now(),
+          result,
+        });
+      }
+      return result;
     }
 
     if (idempotencyKey) this._proactiveIdempotency.delete(idempotencyKey);

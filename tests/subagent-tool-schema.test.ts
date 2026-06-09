@@ -29,10 +29,10 @@ describe("subagent tool schema", () => {
     expect(tool.description).toContain("continuable subagent instance");
   });
 
-  it("includes delegation guidance when proactiveDelegation is on", async () => {
+  it("keeps description concise even when proactiveDelegation is on", async () => {
     const tool = await loadSubagentToolDef({ proactiveDelegation: true });
-    expect(tool.description).toContain("direct tool");
-    expect(tool.description).toContain("protecting the main context window");
+    expect(tool.description).toContain("continuable subagent instance");
+    expect(tool.description.length).toBeLessThan(300);
   });
 
   it("has correct parameter descriptions", async () => {

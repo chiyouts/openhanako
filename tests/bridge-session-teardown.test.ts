@@ -268,6 +268,59 @@ describe("BridgeSessionManager teardown", () => {
     );
   });
 
+  it("adds Bridge-facing /apply details from automation suggestion tool results", async () => {
+    const agent = makeAgent(rootDir);
+    const mgrPath = path.join(agent.sessionDir, "bridge", "owner", "automation-suggestion.jsonl");
+    const manager = new BridgeSessionManager(makeDeps(agent));
+    sessionManagerCreateMock.mockReturnValue({ getSessionFile: () => mgrPath });
+
+    const subscribers = [];
+    const session = {
+      model: { input: ["text"] },
+      prompt: vi.fn(async () => {
+        for (const fn of subscribers) {
+          fn({
+            type: "tool_execution_end",
+            toolName: "automation",
+            isError: false,
+            result: {
+              details: {
+                automationSuggestion: {
+                  suggestionId: "automation_suggestion_1",
+                  shortCode: "3827",
+                  operation: "create",
+                  jobData: {
+                    type: "cron",
+                    schedule: "0 12 * * *",
+                    label: "每日吃饭提醒",
+                    prompt: "该吃饭啦！记得好好吃饭，照顾好自己。",
+                    actorAgentId: "agent-a",
+                  },
+                },
+              },
+            },
+          });
+        }
+      }),
+      subscribe: vi.fn((fn) => {
+        subscribers.push(fn);
+        return vi.fn();
+      }),
+      dispose: vi.fn(),
+      sessionManager: { getSessionFile: () => mgrPath },
+    };
+    createAgentSessionMock.mockResolvedValue({ session });
+
+    const reply = await manager.executeExternalMessage("create reminder", "tg_dm_owner@agent-a", null, { agentId: "agent-a" });
+
+    expect(reply).toContain("我准备了一项自动任务建议");
+    expect(reply).toContain("标题：每日吃饭提醒");
+    expect(reply).toContain("建议ID：3827");
+    expect(reply).toContain("回复 /apply 即可创建这个任务。");
+    expect(reply).toContain("/apply 3827");
+    expect(reply).not.toContain("/confirm");
+  });
+
   it("notifies the owner bridge memory ticker after a successful external turn", async () => {
     const agent = makeAgent(rootDir) as any;
     agent.memoryTicker = {

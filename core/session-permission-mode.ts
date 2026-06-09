@@ -37,9 +37,6 @@ const SIDE_EFFECT_TOOLS = new Set([
   "install_skill",
   "update_settings",
   "todo_write",
-  // Legacy compatibility tools stay classified as side effects so restored
-  // sessions keep the same permission boundary until the v0.133 cleanup window.
-  "create_artifact",
   "stage_files",
   "present_files",
   "subagent",
@@ -86,6 +83,10 @@ const BROWSER_READ_ACTIONS = new Set([
 const TERMINAL_READ_ACTIONS = new Set([
   "read",
   "list",
+]);
+
+const FILE_READ_ACTIONS = new Set([
+  "stat",
 ]);
 
 export function normalizeSessionPermissionMode(raw) {
@@ -168,6 +169,14 @@ function classifySessionFoldersAction(mode, action) {
   return { action: "allow" };
 }
 
+function classifyFileAction(mode, action) {
+  if (FILE_READ_ACTIONS.has(action)) return { action: "allow" };
+  if (mode === SESSION_PERMISSION_MODES.READ_ONLY) return blocked("file");
+  if (mode === SESSION_PERMISSION_MODES.AUTO) return review("file");
+  if (mode === SESSION_PERMISSION_MODES.ASK) return prompt("file");
+  return { action: "allow" };
+}
+
 export function classifySessionPermission({ mode, toolName, params, context }: { mode?: any; toolName?: any; params?: any; context?: any } = {}) {
   let normalized = normalizeSessionPermissionMode(mode);
   const name = typeof toolName === "string" ? toolName : "";
@@ -189,6 +198,7 @@ export function classifySessionPermission({ mode, toolName, params, context }: {
   if (name === "browser") return classifyBrowserAction(normalized, params?.action);
   if (name === "terminal") return classifyTerminalAction(normalized, params?.action);
   if (name === "session_folders") return classifySessionFoldersAction(normalized, params?.action);
+  if (name === "file") return classifyFileAction(normalized, params?.action);
   if (normalized === SESSION_PERMISSION_MODES.OPERATE) return { action: "allow" };
   if (normalized === SESSION_PERMISSION_MODES.READ_ONLY) return blocked(name);
   if (normalized === SESSION_PERMISSION_MODES.AUTO) return review(name);

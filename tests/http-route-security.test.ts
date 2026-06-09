@@ -145,6 +145,8 @@ describe("HTTP route security policy", () => {
       .toMatchObject({ allowed: true });
     expect(authorizeHttpRoute({ method: "POST", path: "/api/providers/fetch-models", principal: providerManager }))
       .toMatchObject({ allowed: true });
+    expect(authorizeHttpRoute({ method: "GET", path: "/api/providers/deepseek/api-key", principal: providerManager }))
+      .toMatchObject({ allowed: true });
     expect(authorizeHttpRoute({ method: "PUT", path: "/api/providers/deepseek/models/deepseek-chat", principal: providerManager }))
       .toMatchObject({ allowed: true });
 
@@ -157,6 +159,8 @@ describe("HTTP route security policy", () => {
       .toMatchObject({ allowed: false, error: "insufficient_scope" });
     expect(authorizeHttpRoute({ method: "PUT", path: "/api/config", principal: providerManager }))
       .toMatchObject({ allowed: false, error: "insufficient_scope" });
+    expect(authorizeHttpRoute({ method: "GET", path: "/api/providers/deepseek/api-key", principal: settingsWriter }))
+      .toMatchObject({ allowed: false, error: "insufficient_scope", requiredScope: "providers.manage" });
   });
 
   it("includes required scope diagnostics when a scoped route denies access", async () => {

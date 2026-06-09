@@ -448,6 +448,9 @@
     "copy": "複製",
     "copied": "已複製 ✓"
   },
+  "codeBlock": {
+    "wordWrap": "自動換行"
+  },
   "cron": {
     "typeAt": "單次",
     "typeEvery": "間隔",
@@ -794,6 +797,7 @@
     "tabs": {
       "interface": "介面",
       "general": "通用",
+      "browser": "瀏覽器",
       "agent": "助手",
       "me": "我",
       "providers": "供應商",
@@ -809,6 +813,20 @@
       "plugins": "插件",
       "about": "關於",
       "security": "安全"
+    },
+    "browser": {
+      "cookiesTitle": "Cookies",
+      "acceptCookies": "接受 Cookies",
+      "acceptCookiesHint": "開啟後，內置瀏覽器會像普通瀏覽器一樣儲存和傳送網站 Cookies。",
+      "clearCookies": "清除 Cookies",
+      "clearCookiesHint": "清除內置瀏覽器已經儲存的 Cookies 和站點資料。",
+      "clearCookiesButton": "清除",
+      "clearCookiesSuccess": "已清除 Cookies",
+      "agentTitle": "Agent 預設行為",
+      "agentOpenBehavior": "打開網頁時",
+      "agentOpenBehaviorHint": "控制 Agent 使用瀏覽器時預設沿用目前標籤頁，還是每次新開標籤頁。",
+      "agentOpenBehaviorCurrentTab": "在目前標籤頁操作",
+      "agentOpenBehaviorNewTab": "新開標籤頁"
     },
     "general": {
       "title": "通用",
@@ -1231,7 +1249,7 @@
       "totalTokens": "Tokens",
       "cacheRead": "快取命中",
       "cacheHitRate": "命中率",
-      "estimatedCost": "預估成本",
+
       "uncached": "未快取消耗",
       "modelMix": "模型分佈",
       "dailyUsage": "每日用量",
@@ -1934,6 +1952,7 @@
     "draftTitle": "自動化草稿",
     "suggestionTitle": "建議",
     "suggested": "建議",
+    "viewSuggestion": "查看建議",
     "openDraft": "開啟自動化草稿",
     "closeDraft": "關閉自動化草稿",
     "confirmCreate": "確認新增",
@@ -2002,7 +2021,8 @@
       "title": "背景動態"
     },
     "todo": {
-      "title": "待辦"
+      "title": "進程",
+      "waitForOutput": "輸出完成後再標記"
     },
     "subagent": {
       "title": "子助手"
@@ -2142,6 +2162,8 @@
     "back": "後退",
     "forward": "前進",
     "reload": "重新整理",
+    "newTab": "新標籤頁",
+    "closeTab": "關閉標籤頁",
     "emergencyStop": "緊急停止 AI 控制",
     "backgroundHint": "後台瀏覽器運行中，點擊查看",
     "background": "後台瀏覽器"

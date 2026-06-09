@@ -264,6 +264,12 @@ describe("channels route membership contract", () => {
         toolMode: "write",
         replyMinChars: "20",
         replyMaxChars: "80",
+        proactiveEnabled: "false",
+        reminderIntervalMinutes: "45",
+        guardLimit: "7",
+        modelOverrideEnabled: "true",
+        modelOverrideId: "deepseek-v4-flash",
+        modelOverrideProvider: "deepseek",
       },
     });
 
@@ -274,6 +280,55 @@ describe("channels route membership contract", () => {
       mode: "write",
       replyMinChars: 20,
       replyMaxChars: 80,
+      proactiveEnabled: false,
+      reminderIntervalMinutes: 45,
+      guardLimit: 7,
+      modelOverrideEnabled: true,
+      modelOverrideModel: { id: "deepseek-v4-flash", provider: "deepseek" },
+    });
+  });
+
+  it("persists DM phone settings with the same setting surface as two-agent conversations", async () => {
+    engine.currentAgentId = "carol";
+
+    const setRes = await app.request("/api/conversations/dm%3Abob/agent-phone-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "write",
+        replyMinChars: 12,
+        replyMaxChars: 34,
+        proactiveEnabled: false,
+        reminderIntervalMinutes: 45,
+        guardLimit: 5,
+        modelOverrideEnabled: true,
+        modelOverrideModel: { id: "deepseek-v4-flash", provider: "deepseek" },
+      }),
+    });
+
+    expect(setRes.status).toBe(200);
+    expect(await setRes.json()).toMatchObject({
+      mode: "write",
+      replyMinChars: 12,
+      replyMaxChars: 34,
+      proactiveEnabled: false,
+      reminderIntervalMinutes: 45,
+      guardLimit: 5,
+      modelOverrideEnabled: true,
+      modelOverrideModel: { id: "deepseek-v4-flash", provider: "deepseek" },
+    });
+
+    const getRes = await app.request("/api/conversations/dm%3Abob/agent-phone-settings");
+    expect(getRes.status).toBe(200);
+    expect(await getRes.json()).toMatchObject({
+      mode: "write",
+      replyMinChars: 12,
+      replyMaxChars: 34,
+      proactiveEnabled: false,
+      reminderIntervalMinutes: 45,
+      guardLimit: 5,
+      modelOverrideEnabled: true,
+      modelOverrideModel: { id: "deepseek-v4-flash", provider: "deepseek" },
     });
   });
 

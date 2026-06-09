@@ -26,6 +26,8 @@ const initialStateFactory = (): MockState => ({
   pendingNewSession: false,
   pendingProjectId: null,
   pendingNewSessionThinkingLevel: null,
+  pendingNewSessionPermissionMode: null,
+  sessionPermissionMode: 'ask',
   sessions: [] as Array<{ path: string }>,
   chatSessions: {} as Record<string, unknown>,
   sessionRegistryFilesByPath: {} as Record<string, unknown>,
@@ -205,6 +207,10 @@ function installStoreMethods() {
     const bySession = mockState.todosBySession as Record<string, unknown>;
     bySession[path] = todos;
   });
+  s.bumpTodosLiveVersion = vi.fn((path: string) => {
+    const versions = mockState.todosLiveVersionBySession as Record<string, number>;
+    versions[path] = (versions[path] ?? 0) + 1;
+  });
   s.setInlineError = vi.fn((path: string, text: string) => {
     const inlineErrors = mockState.inlineErrors as Record<string, string | null>;
     inlineErrors[path] = text;
@@ -219,6 +225,13 @@ function installStoreMethods() {
   s.requestInputFocus = vi.fn();
   s.setThinkingLevel = vi.fn((level: string) => { mockState.thinkingLevel = level; });
   s.setPendingNewSessionThinkingLevel = vi.fn((level: string | null) => { mockState.pendingNewSessionThinkingLevel = level; });
+  s.setSessionPermissionMode = vi.fn((mode: string) => {
+    mockState.sessionPermissionMode = mode;
+    if (mockState.pendingNewSession === true) {
+      mockState.pendingNewSessionPermissionMode = mode;
+    }
+  });
+  s.setPendingNewSessionPermissionMode = vi.fn((mode: string | null) => { mockState.pendingNewSessionPermissionMode = mode; });
   s.setDeskBasePath = vi.fn((path: string) => { mockState.deskBasePath = path; });
   s.setDeskCurrentPath = vi.fn((path: string) => { mockState.deskCurrentPath = path; });
   s.setDeskFiles = vi.fn((files: unknown[]) => { mockState.deskFiles = files; });
@@ -229,7 +242,7 @@ import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { clearChat } from '../../stores/agent-actions';
 import { loadDeskFiles } from '../../stores/desk-actions';
 import { bumpMessageLiveVersion, clearMessageLiveVersion } from '../../stores/message-live-version';
-import { archiveSession, continueDeletedAgentSession, createNewSession, ensureSession, loadMessages, loadSessions, pinSession, switchSession } from '../../stores/session-actions';
+import { archiveSession, completeSessionTodos, continueDeletedAgentSession, createNewSession, ensureSession, loadMessages, loadSessions, pinSession, switchSession } from '../../stores/session-actions';
 import { snapshotStreamBuffer } from '../../stores/stream-invalidator';
 
 const mockFetch = vi.mocked(hanaFetch);
@@ -328,6 +341,34 @@ function jsonResponse(body: unknown, ok = true): Response {
     expect(mockState.currentAgentId).toBeNull();
     expect(deskActionMocks.activateWorkspaceDesk).toHaveBeenCalledWith('/tmp/work', { mountId: null, label: null });
     expect((mockState.chatSessions as Record<string, any>)[deletedPath].items).toHaveLength(1);
+  });
+
+  it('completes current session todos through the explicit cleanup route', async () => {
+    const sessionPath = '/session/todo-cleanup.jsonl';
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true, todos: [] }));
+
+    const ok = await completeSessionTodos(sessionPath);
+
+    expect(ok).toBe(true);
+    expect(mockFetch).toHaveBeenCalledWith('/api/sessions/todos/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: sessionPath }),
+    });
+    expect(mockState.setSessionTodosForPath).toHaveBeenCalledWith(sessionPath, []);
+    expect(mockState.bumpTodosLiveVersion).toHaveBeenCalledWith(sessionPath);
+  });
+
+  it('does not complete session todos while that session is streaming', async () => {
+    const sessionPath = '/session/streaming.jsonl';
+    Object.assign(mockState, {
+      streamingSessions: [sessionPath],
+    });
+
+    const ok = await completeSessionTodos(sessionPath);
+
+    expect(ok).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('clears unread output marker when switching into a normal session', async () => {
@@ -494,6 +535,8 @@ function jsonResponse(body: unknown, ok = true): Response {
 
       const permissionEvent = dispatchedEvents.filter(e => e.type === 'hana-plan-mode').at(-1);
       expect(permissionEvent?.detail).toEqual({ enabled: true, mode: 'read_only' });
+      expect(mockState.sessionPermissionMode).toBe('read_only');
+      expect(mockState.pendingNewSessionPermissionMode).toBe('read_only');
     });
 
     it('initializes pending new-session thinking from the server default', async () => {
@@ -642,6 +685,40 @@ function jsonResponse(body: unknown, ok = true): Response {
       expect(mockState.thinkingLevel).toBe('high');
     });
 
+    it('carries the pending new-session permission draft into session creation', async () => {
+      Object.assign(mockState, {
+        pendingNewSession: true,
+        memoryEnabled: true,
+        selectedFolder: '/workspace-a',
+        pendingNewSessionPermissionMode: 'auto',
+      });
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        path: '/session/new.jsonl',
+        cwd: '/workspace-a',
+        workspaceFolders: [],
+        permissionMode: 'auto',
+      }));
+      mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+      await expect(ensureSession()).resolves.toBe(true);
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        '/api/sessions/new',
+        expect.objectContaining({
+          body: JSON.stringify({
+            memoryEnabled: true,
+            cwd: '/workspace-a',
+            permissionMode: 'auto',
+            currentSessionPath: null,
+          }),
+        }),
+      );
+      expect(mockState.pendingNewSessionPermissionMode).toBeNull();
+      expect(mockState.sessionPermissionMode).toBe('auto');
+    });
+
     it('carries an explicit project id from the new-session draft into session creation', async () => {
       await createNewSession({ projectId: 'project-hana', cwd: '/workspace/project-hana' });
       mockFetch.mockResolvedValueOnce(jsonResponse({
@@ -662,6 +739,7 @@ function jsonResponse(body: unknown, ok = true): Response {
             memoryEnabled: true,
             cwd: '/workspace/project-hana',
             projectId: 'project-hana',
+            permissionMode: 'ask',
             currentSessionPath: null,
           }),
         }),

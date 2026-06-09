@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBridgeState } from '../../settings/tabs/bridge/useBridgeState';
@@ -12,6 +12,11 @@ type MockState = Record<string, any>;
 
 const mockState: MockState = {};
 const mockHanaFetch = vi.fn();
+const mockUpdateSettingsSnapshot = vi.fn((mutator: (snapshot: MockState) => MockState) => {
+  const snapshot = mockState.settingsSnapshot?.data;
+  if (!snapshot) return;
+  mockState.settingsSnapshot.data = mutator(snapshot);
+});
 
 vi.mock('../../settings/store', () => {
   const hook: any = (selector?: (s: MockState) => unknown) =>
@@ -27,6 +32,7 @@ vi.mock('../../settings/api', () => ({
 
 vi.mock('../../settings/actions', () => ({
   loadSettingsConfig: vi.fn(async () => {}),
+  updateSettingsSnapshot: (mutator: (snapshot: MockState) => MockState) => mockUpdateSettingsSnapshot(mutator),
 }));
 
 vi.mock('../../settings/helpers', () => ({
@@ -41,6 +47,20 @@ function BridgeProbe() {
       <span data-testid="permission-mode">{status?.permissionMode || 'none'}</span>
       <span data-testid="telegram-token">{tgToken}</span>
       <span data-testid="public-ishiki">{publicIshiki}</span>
+    </div>
+  );
+}
+
+function BridgeEditorProbe() {
+  const { publicIshiki, setPublicIshiki, savePublicIshiki } = useBridgeState();
+  return (
+    <div>
+      <textarea
+        data-testid="public-ishiki-input"
+        value={publicIshiki}
+        onChange={(event) => setPublicIshiki(event.target.value)}
+      />
+      <button type="button" onClick={savePublicIshiki}>save</button>
     </div>
   );
 }
@@ -83,6 +103,7 @@ describe('useBridgeState snapshot hydration', () => {
       },
     });
     mockHanaFetch.mockReset();
+    mockUpdateSettingsSnapshot.mockClear();
     mockHanaFetch.mockImplementation((url: string) => {
       if (url === '/api/bridge/status?agentId=hana') {
         return new Promise<Response>(() => {});
@@ -107,5 +128,40 @@ describe('useBridgeState snapshot hydration', () => {
       '/api/bridge/status?agentId=hana',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('keeps saved public ishiki in the settings snapshot for remounts', async () => {
+    mockState.settingsSnapshot.data.publicIshiki = '';
+    mockHanaFetch.mockImplementation((url: string, opts?: RequestInit) => {
+      if (url === '/api/bridge/status?agentId=hana') {
+        return new Promise<Response>(() => {});
+      }
+      if (url === '/api/agents/hana/public-ishiki') {
+        expect(opts).toMatchObject({
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: 'saved public ishiki' }),
+        });
+        return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+
+    const first = render(<BridgeEditorProbe />);
+
+    fireEvent.change(screen.getByTestId('public-ishiki-input'), {
+      target: { value: 'saved public ishiki' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => {
+      expect(mockState.showToast).toHaveBeenCalledWith('settings.saved', 'success');
+    });
+    expect(mockState.settingsSnapshot.data.publicIshiki).toBe('saved public ishiki');
+
+    first.unmount();
+    render(<BridgeEditorProbe />);
+
+    expect(screen.getByTestId('public-ishiki-input')).toHaveValue('saved public ishiki');
   });
 });

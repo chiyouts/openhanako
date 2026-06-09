@@ -174,6 +174,8 @@ export interface SuggestionCardBlock {
   type: 'suggestion_card';
   kind: 'automation_draft' | string;
   confirmId?: string;
+  suggestionId?: string;
+  suggestionShortCode?: string;
   operation?: 'create' | 'update' | string;
   status: 'pending' | 'approved' | 'rejected' | string;
   title: string;
