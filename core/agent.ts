@@ -60,9 +60,9 @@ import {
   type AgentAppearanceModel,
   formatAgentAppearancePrompt,
   hasAgentAppearanceSummaryCapability,
-  readCachedAgentAppearanceSummary,
+  readAgentAppearanceProfileResource,
   type ResolvedAgentAppearanceModelConfig,
-  refreshAgentAppearanceSummary,
+  refreshAgentAppearanceProfileResource,
 } from "../lib/agent-appearance-summary.ts";
 
 const moduleLog = createModuleLogger("agent");
@@ -239,6 +239,14 @@ export class Agent {
      * Agent 不持有 Engine 引用，所有对 Engine 的需求通过此对象间接访问。
      */
     this._cb = null;
+
+    // 团队花名册唯一事实源：AgentManager 注入的 active-agent provider，
+    // tombstone / 坏目录已在 manager 层过滤。Agent 自身禁止私扫 agentsDir，
+    // 否则删除标记对 prompt / subagent / DM / workflow 不可见（#1657 / #1633）。
+    // 与旧行为保持一致：仅在频道能力可用（channelsDir 存在）时暴露花名册。
+    if (this.channelsDir && this.agentsDir) {
+      this._listAgents = () => this._cb?.listActiveAgents?.() ?? [];
+    }
   }
 
   // ════════════════════════════
@@ -520,46 +528,9 @@ export class Agent {
     // 9. 频道工具 + 私信工具（需要 channelsDir 和 agentsDir）
     if (this.channelsDir && this.agentsDir) {
       const agentId = this.id;
-      const listAgents = () => {
-        try {
-          return fs.readdirSync(this.agentsDir, { withFileTypes: true })
-            .filter(e => e.isDirectory() && fs.existsSync(path.join(this.agentsDir, e.name, "config.yaml")))
-            .map(e => {
-              try {
-                const raw = fs.readFileSync(path.join(this.agentsDir, e.name, "config.yaml"), "utf-8");
-                const nameMatch = raw.match(/^\s*name:\s*(.+)$/m);
-
-                // models.chat 可能是 string 或 { id, provider } 对象格式
-                let chatModel = "";
-                const chatObjMatch = raw.match(/^\s+chat:\s*\n\s+id:\s*(.+)$/m);
-                if (chatObjMatch) {
-                  chatModel = chatObjMatch[1].trim();
-                } else {
-                  const chatStrMatch = raw.match(/^\s+chat:\s+(\S.+)$/m);
-                  if (chatStrMatch) chatModel = chatStrMatch[1].trim();
-                }
-
-                // 读取 description.md（跳过 hash 注释行）
-                let summary = "";
-                try {
-                  const descRaw = fs.readFileSync(path.join(this.agentsDir, e.name, "description.md"), "utf-8");
-                  summary = descRaw.split("\n")
-                    .filter(l => !l.trim().startsWith("<!--"))
-                    .join("\n").trim();
-                } catch {}
-
-                return {
-                  id: e.name,
-                  name: nameMatch?.[1]?.trim() || e.name,
-                  summary,
-                  model: chatModel,
-                };
-              } catch { return { id: e.name, name: e.name, summary: "", model: "" }; }
-            });
-        } catch { return []; }
-      };
-
-      this._listAgents = listAgents;
+      // 花名册来自构造期装配的 active-agent provider（见 constructor），
+      // 这里只取引用传给各工具，不在 Agent 内部扫盘。
+      const listAgents = this._listAgents;
 
       this._channelTool = createChannelTool({
         channelsDir: this.channelsDir,
@@ -721,6 +692,16 @@ export class Agent {
   setUtilityModel(val) { this._utilityModel = val; }
   setMemoryModel(val) { this._memoryModel = val; }
 
+  /**
+   * 为某个会话面创建带作用域的 search_memory 实例（同一 FactStore，不复制数据归属）。
+   * 频道 phone 会话用它替换默认实例：默认排除其它频道的事实，跨频道需显式参数（#1670）。
+   * FactStore 未初始化（记忆未启用 / runtime 未就绪）时返回 null，调用方不得注入兜底实例。
+   */
+  createConversationScopedMemorySearchTool(conversationScope) {
+    if (!this._factStore) return null;
+    return createMemorySearchTool(this._factStore, { conversationScope });
+  }
+
   // ════════════════════════════
   //  状态访问
   // ════════════════════════════
@@ -773,7 +754,7 @@ export class Agent {
 
   async refreshAppearanceSummary(options: RefreshAppearanceSummaryOptions = {}) {
     const engine = this._getAppearanceEngine();
-    const summary = await refreshAgentAppearanceSummary({
+    const summary = await refreshAgentAppearanceProfileResource({
       agentDir: this.agentDir,
       agentName: this.agentName,
       visionConfig: this._resolveAppearanceVisionConfig(engine),
@@ -1286,6 +1267,15 @@ export class Agent {
         "- Do not decide platform-specific display or sending behavior in the Agent layer; consumers handle it"
     );
 
+    parts.push(isZh
+      ? "\n## 可见 UI 上下文\n\n" +
+        "当用户用「这个、当前、打开的、可见的、选中的、置顶的」等说法指代 Hana 界面里正在看的文件、预览或文件夹时，先调用 current_status 获取 ui_context，再决定要读哪个文件或目录。\n\n" +
+        "ui_context 是用户当前可见界面的被动元信息，可能包含当前查看的文件夹、激活文件或预览标题、以及置顶 viewer 文件。它只描述 Hana 已收集到的 UI 视野；如果返回为空或不足以确定对象，向用户确认，不要猜路径。"
+      : "\n## Visible UI Context\n\n" +
+        "When the user refers to something in the Hana UI with words like current, open, visible, selected, pinned, this file, this folder, or what I am looking at, call current_status with the ui_context key before deciding which file or folder to inspect.\n\n" +
+        "ui_context is passive metadata about the user's visible UI state. It may include the currently viewed folder, active file or preview title, and pinned viewer files. It only describes UI state Hana has collected; if it is empty or not enough to identify the target, ask the user instead of guessing a path."
+    );
+
     if (!forSubagent) {
       const proactiveDelegation = getResolvedExperimentValue(
         this._cb?.getPreferences?.(),
@@ -1433,7 +1423,7 @@ export class Agent {
     parts.push(ishiki);
 
     if (!forSubagent && this._canInjectAppearancePrompt(targetModel)) {
-      const appearance = readCachedAgentAppearanceSummary(this.agentDir);
+      const appearance = readAgentAppearanceProfileResource(this.agentDir);
       const appearancePrompt = appearance
         ? formatAgentAppearancePrompt(appearance.summary, this._config.locale || "")
         : "";

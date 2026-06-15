@@ -69,6 +69,10 @@ function makeMockEngine( overrides: any = {}) {
       return prefs._store.computer_use;
     }),
     setThinkingLevel: vi.fn(function (v) { prefs.setThinkingLevel(v); }),
+    getDefaultThinkingLevel: vi.fn(() => overrides.defaultThinkingLevel || prefs.getThinkingLevel()),
+    setDefaultThinkingLevel: vi.fn(async function (v) { prefs.setThinkingLevel(v); }),
+    getSessionThinkingLevel: vi.fn((sessionPath) => overrides.sessionThinkingLevels?.[sessionPath] || overrides.sessionThinkingLevel || null),
+    setSessionThinkingLevel: vi.fn(async () => ({ ok: true })),
     setDefaultModel: vi.fn(),
     getEventBus: vi.fn(() => eventBus),
     currentSessionPath: "/sessions/test",
@@ -267,6 +271,42 @@ describe("update-settings-tool", () => {
 
       expect(engine.updateComputerUseSettings).toHaveBeenCalledWith({ enabled: true });
       expect(engine._prefs._store.computer_use.enabled).toBe(true);
+    });
+  });
+
+  describe("thinking_level session boundary", () => {
+    it("reads the current session thinking level before the model default", async () => {
+      const { tool } = buildTool({
+        defaultThinkingLevel: "high",
+        sessionThinkingLevels: { "/sessions/test": "off" },
+      });
+
+      const result = await tool.execute("c-thinking-get", { action: "search", query: "thinking" });
+
+      expect(result.content[0].text).toContain("thinking_level");
+      expect(result.content[0].text).toContain("off");
+    });
+
+    it("applies thinking_level to the active session when one exists (#1653)", async () => {
+      const { tool, engine } = buildTool({
+        defaultThinkingLevel: "high",
+        sessionThinkingLevels: { "/sessions/test": "high" },
+      });
+
+      await tool.execute("c-thinking-apply", { action: "apply", key: "thinking_level", value: "off" });
+
+      expect(engine.setSessionThinkingLevel).toHaveBeenCalledWith("/sessions/test", "off");
+      expect(engine.setDefaultThinkingLevel).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the model default when there is no active session", async () => {
+      const { tool, engine } = buildTool({ defaultThinkingLevel: "medium" });
+      engine.currentSessionPath = null;
+
+      await tool.execute("c-thinking-default", { action: "apply", key: "thinking_level", value: "low" });
+
+      expect(engine.setSessionThinkingLevel).not.toHaveBeenCalled();
+      expect(engine.setDefaultThinkingLevel).toHaveBeenCalledWith("low");
     });
   });
 

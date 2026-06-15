@@ -5,7 +5,7 @@
  * 每种 previewItem 类型对应一个 JSX 分支或子组件。
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import { renderMarkdownPreview } from '../../utils/markdown';
 import {
   parseMarkdownCover,
@@ -89,29 +89,10 @@ interface PreviewRendererProps {
 }
 
 // ── HtmlPreview ──
-// HTML 内容由 server 注册为 token 化短期文档；renderer 只负责把该 URL
-// 和 Preview 面板里的占位矩形交给主进程，实际渲染跑在专用 WebContentsView。
-
-function readHtmlPreviewBounds(element: HTMLElement | null) {
-  if (!element) return null;
-  const rect = element.getBoundingClientRect();
-  if (!Number.isFinite(rect.x) || !Number.isFinite(rect.y) || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) {
-    return null;
-  }
-  if (rect.width <= 0 || rect.height <= 0) {
-    return null;
-  }
-  return {
-    x: Math.round(rect.x),
-    y: Math.round(rect.y),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
-  };
-}
+// HTML 内容由 server 注册为 token 化短期文档；右侧 Preview 只承载本地
+// artifact/file-backed HTML，用 DOM iframe 渲染，外部网页访问交给内置浏览器。
 
 function HtmlPreview({ previewItem }: { previewItem: PreviewItem }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const shownRef = useRef(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,7 +100,6 @@ function HtmlPreview({ previewItem }: { previewItem: PreviewItem }) {
     let cancelled = false;
     setPreviewUrl(null);
     setError(null);
-    shownRef.current = false;
 
     hanaFetch('/api/preview/html', {
       method: 'POST',
@@ -128,6 +108,7 @@ function HtmlPreview({ previewItem }: { previewItem: PreviewItem }) {
         title: previewItem.title,
         content: previewItem.content,
         sourceFilePath: previewItem.filePath,
+        sourceRootPath: previewItem.sourceRootPath,
       }),
     })
       .then(async (res) => {
@@ -145,59 +126,20 @@ function HtmlPreview({ previewItem }: { previewItem: PreviewItem }) {
     return () => {
       cancelled = true;
     };
-  }, [previewItem.content, previewItem.filePath, previewItem.title]);
-
-  useLayoutEffect(() => {
-    if (!previewUrl || !window.platform?.showHtmlPreview) return undefined;
-
-    let closed = false;
-    const syncBounds = () => {
-      if (closed) return;
-      const bounds = readHtmlPreviewBounds(hostRef.current);
-      if (!bounds) return;
-      if (!shownRef.current) {
-        const showResult = window.platform.showHtmlPreview?.({
-          previewId: previewItem.id,
-          previewUrl,
-          bounds,
-        });
-        void Promise.resolve(showResult).then((ok) => {
-          if (!closed && ok) shownRef.current = true;
-        });
-        return;
-      }
-      void window.platform.updateHtmlPreviewBounds?.(previewItem.id, bounds);
-    };
-
-    syncBounds();
-    const host = hostRef.current;
-    const resizeObserver = host && typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(syncBounds)
-      : null;
-    if (host && resizeObserver) resizeObserver.observe(host);
-    window.addEventListener('resize', syncBounds);
-    window.addEventListener('scroll', syncBounds, true);
-
-    return () => {
-      closed = true;
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', syncBounds);
-      window.removeEventListener('scroll', syncBounds, true);
-      shownRef.current = false;
-      void window.platform?.closeHtmlPreview?.(previewItem.id);
-    };
-  }, [previewItem.id, previewUrl]);
+  }, [previewItem.content, previewItem.filePath, previewItem.sourceRootPath, previewItem.title]);
 
   if (error) {
     return <pre className="preview-code">{error}</pre>;
   }
 
   return (
-    <div
-      ref={hostRef}
-      className="preview-html-native-host"
-      data-html-preview-host=""
-      aria-label={previewItem.title}
+    <iframe
+      className="preview-html-frame"
+      data-html-preview-frame=""
+      title={previewItem.title}
+      src={previewUrl || 'about:blank'}
+      sandbox="allow-scripts"
+      referrerPolicy="no-referrer"
     />
   );
 }
@@ -655,21 +597,42 @@ function CsvPreview({ content }: { content: string }) {
 }
 
 // ── PdfPreview ──
-// data: URL 在 Electron 中无法渲染大 PDF，改用 blob URL 触发 Chromium 内置查看器
+// sourceUrl 是新路径；content/base64 只保留给旧 previewItem 兼容。
 
-function PdfPreview({ content }: { content: string }) {
-  const url = useMemo(() => {
-    const raw = atob(content);
+function appendPdfViewerHash(url: string): string {
+  if (!url || url === 'about:blank') return url;
+  const params = 'toolbar=0&navpanes=0';
+  const hashIndex = url.indexOf('#');
+  if (hashIndex < 0) return `${url}#${params}`;
+  const prefix = url.slice(0, hashIndex + 1);
+  const hash = url.slice(hashIndex + 1);
+  return `${prefix}${hash ? `${hash}&` : ''}${params}`;
+}
+
+function PdfPreview({ previewItem }: { previewItem: PreviewItem }) {
+  const source = useMemo(() => {
+    if (previewItem.sourceUrl) {
+      return { url: previewItem.sourceUrl, revoke: false };
+    }
+    if (!previewItem.content) {
+      return { url: 'about:blank', revoke: false };
+    }
+    const raw = atob(previewItem.content);
     const bytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-    return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-  }, [content]);
+    if (typeof URL.createObjectURL !== 'function') {
+      return { url: `data:application/pdf;base64,${previewItem.content}`, revoke: false };
+    }
+    return { url: URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), revoke: true };
+  }, [previewItem.content, previewItem.sourceUrl]);
 
   useEffect(() => {
-    return () => URL.revokeObjectURL(url);
-  }, [url]);
+    return () => {
+      if (source.revoke) URL.revokeObjectURL(source.url);
+    };
+  }, [source]);
 
-  return <iframe className="preview-pdf" src={`${url}#toolbar=0&navpanes=0`} />;
+  return <iframe className="preview-pdf" src={appendPdfViewerHash(source.url)} />;
 }
 
 // ── FileInfoPreview ──
@@ -729,7 +692,7 @@ export function PreviewRenderer({ previewItem }: PreviewRendererProps) {
       return <LegacyMediaFallback previewItem={previewItem} />;
 
     case 'pdf':
-      return <PdfPreview content={previewItem.content} />;
+      return <PdfPreview previewItem={previewItem} />;
 
     case 'docx':
       return (

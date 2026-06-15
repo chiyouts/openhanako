@@ -14,6 +14,7 @@ const PROVIDER_TO_ICON: Record<string, string> = {
   moonshot: 'moonshot',
   'kimi-coding': 'kimi',
   zhipu: 'zhipu',
+  'zhipu-coding': 'zhipu',
   siliconflow: 'siliconcloud',
   groq: 'groq',
   mistral: 'mistral',

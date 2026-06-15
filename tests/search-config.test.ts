@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { ConfigCoordinator } from "../core/config-coordinator.ts";
+import {
+  BROWSER_SEARCH_PROVIDER_IDS,
+  SEARCH_API_PROVIDER_IDS,
+  SEARCH_CAPABILITY_KIND,
+  SEARCH_CAPABILITY_PROVIDERS,
+} from "../shared/search-providers.ts";
 
 function makeCoordinator(initialPrefs = {}) {
   let prefs = { ...initialPrefs };
@@ -36,6 +42,14 @@ function makeCoordinator(initialPrefs = {}) {
 }
 
 describe("search config preferences", () => {
+  it("describes built-in search providers as a provider catalog capability", () => {
+    expect(SEARCH_CAPABILITY_KIND).toBe("web.search");
+    expect(SEARCH_CAPABILITY_PROVIDERS).toEqual([
+      ...SEARCH_API_PROVIDER_IDS.map((id) => ({ id, source: "api", requiresApiKey: true })),
+      ...BROWSER_SEARCH_PROVIDER_IDS.map((id) => ({ id, source: "browser", requiresApiKey: false })),
+    ]);
+  });
+
   it("defaults to auto search when no provider is configured", () => {
     const { coord } = makeCoordinator();
 

@@ -5,6 +5,27 @@ const LOCAL_ONLY = Object.freeze({ kind: "local_only" });
 const PUBLIC = Object.freeze({ kind: "public" });
 const STUDIO_OWNER = Object.freeze({ kind: "studio_owner" });
 
+/**
+ * 宿主自有的 /api/plugins/* 一级命名空间。这些 id 下的子路径属于插件管理 API，
+ * 永远不会被代理到插件 route app，也绝不接受 plugin surface 凭证。
+ * server/routes/plugins.ts 的 iframe ticket 签发校验与这里共用同一份名单。
+ */
+export const PLUGIN_HOST_ROUTE_PLUGIN_IDS = Object.freeze(new Set([
+  "config-schemas",
+  "event-bus",
+  "diagnostics",
+  "dev",
+  "marketplace",
+  "install",
+  "settings",
+  "pages",
+  "widgets",
+  "ui-host-capabilities",
+  "settings-tabs",
+  "iframe-ticket",
+  "theme.css",
+]));
+
 export function authorizeHttpRoute({ method, path, principal }) {
   const policy = classifyHttpRoute({ method, path });
   if (policy.kind === "public") {
@@ -26,6 +47,18 @@ export function authorizeHttpRoute({ method, path, principal }) {
   if (!principal) {
     return denied("forbidden", 403, policy, {
       reason: "missing_principal",
+    });
+  }
+  if (policy.kind === "plugin_route") {
+    if (isPluginSurfacePrincipal(principal) && principal.pluginId === policy.pluginId) {
+      return allowed(policy);
+    }
+    if (isStudioOwnerPrincipal(principal)) {
+      return allowed(policy);
+    }
+    return denied("plugin_route_forbidden", 403, policy, {
+      reason: "plugin_route_requires_owner_or_matching_plugin_surface",
+      pluginId: policy.pluginId,
     });
   }
   const scopes = Array.isArray(principal.scopes) ? principal.scopes : [];
@@ -93,6 +126,7 @@ export function classifyHttpRoute({ method = "GET", path = "" } = {}) {
   if (isSkillSettingsWriteRoute(verb, routePath)) return scoped("settings.write");
   if (isMcpSettingsReadRoute(verb, routePath)) return scoped("settings.read");
   if (isMcpSettingsWriteRoute(verb, routePath)) return scoped("settings.write");
+  if (isMediaSubmitRoute(verb, routePath)) return scoped("chat");
   if (isImageGenerationReadRoute(verb, routePath)) return scoped("settings.read");
   if (isImageGenerationWriteRoute(verb, routePath)) return scoped("settings.write");
   if (isImageGenerationProviderManagementRoute(verb, routePath)) return scoped("providers.manage");
@@ -150,9 +184,38 @@ export function classifyHttpRoute({ method = "GET", path = "" } = {}) {
     return scoped("chat");
   }
 
+  const pluginRoute = classifyPluginRouteProxyPath(routePath);
+  if (pluginRoute) return pluginRoute;
+
   if (routePath.startsWith("/api/")) return STUDIO_OWNER;
 
   return LOCAL_ONLY;
+}
+
+/**
+ * 插件 route 代理路径：/api/plugins/:pluginId/<subPath>，排除宿主自有 id。
+ * 必须在所有更具体的 /api/plugins/* 匹配器（settings / mcp / image-gen /
+ * assets / dev / iframe-ticket 等）之后调用，那些路径保持原有 scope 策略。
+ */
+function classifyPluginRouteProxyPath(routePath) {
+  const match = /^\/api\/plugins\/([^/]+)\/.+$/.exec(routePath);
+  if (!match) return null;
+  let pluginId;
+  try {
+    pluginId = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+  if (!pluginId || PLUGIN_HOST_ROUTE_PLUGIN_IDS.has(pluginId)) return null;
+  return Object.freeze({ kind: "plugin_route", pluginId });
+}
+
+export function isPluginSurfacePrincipal(principal) {
+  if (!principal || typeof principal !== "object") return false;
+  return principal.kind === "plugin"
+    && principal.credentialKind === "plugin_surface_session"
+    && typeof principal.pluginId === "string"
+    && principal.pluginId.length > 0;
 }
 
 export function isPublicHttpRoute({ method = "GET", path = "" } = {}) {
@@ -260,6 +323,7 @@ function isClientLocalOnlyRoute(verb, routePath) {
   if (routePath.startsWith("/api/plugins/dev/") || routePath === "/api/plugins/dev") return true;
   if (routePath === "/api/preferences/computer-use/request-permissions") return true;
   if (routePath.startsWith("/api/plugins/image-gen/media/open/")) return true;
+  if (routePath.startsWith("/api/media/generated/open/")) return true;
   if (/^\/api\/plugins\/[^/]+\/assets\/.+$/.test(routePath) && verb !== "GET" && verb !== "HEAD") {
     return true;
   }
@@ -435,19 +499,39 @@ function isMcpSettingsWriteRoute(verb, routePath) {
 
 function isImageGenerationReadRoute(verb, routePath) {
   if (verb !== "GET" && verb !== "HEAD") return false;
-  return routePath === "/api/plugins/image-gen/providers"
+  return routePath === "/api/media/providers"
+    || routePath === "/api/media/image/providers"
+    || routePath === "/api/media/tasks"
+    || /^\/api\/media\/generated\/[^/]+$/.test(routePath)
+    || /^\/api\/media\/tasks\/batch\/[^/]+$/.test(routePath)
+    || /^\/api\/media\/tasks\/[^/]+$/.test(routePath)
+    || routePath === "/api/plugins/image-gen/providers"
     || routePath === "/api/plugins/image-gen/tasks"
     || /^\/api\/plugins\/image-gen\/media\/[^/]+$/.test(routePath)
     || /^\/api\/plugins\/image-gen\/tasks\/batch\/[^/]+$/.test(routePath)
     || /^\/api\/plugins\/image-gen\/tasks\/[^/]+$/.test(routePath);
 }
 
+function isMediaSubmitRoute(verb, routePath) {
+  if (verb !== "POST") return false;
+  return routePath === "/api/media/generate"
+    || routePath === "/api/media/image/generate"
+    || routePath === "/api/media/video/generate"
+    || routePath === "/api/media/asr/transcribe";
+}
+
 function isImageGenerationWriteRoute(verb, routePath) {
-  return verb === "PUT" && routePath === "/api/plugins/image-gen/config";
+  return verb === "PUT" && (
+    routePath === "/api/media/image/config"
+    || routePath === "/api/plugins/image-gen/config"
+  );
 }
 
 function isImageGenerationProviderManagementRoute(verb, routePath) {
-  return (verb === "POST" && /^\/api\/plugins\/image-gen\/providers\/[^/]+\/models$/.test(routePath))
+  return (verb === "POST" && /^\/api\/media\/image\/providers\/[^/]+\/models$/.test(routePath))
+    || (verb === "DELETE" && /^\/api\/media\/image\/providers\/[^/]+\/models\/[^/]+$/.test(routePath))
+    || (verb === "POST" && /^\/api\/media\/tasks\/[^/]+\/retry$/.test(routePath))
+    || (verb === "POST" && /^\/api\/plugins\/image-gen\/providers\/[^/]+\/models$/.test(routePath))
     || (verb === "DELETE" && /^\/api\/plugins\/image-gen\/providers\/[^/]+\/models\/[^/]+$/.test(routePath))
     || (verb === "POST" && /^\/api\/plugins\/image-gen\/tasks\/[^/]+\/retry$/.test(routePath));
 }

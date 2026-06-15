@@ -10,6 +10,7 @@ import fsp from "fs/promises";
 import path from "path";
 import { createAgentSession, SessionManager, estimateTokens, refreshSessionModelFromRegistry } from "../lib/pi-sdk/index.ts";
 import { createDefaultSettings } from "./session-defaults.ts";
+import { restoreDefaultWorkspaceIfMissing } from "../shared/default-workspace.ts";
 import { computeHardTruncation } from "./compaction-utils.ts";
 import {
   appendCompactionResultToSession,
@@ -84,7 +85,7 @@ import {
   summarizeCachePrefixContract,
 } from "../lib/llm/cache-prefix-contract.ts";
 import { buildSessionCacheSnapshot as buildSessionCacheSnapshotValue } from "./session-cache-snapshot.ts";
-import { repairRestoredToolSnapshot, sameToolNames } from "./tool-snapshot-repair.ts";
+import { repairRestoredToolSnapshotDetailed, sameToolNames } from "./tool-snapshot-repair.ts";
 import {
   SESSION_PROMPT_SNAPSHOT_VERSION,
   freezeAgentsFilesResult,
@@ -94,6 +95,10 @@ import {
 } from "./session-prompt-snapshot.ts";
 
 const log = createModuleLogger("session");
+const SESSION_META_PAYLOAD_DIR = "session-meta-payloads";
+const SESSION_META_PAYLOAD_FIELDS = ["promptSnapshot", "memoryReflectionSnapshot"];
+const SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES = 256 * 1024;
+const SESSION_META_INDEX_MAX_BYTES = 1024 * 1024;
 
 /** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
 export const PATROL_TOOLS_DEFAULT = "*";
@@ -740,6 +745,9 @@ export class SessionCoordinator {
     ownerPluginId = null,
     sessionKind = null,
     sessionVisibility = null,
+    // #1624 显式刷新（fresh compact）：restore 时忽略冻结的 promptSnapshot/toolNames，
+    // 按当前 agent 配置重建两份快照并持久化。只在用户显式触发时为 true。
+    refreshCapabilitySnapshots = false,
   }: any = {}) {
     const t0 = Date.now();
     const agent = explicitAgent
@@ -750,6 +758,7 @@ export class SessionCoordinator {
     }
     const ownerAgentId = explicitAgentId || agent.id || this._d.getActiveAgentId();
     const effectiveCwd = cwd || this._d.getHomeCwd(agent.id) || process.cwd();
+    restoreDefaultWorkspaceIfMissing(effectiveCwd);
     const models = this._d.getModels();
     // restore 模式：不指定 model，让 PI SDK 从 JSONL 恢复（session model 单一数据源）
     const effectiveModel = restore ? null : (model || this._pendingModel || models.currentModel);
@@ -780,7 +789,9 @@ export class SessionCoordinator {
         }
       }
     }
-    const restoredPromptSnapshot = restore && sessionPathForMeta
+    // #1624 refreshCapabilitySnapshots：跳过冻结 promptSnapshot，下游 fresh-build
+    // 路径会按当前配置重建并在 metaPatch 持久化（与 !restoredPromptSnapshot 同一条路）。
+    const restoredPromptSnapshot = restore && sessionPathForMeta && !refreshCapabilitySnapshots
       ? await this._readSessionPromptSnapshot(agent, sessionPathForMeta)
       : null;
     const restoredPromptModel = restore && !restoredPromptSnapshot
@@ -903,20 +914,13 @@ export class SessionCoordinator {
     }; // pre-populated for resourceLoader proxy
     const pluginSessionMeta = normalizePluginSessionMeta({ ownerPluginId, sessionKind, sessionVisibility });
 
-    if (!restore && typeof agent.refreshAppearanceSummary === "function") {
-      try {
-        await agent.refreshAppearanceSummary({ targetModel: effectiveModel, rebuildSystemPrompt: true });
-      } catch (err) {
-        log.warn(`agent appearance summary refresh failed: ${err?.message || err}`);
-      }
-    }
-
     // 快照当前 system prompt，per-session 隔离。
     // 后续记忆编译、技能变更只影响新对话，已有对话的 prompt 不变（保护 prefix cache）。
     const systemPromptSnapshot = restoredPromptSnapshot?.systemPrompt
       ?? agent.buildSystemPrompt({
         forceMemoryEnabled: frozenMemoryEnabled,
         forceExperienceEnabled: frozenExperienceEnabled,
+        cwdOverride: effectiveCwd,
         targetModel: promptPatchModel,
       });
     const memoryReflectionSnapshot = (!restore && typeof agent.buildMemoryReflectionSnapshot === "function")
@@ -1148,26 +1152,41 @@ export class SessionCoordinator {
     ];
     let snapshotToolNames = null;  // null signals "do not call setActiveToolsByName"
     let shouldPersistRestoredToolNames = false;
+    // #1624：dismissed fingerprint 仍从 session-meta 读出，保留未来手动提示链路。
+    let restoredDriftDismissedFingerprint: string | null = null;
 
     if (restore) {
       if (sessionPath) {
         const metaPathForRestore = path.join(agent.sessionDir, "session-meta.json");
         let metaEntry = null;
         try {
-          const raw = await fsp.readFile(metaPathForRestore, "utf-8");
-          const meta = JSON.parse(raw);
+          const meta = await this._readMetaCached(metaPathForRestore);
           metaEntry = meta[path.basename(sessionPath)];
         } catch (err) {
           if (err.code !== "ENOENT") {
             log.warn(`session-meta read for tool-snapshot restore failed, recomputing from current agent config: ${err.message}`);
           }
         }
-        if (metaEntry && Array.isArray(metaEntry.toolNames)) {
+        restoredDriftDismissedFingerprint =
+          typeof metaEntry?.capabilityDriftDismissedFingerprint === "string"
+            ? metaEntry.capabilityDriftDismissedFingerprint
+            : null;
+        if (refreshCapabilitySnapshots) {
+          // #1624 显式刷新：Case C 语义重算（含插件工具），强制持久化，
+          // 并清空 dismissed 状态（旧 fingerprint 对新快照没有意义）。
+          const disabled = agent.config?.tools?.disabled ?? DEFAULT_DISABLED_TOOL_NAMES;
+          snapshotToolNames = computeToolSnapshot(allToolNames, disabled, {
+            extraDisabled: extraDisabledToolNames,
+          });
+          shouldPersistRestoredToolNames = true;
+          restoredDriftDismissedFingerprint = null;
+        } else if (metaEntry && Array.isArray(metaEntry.toolNames)) {
           const restoredToolNames = uniqueToolNames(metaEntry.toolNames);
           const gatedRestoredToolNames = computeToolSnapshot(restoredToolNames, [], {
             extraDisabled: stableFeatureDisabledToolNames,
           });  // Case A, with current global feature gates enforced
-          snapshotToolNames = repairRestoredToolSnapshot(gatedRestoredToolNames, allToolNames);
+          const repair = repairRestoredToolSnapshotDetailed(gatedRestoredToolNames, allToolNames);
+          snapshotToolNames = repair.toolNames;
           shouldPersistRestoredToolNames = !sameToolNames(snapshotToolNames, metaEntry.toolNames);
         } else {
           // Legacy sessions created before tool snapshots had no stable tool
@@ -1190,6 +1209,10 @@ export class SessionCoordinator {
         extraDisabled: extraDisabledToolNames,
       });
     }
+
+    // #1624 的能力漂移提示模板保留，但 restore 不再主动计算/唤醒。
+    // 这里刻意不构造 live prompt / tool diff，避免切换旧会话时为隐藏提醒付出额外成本。
+    let capabilityDrift = null;
 
     Object.assign(sessionEntry, {
       session,
@@ -1214,6 +1237,9 @@ export class SessionCoordinator {
       sessionKind: pluginSessionMeta?.kind || null,
       sessionVisibility: pluginSessionMeta?.visibility || "public",
       memoryReflectionSnapshot,
+      // #1624：session 级提示数据，归属 sessionEntry（keyed by sessionPath），不挂 agent/engine
+      capabilityDrift,
+      capabilityDriftDismissedFingerprint: restoredDriftDismissedFingerprint,
       lastTouchedAt: Date.now(),
       unsub,
     });
@@ -1275,6 +1301,10 @@ export class SessionCoordinator {
       if (shouldPersistRestoredToolNames && snapshotToolNames !== null) {
         metaPatch.toolNames = snapshotToolNames;
       }
+      if (refreshCapabilitySnapshots) {
+        // #1624 显式刷新：dismissed 状态随旧快照一并失效
+        metaPatch.capabilityDriftDismissedFingerprint = null;
+      }
       if (Object.keys(metaPatch).length > 0) {
         await this.writeSessionMeta(sessionPath, metaPatch);
       }
@@ -1298,7 +1328,22 @@ export class SessionCoordinator {
       }
     }
 
+    if (!restore) {
+      this._refreshAgentAppearanceSummaryAfterCreate(agent, resolvedModel || effectiveModel || null);
+    }
+
     return { session, sessionPath: sessionPath || mapKey, agentId: creatingAgentId };
+  }
+
+  _refreshAgentAppearanceSummaryAfterCreate(agent: any, targetModel: any) {
+    if (!agent || typeof agent.refreshAppearanceSummary !== "function") return;
+    setTimeout(() => {
+      void Promise.resolve()
+        .then(() => agent.refreshAppearanceSummary({ targetModel, rebuildSystemPrompt: true }))
+        .catch((err) => {
+          log.warn(`agent appearance summary refresh failed: ${err?.message || err}`);
+        });
+    }, 0);
   }
 
   async createDetachedSession({
@@ -1654,6 +1699,11 @@ export class SessionCoordinator {
     if (!sessionPath) return null;
     try {
       const metaPath = this._sessionMetaPathFor(sessionPath);
+      const stat = fs.statSync(metaPath);
+      if (stat.size > SESSION_META_INDEX_MAX_BYTES) {
+        log.warn(`session-meta is too large to parse safely (${stat.size} bytes): ${metaPath}`);
+        return null;
+      }
       const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
       const entry = meta[path.basename(sessionPath)];
       return entry && typeof entry === "object" ? entry : null;
@@ -2895,7 +2945,40 @@ export class SessionCoordinator {
     }
   }
 
-  async reloadSessionRuntime(sessionPath: any) {
+  /**
+   * #1624：返回当前应展示的"工具能力有更新"提示数据；无漂移或已被 dismiss
+   * （dismissed fingerprint === 当前 live fingerprint）时返回 null。
+   * 数据在 restore 完成时算好挂在 sessionEntry 上，这里只做读取与 dismiss 过滤。
+   */
+  getSessionCapabilityDriftNotice(sessionPath: any) {
+    const entry = this._sessions.get(sessionPath);
+    const drift = entry?.capabilityDrift;
+    if (!drift?.hasDrift) return null;
+    if (entry.capabilityDriftDismissedFingerprint === drift.fingerprint) return null;
+    return {
+      ...drift,
+      addedToolNames: [...drift.addedToolNames],
+      removedToolNames: [...drift.removedToolNames],
+      invalidToolNames: [...drift.invalidToolNames],
+    };
+  }
+
+  /**
+   * #1624：记录"用户关闭了当前 fingerprint 的提示"。持久化在 session-meta
+   * （跟 session 走，跨重启生效）；指纹再次变化时才重新提示。
+   */
+  async dismissSessionCapabilityDrift(sessionPath: any, fingerprint: any) {
+    this._assertActiveDesktopSessionPath(sessionPath, "dismissSessionCapabilityDrift");
+    if (typeof fingerprint !== "string" || !fingerprint) {
+      throw new Error("dismissSessionCapabilityDrift: fingerprint required");
+    }
+    const entry = this._sessions.get(sessionPath);
+    if (entry) entry.capabilityDriftDismissedFingerprint = fingerprint;
+    await this.writeSessionMeta(sessionPath, { capabilityDriftDismissedFingerprint: fingerprint });
+    return { ok: true };
+  }
+
+  async reloadSessionRuntime(sessionPath: any, { refreshCapabilitySnapshots = false }: any = {}) {
     this._assertActiveDesktopSessionPath(sessionPath, "reloadSessionRuntime");
     if (this._isDeletedAgentSessionPath(sessionPath)) {
       throw new Error("reloadSessionRuntime: session belongs to a deleted agent");
@@ -2934,6 +3017,7 @@ export class SessionCoordinator {
       agent,
       agentId: targetAgentId,
       preserveAgentMemoryState: true,
+      refreshCapabilitySnapshots,
     });
     return result.session;
   }
@@ -3115,6 +3199,9 @@ export class SessionCoordinator {
         title: null,
         firstMessage: "",
         modified: new Date(entry.lastTouchedAt || Date.now()),
+        // 内存占位投影没有磁盘修订点；revision=null 表示「未知」，
+        // 前端 reconcile 对 null 不做盲目重拉。
+        revision: null,
         messageCount: 0,
         cwd: entry.session?.sessionManager?.getCwd?.() || "",
         agentId: entry.agentId || this._d.getActiveAgentId(),
@@ -3209,7 +3296,7 @@ export class SessionCoordinator {
     const sessKey = path.basename(sessionPath);
     let meta = {};
     try {
-      meta = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
+      meta = await this._readMetaCached(metaPath);
     } catch (err) {
       if (expectedPinnedAt === null && err.code === "ENOENT") return;
       throw new Error(`setSessionPinned: verify failed for ${sessKey}: ${err.message}`);
@@ -3331,8 +3418,13 @@ export class SessionCoordinator {
       return cached.data;
     }
     try {
+      const stat = await fsp.stat(metaPath);
+      if (stat.size > SESSION_META_INDEX_MAX_BYTES) {
+        log.warn(`session-meta is too large to parse safely (${stat.size} bytes): ${metaPath}`);
+        return {};
+      }
       const raw = await fsp.readFile(metaPath, "utf-8");
-      const data = JSON.parse(raw);
+      const data = await this._hydrateSessionMetaPayloads(metaPath, JSON.parse(raw));
       this._metaCache.set(metaPath, { data, ts: Date.now() });
       return data;
     } catch {
@@ -3498,12 +3590,7 @@ export class SessionCoordinator {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        let meta = {};
-        try {
-          meta = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
-        } catch {
-          // file missing or parse error → start fresh
-        }
+        const meta = await this._readSessionMetaIndexForWrite(metaPath);
         meta[sessKey] = {
           ...meta[sessKey],
           ...partial,
@@ -3511,6 +3598,7 @@ export class SessionCoordinator {
         // model is owned by PI SDK via session JSONL — keep session-meta clean
         delete meta[sessKey].model;
         delete meta[sessKey].modelId;
+        meta[sessKey] = await this._externalizeSessionMetaPayloads(metaPath, sessKey, meta[sessKey]);
         await fsp.writeFile(metaPath, JSON.stringify(meta, null, 2));
         this.invalidateMetaCache(metaPath);
         return;
@@ -3524,6 +3612,109 @@ export class SessionCoordinator {
         }
       }
     }
+  }
+
+  _isSessionMetaPayloadRef(value: any, field?: any) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    if (value.kind !== "session-meta-payload") return false;
+    if (field && value.field !== field) return false;
+    return typeof value.path === "string" && value.path.length > 0;
+  }
+
+  _sessionMetaPayloadRelativePath(sessKey: any, field: any) {
+    return path.join(SESSION_META_PAYLOAD_DIR, `${encodeURIComponent(sessKey)}.${field}.json`);
+  }
+
+  _sessionMetaPayloadAbsolutePath(metaPath: any, refPath: any) {
+    return path.join(path.dirname(metaPath), refPath);
+  }
+
+  async _readSessionMetaIndexForWrite(metaPath: any) {
+    try {
+      const stat = await fsp.stat(metaPath);
+      if (stat.size > SESSION_META_INDEX_MAX_BYTES) {
+        await this._quarantineOversizedSessionMeta(metaPath);
+        return {};
+      }
+    } catch (err) {
+      if (err?.code !== "ENOENT") {
+        log.warn(`session-meta stat failed for write: ${err.message}`);
+      }
+      return {};
+    }
+    try {
+      return JSON.parse(await fsp.readFile(metaPath, "utf-8"));
+    } catch {
+      return {};
+    }
+  }
+
+  async _quarantineOversizedSessionMeta(metaPath: any) {
+    try {
+      const backupPath = path.join(
+        path.dirname(metaPath),
+        `session-meta.oversized.${Date.now()}.json`,
+      );
+      await fsp.rename(metaPath, backupPath);
+      this.invalidateMetaCache(metaPath);
+      log.warn(`oversized session-meta quarantined: ${backupPath}`);
+    } catch (err) {
+      if (err?.code !== "ENOENT") {
+        log.warn(`oversized session-meta quarantine failed: ${err.message}`);
+      }
+    }
+  }
+
+  async _externalizeSessionMetaPayloads(metaPath: any, sessKey: any, entry: any) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const next = { ...entry };
+    for (const field of SESSION_META_PAYLOAD_FIELDS) {
+      const value = next[field];
+      if (value === undefined || this._isSessionMetaPayloadRef(value, field)) continue;
+      let encoded = "";
+      try {
+        encoded = JSON.stringify(value);
+      } catch {
+        continue;
+      }
+      if (Buffer.byteLength(encoded, "utf-8") <= SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES) continue;
+      const relPath = this._sessionMetaPayloadRelativePath(sessKey, field);
+      const absPath = this._sessionMetaPayloadAbsolutePath(metaPath, relPath);
+      await fsp.mkdir(path.dirname(absPath), { recursive: true });
+      await fsp.writeFile(absPath, encoded, "utf-8");
+      next[field] = {
+        kind: "session-meta-payload",
+        version: 1,
+        field,
+        path: relPath,
+      };
+    }
+    return next;
+  }
+
+  async _hydrateSessionMetaPayloads(metaPath: any, data: any) {
+    if (!data || typeof data !== "object") return {};
+    const hydrated = {};
+    for (const [sessKey, entry] of Object.entries(data)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        hydrated[sessKey] = entry;
+        continue;
+      }
+      const next = { ...(entry as any) };
+      for (const field of SESSION_META_PAYLOAD_FIELDS) {
+        const ref = next[field];
+        if (!this._isSessionMetaPayloadRef(ref, field)) continue;
+        try {
+          const raw = await fsp.readFile(this._sessionMetaPayloadAbsolutePath(metaPath, ref.path), "utf-8");
+          next[field] = JSON.parse(raw);
+        } catch (err) {
+          log.warn(`session-meta payload read failed for ${sessKey}/${field}: ${err.message}`);
+          delete next[field];
+        }
+      }
+      hydrated[sessKey] = next;
+    }
+    return hydrated;
   }
 
   _sessionMetaPathFor(sessionPath: any) {
@@ -3549,7 +3740,7 @@ export class SessionCoordinator {
     const sessionFileName = path.basename(sessionPath);
     const metaPath = path.join(agent.sessionDir, "session-meta.json");
     try {
-      const meta = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
+      const meta = await this._readMetaCached(metaPath);
       if (Array.isArray(meta?.[sessionFileName]?.toolNames)) return;
     } catch (err) {
       if (err.code !== "ENOENT") {

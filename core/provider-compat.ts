@@ -24,6 +24,7 @@ import * as qwen from "./provider-compat/qwen.ts";
 import * as zhipu from "./provider-compat/zhipu.ts";
 import * as openaiInputAudio from "./provider-compat/openai-input-audio.ts";
 import * as openaiVideoUrl from "./provider-compat/openai-video-url.ts";
+import * as openrouter from "./provider-compat/openrouter.ts";
 import * as anthropic from "./provider-compat/anthropic.ts";
 import { normalizeImplicitOutputBudget } from "./provider-compat/output-budget.ts";
 import { stripOrphanToolResults } from "./provider-compat/tool-pairing.ts";
@@ -48,7 +49,16 @@ interface ProviderModule {
  * 子模块注册表。顺序敏感：first-match-wins。
  * 新 provider 默认加在末尾；只有当模块的 matches 是另一模块子集（更具体规则）时才前置。
  */
-const PROVIDER_MODULES: ProviderModule[] = [deepseek, mimo, qwen, zhipu, openaiInputAudio, openaiVideoUrl, anthropic];
+const PROVIDER_MODULES: ProviderModule[] = [
+  deepseek,
+  mimo,
+  qwen,
+  zhipu,
+  openaiInputAudio,
+  openaiVideoUrl,
+  openrouter,
+  anthropic,
+];
 
 function lower(value) {
   return typeof value === "string" ? value.toLowerCase() : "";

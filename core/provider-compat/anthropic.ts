@@ -7,9 +7,12 @@
  */
 
 import { modelSupportsAnthropicMaxEffort } from "../session-thinking-level.ts";
+import { getReasoningProfile } from "../../shared/model-capabilities.ts";
 
 const CACHE_CONTROL = { type: "ephemeral" };
 const MAX_EFFORT_MIN_OUTPUT_TOKENS = 64000;
+const ADAPTIVE_THINKING_DISABLED_ERROR =
+  "Claude Fable/Mythos 5 does not support disabling adaptive thinking.";
 
 function lower(value) {
   return typeof value === "string" ? value.toLowerCase() : "";
@@ -147,7 +150,35 @@ export function matches(model) {
 }
 
 function shouldUseAnthropicMaxEffort(model, options) {
-  return options?.reasoningLevel === "xhigh" && modelSupportsAnthropicMaxEffort(model);
+  return (options?.reasoningLevel === "xhigh" || options?.reasoningLevel === "max")
+    && modelSupportsAnthropicMaxEffort(model);
+}
+
+function isAdaptiveOnlyProfile(model) {
+  return getReasoningProfile(model) === "anthropic-adaptive-only";
+}
+
+function isThinkingOff(level) {
+  return level === "off" || level === "none" || level === "disabled";
+}
+
+function adaptiveEffortForLevel(level) {
+  if (level === "xhigh" || level === "max") return "max";
+  if (level === "low" || level === "medium" || level === "high") return level;
+  return "high";
+}
+
+function normalizeAdaptiveThinking(thinking) {
+  const base = thinking && typeof thinking === "object" && !Array.isArray(thinking)
+    ? thinking
+    : {};
+  if (base.type === "disabled") {
+    throw new Error(ADAPTIVE_THINKING_DISABLED_ERROR);
+  }
+  return {
+    type: "adaptive",
+    display: base.display || "summarized",
+  };
 }
 
 function withMaxEffort(payload) {
@@ -183,6 +214,26 @@ function normalizeMaxEffort(payload, model, options) {
   return withMaxEffortOutputBudget(withMaxEffort(payload), model, options);
 }
 
+function normalizeAdaptiveOnlyThinking(payload, model, options) {
+  if (isThinkingOff(options?.reasoningLevel)) {
+    throw new Error(ADAPTIVE_THINKING_DISABLED_ERROR);
+  }
+
+  const effort = adaptiveEffortForLevel(options?.reasoningLevel);
+  let next = payload;
+  const editable = () => {
+    if (next === payload) next = { ...payload };
+    return next;
+  };
+
+  const p = editable();
+  p.thinking = normalizeAdaptiveThinking(payload.thinking);
+  p.output_config = { ...(payload.output_config || {}), effort };
+  delete p.reasoning_effort;
+
+  return effort === "max" ? withMaxEffortOutputBudget(next, model, options) : next;
+}
+
 export function apply(payload, model, options = {}) {
   let result = payload;
 
@@ -194,7 +245,9 @@ export function apply(payload, model, options = {}) {
   const messages = normalizeRecentUserMessages(result.messages);
   if (messages.changed) result = { ...result, messages: messages.value };
 
-  result = normalizeMaxEffort(result, model, options);
+  result = isAdaptiveOnlyProfile(model)
+    ? normalizeAdaptiveOnlyThinking(result, model, options)
+    : normalizeMaxEffort(result, model, options);
 
   return result;
 }

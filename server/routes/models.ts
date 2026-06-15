@@ -12,6 +12,7 @@ import {
   modelSupportsDirectAudioInput,
   modelSupportsDirectVideoInput,
   modelSupportsVideoInput,
+  normalizeToolUseContract,
   resolveModelAudioInputTransport,
   resolveModelVideoInputTransport,
 } from "../../shared/model-capabilities.ts";
@@ -76,6 +77,7 @@ function serializeModelInfo(model, { current = null, overrides = null } = {}) {
   if (!model) return null;
   const videoTransport = resolveModelVideoInputTransport(model);
   const audioTransport = resolveModelAudioInputTransport(model);
+  const toolUse = normalizeToolUseContract(model.toolUse);
   return {
     id: model.id,
     name: resolveModelName(model.id, model.name, overrides, model.provider),
@@ -92,6 +94,7 @@ function serializeModelInfo(model, { current = null, overrides = null } = {}) {
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
     ...(modelSupportsXhigh(model) ? { xhigh: true } : {}),
+    ...(toolUse ? { toolUse } : {}),
   };
 }
 

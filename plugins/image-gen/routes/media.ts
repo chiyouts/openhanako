@@ -107,12 +107,29 @@ function adapterAvailableForModel(providerId, model, ctx) {
 function annotateAdapterAvailability(providers, ctx) {
   const next: Record<string, ProviderSummary> = {};
   for (const [providerId, provider] of Object.entries((providers || {}) as Record<string, ProviderSummary>)) {
-    next[providerId] = {
-      ...provider,
-      models: (provider?.models || []).map((model) => ({
+    const models = (provider?.models || [])
+      .map((model) => ({
         ...model,
         adapterAvailable: adapterAvailableForModel(providerId, model, ctx),
-      })),
+      }))
+      .filter((model) => {
+        if (model.adapterAvailable) return true;
+        ctx.log?.warn?.(
+          `[image-gen] settings hide media model "${providerId}/${model.id}": `
+          + (model.protocolId
+            ? `no adapter registered for protocol "${model.protocolId}"`
+            : "protocol unrecognized (model has no protocolId)"),
+        );
+        return false;
+      });
+    if (models.length === 0) continue;
+    const modelIds = new Set(models.map((model) => model.id));
+    next[providerId] = {
+      ...provider,
+      models,
+      availableModels: Array.isArray(provider?.availableModels)
+        ? provider.availableModels.filter((model) => modelIds.has(model.id))
+        : provider?.availableModels,
     };
   }
   return next;

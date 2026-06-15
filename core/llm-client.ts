@@ -12,6 +12,47 @@ import {
 const EMPTY_AFTER_THINKING_MESSAGE = "模型未回复正文，请检查思考内容或稍后重试。";
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CODEX_ACCOUNT_CLAIM_PATH = "https://api.openai.com/auth";
+const DEFAULT_CODEX_UTILITY_INSTRUCTIONS = [
+  "You are Hana's utility model.",
+  "Follow the user request exactly and return only the requested content.",
+].join("\n");
+
+export type CallTextMessage = {
+  role?: string;
+  content?: unknown;
+  [key: string]: unknown;
+};
+
+export type CallTextModel = string | (Record<string, unknown> & {
+  id?: unknown;
+  provider?: unknown;
+}) | null;
+
+export type CallTextUsageLedger = {
+  start?: (entry: unknown) => { requestId?: string | null } | null;
+  finish?: (requestId: string | null | undefined, entry: unknown) => unknown;
+  recordError?: (requestId: string, error: unknown, status: string, entry: unknown) => unknown;
+};
+
+export type CallTextOptions = {
+  [key: string]: unknown;
+  api?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: CallTextModel;
+  headers?: Record<string, string> | null;
+  quirks?: string[];
+  systemPrompt?: string;
+  messages?: CallTextMessage[];
+  temperature?: number;
+  maxTokens?: unknown;
+  outputBudgetSource?: unknown;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  returnUsage?: boolean;
+  usageContext?: unknown;
+  usageLedger?: CallTextUsageLedger | null;
+};
 
 /**
  * core/llm-client.js — 统一的非流式 LLM 调用入口
@@ -299,11 +340,11 @@ export async function callText({
   returnUsage = false,
   usageContext,
   usageLedger,
-}) {
+}: CallTextOptions) {
   // 同时接受完整 model 对象和裸 id。modelObj 用于 provider-compat 决策；modelId 入 payload。
   const modelObj = typeof model === "object" && model !== null ? model : null;
-  const modelId = modelObj ? modelObj.id : String(model || "");
-  const provider = modelObj?.provider || "custom";
+  const modelId = modelObj ? String(modelObj.id || "") : String(model || "");
+  const provider = typeof modelObj?.provider === "string" ? modelObj.provider : "custom";
   const explicitMaxTokens = positiveInteger(maxTokens);
   // ── 1. 消息归一化：提取 system 消息合并到 systemPrompt ──
   let mergedSystem = systemPrompt || "";
@@ -362,13 +403,14 @@ export async function callText({
       "chatgpt-account-id": accountId,
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+    const codexInstructions = mergedSystem.trim() || DEFAULT_CODEX_UTILITY_INSTRUCTIONS;
     body = {
       model: modelId,
       store: false,
       stream: true,
       ...(explicitMaxTokens !== null && { max_output_tokens: explicitMaxTokens }),
       ...(temperature !== undefined && { temperature }),
-      ...(mergedSystem && { instructions: mergedSystem }),
+      instructions: codexInstructions,
       input: normalizedMessages,
     };
   } else if (api === "openai-responses") {

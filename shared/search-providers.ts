@@ -1,4 +1,5 @@
 export const AUTO_SEARCH_PROVIDER = "auto";
+export const SEARCH_CAPABILITY_KIND = "web.search";
 
 export const SEARCH_API_PROVIDER_IDS = Object.freeze([
   "tavily",
@@ -11,6 +12,11 @@ export const BROWSER_SEARCH_PROVIDER_IDS = Object.freeze([
   "google_browser",
   "duckduckgo_browser",
 ] as const);
+
+export const SEARCH_CAPABILITY_PROVIDERS = Object.freeze([
+  ...SEARCH_API_PROVIDER_IDS.map((id) => ({ id, source: "api", requiresApiKey: true })),
+  ...BROWSER_SEARCH_PROVIDER_IDS.map((id) => ({ id, source: "browser", requiresApiKey: false })),
+]);
 
 const SEARCH_API_PROVIDER_SET = new Set<string>(SEARCH_API_PROVIDER_IDS);
 const BROWSER_SEARCH_PROVIDER_SET = new Set<string>(BROWSER_SEARCH_PROVIDER_IDS);

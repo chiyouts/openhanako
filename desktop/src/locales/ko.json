@@ -194,6 +194,20 @@
       "deleteConfirm": "이 보관 항목을 영구 삭제할까요? 되돌릴 수 없습니다.",
       "deleteFailed": "삭제 실패",
       "daysAgo": "{days}일 전 보관됨"
+    },
+    "capabilityDrift": {
+      "title": "도구 구성이 업데이트되었습니다",
+      "addedTools": "새 도구 {count}개",
+      "removedTools": "도구 {count}개 사용 불가",
+      "promptUpdated": "프롬프트 업데이트됨",
+      "separator": ", ",
+      "refreshButton": "에이전트 도구 새로고침",
+      "dismissButton": "닫기",
+      "confirmText": "새로고침하면 이전 대화가 요약으로 압축되며 세부 내용이 손실될 수 있습니다. 계속할까요?",
+      "confirmButton": "새로고침",
+      "cancelButton": "취소",
+      "refreshing": "대화를 압축하고 도구를 새로고침하는 중…",
+      "refreshFailed": "새로고침 실패"
     }
   },
   "common": {
@@ -291,10 +305,10 @@
     "accessModeLocked": "지금은 접근 모드를 변경할 수 없습니다",
     "deskContext": "책상 컨텍스트 포함",
     "pastedImage": "붙여넣은 이미지",
-    "textModelImageBlocked": "현재 모델은 텍스트 전용이라 이미지를 직접 보낼 수 없습니다. 설정에서 모델 기능을 조정하거나 보조 시각을 설정하고 켜 주세요.",
+    "textModelImageFileOnly": "현재 모델은 이미지를 볼 수 없고 보조 비전도 활성화되어 있지 않습니다. 이미지는 파일로 전송되며 모델은 파일 경로만 볼 수 있고 이미지 내용은 볼 수 없습니다.",
     "textModelVideoBlocked": "현재 모델은 비디오 입력을 지원하지 않아요. 설정에서 비디오 기능을 켜거나 비디오 지원 모델로 전환해 주세요.",
     "textModelAudioBlocked": "현재 모델은 오디오 입력을 지원하지 않아요. 오디오 지원 모델로 전환해 주세요.",
-    "imageReadFailed": "이미지를 읽지 못해 메시지를 보내지 않았어요. 다시 붙여넣거나 첨부해 주세요.",
+    "imageReadFailedSentAsFile": "이미지 데이터를 읽지 못해 이 이미지는 파일 경로로 전송되었습니다. 모델은 그 내용을 볼 수 없습니다.",
     "videoReadFailed": "비디오를 읽지 못해 메시지를 보내지 않았어요. 다시 첨부해 주세요.",
     "audioReadFailed": "오디오를 읽지 못해 메시지를 보내지 않았어요. 다시 첨부해 주세요.",
     "recordAudio": "녹음",
@@ -314,17 +328,23 @@
       "auto": "자동",
       "medium": "중간",
       "high": "깊은",
-      "xhigh": "최대"
+      "xhigh": "최대",
+      "max": "최대"
     },
     "thinkingDesc": {
       "off": "추론 없음",
       "auto": "모델이 깊이를 결정",
       "medium": "균형 추론",
       "high": "깊은 추론",
-      "xhigh": "전체 추론"
+      "xhigh": "최대 추론",
+      "max": "최대 추론"
     },
     "contextWindow": "컨텍스트 {windowK}k",
-    "tokensUsed": "사용 {tokensK}k ({pct}%)"
+    "tokensUsed": "사용 {tokensK}k ({pct}%)",
+    "contextActions": "컨텍스트 작업",
+    "refreshAndCompact": "업데이트 후 압축",
+    "refreshAndCompactTooltip": "최신 메모리와 도구 세트로 업데이트",
+    "compact": "압축"
   },
   "slash": {
     "diary": "오늘의 일기 쓰기",
@@ -1249,7 +1269,6 @@
       "totalTokens": "총 Tokens",
       "cacheRead": "캐시 읽기",
       "cacheHitRate": "히트율",
-
       "uncached": "비캐시 사용",
       "modelMix": "모델 분포",
       "dailyUsage": "일별 사용량",
@@ -1392,6 +1411,7 @@
         "medium": "보통",
         "high": "높음",
         "auto": "자동",
+        "max": "최대",
         "xhigh": "최대"
       },
       "addedModels": "추가된 모델",
@@ -1938,6 +1958,8 @@
     "patrolRuns": "순찰",
     "otherRuns": "기타 백그라운드 작업",
     "agentTabs": "Agent별 활동 필터",
+    "previousAgent": "이전 Agent 보기",
+    "nextAgent": "Agent 더 보기",
     "categoryTabs": "활동 유형별 필터",
     "emptyForCategory": "이 분류에는 아직 활동이 없어요.",
     "patrolDone": "순찰 완료",
@@ -1957,6 +1979,8 @@
     "empty": "아직 예약 작업이 없어요.\n필요할 때 어시스턴트가 만들어 줄 거예요.",
     "emptyForAgent": "이 Agent에는 아직 예약 작업이 없어요.",
     "agentTabs": "Agent별 자동화 필터",
+    "previousAgent": "이전 Agent 보기",
+    "nextAgent": "Agent 더 보기",
     "draftTitle": "자동화 초안",
     "suggestionTitle": "제안",
     "suggested": "제안",
@@ -2184,7 +2208,10 @@
     "notConfigured": "{platform}이(가) 설정되지 않았어요",
     "goToSettings": "설정으로 이동",
     "resetContext": "컨텍스트 리셋",
-    "resetContextTip": "다음 메시지부터 새 대화가 시작돼요"
+    "resetContextTip": "다음 메시지부터 새 대화가 시작돼요",
+    "replyInterrupted": "(응답이 중단되어 위 내용이 불완전할 수 있어요)",
+    "replyFailed": "(응답 생성에 실패했어요. 잠시 후 다시 시도해 주세요)",
+    "sessionBusy": "데스크톱 세션이 아직 응답 중이에요. 잠시 후 다시 보내 주세요"
   },
   "notification": {
     "turnCompletionBody": "이번 턴이 완료됐어요"
@@ -2339,6 +2366,7 @@
     "settingsTimeout": "\"{label}\" 변경 확인 시간이 초과되었어요. 설정이 변경되지 않았어요",
     "subagentMaxConcurrent": "현재 {max}개의 서브 에이전트가 실행 중이에요. 완료될 때까지 기다려 주세요.",
     "subagentParentSessionRequired": "subagent에는 활성 부모 대화와 백그라운드 작업 저장소가 필요해요. 현재 컨텍스트에서는 계속 가능한 인스턴스를 만들 수 없어요.",
+    "subagentWriteAccessDenied": "쓰기 권한을 부여할 수 없어요: 부모 세션이 읽기 전용 모드라서 서브에이전트 권한은 부모를 초과할 수 없어요. 세션을 조작 가능 모드로 전환한 뒤 다시 시도하거나, access:\"read\"로 다시 디스패치해 주세요.",
     "subagentFailed": "서브 에이전트 실행 실패: {msg}",
     "subagentTimeout": "서브 에이전트 실행 시간 초과 ({minutes}분)",
     "subagentAborted": "서브 에이전트가 중단되었어요",
@@ -2435,6 +2463,7 @@
     "memorySearchTagsDesc": "태그 필터, 정확한 매칭을 위해 2~5개 키워드 태그. 예: [\"초콜릿\", \"음식 취향\"]",
     "memorySearchDateFromDesc": "시작 날짜, 형식 YYYY-MM-DD",
     "memorySearchDateToDesc": "종료 날짜, 형식 YYYY-MM-DD",
+    "memorySearchCrossChannelDesc": "다른 채널의 기억을 교차 검색할지 여부. 기본값 false: 채널 세션에서는 현재 채널과 일반 기억만 볼 수 있으며, 필요할 때만 명시적으로 true를 전달하세요",
     "memorySearchEmpty": "기억 뱅크에서 관련 내용을 찾을 수 없어요.",
     "memorySearchError": "기억 검색 오류: {msg}",
     "fallbackUserName": "사용자",

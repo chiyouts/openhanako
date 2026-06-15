@@ -31,6 +31,7 @@ import {
   isActiveDesktopSessionPath,
   isArchivedDesktopSessionPath,
 } from "../../core/message-utils.ts";
+import { sessionFileRevision } from "../../core/session-list-projection-cache.ts";
 import {
   extractLatestTodos,
   loadLatestTodoSnapshotFromSessionFile,
@@ -150,6 +151,24 @@ function routeError(message, code, status) {
   return err;
 }
 
+function classifySessionCreationError(err) {
+  const message = err?.message || String(err);
+  if (err?.status && Number.isInteger(err.status)) {
+    return { status: err.status, body: { error: message, code: err.code || "session_create_failed" } };
+  }
+  if (
+    /no available model/i.test(message)
+    || /no available models/i.test(message)
+    || /没有可用的模型/.test(message)
+    || /沒有可用的模型/.test(message)
+    || /利用可能なモデルがありません/.test(message)
+    || /사용 가능한 모델이 없/.test(message)
+  ) {
+    return { status: 409, body: { error: message, code: "no_available_model" } };
+  }
+  return { status: 500, body: { error: message } };
+}
+
 const TODO_COMPLETE_MESSAGE =
   "[Hana Todo] The user marked the current todo list as completed and removed it from the session UI. Treat every item in that list as completed. Create a new todo list only if new work needs tracking.";
 
@@ -198,6 +217,20 @@ function resolveHistoryPageBounds(sourceMessages, { beforeId, limit, forceAll })
     : total;
   const startIdx = Math.max(0, endIdx - limit);
   return { total, startIdx, endIdx, hasMore: startIdx > 0 };
+}
+
+/**
+ * 读取会话文件的磁盘修订点（stat 签名，与 /api/sessions 列表投影同源同格式）。
+ * stat 失败（请求竞态中文件被归档/删除）返回 null —— 显式的「修订点未知」，
+ * 前端对 null 的策略是下次触发时重新校验，不会把差异静默吞掉。
+ */
+async function readSessionFileRevision(sessionPath) {
+  if (!sessionPath) return null;
+  try {
+    return sessionFileRevision(await fs.stat(sessionPath));
+  } catch {
+    return null;
+  }
 }
 
 export function createSessionsRoute(engine, hub = null) {
@@ -506,6 +539,9 @@ export function createSessionsRoute(engine, hub = null) {
           title: s.title || null,
           firstMessage: (s.firstMessage || "").slice(0, 100),
           modified: s.modified?.toISOString() || null,
+          // 磁盘修订点（stat 签名）。web/mobile 端用它对比已缓存会话内容，
+          // 决定是否补拉 /rc 接管等离线窗口写入的消息（issue #1610）。
+          revision: typeof s.revision === "string" ? s.revision : null,
           messageCount: s.messageCount || 0,
           cwd: s.cwd || null,
           agentId: s.agentId || null,
@@ -751,6 +787,10 @@ export function createSessionsRoute(engine, hub = null) {
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
       const resolvedSessionPath = queryPath || engine.currentSessionPath || null;
+      // 修订点必须在读取内容之前取：读取期间若有新写入，revision 只会偏旧
+      // （前端下次触发时多补拉一次，方向安全），不会偏新（把没读到的写入
+      // 标成「已同步」会让 /rc 消息永久漏掉，issue #1610 的反方向竞态）。
+      const revision = await readSessionFileRevision(resolvedSessionPath);
       const sourceMessages = await loadSessionHistoryMessages(engine, resolvedSessionPath);
 
       // 分页参数
@@ -993,7 +1033,7 @@ export function createSessionsRoute(engine, hub = null) {
         engine.activityHub?.rebroadcastSession?.(resolvedSessionPath);
       }
 
-      return c.json({ messages, blocks: slicedBlocks, todos, hasMore, sessionFiles });
+      return c.json({ messages, blocks: slicedBlocks, todos, hasMore, sessionFiles, revision });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -1196,7 +1236,8 @@ export function createSessionsRoute(engine, hub = null) {
       }, newSessionPath);
       return c.json(response);
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      const classified = classifySessionCreationError(err);
+      return c.json(classified.body, classified.status);
     }
   });
 
@@ -1409,11 +1450,60 @@ export function createSessionsRoute(engine, hub = null) {
         currentModelReasoning: activeModel?.reasoning ?? null,
         currentModelXhigh: modelSupportsXhigh(activeModel),
         currentModelContextWindow: activeModel?.contextWindow ?? null,
+        // #1624：restore 时算好的工具/prompt 漂移提示（无漂移或已 dismiss → null）
+        capabilityDrift: engine.getSessionCapabilityDriftNotice?.(sessionPath) || null,
       });
     } catch (err) {
       const errDetail = `${err.message}\n${err.stack || ""}`;
       switchLog.error(`error: ${errDetail}`);
       try { appendFileSync(path.join(engine.hanakoHome, "switch-error.log"), `${new Date().toISOString()}\n${errDetail}\n---\n`); } catch {}
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  // #1624：关闭当前 fingerprint 的"工具能力有更新"提示（跟 session 走，指纹再变才重新提示）
+  route.post("/sessions/capability-drift/dismiss", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const { path: sessionPath, fingerprint } = body || {};
+      if (!sessionPath) {
+        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+      }
+      if (typeof fingerprint !== "string" || !fingerprint) {
+        return c.json({ error: t("error.missingParam", { param: "fingerprint" }) }, 400);
+      }
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
+        return c.json({ error: "Invalid session path" }, 403);
+      }
+      await engine.dismissSessionCapabilityDrift(sessionPath, fingerprint);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  // #1624：显式刷新 Agent 工具——fresh compact：压缩旧对话 + 用当前配置重建 prompt/工具快照
+  route.post("/sessions/fresh-compact", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const { path: sessionPath } = body || {};
+      if (!sessionPath) {
+        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+      }
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
+        return c.json({ error: "Invalid session path" }, 403);
+      }
+      if (isDeletedAgentSessionPath(sessionPath)) {
+        return rejectDeletedAgentSession(c);
+      }
+      const result = await engine.freshCompactDesktopSession(sessionPath);
+      return c.json({
+        ok: true,
+        ...result,
+        capabilityDrift: engine.getSessionCapabilityDriftNotice?.(sessionPath) || null,
+      });
+    } catch (err) {
+      lifecycleLog.error(`fresh-compact failed: ${err.message}`);
       return c.json({ error: err.message }, 500);
     }
   });

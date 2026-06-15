@@ -112,7 +112,13 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig: _provid
     }
   };
 
-  const verifyAndSave = async (btn: HTMLButtonElement) => {
+  const saveApiKeyConfig = async ({
+    verify,
+    button,
+  }: {
+    verify: boolean;
+    button?: HTMLButtonElement;
+  }) => {
     const plan = getApiKeySavePlan({
       keyEdited,
       keyVal,
@@ -125,12 +131,12 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig: _provid
       api,
     });
     if (!plan.shouldSave) return;
-    btn.classList.add(styles['spinning']);
+    button?.classList.add(styles['spinning']);
     try {
       const headers = parseHeaders();
       if (!headers) return;
       const includeHeaders = headersEdited || Object.keys(headers).length > 0;
-      if (plan.shouldVerify) {
+      if (verify && plan.shouldVerify) {
         const testRes = await hanaFetch('/api/providers/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -159,7 +165,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig: _provid
       const msg = err instanceof Error ? err.message : String(err);
       showToast(t('settings.saveFailed') + ': ' + msg, 'error');
     } finally {
-      btn.classList.remove(styles['spinning']);
+      button?.classList.remove(styles['spinning']);
     }
   };
 
@@ -180,7 +186,13 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig: _provid
       const testRes = await hanaFetch('/api/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: providerId, base_url: urlVal.trim() || derivedBaseUrl, api, api_key: keyVal.trim() || undefined, headers }),
+        body: JSON.stringify({
+          name: providerId,
+          base_url: urlVal.trim() || derivedBaseUrl,
+          api,
+          api_key: isMaskedSecretValue(keyVal) ? undefined : keyVal.trim() || undefined,
+          headers,
+        }),
       });
       const testData = await testRes.json();
       setConnStatus(testData.ok ? 'ok' : 'fail');
@@ -201,8 +213,11 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig: _provid
           <KeyInput
             value={keyVal}
             onChange={(v) => { setKeyVal(v); setKeyEdited(true); setConnStatus('idle'); }}
+            onBlur={() => {
+              if (!keyEdited || isPresetSetup) return;
+              void saveApiKeyConfig({ verify: false });
+            }}
             onReveal={isMaskedSecretValue(keyVal) ? revealSavedApiKey : undefined}
-            onRevealValue={(v) => { setKeyVal(v); setConnStatus('idle'); }}
             onRevealError={(err) => {
               const msg = err instanceof Error ? err.message : String(err);
               showToast(msg, 'error');
@@ -213,10 +228,10 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig: _provid
             className={`${styles['pv-cred-conn-icon']} ${styles[connStatus] || ''}`}
             title={t('settings.providers.verifyConnection')}
             onClick={(e) => {
-              if (keyEdited && (keyVal.trim() || presetInfo?.local)) {
-                verifyAndSave(e.currentTarget);
+              if (keyEdited) {
+                void saveApiKeyConfig({ verify: true, button: e.currentTarget });
               } else {
-                verifyOnly(e.currentTarget);
+                void verifyOnly(e.currentTarget);
               }
             }}
           >

@@ -1695,6 +1695,36 @@
     background: transparent;
 }
 
+.model-capsule-provider-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    color: var(--accent);
+    opacity: 0.78;
+    margin-right: 8px;
+}
+
+.model-capsule-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.model-capsule-arrow {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    color: var(--text-muted);
+    margin-left: var(--space-sm);
+    transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.model-capsule-trigger[data-open="true"] .model-capsule-arrow {
+    transform: rotate(180deg);
+}
+
 .model-capsule-input {
     flex: 1;
     min-width: 0;
@@ -6895,6 +6925,15 @@ a.about-link:hover {
     min-width: 0;
 }
 
+.mdw-provider-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    color: var(--accent);
+    opacity: 0.78;
+    margin-right: 8px;
+}
+
 .mdw-arrow {
     flex-shrink: 0;
     font-size: 0.7rem;
@@ -6904,7 +6943,8 @@ a.about-link:hover {
 }
 
 .mdw-popup.open ~ .mdw-trigger .mdw-arrow,
-.mdw .mdw-popup.open + .mdw-trigger .mdw-arrow {
+.mdw .mdw-popup.open + .mdw-trigger .mdw-arrow,
+.mdw-trigger[data-open="true"] .mdw-arrow {
     transform: rotate(180deg);
 }
 

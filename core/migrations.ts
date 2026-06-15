@@ -42,6 +42,7 @@ import { patchAutomationJobForMigration } from "../lib/desk/automation-normalize
 import { parseSkillMetadata } from "../lib/skills/skill-metadata.ts";
 import { safeConversationStem } from "../lib/conversations/agent-phone-projection.ts";
 import { DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.ts";
+import { ProviderCatalogStore } from "./provider-catalog.ts";
 
 const moduleLog = createModuleLogger("migrations");
 
@@ -133,6 +134,8 @@ const migrations = {
   40: migrateSessionPermissionModeSidecars,
   // identity 首启种子曾把 {{userName}} 写成空串，修回动态用户名占位符
   41: migrateIdentityUserNamePlaceholders,
+  // Provider Catalog v2：provider/model/capability canonical store 一次性 cutover
+  42: migrateProviderCatalogV2Cutover,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -1324,6 +1327,18 @@ function patchCronJobsFileForAutomation(jobsPath, log) {
 
   atomicWriteSync(jobsPath, JSON.stringify({ ...data, jobs }, null, 2) + "\n");
   return { changed: true, patchedJobs };
+}
+
+function migrateProviderCatalogV2Cutover(ctx) {
+  const { hanakoHome, providerRegistry, log } = ctx;
+  const store = providerRegistry?._catalog || new ProviderCatalogStore(hanakoHome);
+  const catalog = store.cutoverFromLegacy();
+  if (providerRegistry) {
+    providerRegistry._addedModelsCache = null;
+    providerRegistry._addedModelsMtime = 0;
+    providerRegistry._entries?.clear?.();
+  }
+  log?.(`[migrations] #42: provider catalog v2 ready (${Object.keys(catalog.providers || {}).length} providers)`);
 }
 
 function migrateDirectNotifyAutomationsToAgentRuns(ctx) {

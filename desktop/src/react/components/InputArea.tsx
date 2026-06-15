@@ -19,6 +19,7 @@ import { revealDeskDirectory, toggleJianSidebar } from '../stores/desk-actions';
 import { getWebSocket } from '../services/websocket';
 import { collectUiContext } from '../utils/ui-context';
 import { formatQuotedSelectionForPrompt } from '../utils/quoted-selection';
+import { renderMarkdown } from '../utils/markdown';
 import type { ThinkingLevel } from '../stores/model-slice';
 import { SlashCommandMenu } from './input/SlashCommandMenu';
 import { FileMentionMenu } from './input/FileMentionMenu';
@@ -27,6 +28,7 @@ import { InputContextRow } from './input/InputContextRow';
 import { InputControlBar } from './input/InputControlBar';
 import type { PermissionMode } from './input/PlanModeButton';
 import { SessionConfirmationPrompt } from './input/SessionConfirmationPrompt';
+import { CapabilityDriftNotice } from './input/CapabilityDriftNotice';
 import { serializeEditor } from '../utils/editor-serializer';
 import {
   buildFileMentionItems,
@@ -42,7 +44,7 @@ import {
   evaluateChatAudioSendPreflight,
   evaluateChatVideoSendPreflight,
   getModelAudioInputMode,
-  notifyTextModelImageBlocked,
+  notifyTextModelImageFileOnly,
   notifyTextModelAudioBlocked,
   notifyTextModelVideoBlocked,
 } from '../utils/chat-image-send-preflight';
@@ -64,6 +66,18 @@ import type { ChatListItem, SessionConfirmationBlock } from '../stores/chat-type
 import type { AudioWaveform } from '../stores/chat-types';
 
 const EMPTY_FILE_REFS: readonly import('../types/file-ref').FileRef[] = Object.freeze([]);
+
+// #1624：刷新完成瞬间 drift 已清空但 busy 态还在的兜底渲染数据（只用于 busy 分支）
+const EMPTY_CAPABILITY_DRIFT: import('../types').SessionCapabilityDrift = Object.freeze({
+  version: 1,
+  fingerprint: '',
+  frozenFingerprint: '',
+  addedToolNames: [],
+  removedToolNames: [],
+  invalidToolNames: [],
+  promptChanged: false,
+  hasDrift: false,
+});
 
 function chatVideoMimeTypeForName(name: string, fallback?: string): string {
   if (fallback?.startsWith('video/')) return fallback;
@@ -106,6 +120,12 @@ function chatAudioMimeTypeForName(name: string, fallback?: string): string {
     webm: 'audio/webm',
   };
   return mimeMap[ext] || 'audio/wav';
+}
+
+function createClientUserMessageId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `client-user-${uuid}`;
+  return `client-user-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 async function readFileAsBase64(file: File): Promise<string> {
@@ -308,6 +328,9 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
 
   const globalModelInfo = useMemo(() => models.find(m => m.isCurrent), [models]);
   const sessionModel = useStore(s => s.currentSessionPath ? s.sessionModelsByPath[s.currentSessionPath] : undefined);
+  // #1624：当前 session 的工具能力漂移提示（服务端 restore 时算好，前端只消费）
+  const capabilityDrift = useStore(s => s.currentSessionPath ? (s.capabilityDriftBySession[s.currentSessionPath] ?? null) : null);
+  const capabilityRefreshing = useStore(s => s.currentSessionPath ? s.capabilityRefreshingSessions.includes(s.currentSessionPath) : false);
   const currentModelInfo = sessionModel || globalModelInfo;
   // input 数组缺失视为未知；只有显式 text-only 的模型才在 UI 上标记“辅助视觉”。
   const supportsVision = !Array.isArray(currentModelInfo?.input) || currentModelInfo.input.includes("image");
@@ -1165,7 +1188,10 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const hasContent = inputText.trim().length > 0 || attachedFiles.length > 0 || docContextAttached || quotedSelections.length > 0
     || editorHasInlineNode(editor, 'skillBadge')
     || editorHasInlineNode(editor, 'fileBadge');
-  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && !inputLocked;
+  // capabilityRefreshing / compacting：压缩到 reload 完成之间 session 没有可用
+  // runtime，此窗口内发 prompt 会冷建第二个 runtime 与 reload 竞争（#1624 I2）。
+  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && !inputLocked
+    && !capabilityRefreshing && !compacting;
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
     if (surface === 'mobile') {
@@ -1362,6 +1388,17 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     if (sending) return;
     if (modelSwitching) return;
     if (useStore.getState().pendingSessionSwitchPath) return;
+    if (type === 'prompt') {
+      // 压缩 / 能力刷新（fresh compact）期间禁发 prompt：此窗口内 session 没有
+      // 可用 runtime，发消息会冷建第二个 runtime 与压缩后的 reload 竞争（#1624 I2）。
+      // Enter 发送不走 canSend，必须在提交路径同样拦截；按 keyed 状态现读现查。
+      const guardState = useStore.getState();
+      const guardPath = guardState.currentSessionPath;
+      if (guardPath && (
+        guardState.capabilityRefreshingSessions.includes(guardPath)
+        || guardState.compactingSessions.includes(guardPath)
+      )) return;
+    }
     setSending(true);
 
     try {
@@ -1381,13 +1418,16 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         model: currentModelInfo,
         loadVisionAuxiliaryConfig,
       });
-      if (!imagePreflight.ok) {
-        notifyTextModelImageBlocked({
+      // #1647：视觉能力不可用不再拦下整条消息。图片始终携带文件身份
+      //（displayMessage.attachments → 服务端登记 SessionFile + 注入路径 marker），
+      // 这里只决定是否附带像素载荷；降级是显式的（toast 告知 + 不读字节）。
+      const imagesAsFileOnly = !imagePreflight.ok;
+      if (imagesAsFileOnly) {
+        notifyTextModelImageFileOnly({
           t,
           addToast: useStore.getState().addToast,
           openSettings: () => openProviderModelSettings(currentModelInfo?.provider),
         });
-        return;
       }
       const videoPreflight = await evaluateChatVideoSendPreflight({
         attachments: inputFiles,
@@ -1415,6 +1455,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       ) : [];
 
       const sessionPathForSend = useStore.getState().currentSessionPath;
+      if (!sessionPathForSend) return;
       const sessionFileRefs = otherFiles
         .filter(f => f.fileId)
         .map(f => ({
@@ -1442,7 +1483,9 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       const imageBase64Map = new Map<string, { base64Data: string; mimeType: string }>();
       const videoBase64Map = new Map<string, { base64Data: string; mimeType: string }>();
       const audioBase64Map = new Map<string, { base64Data: string; mimeType: string }>();
-      for (const img of imageFiles) {
+      // 单图读取失败同样不拦整条消息：该图退化为仅文件身份，显式提示（#1647）
+      const imageFileOnlyPaths = new Set<string>();
+      for (const img of imagesAsFileOnly ? [] : imageFiles) {
         try {
           if (img.base64Data && img.mimeType) {
             images.push({ type: 'image', data: img.base64Data, mimeType: img.mimeType });
@@ -1458,10 +1501,10 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
           }
         } catch (err) {
           console.warn('[input] failed to read image attachment', err);
-          useStore.getState().addToast(t('input.imageReadFailed'), 'error', 6000, {
+          imageFileOnlyPaths.add(img.path);
+          useStore.getState().addToast(t('input.imageReadFailedSentAsFile'), 'warning', 6000, {
             dedupeKey: `image-read-failed:${img.path}`,
           });
-          return;
         }
       }
       for (const audio of sendAudiosNatively ? audioFiles : []) {
@@ -1534,39 +1577,69 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       clearAttachedFiles();
       if (useStore.getState().quotedSelections.length > 0) useStore.getState().clearQuotedSelections();
 
+      const clientMessageId = createClientUserMessageId();
+      const displayMessage = {
+        text,
+        skills: skills.length > 0 ? skills : undefined,
+        quotedText: quotes.length > 0 ? quotes.map(q => q.text).join('\n\n') : undefined,
+        attachments: allFiles.length > 0 ? allFiles.map(f => {
+          const cached = imageBase64Map.get(f.path);
+          const cachedVideo = videoBase64Map.get(f.path);
+          const cachedAudio = audioBase64Map.get(f.path);
+          const imageFile = !f.isDirectory && isImageFile(f.name);
+          return {
+            fileId: f.fileId,
+            path: f.path,
+            name: f.name,
+            isDir: !!f.isDirectory,
+            mimeType: f.mimeType || cached?.mimeType || cachedVideo?.mimeType || cachedAudio?.mimeType || undefined,
+            visionAuxiliary: imageFile && !supportsVision && !imagesAsFileOnly && !imageFileOnlyPaths.has(f.path),
+            ...(f.waveform ? { waveform: f.waveform } : {}),
+          };
+        }) : undefined,
+      };
+
+      useStore.getState().appendOptimisticUserMessage(sessionPathForSend, {
+        id: clientMessageId,
+        role: 'user',
+        text,
+        textHtml: text ? renderMarkdown(text) : undefined,
+        timestamp: Date.now(),
+        attachments: displayMessage.attachments,
+        quotedText: displayMessage.quotedText,
+        skills: displayMessage.skills,
+        sendStatus: 'pending',
+      });
+
       const ws = getWebSocket();
       const wsMsg: Record<string, unknown> = {
         type,
+        clientMessageId,
         text: finalText,
         sessionPath: sessionPathForSend,
         uiContext: collectUiContext(useStore.getState()),
-        displayMessage: {
-          text,
-          skills: skills.length > 0 ? skills : undefined,
-          quotedText: quotes.length > 0 ? quotes.map(q => q.text).join('\n\n') : undefined,
-          attachments: allFiles.length > 0 ? allFiles.map(f => {
-            const cached = imageBase64Map.get(f.path);
-            const cachedVideo = videoBase64Map.get(f.path);
-            const cachedAudio = audioBase64Map.get(f.path);
-            const imageFile = !f.isDirectory && isImageFile(f.name);
-            return {
-              fileId: f.fileId,
-              path: f.path,
-              name: f.name,
-              isDir: !!f.isDirectory,
-              mimeType: f.mimeType || cached?.mimeType || cachedVideo?.mimeType || cachedAudio?.mimeType || undefined,
-              visionAuxiliary: imageFile && !supportsVision,
-              ...(f.waveform ? { waveform: f.waveform } : {}),
-            };
-          }) : undefined,
-        },
+        displayMessage,
       };
       if (sessionFileRefs.length > 0) wsMsg.sessionFileRefs = sessionFileRefs;
       if (images.length > 0) wsMsg.images = images;
       if (videos.length > 0) wsMsg.videos = videos;
       if (audios.length > 0) wsMsg.audios = audios;
       if (skills.length > 0) wsMsg.skills = skills;
-      ws?.send(JSON.stringify(wsMsg));
+      if (!ws) {
+        useStore.getState().markOptimisticUserMessageFailed(
+          sessionPathForSend,
+          clientMessageId,
+          'websocket_unavailable',
+        );
+        return;
+      }
+      try {
+        ws.send(JSON.stringify(wsMsg));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        useStore.getState().markOptimisticUserMessageFailed(sessionPathForSend, clientMessageId, message);
+        throw err;
+      }
     } finally {
       setSending(false);
     }
@@ -1736,6 +1809,12 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         )}
       </div>
       <div className={styles['input-stack']}>
+        {(capabilityDrift || capabilityRefreshing) && !visibleSessionConfirmation && !deletedAgentReadOnly && currentSessionPath && (
+          <CapabilityDriftNotice
+            sessionPath={currentSessionPath}
+            drift={capabilityDrift ?? EMPTY_CAPABILITY_DRIFT}
+          />
+        )}
         {visibleSessionConfirmation && (
           <SessionConfirmationPrompt
             block={visibleSessionConfirmation}

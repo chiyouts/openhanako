@@ -39,6 +39,14 @@ function writeModelsJson(data) {
   );
 }
 
+function readPersistedProviders() {
+  const catalogPath = path.join(tmpDir, "provider-catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    return JSON.parse(fs.readFileSync(catalogPath, "utf-8")).providers || {};
+  }
+  return YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8")).providers;
+}
+
 function deepseekProvider(apiKey) {
   const provider = {
     base_url: "https://api.deepseek.com/v1",
@@ -93,7 +101,7 @@ describe("ModelManager AuthStorage ownership", () => {
     await manager.syncAndRefresh();
 
     await expect(getDeepseekApiKey(manager)).resolves.toBe("sk-legacy-4d2a");
-    const persistedProviders = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8")).providers;
+    const persistedProviders = readPersistedProviders();
     expect(persistedProviders.deepseek.api_key).toBe("sk-legacy-4d2a");
     const persistedAuth = JSON.parse(fs.readFileSync(path.join(tmpDir, "auth.json"), "utf-8"));
     expect(persistedAuth.deepseek).toBeUndefined();
@@ -120,7 +128,7 @@ describe("ModelManager AuthStorage ownership", () => {
     await manager.syncAndRefresh();
 
     await expect(getDeepseekApiKey(manager)).resolves.toBe("sk-projected-6ad1");
-    const persistedProviders = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8")).providers;
+    const persistedProviders = readPersistedProviders();
     expect(persistedProviders.deepseek.api_key).toBe("sk-projected-6ad1");
   });
 
@@ -153,7 +161,7 @@ describe("ModelManager AuthStorage ownership", () => {
     manager.init();
     await manager.syncAndRefresh();
 
-    const persistedProviders = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8")).providers;
+    const persistedProviders = readPersistedProviders();
     expect(persistedProviders.deepseek.api_key).toBe("");
     const persistedAuth = JSON.parse(fs.readFileSync(path.join(tmpDir, "auth.json"), "utf-8"));
     expect(persistedAuth.deepseek).toBeUndefined();
@@ -187,7 +195,7 @@ describe("ModelManager AuthStorage ownership", () => {
     manager.init();
     await manager.syncAndRefresh();
 
-    const persistedProviders = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8")).providers;
+    const persistedProviders = readPersistedProviders();
     const projected = JSON.parse(fs.readFileSync(path.join(tmpDir, "models.json"), "utf-8"));
     expect(persistedProviders["my-provider"]).toBeUndefined();
     expect(projected.providers["my-provider"]).toBeUndefined();

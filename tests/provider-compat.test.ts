@@ -65,6 +65,72 @@ describe("Anthropic Max effort normalization", () => {
     expect(result.output_config).toEqual({ effort: "max" });
     expect(result.max_tokens).toBe(12000);
   });
+
+  it("maps Claude Fable/Mythos budget thinking to adaptive thinking with effort", () => {
+    const payload = {
+      model: "claude-fable-5",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled", budget_tokens: 8192, display: "omitted" },
+      max_tokens: 42666,
+    };
+    const result = normalizeProviderPayload(payload, {
+      id: "claude-fable-5",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      reasoning: true,
+      maxTokens: 128000,
+      compat: {
+        thinkingFormat: "anthropic",
+        reasoningProfile: "anthropic-adaptive-only",
+      },
+    }, { mode: "chat", reasoningLevel: "xhigh" });
+
+    expect(result).not.toBe(payload);
+    expect(result.thinking).toEqual({ type: "adaptive", display: "omitted" });
+    expect(result.output_config).toEqual({ effort: "max" });
+    expect(result.max_tokens).toBe(64000);
+    expect(payload.thinking).toEqual({ type: "enabled", budget_tokens: 8192, display: "omitted" });
+  });
+
+  it("keeps Claude Fable/Mythos adaptive thinking explicit when no thinking field is present", () => {
+    const result = normalizeProviderPayload({
+      model: "claude-mythos-5",
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 12000,
+    }, {
+      id: "claude-mythos-5",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      reasoning: true,
+      maxTokens: 128000,
+      compat: {
+        thinkingFormat: "anthropic",
+        reasoningProfile: "anthropic-adaptive-only",
+      },
+    }, { mode: "chat", reasoningLevel: "medium" });
+
+    expect(result.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(result.output_config).toEqual({ effort: "medium" });
+    expect(result.max_tokens).toBe(12000);
+  });
+
+  it("fails closed when Claude Fable/Mythos thinking is explicitly disabled", () => {
+    expect(() => normalizeProviderPayload({
+      model: "claude-fable-5",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "disabled" },
+      max_tokens: 12000,
+    }, {
+      id: "claude-fable-5",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      reasoning: true,
+      compat: {
+        thinkingFormat: "anthropic",
+        reasoningProfile: "anthropic-adaptive-only",
+      },
+    }, { mode: "chat", reasoningLevel: "off" })).toThrow(/does not support disabling adaptive thinking/);
+  });
 });
 
 describe("getThinkingFormat", () => {
@@ -141,6 +207,23 @@ describe("getThinkingFormat", () => {
       reasoning: true,
       compat: { supportsDeveloperRole: false },
     })).toBe("openrouter");
+  });
+
+  it("Claude Fable/Mythos adaptive-only 模型派生供应商专属 profile", () => {
+    expect(getReasoningProfile({
+      id: "claude-fable-5",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      reasoning: true,
+    })).toBe("anthropic-adaptive-only");
+
+    expect(getReasoningProfile({
+      id: "anthropic/claude-fable-5",
+      provider: "openrouter",
+      api: "openai-completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: true,
+    })).toBe("openrouter-anthropic-adaptive");
   });
 });
 
@@ -569,6 +652,65 @@ describe("normalizeProviderPayload — 通用层", () => {
       expect(offResult.reasoning).toEqual({ effort: "none" });
       expect(offResult).not.toHaveProperty("reasoning_effort");
     }
+  });
+
+  it("OpenRouter Claude Fable adaptive thinking 用 verbosity 控制 effort，不发送无效 reasoning.effort", () => {
+    const payload = {
+      model: "anthropic/claude-fable-5",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning: { effort: "medium" },
+      thinking: { type: "enabled", budget_tokens: 8192 },
+      max_completion_tokens: 32000,
+    };
+    const model = {
+      id: "anthropic/claude-fable-5",
+      provider: "openrouter",
+      api: "openai-completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: true,
+      maxTokens: 128000,
+      compat: {
+        supportsDeveloperRole: false,
+        thinkingFormat: "openrouter",
+        reasoningProfile: "openrouter-anthropic-adaptive",
+      },
+    };
+
+    const result = normalizeProviderPayload(payload, model, {
+      mode: "chat",
+      reasoningLevel: "xhigh",
+      outputBudgetSource: "sdk-default",
+    });
+
+    expect(result).not.toBe(payload);
+    expect(result.verbosity).toBe("max");
+    expect(result.reasoning).toEqual({ enabled: true });
+    expect(result).not.toHaveProperty("thinking");
+    expect(result).not.toHaveProperty("reasoning_effort");
+    expect(result).not.toHaveProperty("max_completion_tokens");
+    expect(payload.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("OpenRouter Claude Fable adaptive thinking 显式 off 时 fail closed", () => {
+    expect(() => normalizeProviderPayload({
+      model: "anthropic/claude-fable-5",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning: { effort: "none" },
+    }, {
+      id: "anthropic/claude-fable-5",
+      provider: "openrouter",
+      api: "openai-completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: true,
+      compat: {
+        supportsDeveloperRole: false,
+        thinkingFormat: "openrouter",
+        reasoningProfile: "openrouter-anthropic-adaptive",
+      },
+    }, {
+      mode: "chat",
+      reasoningLevel: "off",
+    })).toThrow(/does not support disabling adaptive thinking/);
   });
 
   it("DashScope Qwen video models convert SDK image_url data:video blocks to video_url", () => {

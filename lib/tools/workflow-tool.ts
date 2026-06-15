@@ -30,6 +30,10 @@ function makeLimiter() {
   return createLimiter({ maxConcurrent: WORKFLOW_AGENT_MAX_CONCURRENT, maxTotal: AGENT_TOTAL_BACKSTOP });
 }
 
+function declarativeNodesUnsupported(meta) {
+  return Array.isArray(meta?.nodes);
+}
+
 /** 一条 usage entry 的总 token（优先顶层 totalTokens，回退 input+output）。 */
 function usageTokens(usage) {
   if (!usage) return 0;
@@ -106,6 +110,11 @@ export function createWorkflowTool(deps) {
         ({ meta } = extractMeta(params.script));
       } catch (err) {
         return toolError(t("tool.workflow.scriptInvalid", { message: err.message }));
+      }
+      if (declarativeNodesUnsupported(meta)) {
+        return toolError(
+          "workflow meta.nodes is declarative metadata and is not executable yet; use agent()/parallel()/phase()/log() in the script body.",
+        );
       }
 
       const store = deps.getDeferredStore?.();

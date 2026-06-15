@@ -286,7 +286,7 @@ describe("HTTP route security policy", () => {
       .toMatchObject({
         allowed: false,
         status: 403,
-        error: "studio_owner_required",
+        error: "plugin_route_forbidden",
       });
     expect(authorizeHttpRoute({ method: "GET", path: "/api/plugins/demo/page", principal: owner }))
       .toMatchObject({ allowed: true });
@@ -383,6 +383,20 @@ describe("HTTP route security policy", () => {
       ["GET", "/api/plugins/marketplace"],
       ["GET", "/api/plugins/marketplace/image-gen/readme"],
       ["GET", "/api/plugins/diagnostics"],
+      ["GET", "/api/media/image/providers"],
+      ["GET", "/api/media/providers"],
+      ["POST", "/api/media/generate"],
+      ["POST", "/api/media/image/generate"],
+      ["POST", "/api/media/video/generate"],
+      ["POST", "/api/media/asr/transcribe"],
+      ["PUT", "/api/media/image/config"],
+      ["POST", "/api/media/image/providers/dashscope/models"],
+      ["DELETE", "/api/media/image/providers/dashscope/models/wanx"],
+      ["POST", "/api/media/tasks/task_1/retry"],
+      ["GET", "/api/media/generated/cover.png"],
+      ["HEAD", "/api/media/generated/cover.png"],
+      ["GET", "/api/media/tasks/batch/batch_1"],
+      ["GET", "/api/media/tasks/task_1"],
       ["GET", "/api/plugins/image-gen/providers"],
       ["PUT", "/api/plugins/image-gen/config"],
       ["POST", "/api/plugins/image-gen/providers/dashscope/models"],
@@ -424,6 +438,8 @@ describe("HTTP route security policy", () => {
       ["GET", "/api/plugins?source=community"],
       ["GET", "/api/plugins/marketplace"],
       ["GET", "/api/plugins/diagnostics"],
+      ["GET", "/api/media/image/providers"],
+      ["PUT", "/api/media/image/config"],
       ["GET", "/api/plugins/image-gen/providers"],
       ["PUT", "/api/plugins/image-gen/config"],
       ["GET", "/api/plugins/mcp/state?agentId=hana"],
@@ -431,6 +447,24 @@ describe("HTTP route security policy", () => {
     ]) {
       expect(authorizeHttpRoute({ method, path, principal }), `${method} ${path}`)
         .toMatchObject({ allowed: false, status: 403 });
+    }
+  });
+
+  it("treats media submit routes as chat actions for plugin and client surfaces", async () => {
+    const { authorizeHttpRoute, classifyHttpRoute } = await import("../server/http/route-security.ts");
+
+    for (const path of [
+      "/api/media/generate",
+      "/api/media/image/generate",
+      "/api/media/video/generate",
+      "/api/media/asr/transcribe",
+    ]) {
+      expect(classifyHttpRoute({ method: "POST", path }), path)
+        .toMatchObject({ kind: "scope", scope: "chat" });
+      expect(authorizeHttpRoute({ method: "POST", path, principal: mobilePrincipal() }), path)
+        .toMatchObject({ allowed: true });
+      expect(authorizeHttpRoute({ method: "POST", path, principal: devicePrincipal(["settings.read"]) }), path)
+        .toMatchObject({ allowed: false, status: 403, error: "insufficient_scope" });
     }
   });
 
@@ -453,6 +487,7 @@ describe("HTTP route security policy", () => {
       ["PUT", "/api/skills/external-paths"],
       ["POST", "/api/plugins/dev/install"],
       ["POST", "/api/plugins/dev/demo/reload"],
+      ["POST", "/api/media/generated/open/cover.png"],
       ["POST", "/api/plugins/image-gen/media/open/cover.png"],
     ]) {
       expect(authorizeHttpRoute({ method, path, principal: owner }), `${method} ${path}`)
@@ -655,6 +690,117 @@ describe("HTTP route security policy", () => {
       allowed: false,
       status: 403,
       error: "studio_owner_required",
+    });
+  });
+
+  describe("plugin route proxy policy", () => {
+    function pluginSurfacePrincipal(pluginId, overrides: any = {}) {
+      return Object.freeze({
+        kind: "plugin",
+        pluginId,
+        credentialKind: "plugin_surface_session",
+        connectionKind: "local",
+        scopes: [],
+        ...overrides,
+      });
+    }
+
+    it("classifies plugin proxy sub-paths as plugin_route with the plugin id", async () => {
+      const { classifyHttpRoute } = await import("../server/http/route-security.ts");
+
+      expect(classifyHttpRoute({ method: "POST", path: "/api/plugins/media-board/api/create-session" }))
+        .toMatchObject({ kind: "plugin_route", pluginId: "media-board" });
+      expect(classifyHttpRoute({ method: "GET", path: "/api/plugins/media-board/page" }))
+        .toMatchObject({ kind: "plugin_route", pluginId: "media-board" });
+    });
+
+    it("keeps host-owned plugin management routes out of the plugin_route policy", async () => {
+      const { classifyHttpRoute } = await import("../server/http/route-security.ts");
+
+      expect(classifyHttpRoute({ method: "POST", path: "/api/plugins/dev/install" }))
+        .toMatchObject({ kind: "local_only" });
+      expect(classifyHttpRoute({ method: "GET", path: "/api/plugins/media-board/config" }))
+        .toMatchObject({ kind: "scope", scope: "settings.read" });
+      expect(classifyHttpRoute({ method: "GET", path: "/api/plugins/event-bus/capabilities" }))
+        .toMatchObject({ kind: "scope", scope: "settings.read" });
+      expect(classifyHttpRoute({ method: "POST", path: "/api/plugins/event-bus/capabilities" }))
+        .not.toMatchObject({ kind: "plugin_route" });
+      expect(classifyHttpRoute({ method: "GET", path: "/api/plugins/media-board/assets/dist/app.js" }))
+        .toMatchObject({ kind: "scope", scope: "chat" });
+    });
+
+    it("authorizes matching plugin surface principals on their own plugin routes only", async () => {
+      const { authorizeHttpRoute } = await import("../server/http/route-security.ts");
+
+      expect(authorizeHttpRoute({
+        method: "POST",
+        path: "/api/plugins/media-board/api/create-session",
+        principal: pluginSurfacePrincipal("media-board"),
+      })).toMatchObject({ allowed: true });
+
+      expect(authorizeHttpRoute({
+        method: "POST",
+        path: "/api/plugins/other-plugin/api/create-session",
+        principal: pluginSurfacePrincipal("media-board"),
+      })).toMatchObject({
+        allowed: false,
+        status: 403,
+        error: "plugin_route_forbidden",
+      });
+    });
+
+    it("keeps owner access and denies non-owner device principals on plugin routes", async () => {
+      const { authorizeHttpRoute } = await import("../server/http/route-security.ts");
+
+      expect(authorizeHttpRoute({
+        method: "POST",
+        path: "/api/plugins/media-board/api/create-session",
+        principal: localPrincipal,
+      })).toMatchObject({ allowed: true });
+
+      expect(authorizeHttpRoute({
+        method: "POST",
+        path: "/api/plugins/media-board/api/create-session",
+        principal: desktopOwnerPrincipal(),
+      })).toMatchObject({ allowed: true });
+
+      expect(authorizeHttpRoute({
+        method: "POST",
+        path: "/api/plugins/media-board/api/create-session",
+        principal: mobilePrincipal(),
+      })).toMatchObject({ allowed: false, status: 403, error: "plugin_route_forbidden" });
+
+      expect(authorizeHttpRoute({
+        method: "POST",
+        path: "/api/plugins/media-board/api/create-session",
+        principal: null,
+      })).toMatchObject({ allowed: false, status: 403 });
+    });
+
+    it("does not let plugin surface principals reach host scope or studio owner routes", async () => {
+      const { authorizeHttpRoute } = await import("../server/http/route-security.ts");
+      const principal = pluginSurfacePrincipal("media-board");
+
+      expect(authorizeHttpRoute({
+        method: "GET",
+        path: "/api/plugins/media-board/config",
+        principal,
+      })).toMatchObject({ allowed: false, status: 403 });
+      expect(authorizeHttpRoute({
+        method: "PUT",
+        path: "/api/plugins/settings",
+        principal,
+      })).toMatchObject({ allowed: false, status: 403 });
+      expect(authorizeHttpRoute({
+        method: "GET",
+        path: "/api/sessions",
+        principal,
+      })).toMatchObject({ allowed: false, status: 403 });
+      expect(authorizeHttpRoute({
+        method: "GET",
+        path: "/api/usage/llm",
+        principal,
+      })).toMatchObject({ allowed: false, status: 403 });
     });
   });
 });

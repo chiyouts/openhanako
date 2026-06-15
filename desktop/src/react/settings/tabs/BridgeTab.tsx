@@ -7,6 +7,7 @@ import { BridgeAgentRow } from './bridge/BridgeAgentRow';
 import { BridgePermissionModeSelect, type BridgePermissionMode } from './bridge/BridgeWidgets';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
+import { Toggle } from '../widgets/Toggle';
 import { useSettingsStore } from '../store';
 import styles from '../Settings.module.css';
 
@@ -20,6 +21,9 @@ export function BridgeTab() {
   const qqInfo = b.status?.qq;
   const wxInfo = b.status?.wechat;
   const permissionMode = (b.status?.permissionMode || snapshotBridge?.permissionMode) as BridgePermissionMode | undefined;
+  const receiptEnabled = typeof b.status?.receiptEnabled === 'boolean'
+    ? b.status.receiptEnabled
+    : snapshotBridge?.receiptEnabled;
   const globalSettingsPending = !permissionMode || b.globalSettingsSaving;
 
   return (
@@ -33,6 +37,18 @@ export function BridgeTab() {
               value={permissionMode}
               onChange={(mode) => b.saveGlobalSettings({ permissionMode: mode })}
               disabled={globalSettingsPending}
+            />
+          }
+        />
+        <SettingsRow
+          label={t('settings.bridge.receiptEnabled')}
+          hint={t('settings.bridge.receiptEnabledDesc')}
+          control={
+            <Toggle
+              on={receiptEnabled}
+              ariaLabel={t('settings.bridge.receiptEnabled')}
+              onChange={(on) => b.saveGlobalSettings({ receiptEnabled: on })}
+              disabled={b.globalSettingsSaving}
             />
           }
         />

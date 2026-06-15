@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { callTextWithLengthContract } from "../core/output-length-contract.ts";
 import { modelSupportsDirectImageInput } from "../shared/model-capabilities.ts";
 
 const AVATAR_EXTENSIONS = ["png", "jpg", "jpeg", "webp"] as const;
@@ -36,6 +37,7 @@ export const AGENT_APPEARANCE_SUMMARY_REQUEST = [
   "忽略不属于 Agent 自身的画面信息。判断某个元素是否保留时，只看它是否构成这个 Agent 的样子。",
   "不要描述构图、载体、展示方式或生成痕迹。不要使用外部观察口吻。",
   "用第二人称中文输出，像在直接告诉这个 Agent 它长什么样。自然一点，有活人感，重点使用“你的形象……”“你的样子……”。",
+  "目标约 120 字，可在 1-240 字之间自然浮动；信息完整比凑长度更重要。",
 ].join("\n");
 
 export type AgentAvatarResource = {
@@ -57,6 +59,8 @@ type CachedAgentAppearanceSummary = {
   model?: string | null;
   updatedAt: string;
 };
+
+export type AgentAppearanceProfileResource = CachedAgentAppearanceSummary;
 
 export type AgentAppearanceModel = Record<string, unknown>;
 
@@ -83,6 +87,10 @@ type RefreshAgentAppearanceSummaryOptions = {
 
 export function agentAppearanceSummaryPath(agentDir: string): string {
   return path.join(agentDir, "appearance-summary.json");
+}
+
+export function agentAppearanceProfileResourcePath(agentDir: string): string {
+  return agentAppearanceSummaryPath(agentDir);
 }
 
 function avatarPathForExtension(agentDir: string, ext: string): string {
@@ -171,7 +179,7 @@ export function sanitizeAgentAppearanceSummary(text: unknown): string {
   const normalized = normalizeText(text);
   if (!normalized) return "";
   if (EXTERNAL_DESCRIPTION_PATTERNS.some((pattern) => pattern.test(normalized))) return "";
-  return normalized.slice(0, 1200);
+  return normalized;
 }
 
 export function formatAgentAppearancePrompt(summary: string, locale?: string): string {
@@ -198,6 +206,13 @@ export function writeCachedAgentAppearanceSummary(
   return payload;
 }
 
+export function writeAgentAppearanceProfileResource(
+  agentDir: string,
+  entry: { avatarHash: string; summary: string; model?: string | null },
+): AgentAppearanceProfileResource | null {
+  return writeCachedAgentAppearanceSummary(agentDir, entry);
+}
+
 export function readCachedAgentAppearanceSummary(agentDir: string): CachedAgentAppearanceSummary | null {
   const avatar = readAgentAvatarResource(agentDir);
   if (!avatar) return null;
@@ -220,6 +235,10 @@ export function readCachedAgentAppearanceSummary(agentDir: string): CachedAgentA
   } catch {
     return null;
   }
+}
+
+export function readAgentAppearanceProfileResource(agentDir: string): AgentAppearanceProfileResource | null {
+  return readCachedAgentAppearanceSummary(agentDir);
 }
 
 export function hasAgentAppearanceSummaryCapability(options: {
@@ -264,43 +283,54 @@ export async function refreshAgentAppearanceSummary(
     throw new Error("callText is required to refresh agent appearance summary");
   }
 
-  const response = await options.callText({
-    api: config.api,
-    apiKey: config.api_key || config.apiKey,
-    baseUrl: config.base_url || config.baseUrl,
-    headers: config.headers,
-    model: config.model,
-    messages: [{
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: [
-            AGENT_APPEARANCE_SUMMARY_REQUEST,
-            "",
-            options.agentName ? `Agent 名字：${options.agentName}` : "",
-          ].filter(Boolean).join("\n"),
+  const { text } = await callTextWithLengthContract({
+    callText: options.callText,
+    request: {
+      api: config.api,
+      apiKey: config.api_key || config.apiKey,
+      baseUrl: config.base_url || config.baseUrl,
+      headers: config.headers,
+      model: config.model,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              AGENT_APPEARANCE_SUMMARY_REQUEST,
+              "",
+              options.agentName ? `Agent 名字：${options.agentName}` : "",
+            ].filter(Boolean).join("\n"),
+          },
+          avatar.image,
+        ],
+      }],
+      temperature: 0.2,
+      timeoutMs: APPEARANCE_SUMMARY_TIMEOUT_MS,
+      signal: options.signal,
+      usageLedger: options.usageLedger,
+      usageContext: {
+        source: {
+          subsystem: "agent",
+          operation: "appearance_summary",
+          surface: "system_prompt",
+          trigger: "runtime",
         },
-        avatar.image,
-      ],
-    }],
-    temperature: 0.2,
-    maxTokens: 320,
-    timeoutMs: APPEARANCE_SUMMARY_TIMEOUT_MS,
-    signal: options.signal,
-    usageLedger: options.usageLedger,
-    usageContext: {
-      source: {
-        subsystem: "agent",
-        operation: "appearance_summary",
-        surface: "system_prompt",
-        trigger: "runtime",
+        attribution: { kind: "agent", agentDir: options.agentDir },
       },
-      attribution: { kind: "agent", agentDir: options.agentDir },
     },
+    contract: {
+      label: "外观摘要",
+      target: 120,
+      unit: "chars",
+      min: 1,
+      max: 240,
+      locale: "zh",
+    },
+    extractText: textFromModelResponse,
   });
 
-  const summary = sanitizeAgentAppearanceSummary(textFromModelResponse(response));
+  const summary = sanitizeAgentAppearanceSummary(text);
   if (!summary) return null;
   writeCachedAgentAppearanceSummary(options.agentDir, {
     avatarHash: avatar.hash,
@@ -309,3 +339,5 @@ export async function refreshAgentAppearanceSummary(
   });
   return summary;
 }
+
+export const refreshAgentAppearanceProfileResource = refreshAgentAppearanceSummary;

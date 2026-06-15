@@ -110,11 +110,18 @@ export class ModelManager {
     return level ? { ...model, defaultThinkingLevel: level } : model;
   }
 
-  /** 刷新可用模型列表，用 added-models.yaml 过滤 */
+  _allowsRuntimeDiscoveredModel(model) {
+    if (!model?.provider) return false;
+    const resolved = this.providerRegistry.resolveChatProvider?.(model.provider);
+    if (resolved) return resolved.projection !== "none";
+    return !!this.providerRegistry.get?.(model.provider);
+  }
+
+  /** 刷新可用模型列表，用 Provider Catalog v2 过滤 */
   async refreshAvailable() {
     const allModels = await this._modelRegistry.getAvailable();
     // Pi SDK 返回所有有 auth 的模型（包括 OAuth 内置模型），
-    // 但用户只想看自己配置的模型。用 added-models.yaml 的模型列表过滤。
+    // 但用户只想看自己配置或 ProviderRegistry 明确声明的模型。
     const rawProviders = this.providerRegistry.getAllProvidersRaw();
     const userModelSets = new Map();
     for (const [name, raw] of Object.entries(rawProviders) as [string, any][]) {
@@ -130,8 +137,7 @@ export class ModelManager {
     }
     this._availableModels = allModels.filter(m => {
       const allowed = userModelSets.get(m.provider);
-      // 没有在 added-models.yaml 里的 provider → 全部放行（兼容未知来源）
-      if (!allowed) return true;
+      if (!allowed) return this._allowsRuntimeDiscoveredModel(m);
       return allowed.has(m.id);
     })
       .map(enrichModelFromKnownMetadata)
@@ -140,7 +146,7 @@ export class ModelManager {
   }
 
   /**
-   * 同步 added-models.yaml → models.json，然后刷新 ModelRegistry。
+   * 同步 Provider Catalog provider configs → models.json，然后刷新 ModelRegistry。
    *
    * ⚠ 刷新后 _availableModels 是全新数组，旧的 model 对象引用（含烤在字段里的
    * 过期 baseUrl）会失效。本方法负责把 _defaultModel 指针也重新定位到新数组里
@@ -228,7 +234,7 @@ export class ModelManager {
   }
 
   /**
-   * Hana 的 API-key provider 凭证源是 added-models.yaml → models.json。
+   * Hana 的 API-key provider 凭证源是 Provider Catalog → models.json。
    * AuthStorage 只保留 OAuth 条目，避免 Pi SDK 优先读取 stale auth.json。
    * @private
    */
@@ -444,7 +450,7 @@ export class ModelManager {
   }
 
   /**
-   * 从 Pi SDK registry 获取某 provider 的所有模型（不经过 added-models.yaml 过滤）
+   * 从 Pi SDK registry 获取某 provider 的所有模型（不经过 Provider Catalog 过滤）
    * 用于模型发现（fetch-models），不影响主应用的 availableModels
    * @param {string} name - provider ID
    * @returns {object[]}

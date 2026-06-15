@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   hanaFetch: vi.fn(),
 }));
 
+const platformMock = vi.hoisted(() => ({
+  selectFolder: vi.fn(),
+}));
+
 vi.mock('../../settings/api', () => ({
   hanaFetch: (...args: unknown[]) => mocks.hanaFetch(...args),
 }));
@@ -33,8 +37,8 @@ vi.mock('../../settings/components/SettingsRow', () => ({
 }));
 
 vi.mock('../../settings/tabs/media/MediaProviderDetail', () => ({
-  MediaProviderDetail: ({ providerId }: { providerId: string }) => (
-    <div data-testid="media-provider-detail">image:{providerId}</div>
+  MediaProviderDetail: ({ providerId, capability = 'imageGeneration' }: { providerId: string; capability?: string }) => (
+    <div data-testid="media-provider-detail">{capability === 'videoGeneration' ? 'video' : 'image'}:{providerId}</div>
   ),
 }));
 
@@ -67,8 +71,9 @@ function jsonResponse(body: unknown): Response {
 describe('MediaTab image-gen config', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.assign(window, { platform: platformMock });
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({
           providers: {
             volcengine: {
@@ -81,6 +86,9 @@ describe('MediaTab image-gen config', () => {
           },
           config: {},
         }));
+      }
+      if (path === '/api/media/video/providers') {
+        return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
       }
       return Promise.resolve(jsonResponse({ values: { defaultImageModel: { provider: 'volcengine', id: 'seedream-5' } } }));
     });
@@ -104,7 +112,7 @@ describe('MediaTab image-gen config', () => {
     let resolveImageProviders: (response: Response) => void = () => {};
     let resolveSpeechProviders: (response: Response) => void = () => {};
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return new Promise(resolve => {
           resolveImageProviders = resolve;
         });
@@ -161,15 +169,15 @@ describe('MediaTab image-gen config', () => {
 
     const select = await screen.findByLabelText('settings.media.defaultModel');
     await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/plugins/image-gen/providers');
+      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/media/image/providers');
     });
 
     fireEvent.change(select, { target: { value: 'volcengine/seedream-5' } });
 
     await waitFor(() => {
-      expect(mocks.hanaFetch.mock.calls.some(([path]) => path === '/api/plugins/image-gen/config')).toBe(true);
+      expect(mocks.hanaFetch.mock.calls.some(([path]) => path === '/api/media/image/config')).toBe(true);
     });
-    const saveCall = mocks.hanaFetch.mock.calls.find(([path]) => path === '/api/plugins/image-gen/config');
+    const saveCall = mocks.hanaFetch.mock.calls.find(([path]) => path === '/api/media/image/config');
     expect(saveCall?.[1]).toMatchObject({ method: 'PUT' });
     expect(JSON.parse(String((saveCall?.[1] as RequestInit).body))).toEqual({
       values: {
@@ -181,7 +189,7 @@ describe('MediaTab image-gen config', () => {
 
   it('sends null to clear the global default model over HTTP', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({
           providers: {
             volcengine: {
@@ -204,15 +212,33 @@ describe('MediaTab image-gen config', () => {
     fireEvent.change(select, { target: { value: '' } });
 
     await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/plugins/image-gen/config', expect.objectContaining({
+      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/media/image/config', expect.objectContaining({
         body: JSON.stringify({ values: { defaultImageModel: null } }),
+      }));
+    });
+  });
+
+  it('saves the custom image output directory through the plugin route with agent scope', async () => {
+    platformMock.selectFolder.mockResolvedValue('D:/Images/Hana');
+    useSettingsStore.setState({
+      getSettingsAgentId: () => 'agent-a',
+    } as any);
+
+    render(<MediaTab />);
+
+    fireEvent.click(await screen.findByLabelText('settings.mediaExtra.chooseOutputDir'));
+
+    await waitFor(() => {
+      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/plugins/image-gen/config?agentId=agent-a', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ values: { outputDir: 'D:/Images/Hana' } }),
       }));
     });
   });
 
   it('auto-selects the first credentialed image provider instead of the first provider in transport order', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({
           providers: {
             openai: {
@@ -243,7 +269,7 @@ describe('MediaTab image-gen config', () => {
 
   it('switches the detail pane to speech recognition providers without falling back to image provider details', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({
           providers: {
             dashscope: {
@@ -287,7 +313,7 @@ describe('MediaTab image-gen config', () => {
 
   it('does not offer image models with missing runtime adapters as selectable defaults', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({
           providers: {
             axis: {
@@ -313,9 +339,42 @@ describe('MediaTab image-gen config', () => {
     expect(option?.textContent).toContain('settings.media.adapterMissing');
   });
 
+  it('renders custom provider image models from the endpoint and offers them as selectable defaults (#1627)', async () => {
+    mocks.hanaFetch.mockImplementation((path: string) => {
+      if (path === '/api/media/image/providers') {
+        return Promise.resolve(jsonResponse({
+          providers: {
+            'my-proxy': {
+              providerId: 'my-proxy',
+              displayName: 'My Proxy',
+              hasCredentials: true,
+              models: [{ id: 'flux-1.1-pro', name: 'FLUX 1.1 Pro', protocolId: 'openai-images', adapterAvailable: true }],
+              availableModels: [],
+            },
+          },
+          config: {},
+        }));
+      }
+      return Promise.resolve(jsonResponse({ values: {} }));
+    });
+
+    render(<MediaTab />);
+
+    // 自定义 provider 出现在左侧 provider 列表
+    expect(await screen.findByText('My Proxy')).toBeInTheDocument();
+    // 详情面板选中该 provider
+    expect(screen.getByTestId('media-provider-detail')).toHaveTextContent('image:my-proxy');
+    // 其图片模型出现在全局默认模型选择器中且可选
+    const select = await screen.findByLabelText('settings.media.defaultModel');
+    const option = Array.from(select.querySelectorAll('option')).find((item) => item.value === 'my-proxy/flux-1.1-pro');
+    expect(option).toBeTruthy();
+    expect(option).not.toBeDisabled();
+    expect(option?.textContent).toContain('FLUX 1.1 Pro');
+  });
+
   it('loads speech-recognition providers from the speech endpoint', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
       }
       if (path === '/api/speech-recognition/providers') {
@@ -342,9 +401,55 @@ describe('MediaTab image-gen config', () => {
     });
   });
 
+  it('loads video generation providers and saves the default video model through the video config endpoint', async () => {
+    mocks.hanaFetch.mockImplementation((path: string) => {
+      if (path === '/api/media/image/providers') {
+        return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
+      }
+      if (path === '/api/media/video/providers') {
+        return Promise.resolve(jsonResponse({
+          providers: {
+            agnes: {
+              providerId: 'agnes',
+              displayName: 'Agnes AI',
+              hasCredentials: true,
+              models: [{ id: 'agnes-video-v2.0', name: 'Agnes Video V2.0', protocolId: 'agnes-videos', adapterAvailable: true }],
+              availableModels: [],
+            },
+          },
+          config: {},
+        }));
+      }
+      if (path === '/api/speech-recognition/providers') {
+        return Promise.resolve(jsonResponse({ providers: {}, config: { enabled: false } }));
+      }
+      if (path === '/api/media/video/config') {
+        return Promise.resolve(jsonResponse({
+          values: { defaultVideoModel: { provider: 'agnes', id: 'agnes-video-v2.0' } },
+        }));
+      }
+      return Promise.resolve(jsonResponse({ values: {} }));
+    });
+
+    render(<MediaTab />);
+
+    expect(await screen.findByText('Agnes AI')).toBeInTheDocument();
+    expect(screen.getByTestId('media-provider-detail')).toHaveTextContent('video:agnes');
+
+    const select = await screen.findByLabelText('settings.media.defaultVideoModel');
+    fireEvent.change(select, { target: { value: 'agnes/agnes-video-v2.0' } });
+
+    await waitFor(() => {
+      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/media/video/config', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ values: { defaultVideoModel: { provider: 'agnes', id: 'agnes-video-v2.0' } } }),
+      }));
+    });
+  });
+
   it('saves speech-recognition enabled state through the speech config endpoint', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
       }
       if (path === '/api/speech-recognition/providers') {
@@ -381,7 +486,7 @@ describe('MediaTab image-gen config', () => {
 
   it('saves the default speech-recognition model through the speech config endpoint', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
       }
       if (path === '/api/speech-recognition/providers') {
@@ -422,7 +527,7 @@ describe('MediaTab image-gen config', () => {
 
   it('does not offer speech models without runnable adapters as selectable defaults', async () => {
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
       }
       if (path === '/api/speech-recognition/providers') {
@@ -466,7 +571,7 @@ describe('MediaTab image-gen config', () => {
       } as any,
     });
     mocks.hanaFetch.mockImplementation((path: string) => {
-      if (path === '/api/plugins/image-gen/providers') {
+      if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({ providers: {}, config: {} }));
       }
       if (path === '/api/speech-recognition/providers') {
