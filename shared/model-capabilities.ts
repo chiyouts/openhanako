@@ -83,6 +83,7 @@ const MODEL_THINKING_FORMATS = new Set([
   "zhipu",
   "deepseek",
   "openrouter",
+  "kimi",
 ]);
 
 const MODEL_REASONING_PROFILES = new Set([
@@ -92,6 +93,7 @@ const MODEL_REASONING_PROFILES = new Set([
   "mimo-openai",
   "openrouter-anthropic-adaptive",
   "zhipu-openai",
+  "kimi-openai",
 ]);
 
 const TOOL_USE_DIALECTS = new Set([
@@ -106,6 +108,13 @@ const TOOL_RESULT_FORMATS = new Set([
   "message",
   "content_block",
   "part",
+]);
+
+const OUTPUT_CAP_FIELDS = new Set([
+  "max_tokens",
+  "max_completion_tokens",
+  "max_output_tokens",
+  "maxOutputTokens",
 ]);
 
 export function normalizeModelProtocolCompat(value: any): Record<string, any> | null {
@@ -124,6 +133,10 @@ export function normalizeModelProtocolCompat(value: any): Record<string, any> | 
 
   if (value.hanaVideoInput === true) out.hanaVideoInput = true;
   if (value.hanaAudioInput === true) out.hanaAudioInput = true;
+  if (value.outputCapRequired === true) out.outputCapRequired = true;
+  if (typeof value.outputCapField === "string" && OUTPUT_CAP_FIELDS.has(value.outputCapField)) {
+    out.outputCapField = value.outputCapField;
+  }
 
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -197,6 +210,20 @@ function isDeepSeekThinkingModelId(id: string): boolean {
 function isOpenAIReasoningApi(model: any, context: any = {}) {
   const api = getApi(model, context);
   return api === "openai-completions" || api === "openai-responses" || api === "";
+}
+
+function isOfficialKimiOpenAIEndpoint(model: any, context: any = {}) {
+  if (!isOpenAIReasoningApi(model, context)) return false;
+
+  const provider = getProvider(model, context);
+  if (provider === "kimi-coding" || provider === "moonshot") return true;
+
+  const host = getBaseHost(model, context);
+  const baseUrl = getBaseUrl(model, context);
+  return (
+    host === "api.kimi.com"
+    && baseUrl.includes("/coding/v1")
+  ) || host === "api.moonshot.cn";
 }
 
 function isMimoFamilyModel(model: any, context: any = {}) {
@@ -276,6 +303,10 @@ export function getThinkingFormat(model: any, context: any = {}) {
     return "openrouter";
   }
 
+  if (isOfficialKimiOpenAIEndpoint(model, context) && model.reasoning === true) {
+    return "kimi";
+  }
+
   if (
     isOfficialDeepSeekEndpoint(model, context)
     && (model.reasoning === true || isDeepSeekThinkingModelId(modelId))
@@ -344,6 +375,10 @@ export function getReasoningProfile(model: any, context: any = {}) {
     if (api === "openai-completions" || api === "openai-responses" || api === "") {
       return "zhipu-openai";
     }
+  }
+
+  if (isOfficialKimiOpenAIEndpoint(model, context) && model.reasoning === true) {
+    return "kimi-openai";
   }
 
   if (isOfficialDeepSeekEndpoint(model, context)) {
