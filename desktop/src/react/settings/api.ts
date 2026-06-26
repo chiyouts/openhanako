@@ -47,11 +47,7 @@ export async function hanaFetch(
     });
     if (!res.ok) {
       const detail = await readErrorMessage(res);
-      throw new Error(
-        detail
-          ? `hanaFetch ${path}: ${res.status} ${res.statusText} - ${detail}`
-          : `hanaFetch ${path}: ${res.status} ${res.statusText}`,
-      );
+      throw new Error(detail || `hanaFetch ${path}: ${res.status} ${res.statusText}`);
     }
     return res;
   } finally {

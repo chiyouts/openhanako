@@ -83,9 +83,9 @@ export class TaskStore {
   /**
    * Add a new task. Throws if taskId already exists.
    *
-   * @param {{ taskId: string, adapterId: string, providerId?: string|null, modelId?: string|null, protocolId?: string|null, credentialLaneId?: string|null, generatedDir?: string|null, batchId: string, type: string, prompt: string, params: object, sessionId?: string|null, sessionPath?: string|null, sessionRef?: object|null, deliveryMode?: string, delivery?: object|null, deliveryTarget?: object|null, metadata?: object|null, adapterTaskId?: string|null, submitState?: string }} opts
+   * @param {{ taskId: string, adapterId: string, providerId?: string|null, modelId?: string|null, protocolId?: string|null, credentialLaneId?: string|null, batchId: string, type: string, prompt: string, params: object, sessionId?: string|null, sessionPath?: string|null, sessionRef?: object|null, deliveryMode?: string, delivery?: object|null, deliveryTarget?: object|null, metadata?: object|null, adapterTaskId?: string|null, submitState?: string }} opts
    */
-  add({ taskId, adapterId, providerId = null, modelId = null, protocolId = null, credentialLaneId = null, generatedDir = null, batchId, type, prompt, params, sessionId = null, sessionPath = null, sessionRef = null, deliveryMode = "session", delivery = null, deliveryTarget = null, metadata = null, adapterTaskId = null, submitState = "submitted" }) {
+  add({ taskId, adapterId, providerId = null, modelId = null, protocolId = null, credentialLaneId = null, batchId, type, prompt, params, sessionId = null, sessionPath = null, sessionRef = null, deliveryMode = "session", delivery = null, deliveryTarget = null, metadata = null, adapterTaskId = null, submitState = "submitted" }) {
     if (this._tasks.has(taskId)) {
       throw new Error(`TaskStore: duplicate taskId "${taskId}"`);
     }
@@ -96,7 +96,6 @@ export class TaskStore {
       modelId: modelId || params?.modelId || params?.model || null,
       protocolId: protocolId || params?.protocolId || null,
       credentialLaneId: credentialLaneId || params?.credentialLaneId || null,
-      generatedDir: generatedDir || params?.generatedDir || null,
       batchId,
       type,
       prompt,

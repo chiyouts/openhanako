@@ -856,17 +856,9 @@ export function normalizeImageGenerationConfig(value) {
   const providerDefaults = raw.providerDefaults && typeof raw.providerDefaults === "object" && !Array.isArray(raw.providerDefaults)
     ? structuredClone(raw.providerDefaults)
     : null;
-  const outputDir = typeof raw.outputDir === "string" && raw.outputDir.trim()
-    ? raw.outputDir.trim()
-    : null;
-  const outputDirHistory = Array.isArray(raw.outputDirHistory)
-    ? raw.outputDirHistory.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())
-    : null;
   return {
     ...(defaultModel?.provider && defaultModel.id ? { defaultImageModel: defaultModel } : {}),
     ...(providerDefaults ? { providerDefaults } : {}),
-    ...(outputDir ? { outputDir } : {}),
-    ...(outputDirHistory?.length ? { outputDirHistory } : {}),
   };
 }
 
@@ -895,19 +887,7 @@ export function mergeImageGenerationConfig(base, override) {
   if (defaultModel) next.defaultImageModel = defaultModel;
   const providerDefaults = mergeProviderDefaults(left.providerDefaults, right.providerDefaults);
   if (providerDefaults) next.providerDefaults = providerDefaults;
-  const outputDir = right.outputDir || left.outputDir || null;
-  if (outputDir) next.outputDir = outputDir;
-  const outputDirHistory = mergeStringLists(left.outputDirHistory, right.outputDirHistory);
-  if (outputDirHistory.length) next.outputDirHistory = outputDirHistory;
   return next;
-}
-
-function mergeStringLists(base, override) {
-  const values = [
-    ...(Array.isArray(base) ? base : []),
-    ...(Array.isArray(override) ? override : []),
-  ].filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim());
-  return [...new Set(values)];
 }
 
 function mergeProviderDefaults(base, override) {

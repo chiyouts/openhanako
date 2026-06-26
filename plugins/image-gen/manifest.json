@@ -2,7 +2,7 @@
   "id": "image-gen",
   "name": "Image Generation",
   "version": "0.1.0",
-  "description": "Image generation for OpenAI-compatible and Volcengine providers",
+  "description": "图片生成：火山引擎 Seedream、OpenAI GPT Image",
   "trust": "full-access",
   "hidden": true,
   "contributes": {
@@ -10,7 +10,7 @@
       "properties": {
         "defaultImageModel": {
           "type": "object",
-          "title": "Default image model",
+          "title": "默认图片模型",
           "properties": {
             "id": { "type": "string" },
             "provider": { "type": "string" }
@@ -18,18 +18,7 @@
         },
         "providerDefaults": {
           "type": "object",
-          "title": "Per-provider defaults"
-        },
-        "outputDir": {
-          "type": "string",
-          "title": "Generated media output directory"
-        },
-        "outputDirHistory": {
-          "type": "array",
-          "title": "Historical generated media directories",
-          "items": {
-            "type": "string"
-          }
+          "title": "per-provider 默认参数"
         }
       }
     }

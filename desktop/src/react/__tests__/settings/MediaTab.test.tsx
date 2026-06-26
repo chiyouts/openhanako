@@ -11,10 +11,6 @@ const mocks = vi.hoisted(() => ({
   hanaFetch: vi.fn(),
 }));
 
-const platformMock = vi.hoisted(() => ({
-  selectFolder: vi.fn(),
-}));
-
 vi.mock('../../settings/api', () => ({
   hanaFetch: (...args: unknown[]) => mocks.hanaFetch(...args),
 }));
@@ -71,7 +67,6 @@ function jsonResponse(body: unknown): Response {
 describe('MediaTab image-gen config', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.assign(window, { platform: platformMock });
     mocks.hanaFetch.mockImplementation((path: string) => {
       if (path === '/api/media/image/providers') {
         return Promise.resolve(jsonResponse({
@@ -214,24 +209,6 @@ describe('MediaTab image-gen config', () => {
     await waitFor(() => {
       expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/media/image/config', expect.objectContaining({
         body: JSON.stringify({ values: { defaultImageModel: null } }),
-      }));
-    });
-  });
-
-  it('saves the custom image output directory through the plugin route with agent scope', async () => {
-    platformMock.selectFolder.mockResolvedValue('D:/Images/Hana');
-    useSettingsStore.setState({
-      getSettingsAgentId: () => 'agent-a',
-    } as any);
-
-    render(<MediaTab />);
-
-    fireEvent.click(await screen.findByLabelText('settings.mediaExtra.chooseOutputDir'));
-
-    await waitFor(() => {
-      expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/plugins/image-gen/config?agentId=agent-a', expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({ values: { outputDir: 'D:/Images/Hana' } }),
       }));
     });
   });

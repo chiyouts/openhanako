@@ -81,7 +81,6 @@ function uniqueTruthy(paths) {
  * @param {string} opts.hanakoHome
  * @param {string[]} [opts.runtimeWritablePaths]
  * @param {"standard"|"full-access"} opts.mode
- * @param {string[]} [opts.extraReadOnlyPaths]
  * @returns {object} policy
  */
 export function deriveSandboxPolicy({
@@ -92,7 +91,6 @@ export function deriveSandboxPolicy({
   hanakoHome,
   runtimeWritablePaths = [],
   mode,
-  extraReadOnlyPaths = [],
 }) {
   if (mode === "full-access") {
     return { mode: "full-access" };
@@ -110,7 +108,6 @@ export function deriveSandboxPolicy({
     cwd,
     workspace,
     workspaceRoots,
-    extraReadOnlyPaths: extraReadOnlyPaths.filter(Boolean),
     allowExternalReads: true,
 
     // OS 沙盒用：可写路径

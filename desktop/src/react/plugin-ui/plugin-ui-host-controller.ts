@@ -15,13 +15,6 @@ export interface PluginIframeSize {
   height?: number;
 }
 
-export interface PluginMediaViewerPayload {
-  url: string;
-  name: string;
-  kind: 'image' | 'svg' | 'video';
-  ext?: string;
-}
-
 export interface PluginUiRequestContext {
   pluginId: string;
   slot: PluginUiSlot;
@@ -48,7 +41,6 @@ export type PluginIframeHostMessage =
   | { kind: 'ready' }
   | { kind: 'navigate-tab'; tab: string }
   | { kind: 'resize'; size: PluginIframeSize }
-  | { kind: 'open-media-viewer'; payload: PluginMediaViewerPayload }
   | { kind: 'request'; message: PluginUiMessage };
 
 const CARD_MIN_WIDTH = 50;
@@ -64,18 +56,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function numberField(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function parseMediaViewerPayload(payload: unknown): PluginMediaViewerPayload | null {
-  if (!isObject(payload)) return null;
-  if (typeof payload.url !== 'string' || typeof payload.name !== 'string') return null;
-  if (payload.kind !== 'image' && payload.kind !== 'svg' && payload.kind !== 'video') return null;
-  return {
-    url: payload.url,
-    name: payload.name,
-    kind: payload.kind,
-    ext: typeof payload.ext === 'string' ? payload.ext : undefined,
-  };
 }
 
 export function getPluginIframeOrigin(routeUrl: string | null): string | null {
@@ -114,11 +94,6 @@ export function parsePluginIframeHostMessage(data: unknown): PluginIframeHostMes
       const height = numberField(data.payload.height);
       if (width === undefined && height === undefined) return null;
       return { kind: 'resize', size: { width, height } };
-    }
-
-    if (data.type === 'open-media-viewer') {
-      const payload = parseMediaViewerPayload(data.payload);
-      return payload ? { kind: 'open-media-viewer', payload } : null;
     }
 
     return null;

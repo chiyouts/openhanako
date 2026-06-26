@@ -32,10 +32,7 @@ export async function submitImageGeneration({ input = {}, ctx, metadata = null, 
     throw new Error(t("plugin.imageGen.noSessionPath"));
   }
 
-  const generatedDir = typeof ctx?._mediaGen?.getWritableGeneratedDir === "function"
-    ? await ctx._mediaGen.getWritableGeneratedDir({ agentId: ctx.agentId })
-    : undefined;
-  const submitCtx = createSubmitContext(ctx, generatedDir);
+  const submitCtx = createSubmitContext(ctx);
   const target = await resolveImageTarget(input, registry, submitCtx);
   const adapter = target?.adapter || null;
   if (!adapter) throw new Error(t("plugin.imageGen.noProvider"));
@@ -82,7 +79,6 @@ export async function submitImageGeneration({ input = {}, ctx, metadata = null, 
       modelId: target.modelId,
       protocolId: target.protocolId,
       credentialLaneId: target.credentialLaneId,
-      generatedDir: submitCtx.generatedDir,
       batchId,
       type: "image",
       prompt: input.prompt,

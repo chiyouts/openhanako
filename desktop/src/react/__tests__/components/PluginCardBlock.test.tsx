@@ -1,16 +1,16 @@
-﻿/**
+/**
  * @vitest-environment jsdom
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
+import { PluginCardBlock } from '../../components/chat/PluginCardBlock';
+import { useStore } from '../../stores';
 import {
   PLUGIN_UI_CAPABILITY,
   PLUGIN_UI_PROTOCOL,
   PLUGIN_UI_PROTOCOL_VERSION,
 } from '@hana/plugin-protocol';
-import { PluginCardBlock } from '../../components/chat/PluginCardBlock';
-import { useStore } from '../../stores';
 
 vi.mock('../../hooks/use-plugin-surface-url', () => ({
   usePluginSurfaceUrl: (routeUrl: string | null) => ({
@@ -34,28 +34,24 @@ function attachIframeWindow(iframe: HTMLIFrameElement, contentWindow: Window) {
   });
 }
 
-function renderCard() {
-  const rendered = render(
-    <PluginCardBlock
-      card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
-      agentId="butter"
-    />,
-  );
-  const iframe = rendered.container.querySelector('iframe') as HTMLIFrameElement;
-  const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
-  attachIframeWindow(iframe, trustedWindow);
-  return { ...rendered, iframe, trustedWindow };
-}
-
 describe('PluginCardBlock', () => {
   afterEach(() => {
     cleanup();
-    useStore.getState().closeMediaViewer();
     useStore.setState({ chatSessions: {} } as any);
   });
 
-  it('only accepts ready / resize messages from the iframe window and expected origin', () => {
-    const { iframe, trustedWindow } = renderCard();
+  it('只接受来自 iframe 自身且 origin 正确的 ready / resize 消息', () => {
+    const { container } = render(
+      <PluginCardBlock
+        card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
+        agentId="butter"
+      />,
+    );
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+    expect(iframe).toBeTruthy();
+
+    const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
+    attachIframeWindow(iframe, trustedWindow);
 
     expect(iframe.style.opacity).toBe('0.3');
     expect(iframe.style.width).toBe('400px');
@@ -96,8 +92,16 @@ describe('PluginCardBlock', () => {
     expect(iframe.style.height).toBe('220px');
   });
 
-  it('accepts SDK envelope ready / resize messages', () => {
-    const { iframe, trustedWindow } = renderCard();
+  it('接受新版 SDK envelope 的 ready / resize 消息', () => {
+    const { container } = render(
+      <PluginCardBlock
+        card={{ type: 'iframe', pluginId: 'demo', route: '/card', title: 'Demo', description: 'fallback' }}
+        agentId="butter"
+      />,
+    );
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+    const trustedWindow = { postMessage: vi.fn() } as unknown as Window;
+    attachIframeWindow(iframe, trustedWindow);
 
     act(() => {
       window.dispatchEvent(new MessageEvent('message', {
@@ -126,53 +130,6 @@ describe('PluginCardBlock', () => {
     expect(iframe.style.opacity).toBe('1');
     expect(iframe.style.width).toBe('260px');
     expect(iframe.style.height).toBe('210px');
-  });
-
-  it('accepts trusted open-media-viewer messages and opens the parent MediaViewer state', () => {
-    const { trustedWindow } = renderCard();
-
-    act(() => {
-      window.dispatchEvent(new MessageEvent('message', {
-        data: {
-          type: 'open-media-viewer',
-          payload: {
-            kind: 'image',
-            name: 'cat.png',
-            url: 'http://127.0.0.1:3210/api/plugins/image-gen/media/cat.png',
-            ext: 'png',
-          },
-        },
-        origin: 'http://127.0.0.1:3210',
-        source: trustedWindow,
-      }));
-    });
-
-    const viewer = useStore.getState().mediaViewer;
-    expect(viewer?.currentId).toContain('plugin-card:demo:');
-    expect(viewer?.files[0].remoteUrl).toContain('/api/plugins/image-gen/media/cat.png');
-  });
-
-  it('normalizes relative plugin media URLs to absolute URLs before opening the MediaViewer state', () => {
-    const { trustedWindow } = renderCard();
-
-    act(() => {
-      window.dispatchEvent(new MessageEvent('message', {
-        data: {
-          type: 'open-media-viewer',
-          payload: {
-            kind: 'image',
-            name: 'cat.png',
-            url: '/api/plugins/image-gen/media/cat.png?token=abc',
-            ext: 'png',
-          },
-        },
-        origin: 'http://127.0.0.1:3210',
-        source: trustedWindow,
-      }));
-    });
-
-    const viewer = useStore.getState().mediaViewer;
-    expect(viewer?.files[0].remoteUrl).toBe('http://127.0.0.1:3210/api/plugins/image-gen/media/cat.png?token=abc');
   });
 
   it('renders chat.surface cards as native chat transcript surfaces', () => {

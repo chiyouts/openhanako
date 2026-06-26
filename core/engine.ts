@@ -1667,10 +1667,7 @@ export class HanaEngine {
   _getResolvedExternalSkillPaths(cwd) {
     const pluginPaths = this._pluginManager?.getSkillPaths?.() || [];
     const workspacePaths = this._getWorkspaceExternalSkillPaths(cwd);
-    const configuredPaths = typeof this._prefs?.getExternalSkillPaths === "function"
-      ? this._prefs.getExternalSkillPaths()
-      : [];
-    return this._mergeExternalPaths(configuredPaths, [
+    return this._mergeExternalPaths(this._prefs.getExternalSkillPaths(), [
       ...pluginPaths,
       ...workspacePaths,
     ]);
@@ -2253,8 +2250,6 @@ export class HanaEngine {
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;
-    const extraReadOnlyPaths = this._getResolvedExternalSkillPaths(effectiveWorkspace)
-      .map((entry) => entry.dirPath);
     const workspaceFolders = opts.workspaceFolders || [];
     const staticAuthorizedFolders = Array.isArray(opts.authorizedFolders) ? opts.authorizedFolders : [];
     const getAuthorizedFolders = typeof opts.getAuthorizedFolders === "function"
@@ -2310,7 +2305,6 @@ export class HanaEngine {
       authorizedFolders: staticAuthorizedFolders,
       getAuthorizedFolders,
       hanakoHome: this.hanakoHome,
-      extraReadOnlyPaths,
       executionBoundary,
       getSandboxEnabled: () => this._readPreferences().sandbox !== false,
       getSandboxNetworkEnabled: () => process.platform === "win32"

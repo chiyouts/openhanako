@@ -9,14 +9,15 @@ export interface MediaSource {
 }
 
 /**
- * Resolve a FileRef to a URL consumable by <img> / <video>.
+ * FileRef → 可供 <img> / <video> 直接消费的 URL。
  *
- * Local desktop connections prefer platform.getFileUrl so local images stay on
- * disk and do not inflate the renderer heap. Remote clients use resource
- * content links instead of exposing server-local paths.
+ * 设计原则：
+ *   - 本地桌面连接优先走 platform.getFileUrl（preload 层统一编码 + UNC / Windows 盘符兜底）。
+ *   - 远程连接优先走 Resource content URL，避免把 server 本机路径暴露给 client。
+ *   - 只有无 path 且无 resource content link 的 inline 数据才走 data URL。
  */
 export async function loadMediaSource(ref: FileRef): Promise<MediaSource> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- preload injects window.platform at runtime.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- window.platform 的运行时存在性要在这里显式校验
   const platform = (window as any).platform;
 
   if (ref.kind !== 'image' && ref.kind !== 'svg' && ref.kind !== 'video') {

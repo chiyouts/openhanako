@@ -381,7 +381,6 @@ export interface PlatformApi {
   openSettings(tab?: string): void;
   openBrowserViewer(url?: string, theme?: string): void;
   selectFolder(): Promise<string | null>;
-  saveFileAs?(options: { defaultPath?: string; title?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>;
   selectFiles(): Promise<string[]>;
   selectSkill(): Promise<string | null>;
   selectPlugin?(): Promise<string | null>;

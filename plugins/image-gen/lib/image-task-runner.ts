@@ -64,18 +64,15 @@ export function normalizeSessionPath(ctx) {
 }
 
 export function generatedDirForCtx(ctx) {
-  const configured = ctx?._mediaGen?.getGeneratedDir || ctx?._mediaGen?.generatedDir;
-  if (typeof configured === "function") return configured();
-  if (typeof configured === "string") return configured;
   return path.join(ctx.dataDir, "generated");
 }
 
-export function createSubmitContext(ctx, generatedDir = generatedDirForCtx(ctx)) {
+export function createSubmitContext(ctx) {
   return {
     dataDir: ctx.dataDir,
     bus: ctx.bus,
     log: ctx.log,
-    generatedDir,
+    generatedDir: generatedDirForCtx(ctx),
     config: ctx.config,
   };
 }
@@ -511,7 +508,7 @@ export async function retryImageTask({ taskId, ctx }) {
 
   poller.add(taskId);
 
-  const submitCtx = createSubmitContext(ctx, task.generatedDir || undefined);
+  const submitCtx = createSubmitContext(ctx);
   const adapterSubmitCtx = submitContextForAdapter(registry, adapter, submitCtx);
   void runSubmitInBackground({
     taskId,

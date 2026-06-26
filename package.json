@@ -127,7 +127,6 @@
     "appId": "com.hanako.app",
     "productName": "HanaAgent",
     "asar": true,
-    "compression": "maximum",
     "npmRebuild": false,
     "afterPack": "./scripts/fix-modules.cjs",
     "extraMetadata": {
@@ -214,19 +213,7 @@
       "extraResources": [
         {
           "from": "vendor/git-portable",
-          "to": "git",
-          "filter": [
-            "**/*",
-            "!dev/**",
-            "!tmp/**",
-            "!mingw32/share/doc/**",
-            "!mingw32/share/licenses/**",
-            "!usr/share/doc/**",
-            "!usr/share/licenses/**",
-            "!usr/share/vim/**",
-            "!**/*.html",
-            "!unins000.*"
-          ]
+          "to": "git"
         },
         {
           "from": "dist-sandbox/win-${arch}/",

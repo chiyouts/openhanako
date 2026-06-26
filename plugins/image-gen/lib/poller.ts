@@ -85,7 +85,7 @@ export class Poller {
     this._store        = store;
     this._registry     = registry;
     this._bus          = bus;
-    this._dataDir      = dataDir || dirname(typeof generatedDir === "function" ? generatedDir() : generatedDir);
+    this._dataDir      = dataDir || dirname(generatedDir);
     this._generatedDir = generatedDir;
     this._log          = createSafeLogger(log);
     this._registerSessionFile = registerSessionFile || null;
@@ -228,17 +228,9 @@ export class Poller {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-
-  _getGeneratedDir(task) {
-    if (task?.generatedDir) return task.generatedDir;
-    return typeof this._generatedDir === "function"
-      ? this._generatedDir(task)
-      : this._generatedDir;
-  }
-
-  async _readImageDimensions(task, files) {
+  async _readImageDimensions(files) {
     if (!files?.length) return { imageWidth: null, imageHeight: null };
-    const filePath = pathJoin(this._getGeneratedDir(task), files[0]);
+    const filePath = pathJoin(this._generatedDir, files[0]);
     const size = await readImageSize(filePath).catch(() => null);
     return size
       ? { imageWidth: (size as any).width, imageHeight: (size as any).height }
@@ -260,7 +252,7 @@ export class Poller {
     if (!this._registerSessionFile || (!sessionId && !sessionPath) || !files?.length) return [];
     const sessionFiles = [];
     for (const file of files) {
-      const filePath = pathJoin(this._getGeneratedDir(task), file).split("\\").join("/");
+      const filePath = pathJoin(this._generatedDir, file);
       try {
         const sessionFile = this._registerSessionFile({
           ...(sessionId ? { sessionId } : {}),
@@ -287,7 +279,7 @@ export class Poller {
       batchId: task.batchId || null,
       kind: task.type === "video" ? "video" : "image",
       files: Array.isArray(files) ? files : [],
-      generatedDir: this._getGeneratedDir(task),
+      generatedDir: this._generatedDir,
       sessionFiles: Array.isArray(sessionFiles) ? sessionFiles : [],
       imageWidth: dims?.imageWidth ?? latest.imageWidth ?? null,
       imageHeight: dims?.imageHeight ?? latest.imageHeight ?? null,
@@ -338,7 +330,7 @@ export class Poller {
 
     // Fake-async: adapter populated files synchronously during submit.
     if (task.files && task.files.length > 0) {
-      const dims = await this._readImageDimensions(task, task.files);
+      const dims = await this._readImageDimensions(task.files);
       const sessionFiles = this._registerGeneratedFiles(task, task.files);
       this._store.update(taskId, {
         status: "done",
@@ -384,7 +376,7 @@ export class Poller {
 
     const baseCtx = {
       dataDir: this._dataDir,
-      generatedDir: this._getGeneratedDir(task),
+      generatedDir: this._generatedDir,
       bus: this._bus,
       log: this._log,
       task,
@@ -423,7 +415,7 @@ export class Poller {
 
     if (status === "success" || status === "done") {
       const files = result.files ?? [];
-      const dims = await this._readImageDimensions(task, files);
+      const dims = await this._readImageDimensions(files);
       const sessionFiles = this._registerGeneratedFiles(task, files);
       this._store.update(taskId, {
         status: "done",

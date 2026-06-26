@@ -517,7 +517,7 @@ describe("Poller", () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
 
-    const expectedFilePath = path.posix.join("/tmp/image-gen-generated", "abc.png");
+    const expectedFilePath = path.join("/tmp/image-gen-generated", "abc.png");
     expect(registerSessionFile).toHaveBeenCalledWith({
       sessionPath: "/sessions/image-gen.jsonl",
       filePath: expectedFilePath,
@@ -591,7 +591,7 @@ describe("Poller", () => {
     expect(registerSessionFile).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: "sess_image_task",
       sessionRef: { sessionId: "sess_image_task" },
-      filePath: path.posix.join("/tmp/image-gen-generated", "id-only.png"),
+      filePath: path.join("/tmp/image-gen-generated", "id-only.png"),
       label: "id-only.png",
       origin: "plugin_output",
       storageKind: "plugin_data",

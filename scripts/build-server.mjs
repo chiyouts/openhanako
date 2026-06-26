@@ -453,15 +453,11 @@ console.log("[build-server] dependencies installed");
 // ── 8. @vercel/nft 追踪：只保留运行时实际需要的文件 ──
 // 从 bundle 入口出发，静态分析所有 import/require 链，
 // 删除 node_modules 里没被追踪到的文件（.d.ts、.map、多余平台二进制等）
-let fileList;
-if (isWin) {
-  console.log("[build-server] skipping nft trace on Windows");
-  fileList = null;
-} else {
-  console.log("[build-server] running nft trace...");
+console.log("[build-server] running nft trace...");
 
 // nft 是 ESM，用动态 import
 const { nodeFileTrace } = await import("@vercel/nft");
+let fileList;
 try {
   ({ fileList } = await nodeFileTrace(
     [path.join(outDir, "bundle", "index.js")],
@@ -471,7 +467,6 @@ try {
   // Windows CI 上 nft 可能因用户目录不存在而报错，跳过裁剪
   console.warn(`[build-server] nft trace failed (${e.message}), skipping prune`);
   fileList = null;
-}
 }
 
 const nmDir = path.join(outDir, "node_modules");
@@ -538,15 +533,11 @@ const MB = (n) => (n / 1024 / 1024).toFixed(0);
 console.log(`[build-server] nft: kept ${keptFiles} files, removed ${removedFiles} files (${MB(removedSize)}MB)`);
 } // end if (fileList)
 
-if (fileList) {
-  try {
-    verifyExternalEntrypoints(outDir, Object.keys(externalPkg.dependencies));
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-} else {
-  console.log("[build-server] nft trace skipped; external entrypoints were already verified");
+try {
+  verifyExternalEntrypoints(outDir, Object.keys(externalPkg.dependencies));
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
 }
 runBetterSqliteRuntimeSmokeIfNeeded();
 runJiebaRuntimeSmokeIfNeeded();

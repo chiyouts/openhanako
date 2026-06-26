@@ -8,13 +8,6 @@ import {
   normalizeImageGenerationConfig,
   normalizeVideoGenerationConfig,
 } from "../preferences-manager.ts";
-import {
-  findGeneratedFile,
-  getDefaultGeneratedDir,
-  recordOutputDirHistory,
-  resolveGeneratedDir,
-  validateOutputDir,
-} from "../../plugins/image-gen/lib/generated-dir.js";
 import { TaskStore } from "../../plugins/image-gen/lib/task-store.ts";
 import { Poller } from "../../plugins/image-gen/lib/poller.ts";
 import { submitImageGeneration } from "../../plugins/image-gen/lib/submit-image.ts";
@@ -43,14 +36,6 @@ const IMAGE_GENERATION_CONFIG_SCHEMA = normalizePluginConfigSchema("image-gen", 
     providerDefaults: {
       type: "object",
       title: "per-provider 默认参数",
-    },
-    outputDir: {
-      type: "string",
-      title: "Image output directory",
-    },
-    outputDirHistory: {
-      type: "array",
-      title: "Image output directory history",
     },
   },
 });
@@ -100,26 +85,6 @@ function normalizeConfigPatch(patch) {
       next.providerDefaults = structuredClone(value);
     } else {
       throw new Error("providerDefaults must be an object");
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(values, "outputDir")) {
-    const value = values.outputDir;
-    if (value === undefined || value === null || value === "") {
-      next.outputDir = undefined;
-    } else if (typeof value === "string") {
-      next.outputDir = value;
-    } else {
-      throw new Error("outputDir must be a string");
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(values, "outputDirHistory")) {
-    const value = values.outputDirHistory;
-    if (value === undefined || value === null) {
-      next.outputDirHistory = undefined;
-    } else if (Array.isArray(value)) {
-      next.outputDirHistory = value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim());
-    } else {
-      throw new Error("outputDirHistory must be an array");
     }
   }
   return next;
@@ -357,7 +322,7 @@ export class UniversalMediaManager {
   }
 
   get dataDir() { return this._dataDir; }
-  get generatedDir() { return this.getGeneratedDir(); }
+  get generatedDir() { return this._generatedDir; }
   get registry() { return this._registry; }
   get store() { return this._store; }
   get poller() { return this._poller; }
@@ -368,38 +333,8 @@ export class UniversalMediaManager {
       registry: this._registry,
       store: this._store,
       poller: this._poller,
-      generatedDir: () => this.getGeneratedDir(),
-      getGeneratedDir: () => this.getGeneratedDir(),
-      getWritableGeneratedDir: (options: any = {}) => this.getWritableGeneratedDir(options),
+      generatedDir: this._generatedDir,
     };
-  }
-
-  _generatedDirContext() {
-    return {
-      dataDir: this._dataDir,
-      bus: this._bus,
-      log: this._log,
-      config: this._config,
-    };
-  }
-
-  getGeneratedDir() {
-    return resolveGeneratedDir(this._generatedDirContext());
-  }
-
-  async getWritableGeneratedDir({ agentId }: { agentId?: string } = {}) {
-    const ctx = this._generatedDirContext();
-    const validation = await validateOutputDir(ctx, resolveGeneratedDir(ctx), { agentId });
-    if (validation.ok) return validation.outputDir;
-
-    const fallbackDir = getDefaultGeneratedDir(ctx);
-    if (validation.outputDir !== fallbackDir) {
-      this._log.warn?.(`[media] configured outputDir is unavailable, falling back to default: ${validation.error}`);
-      const fallbackValidation = await validateOutputDir(ctx, fallbackDir, { agentId });
-      if (fallbackValidation.ok) return fallbackValidation.outputDir;
-    }
-
-    throw new Error(validation.error || "unable to prepare generated output directory");
   }
 
   _registerBuiltinAdapters() {
@@ -462,12 +397,6 @@ export class UniversalMediaManager {
   setImageConfig(patch) {
     const updates = normalizeConfigPatch(patch);
     this._validateImageConfigPatch(updates);
-    if (Object.prototype.hasOwnProperty.call(updates, "outputDir")) {
-      const ctx = this._generatedDirContext();
-      const previousDir = this.getGeneratedDir();
-      const nextDir = updates.outputDir || getDefaultGeneratedDir(ctx);
-      recordOutputDirHistory(ctx, previousDir, nextDir);
-    }
     const current = this.getImageConfig();
     const next = { ...current };
     for (const [key, value] of Object.entries(updates)) {
@@ -542,7 +471,7 @@ export class UniversalMediaManager {
       registry: this._registry,
       bus,
       dataDir: this._dataDir,
-      generatedDir: () => this.getGeneratedDir(),
+      generatedDir: this._generatedDir,
       log: this._log,
       registerSessionFile: this._registerSessionFile,
     });
@@ -632,7 +561,7 @@ export class UniversalMediaManager {
       dataDir: this._dataDir,
       bus: this._bus,
       log: this._log,
-      generatedDir: this.getGeneratedDir(),
+      generatedDir: this._generatedDir,
       config: this._config,
       videoConfig: this._createVideoConfigBridge(),
     };
@@ -1032,18 +961,14 @@ export class UniversalMediaManager {
   }
 
   _removeGeneratedFile(filename) {
-    const filePath = findGeneratedFile(this._generatedDirContext(), filename);
-    if (filePath) {
-      try { fs.unlinkSync(filePath); } catch {}
-    }
+    try { fs.unlinkSync(path.join(this._generatedDir, filename)); } catch {}
   }
 
   generatedFilePath(filename) {
     if (!filename || filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
       throw new Error("invalid filename");
     }
-    return findGeneratedFile(this._generatedDirContext(), filename)
-      || path.join(this.getGeneratedDir(), filename);
+    return path.join(this._generatedDir, filename);
   }
 
   async listImageProviders() {

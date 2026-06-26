@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useSettingsStore } from '../store';
 import { hanaFetch } from '../api';
 import { t } from '../helpers';
@@ -23,25 +23,6 @@ interface MediaConfig {
   defaultImageModel?: { id: string; provider: string };
   defaultVideoModel?: { id: string; provider: string };
   providerDefaults?: Record<string, any>;
-  outputDir?: string;
-  resolvedOutputDir?: string;
-}
-
-function FolderIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function ResetIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 12a9 9 0 1 0 3-6.7" />
-      <path d="M3 3v6h6" />
-    </svg>
-  );
 }
 
 interface SpeechModel {
@@ -126,11 +107,11 @@ function speechModelLabel(model: SpeechModel | { id: string; name: string }): st
 function getRunnableSpeechModels(provider: SpeechProvider): Array<{ id: string; name: string }> {
   if (!provider.hasCredentials) return [];
   if (Array.isArray(provider.availableModels)) {
-    return provider.availableModels.map((model) => ({ id: model.id, name: model.name || model.id }));
+    return provider.availableModels.map(model => ({ id: model.id, name: model.name || model.id }));
   }
   return (provider.models || [])
-    .filter((model) => model.adapterAvailable !== false)
-    .map((model) => ({ id: model.id, name: speechModelLabel(model) }));
+    .filter(model => model.adapterAvailable !== false)
+    .map(model => ({ id: model.id, name: speechModelLabel(model) }));
 }
 
 function textOrFallback(key: string, fallback: string): string {
@@ -174,7 +155,7 @@ function SpeechProviderDetail({
           </div>
           {runnableModels.length > 0 ? (
             <div className={styles['pv-fav-list']}>
-              {runnableModels.map((model) => (
+              {runnableModels.map(model => (
                 <div key={model.id} className={styles['pv-fav-item']}>
                   <span className={styles['pv-fav-item-name']} title={model.id}>{model.name || model.id}</span>
                   <span className={styles['pv-fav-item-id']}>{model.id}</span>
@@ -200,7 +181,7 @@ function SpeechProviderDetail({
 }
 
 export function MediaTab() {
-  const snapshotSpeechConfig = useSettingsStore((s) => s.settingsSnapshot.data?.preferences?.speechRecognition);
+  const snapshotSpeechConfig = useSettingsStore(s => s.settingsSnapshot.data?.preferences?.speechRecognition);
   const [providers, setProviders] = useState<Record<string, MediaProvider>>({});
   const [config, setConfig] = useState<MediaConfig | null>(null);
   const [imageConfigLoading, setImageConfigLoading] = useState(true);
@@ -213,7 +194,7 @@ export function MediaTab() {
   ));
   const [speechConfigLoading, setSpeechConfigLoading] = useState(() => !snapshotSpeechConfig);
   const [selected, setSelected] = useState<MediaSelection | null>(null);
-  const showToast = useSettingsStore((s) => s.showToast);
+  const showToast = useSettingsStore(s => s.showToast);
 
   useEffect(() => {
     if (!snapshotSpeechConfig) return;
@@ -228,11 +209,11 @@ export function MediaTab() {
       const nextProviders = data.providers || {};
       setProviders(nextProviders);
       setConfig(data.config || {});
-      setSelected((current) => {
+      setSelected(current => {
         if (current && current.kind !== 'imageGeneration') return current;
         if (current?.kind === 'imageGeneration' && nextProviders[current.providerId]) return current;
         const ids = Object.keys(nextProviders);
-        const providerId = ids.find((id) => nextProviders[id]?.hasCredentials) || ids[0] || null;
+        const providerId = ids.find(id => nextProviders[id]?.hasCredentials) || ids[0] || null;
         return providerId ? { kind: 'imageGeneration', providerId } : null;
       });
     } catch {
@@ -273,7 +254,7 @@ export function MediaTab() {
       const nextProviders = data.providers || {};
       setSpeechProviders(nextProviders);
       setSpeechConfig(mergeSpeechConfig({ enabled: false }, data.config || {}));
-      setSelected((current) => {
+      setSelected(current => {
         if (current?.kind !== 'speechRecognition') return current;
         if (nextProviders[current.providerId]) return current;
         return null;
@@ -295,14 +276,14 @@ export function MediaTab() {
   const providerIds = Object.keys(providers);
   const videoProviderIds = Object.keys(videoProviders);
   const speechProviderIds = Object.keys(speechProviders);
-  const allImageModels = providerIds.flatMap((providerId) =>
-    (providers[providerId].models || []).map((model) => ({ ...model, provider: providerId })),
+  const allImageModels = providerIds.flatMap(pid =>
+    (providers[pid].models || []).map(m => ({ ...m, provider: pid }))
   );
-  const allVideoModels = videoProviderIds.flatMap((providerId) =>
-    (videoProviders[providerId].models || []).map((model) => ({ ...model, provider: providerId })),
+  const allVideoModels = videoProviderIds.flatMap(pid =>
+    (videoProviders[pid].models || []).map(m => ({ ...m, provider: pid }))
   );
-  const allSpeechModels = speechProviderIds.flatMap((providerId) =>
-    getRunnableSpeechModels(speechProviders[providerId]).map((model) => ({ ...model, provider: providerId })),
+  const allSpeechModels = speechProviderIds.flatMap(pid =>
+    getRunnableSpeechModels(speechProviders[pid]).map(m => ({ ...m, provider: pid }))
   );
   const speechEnabled = speechConfig?.enabled === true;
   const speechRecognitionEnabledLabel = textOrFallback('settings.media.speechRecognitionEnabled', '发送语音条时转录');
@@ -331,28 +312,8 @@ export function MediaTab() {
         body: JSON.stringify({ values: encodeConfigPatch(updates) }),
       });
       const data = await res.json().catch(() => null);
-      if (data?.config) setConfig(data.config);
-      else if (data?.values) setConfig(data.values);
-      else setConfig((prev) => applyConfigPatch(prev || {}, updates));
-      showToast(t('settings.saved'), 'success');
-    } catch (err: any) {
-      showToast(err.message || 'Save failed', 'error');
-    }
-  };
-
-  const saveImageOutputDirConfig = async (updates: Partial<MediaConfig>) => {
-    try {
-      const agentId = useSettingsStore.getState().getSettingsAgentId();
-      const query = agentId ? `?agentId=${agentId}` : '';
-      const res = await hanaFetch(`/api/plugins/image-gen/config${query}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: encodeConfigPatch(updates) }),
-      });
-      const data = await res.json().catch(() => null);
-      if (data?.config) setConfig(data.config);
-      else if (data?.values) setConfig(data.values);
-      else setConfig((prev) => applyConfigPatch(prev || {}, updates));
+      if (data?.values) setConfig(data.values);
+      else setConfig(prev => applyConfigPatch(prev || {}, updates));
       showToast(t('settings.saved'), 'success');
     } catch (err: any) {
       showToast(err.message || 'Save failed', 'error');
@@ -383,14 +344,14 @@ export function MediaTab() {
         body: JSON.stringify({ values: encodeSpeechConfigPatch(updates) }),
       });
       const data = await res.json().catch(() => null);
-      setSpeechConfig((prev) => {
+      setSpeechConfig(prev => {
         const base = prev || { enabled: false };
         const next = data?.config
           ? mergeSpeechConfig(base, data.config)
           : data?.values
             ? mergeSpeechConfig(base, data.values)
             : applySpeechConfigPatch(base, updates);
-        updateSettingsSnapshot((snapshot) => ({
+        updateSettingsSnapshot(snapshot => ({
           ...snapshot,
           preferences: { ...snapshot.preferences, speechRecognition: next },
         }));
@@ -402,50 +363,42 @@ export function MediaTab() {
     }
   };
 
-  const chooseOutputDir = async () => {
-    const folder = await window.platform?.selectFolder?.();
-    if (!folder) return;
-    await saveImageOutputDirConfig({ outputDir: folder });
-  };
-
-  const resetOutputDir = async () => {
-    await saveImageOutputDirConfig({ outputDir: '' });
-  };
-
   return (
-    <div className={`${styles['settings-tab-content']} ${styles.active}`} data-tab="media">
+    <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="media">
+      {/* pv-layout：double-column variant 做外壳，内部 DOM 保留原样 */}
       <SettingsSection variant="double-column">
         <div className={styles['pv-layout']}>
+          {/* Left: Provider list */}
           <div className={styles['pv-list']}>
             <div className={styles['pv-list-group-label']}>{t('settings.media.imageGeneration')}</div>
-            {providerIds.map((providerId) => {
-              const provider = providers[providerId];
+            {providerIds.map(pid => {
+              const p = providers[pid];
               return (
                 <button
-                  key={providerId}
-                  className={`${styles['pv-list-item']}${selectedImageProviderId === providerId ? ` ${styles.selected}` : ''}${!provider.hasCredentials ? ` ${styles.dim}` : ''}`}
-                  onClick={() => setSelected({ kind: 'imageGeneration', providerId })}
+                  key={pid}
+                  className={`${styles['pv-list-item']}${selectedImageProviderId === pid ? ' ' + styles['selected'] : ''}${!p.hasCredentials ? ' ' + styles['dim'] : ''}`}
+                  onClick={() => setSelected({ kind: 'imageGeneration', providerId: pid })}
                 >
-                  <span className={`${styles['pv-status-dot']}${provider.hasCredentials ? ` ${styles.on}` : ''}`} />
-                  <span className={styles['pv-list-item-name']}>{provider.displayName || providerId}</span>
-                  <span className={styles['pv-list-item-count']}>{provider.models.length}</span>
+                  <span className={`${styles['pv-status-dot']}${p.hasCredentials ? ' ' + styles['on'] : ''}`} />
+                  <span className={styles['pv-list-item-name']}>{p.displayName || pid}</span>
+                  <span className={styles['pv-list-item-count']}>{p.models.length}</span>
                 </button>
               );
             })}
 
             <div className={styles['pv-list-divider']} />
             <div className={styles['pv-list-group-label']}>{t('settings.media.videoGeneration')}</div>
-            {videoProviderIds.map((providerId) => {
-              const provider = videoProviders[providerId];
+            {videoProviderIds.map(pid => {
+              const p = videoProviders[pid];
               return (
                 <button
-                  key={providerId}
-                  className={`${styles['pv-list-item']}${selectedVideoProviderId === providerId ? ` ${styles.selected}` : ''}${!provider.hasCredentials ? ` ${styles.dim}` : ''}`}
-                  onClick={() => setSelected({ kind: 'videoGeneration', providerId })}
+                  key={pid}
+                  className={`${styles['pv-list-item']}${selectedVideoProviderId === pid ? ' ' + styles['selected'] : ''}${!p.hasCredentials ? ' ' + styles['dim'] : ''}`}
+                  onClick={() => setSelected({ kind: 'videoGeneration', providerId: pid })}
                 >
-                  <span className={`${styles['pv-status-dot']}${provider.hasCredentials ? ` ${styles.on}` : ''}`} />
-                  <span className={styles['pv-list-item-name']}>{provider.displayName || providerId}</span>
-                  <span className={styles['pv-list-item-count']}>{provider.models.length}</span>
+                  <span className={`${styles['pv-status-dot']}${p.hasCredentials ? ' ' + styles['on'] : ''}`} />
+                  <span className={styles['pv-list-item-name']}>{p.displayName || pid}</span>
+                  <span className={styles['pv-list-item-count']}>{p.models.length}</span>
                 </button>
               );
             })}
@@ -454,19 +407,19 @@ export function MediaTab() {
             <div className={styles['pv-list-group-label']}>
               {t('settings.media.speechRecognition')}
             </div>
-            {speechProviderIds.map((providerId) => {
-              const provider = speechProviders[providerId];
-              const runnableCount = getRunnableSpeechModels(provider).length;
+            {speechProviderIds.map(pid => {
+              const p = speechProviders[pid];
+              const runnableCount = getRunnableSpeechModels(p).length;
               return (
                 <button
-                  key={providerId}
+                  key={pid}
                   type="button"
-                  className={`${styles['pv-list-item']}${selectedSpeechProviderId === providerId ? ` ${styles.selected}` : ''}${!provider.hasCredentials || runnableCount === 0 ? ` ${styles.dim}` : ''}`}
-                  onClick={() => setSelected({ kind: 'speechRecognition', providerId })}
-                  title={provider.unavailableReason || undefined}
+                  className={`${styles['pv-list-item']}${selectedSpeechProviderId === pid ? ' ' + styles['selected'] : ''}${!p.hasCredentials || runnableCount === 0 ? ' ' + styles['dim'] : ''}`}
+                  onClick={() => setSelected({ kind: 'speechRecognition', providerId: pid })}
+                  title={p.unavailableReason || undefined}
                 >
-                  <span className={`${styles['pv-status-dot']}${provider.hasCredentials && runnableCount > 0 ? ` ${styles.on}` : ''}`} />
-                  <span className={styles['pv-list-item-name']}>{provider.displayName || providerId}</span>
+                  <span className={`${styles['pv-status-dot']}${p.hasCredentials && runnableCount > 0 ? ' ' + styles['on'] : ''}`} />
+                  <span className={styles['pv-list-item-name']}>{p.displayName || pid}</span>
                   <span className={styles['pv-list-item-count']}>{runnableCount}</span>
                 </button>
               );
@@ -484,6 +437,7 @@ export function MediaTab() {
             </div>
           </div>
 
+          {/* Right: Provider detail */}
           <div className={styles['pv-detail']}>
             {selectedImageProviderId && providers[selectedImageProviderId] ? (
               <MediaProviderDetail
@@ -510,48 +464,51 @@ export function MediaTab() {
                 config={speechConfig}
               />
             ) : (
-              <div className={styles['pv-empty']}>{t('settings.media.noProvider')}</div>
+              <div className={styles['pv-empty']}>
+                {t('settings.media.noProvider')}
+              </div>
             )}
           </div>
         </div>
       </SettingsSection>
 
+      {/* 全局默认：标准 inline row */}
       <SettingsSection title={t('settings.media.globalDefault')}>
         <SettingsRow
           label={t('settings.media.defaultModel')}
           control={
             <SelectWidget
               value={imageDefaultValue}
-              onChange={(value) => {
-                if (value === LOADING_SELECT_VALUE) return;
-                if (!value) {
+              onChange={(val) => {
+                if (val === LOADING_SELECT_VALUE) return;
+                if (!val) {
                   saveConfig({ defaultImageModel: undefined });
                   return;
                 }
-                const [provider, ...rest] = value.split('/');
+                const [provider, ...rest] = val.split('/');
                 saveConfig({ defaultImageModel: { id: rest.join('/'), provider } });
               }}
               disabled={!imageConfigReady}
               options={[
-                ...(imageConfigReady ? [{ value: '', label: '-' }] : [{ value: LOADING_SELECT_VALUE, label: t('common.loading'), disabled: true }]),
-                ...(imageConfigReady && config?.defaultImageModel && !allImageModels.some((model) => `${model.provider}/${model.id}` === imageDefaultValue)
+                ...(imageConfigReady ? [{ value: '', label: '—' }] : [{ value: LOADING_SELECT_VALUE, label: t('common.loading'), disabled: true }]),
+                ...(imageConfigReady && config?.defaultImageModel && !allImageModels.some(m => `${m.provider}/${m.id}` === imageDefaultValue)
                   ? [{
                       value: imageDefaultValue,
                       label: `${config.defaultImageModel.provider} / ${config.defaultImageModel.id}`,
                       disabled: true,
                     }]
                   : []),
-                ...(imageConfigReady ? allImageModels.map((model) => {
-                  const providerHasCredentials = providers[model.provider]?.hasCredentials === true;
-                  const adapterAvailable = model.adapterAvailable !== false;
-                  const label = `${model.provider} / ${model.name || model.id}`;
+                ...(imageConfigReady ? allImageModels.map(m => {
+                  const providerHasCredentials = providers[m.provider]?.hasCredentials === true;
+                  const adapterAvailable = m.adapterAvailable !== false;
+                  const label = `${m.provider} / ${m.name || m.id}`;
                   const unavailableReason = !providerHasCredentials
                     ? t('settings.media.credentialMissing')
                     : !adapterAvailable
                       ? t('settings.media.adapterMissing')
                       : '';
                   return {
-                    value: `${model.provider}/${model.id}`,
+                    value: `${m.provider}/${m.id}`,
                     label: unavailableReason ? `${label} (${unavailableReason})` : label,
                     disabled: !providerHasCredentials || !adapterAvailable,
                   };
@@ -618,65 +575,32 @@ export function MediaTab() {
           control={
             <SelectWidget
               value={speechDefaultValue}
-              onChange={(value) => {
-                if (value === LOADING_SELECT_VALUE) return;
-                if (!value) {
+              onChange={(val) => {
+                if (val === LOADING_SELECT_VALUE) return;
+                if (!val) {
                   saveSpeechConfig({ defaultModel: undefined });
                   return;
                 }
-                const [provider, ...rest] = value.split('/');
+                const [provider, ...rest] = val.split('/');
                 saveSpeechConfig({ defaultModel: { id: rest.join('/'), provider } });
               }}
               disabled={!speechConfigReady || !speechEnabled || (allSpeechModels.length === 0 && !speechConfig?.defaultModel)}
               options={[
-                ...(speechConfigReady ? [{ value: '', label: '-' }] : [{ value: LOADING_SELECT_VALUE, label: t('common.loading'), disabled: true }]),
-                ...(speechConfigReady && speechConfig?.defaultModel && !allSpeechModels.some((model) => `${model.provider}/${model.id}` === speechDefaultValue)
+                ...(speechConfigReady ? [{ value: '', label: '—' }] : [{ value: LOADING_SELECT_VALUE, label: t('common.loading'), disabled: true }]),
+                ...(speechConfigReady && speechConfig?.defaultModel && !allSpeechModels.some(m => `${m.provider}/${m.id}` === speechDefaultValue)
                   ? [{
                       value: speechDefaultValue,
                       label: `${speechConfig.defaultModel.provider} / ${speechConfig.defaultModel.id}`,
                       disabled: true,
                     }]
                   : []),
-                ...(speechConfigReady && speechEnabled ? allSpeechModels.map((model) => ({
-                  value: `${model.provider}/${model.id}`,
-                  label: `${model.provider} / ${model.name || model.id}`,
+                ...(speechConfigReady && speechEnabled ? allSpeechModels.map(m => ({
+                  value: `${m.provider}/${m.id}`,
+                  label: `${m.provider} / ${m.name || m.id}`,
                 })) : []),
               ]}
             />
           }
-        />
-        <SettingsRow
-          label={t('settings.mediaExtra.outputDir')}
-          control={(
-            <div className={styles['pv-inline-action-row']}>
-              <input
-                className={styles['settings-input']}
-                type="text"
-                value={config?.resolvedOutputDir || config?.outputDir || ''}
-                readOnly
-                title={config?.resolvedOutputDir || config?.outputDir || ''}
-                style={{ flex: 1, minWidth: 0 }}
-              />
-              <button
-                type="button"
-                className={styles['pv-inline-icon-btn']}
-                onClick={chooseOutputDir}
-                title={t('settings.mediaExtra.chooseOutputDir')}
-                aria-label={t('settings.mediaExtra.chooseOutputDir')}
-              >
-                <FolderIcon />
-              </button>
-              <button
-                type="button"
-                className={`${styles['pv-inline-icon-btn']} ${styles.danger}`}
-                onClick={resetOutputDir}
-                title={t('settings.mediaExtra.resetOutputDir')}
-                aria-label={t('settings.mediaExtra.resetOutputDir')}
-              >
-                <ResetIcon />
-              </button>
-            </div>
-          )}
         />
       </SettingsSection>
     </div>

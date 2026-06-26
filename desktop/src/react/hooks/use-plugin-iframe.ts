@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { DEFAULT_PLUGIN_UI_CAPABILITIES } from '../plugin-ui/capabilities';
-import { useStore } from '../stores';
 import {
   clampPluginIframeSize,
   getPluginIframeOrigin,
@@ -48,7 +47,6 @@ export function usePluginIframe(routeUrl: string | null, options: UsePluginIfram
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const seqRef = useRef(0);
   const expectedOrigin = useMemo(() => getPluginIframeOrigin(routeUrl), [routeUrl]);
-  const setMediaViewer = useStore(state => state.setMediaViewer);
 
   const resetHandshakeTimeout = useCallback(() => {
     clearTimeout(timeoutRef.current);
@@ -83,24 +81,6 @@ export function usePluginIframe(routeUrl: string | null, options: UsePluginIfram
             iframe.style.height = `${next.height}px`;
           }
           return next;
-        });
-      }
-      if (message.kind === 'open-media-viewer') {
-        if (slot !== 'card') return;
-        const normalizedUrl = new URL(message.payload.url, routeUrl || window.location.href).toString();
-        const fileId = `plugin-card:${pluginId}:${normalizedUrl}`;
-        setMediaViewer({
-          files: [{
-            id: fileId,
-            kind: message.payload.kind,
-            source: 'desk',
-            name: message.payload.name,
-            path: '',
-            remoteUrl: normalizedUrl,
-            ext: message.payload.ext,
-          }],
-          currentId: fileId,
-          origin: 'desk',
         });
       }
       if (message.kind === 'request') {
@@ -143,7 +123,6 @@ export function usePluginIframe(routeUrl: string | null, options: UsePluginIfram
     initialSize?.width,
     initialSize?.height,
     resetHandshakeTimeout,
-    setMediaViewer,
   ]);
 
   const postToIframe = useCallback((type: string, payload: Record<string, unknown> = {}) => {
