@@ -3,6 +3,7 @@ import os from "os";
 
 const createTelegramAdapter = vi.fn();
 const createFeishuAdapter = vi.fn();
+const createDingTalkAdapter = vi.fn();
 const createQQAdapter = vi.fn();
 const createWechatAdapter = vi.fn();
 
@@ -11,6 +12,9 @@ vi.mock("../lib/bridge/telegram-adapter.js", () => ({
 }));
 vi.mock("../lib/bridge/feishu-adapter.js", () => ({
   createFeishuAdapter: (...args) => createFeishuAdapter(...args),
+}));
+vi.mock("../lib/bridge/dingtalk-adapter.js", () => ({
+  createDingTalkAdapter: (...args) => createDingTalkAdapter(...args),
 }));
 vi.mock("../lib/bridge/qq-adapter.js", () => ({
   createQQAdapter: (...args) => createQQAdapter(...args),
@@ -29,6 +33,7 @@ describe("BridgeManager platform status", () => {
   it("starts wechat in connecting state until the adapter reports readiness", () => {
     createTelegramAdapter.mockReset();
     createFeishuAdapter.mockReset();
+    createDingTalkAdapter.mockReset();
     createQQAdapter.mockReset();
     createWechatAdapter.mockReset();
     createWechatAdapter.mockReturnValue({ stop: vi.fn() });
@@ -44,5 +49,33 @@ describe("BridgeManager platform status", () => {
     bm.startPlatform("wechat", { botToken: "wx-token", hanaHome: os.tmpdir() }, "hana");
 
     expect(bm.getStatus("hana").wechat).toMatchObject({ status: "connecting", error: null });
+  });
+
+  it("reports DingTalk config errors when enabled credentials are incomplete", () => {
+    createTelegramAdapter.mockReset();
+    createFeishuAdapter.mockReset();
+    createDingTalkAdapter.mockReset();
+    createQQAdapter.mockReset();
+    createWechatAdapter.mockReset();
+
+    const engine = {
+      hanakoHome: os.tmpdir(),
+      agent: null,
+      getAgent: vi.fn(() => null),
+    };
+    const hub = { eventBus: { emit: vi.fn() } };
+    const bm = new BridgeManager({ engine, hub });
+
+    bm.startPlatformFromConfig("dingtalk", {
+      enabled: true,
+      clientId: "dt-client",
+      clientSecret: "dt-secret",
+    }, "hana");
+
+    expect(createDingTalkAdapter).not.toHaveBeenCalled();
+    expect(bm.getStatus("hana").dingtalk).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/enterprise robotCode/i),
+    });
   });
 });

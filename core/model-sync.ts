@@ -20,6 +20,7 @@ import {
 import { normalizeProviderHeaders, providerCredentialAllowsMissingApiKey } from "../shared/provider-auth.ts";
 import { validateProviderModels } from "../shared/provider-model-validation.ts";
 import { buildRuntimeApiKeyRef } from "../shared/runtime-api-key-ref.ts";
+import { inferOllamaModelMetadata } from "../shared/ollama-model-metadata.ts";
 import { normalizeProviderBaseUrlForApi } from "../lib/llm/provider-client.ts";
 import { normalizeThinkingLevelForModel } from "./session-thinking-level.ts";
 
@@ -267,7 +268,8 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
   // 兼容读：migration #7 之前的旧数据用 vision 字段；两个版本后移除 vision fallback
   const userImage = isObj ? (modelEntry.image ?? modelEntry.vision) : undefined;
   const knownImage = known?.image ?? known?.vision;
-  const image = userImage !== undefined ? userImage : (knownImage === true);
+  const inferredImage = inferOllamaModelMetadata(provider, id)?.image;
+  const image = userImage !== undefined ? userImage : (knownImage === true || inferredImage === true);
   const userVideo = isObj ? modelEntry.video : undefined;
   const knownVideo = known?.video;
   const video = userVideo !== undefined ? userVideo : (knownVideo === true);
@@ -319,17 +321,18 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
   // 3. Gemini OpenAI 兼容层（/v1beta/openai）严格校验，不识别 store 字段会 400。
   //    Native google-generative-ai 不走 Chat Completions，不需要这组 OpenAI 字段兼容。
   if (provider !== "openai") {
+    const knownCompat = normalizeModelProtocolCompat(known?.compat) || {};
     const explicitCompat = isObj
       ? (normalizeModelProtocolCompat(modelEntry.compat) || {})
       : {};
-    const compat: Record<string, unknown> = { ...explicitCompat, supportsDeveloperRole: false };
+    const compat: Record<string, unknown> = { ...knownCompat, ...explicitCompat, supportsDeveloperRole: false };
     if (api === "openai-completions" && (
       provider === "gemini"
       || baseUrl.includes("generativelanguage.googleapis.com")
     )) {
       compat.supportsStore = false;
     }
-    if (isZhipuOpenAICompat(provider, baseUrl, api)) {
+    if (compat.thinkingFormat === "zhipu" || isZhipuOpenAICompat(provider, baseUrl, api)) {
       compat.supportsStore = false;
       compat.supportsReasoningEffort = false;
     }

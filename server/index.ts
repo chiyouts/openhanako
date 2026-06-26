@@ -23,12 +23,14 @@ import { initDebugLog, createModuleLogger } from "../lib/debug-log.ts";
 import { redactLogLabel, redactLogText } from "../lib/log-redactor.ts";
 import { safeJson } from "./hono-helpers.ts";
 import { installOpenAIRelayFetchSanitizer } from "./openai-relay-fetch.js";
+import { resolveSessionThinkingLevelState } from "./session-thinking-level-state.ts";
 
 const log = createModuleLogger("server");
 const checkpointLog = createModuleLogger("checkpoint");
 const sessionFilesLog = createModuleLogger("session-files");
 import { createOutboundProxyRuntime } from "../lib/net/outbound-proxy.ts";
 import { createServerAuthService } from "../core/server-auth.ts";
+import { createWebSocketTicketService } from "../core/ws-auth-ticket.ts";
 import { resolveServerListenOptions } from "../core/server-network-config.ts";
 import { isCorsOriginAllowed } from "./http/cors-policy.ts";
 import { inferHttpConnectionKind } from "./http/transport-context.ts";
@@ -79,8 +81,10 @@ import { createCommandsRoute } from "./routes/commands.ts";
 import { createServerIdentityRoute } from "./routes/server-identity.ts";
 import { ensureLocalIdentityRegistries } from "../core/server-identity.ts";
 import { createResourcesRoute } from "./routes/resources.ts";
+import { createResourceIoRoute } from "./routes/resource-io.ts";
 import { createUsageRoute } from "./routes/usage.ts";
 import { createWebAuthRoute } from "./routes/web-auth.ts";
+import { createWebSocketAuthRoute } from "./routes/ws-auth.ts";
 import { createMobileWorkbenchRoute } from "./routes/mobile-workbench.ts";
 import { createStudioWorkspacesRoute } from "./routes/studio-workspaces.ts";
 import { createMobileStaticRoute } from "./routes/mobile-static.ts";
@@ -89,6 +93,7 @@ import { createAccessRoute } from "./routes/access.ts";
 import { createMediaRoute } from "./routes/media.ts";
 import { createSpeechRecognitionRoute } from "./routes/speech-recognition.ts";
 import { registerTaskRegistryBusHandlers } from "./task-bus-handlers.ts";
+import { registerDeferredResultBusHandlers } from "./deferred-result-bus-handlers.ts";
 import { configureProcessPiSdkEnv, ensureHanaPiSdkDirs, resolveHanakoHome } from "../shared/hana-runtime-paths.ts";
 // internal-browser WS is handled directly via raw ws.WebSocketServer in the
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
@@ -98,7 +103,6 @@ import { SubagentRunStore } from "../lib/subagent-run-store.ts";
 import { SubagentThreadStore } from "../lib/subagent-thread-store.ts";
 import { ActivityHub } from "../lib/activity-hub.ts";
 import { WorkflowActivityStore } from "../lib/workflow-activity-store.ts";
-import { normalizeDeferredResolveResult } from "../lib/deferred-result-payload.ts";
 import { createDeferredResultExtension } from "../lib/extensions/deferred-result-ext.ts";
 import { createCompactionGuardExtension } from "../lib/extensions/compaction-guard-ext.ts";
 import { getResolvedCompactionMode } from "../shared/compaction-mode.ts";
@@ -302,6 +306,7 @@ outboundProxyRuntime.apply(engine.getNetworkProxy());
 // 注入依赖给 BrowserManager（避免循环依赖）
 import { BrowserManager } from "../lib/browser/browser-manager.ts";
 BrowserManager.setHanakoHome(engine.hanakoHome);
+BrowserManager.setSessionIdResolver((sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null);
 
 // 注：createSession 必须在所有 Pi SDK extension factory 都注册完之后
 // (framework extension via registerExtensionFactory + plugin extension via
@@ -352,6 +357,7 @@ const serverAuthService = createServerAuthService({
   loopbackToken: SERVER_TOKEN,
   runtimeContext: () => engine.getRuntimeContext(),
 });
+const wsTicketService = createWebSocketTicketService();
 
 // ── 创建 Hono 实例 ──
 const app = new Hono();
@@ -430,6 +436,7 @@ app.use("*", async (c: any, next: any) => {
   // 链路实现与契约见 server/http/request-principal.ts（与测试共用）。
   const resolved = resolveHttpRequestPrincipal(c, engine, {
     serverAuthService,
+    wsTicketService,
     connectionKind: transport.connectionKind,
   });
   if (!resolved.ok) {
@@ -473,23 +480,28 @@ app.onError((err: any, c: any) => {
 });
 
 // ── 阻塞式确认存储 ──
-const confirmStore = new ConfirmStore();
+const confirmStore = new ConfirmStore({
+  getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null,
+});
 engine.setConfirmStore(confirmStore);
 
 // --- Deferred Result Store ---
 const deferredResultStore = new DeferredResultStore(
   hub.eventBus,
   path.join(hanakoHome, ".ephemeral", "deferred-tasks.json"),
+  { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
 );
 engine.setDeferredResultStore(deferredResultStore);
 
 const subagentRunStore = new SubagentRunStore(
   path.join(hanakoHome, "subagent-runs.json"),
+  { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
 );
 engine.setSubagentRunStore(subagentRunStore);
 
 const subagentThreadStore = new SubagentThreadStore(
   path.join(hanakoHome, "subagent-threads.json"),
+  { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
 );
 engine.setSubagentThreadStore(subagentThreadStore);
 
@@ -505,38 +517,12 @@ workflowActivityStore.prune(WORKFLOW_ACTIVITY_TTL_MS, Date.now());
 const activityHub = new ActivityHub(
   { emit: (event, sp) => engine.emitEvent(event, sp) },
   workflowActivityStore,
+  { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
 );
 engine.setActivityHub(activityHub);
 
 // Bus handlers for plugin access
-hub.eventBus.handle("deferred:register", ({ taskId, sessionPath, meta }) => {
-  if (!sessionPath) return { ok: false, error: "sessionPath is required" };
-  deferredResultStore.defer(taskId, sessionPath, meta);
-  return { ok: true, sessionPath };
-});
-hub.eventBus.handle("deferred:retry", ({ taskId, sessionPath, meta }) => {
-  if (!sessionPath) return { ok: false, error: "sessionPath is required" };
-  deferredResultStore.retry(taskId, sessionPath, meta);
-  return { ok: true, sessionPath };
-});
-hub.eventBus.handle("deferred:resolve", ({ taskId, result, files, sessionFiles }) => {
-  deferredResultStore.resolve(taskId, normalizeDeferredResolveResult({ result, files, sessionFiles }));
-  return { ok: true };
-});
-hub.eventBus.handle("deferred:fail", ({ taskId, reason, error }) => {
-  deferredResultStore.fail(taskId, reason ?? error?.message ?? String(error));
-  return { ok: true };
-});
-hub.eventBus.handle("deferred:query", ({ taskId }) => {
-  return deferredResultStore.query(taskId);
-});
-hub.eventBus.handle("deferred:list-pending", ({ sessionPath }) => {
-  return deferredResultStore.listPending(sessionPath);
-});
-hub.eventBus.handle("deferred:abort", ({ taskId, reason }) => {
-  deferredResultStore.abort(taskId, reason);
-  return { ok: true };
-});
+registerDeferredResultBusHandlers(hub.eventBus, deferredResultStore);
 
 // Task registry bus handlers (plugin access)
 registerTaskRegistryBusHandlers(hub.eventBus, engine.taskRegistry);
@@ -547,6 +533,28 @@ hub.eventBus.handle("session:get-titles", async ({ paths }) => {
   const titles = await coord.getTitlesForPaths(paths);
   return { titles };
 });
+function sessionUsageFields(sessionPath: string | null) {
+  const cleanSessionPath = typeof sessionPath === "string" && sessionPath.trim()
+    ? sessionPath.trim()
+    : null;
+  const sessionId = cleanSessionPath
+    ? engine.getSessionIdForPath?.(cleanSessionPath) || null
+    : null;
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    ...(cleanSessionPath ? { sessionPath: cleanSessionPath } : {}),
+  };
+}
+
+function sessionUsageAttribution(sessionPath: string | null, agentId: string | null, extra: Record<string, any> = {}) {
+  return {
+    kind: "session",
+    agentId: agentId || null,
+    ...sessionUsageFields(sessionPath),
+    ...extra,
+  };
+}
+
 hub.eventBus.handle("utility:call-text", async (payload: any = {}) => {
   const sessionPath = typeof payload.sessionPath === "string" && payload.sessionPath.trim()
     ? payload.sessionPath.trim()
@@ -573,7 +581,7 @@ hub.eventBus.handle("utility:call-text", async (payload: any = {}) => {
         trigger: "tool",
       },
       attribution: sessionPath
-        ? { kind: "session", agentId: utility.usageAgentId || agentId || null, sessionPath }
+        ? sessionUsageAttribution(sessionPath, utility.usageAgentId || agentId || null)
         : { kind: "utility", agentId: utility.usageAgentId || agentId || null },
     },
   } as any);
@@ -609,12 +617,12 @@ hub.eventBus.handle("model:sample-text", async (payload: any = {}) => {
         operation: payload.operation || "sample-text",
         surface: "plugin",
         trigger: "tool",
-        actor: pluginId ? { kind: "plugin", pluginId, agentId: agentId || null, sessionPath } : undefined,
+        actor: pluginId ? { kind: "plugin", pluginId, agentId: agentId || null, ...sessionUsageFields(sessionPath) } : undefined,
       },
       attribution: pluginId
-        ? { kind: "plugin", pluginId, agentId: utility.usageAgentId || agentId || null, sessionPath }
+        ? { kind: "plugin", pluginId, agentId: utility.usageAgentId || agentId || null, ...sessionUsageFields(sessionPath) }
         : sessionPath
-          ? { kind: "session", agentId: utility.usageAgentId || agentId || null, sessionPath }
+          ? sessionUsageAttribution(sessionPath, utility.usageAgentId || agentId || null)
           : { kind: "utility", agentId: utility.usageAgentId || agentId || null },
     },
   } as any);
@@ -648,7 +656,7 @@ await engine.registerExtensionFactory(createCompactionGuardExtension({
           agentId: bridgeContext.agentId || null,
           conversationId: bridgeContext.sessionKey || bridgeContext.chatId || sessionPath,
           conversationType,
-          sessionPath,
+          ...sessionUsageFields(sessionPath),
         },
       };
     }
@@ -659,11 +667,10 @@ await engine.registerExtensionFactory(createCompactionGuardExtension({
         surface: "desktop",
         trigger: "threshold",
       },
-      attribution: {
-        kind: "session",
-        agentId: sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null,
+      attribution: sessionUsageAttribution(
         sessionPath,
-      },
+        sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null,
+      ),
     };
   },
 }));
@@ -760,6 +767,7 @@ app.route("", createMobileStaticRoute({ distDir: fromRoot("desktop", "dist-rende
 app.route("", createHtmlPreviewRoute());
 app.route("/api", chatRestRoute);
 app.route("", chatWsRoute);
+app.route("/api", createWebSocketAuthRoute({ ticketService: wsTicketService }));
 app.route("/api", createWebAuthRoute({
   hanakoHome: engine.hanakoHome,
   authService: serverAuthService,
@@ -801,6 +809,7 @@ app.route("/api", createMediaRoute(engine));
 app.route("/api", createPluginsRoute(engine));
 app.route("/api", createCheckpointsRoute(engine));
 app.route("/api", createCommandsRoute(engine));
+app.route("/api", createResourceIoRoute(engine));
 app.route("/api", createResourcesRoute(engine));
 app.route("/api", createUsageRoute(engine));
 app.route("/api", createSpeechRecognitionRoute(engine));
@@ -880,9 +889,9 @@ app.get("/api/session-permission-mode", async (c) => {
 });
 
 app.get("/api/session-thinking-level", async (c) => {
-  return c.json({
-    thinkingLevel: engine.getSessionThinkingLevel?.() || engine.getDefaultThinkingLevel?.() || engine.getThinkingLevel?.() || "medium",
-  });
+  const sessionPath = c.req.query("sessionPath") || null;
+  const pendingNewSession = c.req.query("pendingNewSession") === "1";
+  return c.json(resolveSessionThinkingLevelState(engine, { sessionPath, pendingNewSession }));
 });
 
 app.post("/api/session-thinking-level", async (c) => {
@@ -894,16 +903,12 @@ app.post("/api/session-thinking-level", async (c) => {
     return c.json({
       ok: false,
       error: result.error || "failed to set thinking level",
-      thinkingLevel: result.thinkingLevel || (
-        sessionPath
-          ? engine.getSessionThinkingLevel(sessionPath)
-          : engine.getDefaultThinkingLevel?.()
-      ),
+      ...resolveSessionThinkingLevelState(engine, { sessionPath, pendingNewSession: !sessionPath }),
     }, 409);
   }
   return c.json({
     ok: true,
-    thinkingLevel: result.thinkingLevel,
+    ...resolveSessionThinkingLevelState(engine, { sessionPath, pendingNewSession: !sessionPath }),
   });
 });
 

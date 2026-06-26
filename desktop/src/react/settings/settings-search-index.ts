@@ -50,7 +50,7 @@ const BUILT_IN_SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     tabId: 'interface',
     titleKey: 'settings.appearance.font',
     pathKeys: ['settings.tabs.interface'],
-    aliases: ['font', 'serif', 'sans', 'typography', 'markdown font', '字体', '宋体', '黑体', '排版', 'Markdown 字体'],
+    aliases: ['font', 'serif', 'sans', 'typography', 'markdown font', 'reading width', 'document width', 'body width', 'chat width', 'chat body size', 'body size', '字体', '宋体', '黑体', '排版', 'Markdown 字体', '阅读宽度', '文档宽度', '正文宽度', '聊天宽度', '聊天字号', '正文字号'],
   },
   {
     id: 'interface-language',
@@ -65,6 +65,13 @@ const BUILT_IN_SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     titleKey: 'settings.interface.shortcuts',
     pathKeys: ['settings.tabs.interface'],
     aliases: ['shortcut', 'keyboard', 'voice shortcut', '快捷键', '键盘', '录音快捷键', '语音快捷键'],
+  },
+  {
+    id: 'interface-sidebar',
+    tabId: 'interface',
+    titleKey: 'settings.interface.sidebar',
+    pathKeys: ['settings.tabs.interface'],
+    aliases: ['sidebar', 'session list', 'compact sessions', 'single line', 'density', '侧边栏', '会话列表', '单行', '紧凑', '密度'],
   },
   {
     id: 'general-startup',

@@ -16,6 +16,13 @@ import { t } from "../../lib/i18n.ts";
 import { resolveAgent, resolveAgentStrict } from "../utils/resolve-agent.ts";
 import { telegramBotOptions } from "../../lib/net/outbound-proxy.ts";
 import {
+  DINGTALK_ACCESS_TOKEN_PATH,
+  DINGTALK_REST_API_BASE_URL,
+  assertNoUnsupportedDingTalkRobotFields,
+  buildDingTalkUrl,
+  normalizeDingTalkBridgeCredentials,
+} from "../../lib/bridge/dingtalk-contract.ts";
+import {
   collectSecretPatchPaths,
   isMaskedSecretValue,
   maskSecretValue,
@@ -48,6 +55,28 @@ function feishuTestInfo({ credentialOk, response, data }: { credentialOk?: any; 
     ...(data?.code !== undefined ? { feishuCode: data.code } : {}),
     ...(data?.msg ? { feishuMessage: data.msg } : {}),
     ...(logId ? { logId } : {}),
+  };
+}
+
+function dingtalkStreamInfo() {
+  return {
+    eventDelivery: "stream",
+    callbackUrlRequired: false,
+    stream: {
+      status: "not_tested",
+      reason: "bridge/test validates internal-app credentials only; the runtime Stream connection reports live status after the connector is enabled.",
+    },
+  };
+}
+
+function dingtalkTestInfo({ credentialOk, response, data }: { credentialOk?: any; response?: any; data?: any } = {}) {
+  return {
+    credentialOk,
+    ...dingtalkStreamInfo(),
+    ...(response ? { httpStatus: response.status } : {}),
+    ...(data?.code !== undefined ? { dingtalkCode: data.code } : {}),
+    ...(data?.errcode !== undefined ? { dingtalkErrcode: data.errcode } : {}),
+    ...(data?.message || data?.errmsg || data?.msg ? { dingtalkMessage: data.message || data.errmsg || data.msg } : {}),
   };
 }
 
@@ -98,7 +127,7 @@ export function buildBridgeStatus(engine: any, manager: any, agent: any) {
       ...extraFields,
       enabled: !!cfg?.enabled,
       status: live[plat]?.status || "disconnected",
-      error: live[plat]?.error || null,
+      error: live[plat]?.error || extraFields?.configError || null,
       agentId: agent.id,
     };
   };
@@ -106,6 +135,41 @@ export function buildBridgeStatus(engine: any, manager: any, agent: any) {
   const tgToken = bridge.telegram?.token || "";
   const fsAppId = bridge.feishu?.appId || "";
   const fsAppSecret = bridge.feishu?.appSecret || "";
+  const dtClientId = bridge.dingtalk?.appKey || bridge.dingtalk?.clientId || "";
+  const dtClientSecret = bridge.dingtalk?.appSecret || bridge.dingtalk?.clientSecret || "";
+  const dtRobotCode = bridge.dingtalk?.robotCode || "";
+  const dtRestBaseUrl = bridge.dingtalk?.restBaseUrl || DINGTALK_REST_API_BASE_URL;
+  const dtHasConfig = !!(
+    bridge.dingtalk?.enabled
+    || dtClientId
+    || dtClientSecret
+    || dtRobotCode
+    || bridge.dingtalk?.restBaseUrl
+    || bridge.dingtalk?.webhook
+    || bridge.dingtalk?.webhookUrl
+    || bridge.dingtalk?.webhookToken
+    || bridge.dingtalk?.webhookSecret
+    || bridge.dingtalk?.robotWebhook
+    || bridge.dingtalk?.robotToken
+    || bridge.dingtalk?.token
+    || bridge.dingtalk?.secret
+  );
+  let dtConfigured = false;
+  let dtConfigError = null;
+  if (dtHasConfig) {
+    try {
+      normalizeDingTalkBridgeCredentials({
+        ...bridge.dingtalk,
+        appKey: dtClientId,
+        appSecret: dtClientSecret,
+        robotCode: dtRobotCode,
+        restBaseUrl: dtRestBaseUrl,
+      });
+      dtConfigured = true;
+    } catch (err: any) {
+      dtConfigError = err?.message || String(err);
+    }
+  }
 
   const ownerDict = {};
   for (const plat of KNOWN_PLATFORMS) {
@@ -126,6 +190,14 @@ export function buildBridgeStatus(engine: any, manager: any, agent: any) {
     }),
     feishu: platformStatus("feishu", bridge.feishu, {
       configured: !!(fsAppId && fsAppSecret), appId: fsAppId, appSecret: maskSecretValue(fsAppSecret),
+    }),
+    dingtalk: platformStatus("dingtalk", bridge.dingtalk, {
+      configured: dtConfigured,
+      clientId: dtClientId,
+      clientSecret: maskSecretValue(dtClientSecret),
+      robotCode: dtRobotCode,
+      restBaseUrl: dtRestBaseUrl,
+      configError: dtConfigError,
     }),
     qq: platformStatus("qq", bridge.qq, {
       configured: !!(bridge.qq?.appID && (bridge.qq?.appSecret || bridge.qq?.token)),
@@ -216,6 +288,14 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
       Object.assign(patch, resolveBridgeCredentials(platform, credentials, bridgeCfg));
     }
     if (typeof enabled === "boolean") patch.enabled = enabled;
+    if (platform === "dingtalk") {
+      try {
+        assertNoUnsupportedDingTalkRobotFields(patch);
+        if (patch.enabled) normalizeDingTalkBridgeCredentials(patch);
+      } catch (err: any) {
+        return c.json({ ok: false, error: err?.message || String(err) }, 400);
+      }
+    }
 
     agent.updateConfig({ bridge: { [platform]: patch } });
 
@@ -512,7 +592,12 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
       await manager.sendMediaItem(
         platform,
         chatId,
-        { type: "session_file", fileId: sessionFile.id, sessionPath },
+        {
+          type: "session_file",
+          fileId: sessionFile.id,
+          ...(sessionFile.sessionId ? { sessionId: sessionFile.sessionId } : {}),
+          sessionPath,
+        },
         agent.id,
       );
       return c.json({ ok: true, fileId: sessionFile.id });
@@ -579,6 +664,34 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
           ok: false,
           error: data.msg || t("error.verifyFailed"),
           info: feishuTestInfo({ credentialOk: false, response: resp, data }),
+        });
+      } else if (platform === "dingtalk") {
+        const dingtalkCredentials = normalizeDingTalkBridgeCredentials(effectiveCredentials);
+        const resp = await fetch(buildDingTalkUrl(dingtalkCredentials.restBaseUrl, DINGTALK_ACCESS_TOKEN_PATH), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            appKey: dingtalkCredentials.appKey,
+            appSecret: dingtalkCredentials.appSecret,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        const data = await resp.json();
+        const code = data.code ?? data.errcode;
+        const token = data.accessToken || data.access_token;
+        if (resp.ok && token && (code === undefined || code === 0 || code === "0")) {
+          return c.json({
+            ok: true,
+            info: {
+              msg: t("error.tokenSuccess"),
+              ...dingtalkTestInfo({ credentialOk: true, response: resp, data }),
+            },
+          });
+        }
+        return c.json({
+          ok: false,
+          error: data.message || data.errmsg || data.msg || t("error.verifyFailed"),
+          info: dingtalkTestInfo({ credentialOk: false, response: resp, data }),
         });
       } else if (platform === "qq") {
         // v2 鉴权：appID + appSecret → access_token → /users/@me
@@ -664,11 +777,13 @@ function hasExplicitAgentId(c: any) {
 function bridgeSecretKeys(platform: any): any {
   return platform === "feishu"
     ? ["appSecret"]
-    : platform === "qq"
-      ? ["appSecret", "token"]
-      : platform === "wechat"
-        ? ["botToken"]
-        : ["token"];
+    : platform === "dingtalk"
+      ? ["clientSecret", "appSecret", "webhookToken", "webhookSecret", "token", "secret"]
+      : platform === "qq"
+        ? ["appSecret", "token"]
+        : platform === "wechat"
+          ? ["botToken"]
+          : ["token"];
 }
 
 function buildBridgeManualSendSessionPath(agentId: any, platform: any, chatId: any) {

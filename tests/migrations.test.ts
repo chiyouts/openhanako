@@ -12,7 +12,7 @@ import { SEARCH_CAPABILITY_PROVIDERS } from "../shared/search-providers.ts";
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
-const LATEST_DATA_VERSION = 42;
+const LATEST_DATA_VERSION = 43;
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-migrations-"));
@@ -423,6 +423,92 @@ describe("migration #42: provider catalog v2 cutover", () => {
     expect(catalog.capabilities["web.search"].providers).toEqual([{ id: "brave", source: "api" }]);
     expect(catalog.meta.migrationSource).toBe("added-models.yaml");
     expect(catalog.meta.providerCatalogCutoverAt).toEqual(expect.any(String));
+  });
+});
+
+describe("migration #43: Codex image generation defaults follow mode schema", () => {
+  let tmpDir, agentsDir, userDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    agentsDir = path.join(tmpDir, "agents");
+    userDir = path.join(tmpDir, "user");
+    fs.mkdirSync(agentsDir, { recursive: true });
+  });
+
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it("removes stale Codex size defaults while preserving other provider defaults", () => {
+    const prefs = makePrefs(userDir);
+    prefs.savePreferences({
+      _dataVersion: 42,
+      imageGeneration: {
+        defaultImageModel: { provider: "openai-codex-oauth", id: "gpt-image-2" },
+        providerDefaults: {
+          "openai-codex-oauth": {
+            size: "4K",
+            models: {
+              "gpt-image-2": {
+                modes: {
+                  text2image: { ratio: "3:2" },
+                },
+              },
+            },
+          },
+          openai: { size: "1024x1024" },
+        },
+      },
+    });
+    writeJson(path.join(tmpDir, "plugin-data", "image-gen", "config.json"), {
+      global: {
+        providerDefaults: {
+          "openai-codex-oauth": {
+            size: "4K",
+            models: {
+              "gpt-image-2": {
+                modes: {
+                  text2image: { ratio: "3:2" },
+                },
+              },
+            },
+          },
+          openai: { size: "1024x1024" },
+        },
+      },
+    });
+
+    runMigrations({
+      hanakoHome: tmpDir,
+      agentsDir,
+      prefs,
+      providerRegistry: makeRegistryWithModels({}),
+      log: () => {},
+    });
+
+    const nextPrefs = prefs.getPreferences();
+    expect(nextPrefs._dataVersion).toBe(LATEST_DATA_VERSION);
+    expect(nextPrefs.imageGeneration.providerDefaults["openai-codex-oauth"]).toEqual({
+      models: {
+        "gpt-image-2": {
+          modes: {
+            text2image: { ratio: "3:2" },
+          },
+        },
+      },
+    });
+    expect(nextPrefs.imageGeneration.providerDefaults.openai).toEqual({ size: "1024x1024" });
+
+    const pluginConfig = readJson(path.join(tmpDir, "plugin-data", "image-gen", "config.json"));
+    expect(pluginConfig.global.providerDefaults["openai-codex-oauth"]).toEqual({
+      models: {
+        "gpt-image-2": {
+          modes: {
+            text2image: { ratio: "3:2" },
+          },
+        },
+      },
+    });
+    expect(pluginConfig.global.providerDefaults.openai).toEqual({ size: "1024x1024" });
   });
 });
 
@@ -3246,6 +3332,38 @@ describe("migration #19 — migrate legacy API-key auth to provider config", () 
       base_url: "https://api.deepseek.com",
       api: "openai-completions",
       models: ["deepseek-v4-flash"],
+    });
+  });
+
+  it("rescues a secret-only custom provider when its local plugin definition is missing", () => {
+    writeAuth({});
+    writeAddedModels({
+      providers: {
+        "my-provider": {
+          api_key: "sk-secret-only",
+        },
+      },
+    });
+    writeJson(path.join(tmpDir, "models.json"), {
+      providers: {
+        "my-provider": {
+          baseUrl: "https://api.example.com/v1",
+          api: "openai-completions",
+          apiKey: "sk-secret-only",
+          models: [
+            { id: "custom-chat" },
+          ],
+        },
+      },
+    });
+
+    runFrom18();
+
+    expect(readPersistedProviders()["my-provider"]).toEqual({
+      api_key: "sk-secret-only",
+      base_url: "https://api.example.com/v1",
+      api: "openai-completions",
+      models: ["custom-chat"],
     });
   });
 

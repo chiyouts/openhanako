@@ -222,11 +222,14 @@ export type RichBlock =
   | {
     type: 'interlude';
     id: string;
+    deliveryId?: string;
     variant: 'deferred_result' | string;
+    timelinePlacement?: 'after_anchor_message' | string;
     taskId?: string;
     status?: 'success' | 'failed' | 'aborted' | string;
     sourceKind?: 'subagent' | 'workflow' | 'tool' | string;
     sourceLabel?: string;
+    previewSessionId?: string;
     previewSessionPath?: string;
     previewAgentId?: string;
     text: string;
@@ -243,6 +246,7 @@ export type RichBlock =
     requestedAgentName?: string;
     executorAgentId?: string;
     executorAgentNameSnapshot?: string;
+    sessionId?: string | null;
     streamKey: string;
     streamStatus: 'running' | 'done' | 'failed' | 'aborted';
     summary?: string;

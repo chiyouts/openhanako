@@ -21,6 +21,12 @@ vi.mock('../../hooks/use-plugin-surface-url', () => ({
   }),
 }));
 
+vi.mock('../../components/chat/ChatMessageSurface', () => ({
+  ChatMessageSurface: ({ sessionPath }: { sessionPath: string }) => (
+    <div data-testid="chat-surface" data-session-path={sessionPath} />
+  ),
+}));
+
 function attachIframeWindow(iframe: HTMLIFrameElement, contentWindow: Window) {
   Object.defineProperty(iframe, 'contentWindow', {
     configurable: true,
@@ -45,6 +51,7 @@ describe('PluginCardBlock', () => {
   afterEach(() => {
     cleanup();
     useStore.getState().closeMediaViewer();
+    useStore.setState({ chatSessions: {} } as any);
   });
 
   it('only accepts ready / resize messages from the iframe window and expected origin', () => {
@@ -166,5 +173,35 @@ describe('PluginCardBlock', () => {
 
     const viewer = useStore.getState().mediaViewer;
     expect(viewer?.files[0].remoteUrl).toBe('http://127.0.0.1:3210/api/plugins/image-gen/media/cat.png?token=abc');
+  });
+
+  it('renders chat.surface cards as native chat transcript surfaces', () => {
+    useStore.setState({
+      chatSessions: {
+        '/sessions/private.jsonl': {
+          items: [],
+          hasMore: false,
+          loadingMore: false,
+        },
+      },
+    } as any);
+
+    const { container, getByTestId } = render(
+      <PluginCardBlock
+        card={{
+          type: 'chat.surface',
+          pluginId: 'demo',
+          sessionId: 'sess_private',
+          sessionPath: '/sessions/private.jsonl',
+          sessionRef: { sessionId: 'sess_private', sessionPath: '/sessions/private.jsonl' },
+          title: 'Private run',
+          description: 'Private transcript',
+        }}
+        agentId="butter"
+      />,
+    );
+
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(getByTestId('chat-surface').getAttribute('data-session-path')).toBe('/sessions/private.jsonl');
   });
 });

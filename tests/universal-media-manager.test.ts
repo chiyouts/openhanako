@@ -267,6 +267,42 @@ describe("UniversalMediaManager plugin image input boundary", () => {
 
     manager.stop();
   });
+
+  it("submits image generation with sessionId ownership when no path locator is supplied", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const manager = makeManager(root, makePreferences(root));
+    const bus = makeBus();
+    manager.start(bus);
+    manager.registerAdapter({
+      id: "id-image",
+      types: ["image"],
+      submit: vi.fn(async () => ({ taskId: "id-image-task" })),
+    });
+
+    const result = await manager.generateImageFromBus({
+      sessionId: "sess_media_image",
+      prompt: "draw by id",
+      provider: "id-image",
+    });
+    await flushBackgroundWork();
+
+    expect(result).toMatchObject({ ok: true, kind: "image" });
+    expect(manager.getTask(result.tasks[0].taskId)).toMatchObject({
+      sessionId: "sess_media_image",
+      sessionPath: null,
+    });
+    expect(bus.request).toHaveBeenCalledWith("deferred:register", expect.objectContaining({
+      sessionId: "sess_media_image",
+      sessionPath: null,
+    }));
+    expect(bus.request).toHaveBeenCalledWith("task:register", expect.objectContaining({
+      sessionId: "sess_media_image",
+      parentSessionPath: null,
+    }));
+
+    manager.stop();
+  });
 });
 
 describe("media parameter input limits", () => {
@@ -291,6 +327,39 @@ describe("media parameter input limits", () => {
     expect(result.resolvedParameters).toMatchObject({
       resolution: "2k",
       ratio: "16:9",
+    });
+    expect(result.resolvedParameters).not.toHaveProperty("size");
+  });
+
+  it("drops stale provider image size defaults when the selected mode schema only accepts resolution", () => {
+    const result = resolveMediaParameters({
+      kind: "image",
+      providerId: "openai-codex-oauth",
+      input: {
+        prompt: "a classroom cover",
+      },
+      providerDefaults: {
+        size: "4K",
+      },
+      model: {
+        id: "gpt-image-2",
+        modes: [{
+          id: "text2image",
+          parameterSchema: {
+            type: "object",
+            properties: {
+              resolution: { type: "string", enum: ["1K", "2K"], default: "2K" },
+              ratio: { type: "string", enum: ["1:1", "3:2"], default: "3:2" },
+            },
+          },
+          defaults: { resolution: "2K", ratio: "3:2" },
+        }],
+      },
+    });
+
+    expect(result.resolvedParameters).toMatchObject({
+      resolution: "2K",
+      ratio: "3:2",
     });
     expect(result.resolvedParameters).not.toHaveProperty("size");
   });
@@ -373,6 +442,27 @@ describe("UniversalMediaManager adapter registration bus contract", () => {
     }
   });
 
+  it("registers the shared image-gen built-in adapter list in the native media runtime", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const { builtinImageGenAdapters } = await import("../plugins/image-gen/builtin-adapters.ts");
+    const manager = new UniversalMediaManager({
+      hanakoHome: root,
+      preferences: makePreferences(root),
+      providerRegistry: {
+        getMediaProviders: () => [],
+        resolveMediaModel: () => {
+          throw new Error("not configured");
+        },
+      },
+      registerSessionFile: () => {},
+    });
+
+    const expectedIds = builtinImageGenAdapters.map((adapter) => adapter.id).sort();
+    const actualIds = manager.registry.list().map((adapter) => adapter.id).sort();
+    expect(actualIds).toEqual(expectedIds);
+  });
+
   it("accepts module loggers that expose log/warn/error but no info method", () => {
     const root = makeRoot();
     roots.push(root);
@@ -406,6 +496,71 @@ describe("UniversalMediaManager adapter registration bus contract", () => {
     expect(result).toEqual({ ok: true });
     expect(manager.registry.getProtocol("jimeng-cli-images")).toMatchObject({
       id: "jimeng-cli-images",
+    });
+
+    manager.stop();
+  });
+
+  it("passes the registering plugin owner context to adapter submit calls", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const manager = new UniversalMediaManager({
+      hanakoHome: root,
+      preferences: makePreferences(root),
+      providerRegistry: {
+        getMediaProviders: () => [],
+        resolveMediaModel: () => {
+          throw new Error("not configured");
+        },
+      },
+      registerSessionFile: () => {},
+    });
+    const bus = makeBus();
+    manager.start(bus);
+    const pluginDataDir = path.join(root, "plugin-data", "dreamina");
+    const pluginConfig = { get: vi.fn(() => null) };
+    const pluginLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const submit = vi.fn(async () => ({ taskId: "dreamina-image-task" }));
+
+    const result = bus.handlers.get("media-gen:register-adapter")({
+      adapter: {
+        id: "dreamina",
+        types: ["image"],
+        submit,
+      },
+    }, {
+      caller: {
+        kind: "plugin",
+        pluginId: "dreamina",
+        pluginKey: "community:dreamina",
+        source: "community",
+        pluginDir: path.join(root, "plugins", "dreamina"),
+        dataDir: pluginDataDir,
+        config: pluginConfig,
+        log: pluginLog,
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(manager.registry.getRecord("dreamina")?.owner).toMatchObject({
+      pluginId: "dreamina",
+      pluginKey: "community:dreamina",
+      dataDir: pluginDataDir,
+    });
+
+    await manager.generateImageFromBus({
+      prompt: "quiet notebook",
+      provider: "dreamina",
+      delivery: { mode: "response" },
+    });
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect((submit as any).mock.calls[0][1]).toMatchObject({
+      pluginId: "dreamina",
+      pluginKey: "community:dreamina",
+      dataDir: pluginDataDir,
+      generatedDir: path.join(pluginDataDir, "generated"),
+      config: pluginConfig,
+      log: pluginLog,
     });
 
     manager.stop();
@@ -523,6 +678,45 @@ describe("UniversalMediaManager response delivery", () => {
     });
     expect(bus.request).not.toHaveBeenCalledWith("deferred:register", expect.anything());
     expect(bus.request).not.toHaveBeenCalledWith("task:register", expect.anything());
+
+    manager.stop();
+  });
+
+  it("submits video generation with sessionId ownership when no path locator is supplied", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const manager = makeManager(root, makePreferences(root));
+    const bus = makeBus();
+    manager.start(bus);
+    manager.registerAdapter({
+      id: "id-video",
+      types: ["video"],
+      submit: vi.fn(async () => ({ taskId: "id-video-task" })),
+    });
+
+    const result = await manager.generateVideoFromBus({
+      sessionId: "sess_media_video",
+      prompt: "animate by id",
+      provider: "id-video",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      kind: "video",
+      tasks: [{ taskId: "id-video-task" }],
+    });
+    expect(manager.getTask("id-video-task")).toMatchObject({
+      sessionId: "sess_media_video",
+      sessionPath: null,
+    });
+    expect(bus.request).toHaveBeenCalledWith("deferred:register", expect.objectContaining({
+      sessionId: "sess_media_video",
+      sessionPath: null,
+    }));
+    expect(bus.request).toHaveBeenCalledWith("task:register", expect.objectContaining({
+      sessionId: "sess_media_video",
+      parentSessionPath: null,
+    }));
 
     manager.stop();
   });

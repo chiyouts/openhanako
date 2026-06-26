@@ -48,6 +48,15 @@ describe('MediaViewer interaction', () => {
     expect(useStore.getState().mediaViewer).toBeNull();
   });
 
+  it('closes when clicking stage background but not the image stage', () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
+    const { getByTestId } = render(<MediaViewer />);
+    fireEvent.click(getByTestId('image-stage'));
+    expect(useStore.getState().mediaViewer?.currentId).toBe('a');
+    fireEvent.click(getByTestId('media-viewer-stage-wrap'));
+    expect(useStore.getState().mediaViewer).toBeNull();
+  });
+
   it('closes when clicking the close button', () => {
     useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
     const { getByTestId } = render(<MediaViewer />);
@@ -86,6 +95,23 @@ describe('MediaViewer interaction', () => {
     view = render(<MediaViewer />);
     expect(view.getByTestId('media-viewer-prev')).toBeTruthy();
     expect(view.getByTestId('media-viewer-next')).toBeTruthy();
+  });
+
+  it('keeps navigation buttons visible when chrome auto-hides', () => {
+    vi.useFakeTimers();
+    try {
+      useStore.getState().setMediaViewer({ files: [fileRef('a'), fileRef('b')], currentId: 'a', origin: 'desk' });
+      const { getByTestId } = render(<MediaViewer />);
+      const prev = getByTestId('media-viewer-prev');
+      const next = getByTestId('media-viewer-next');
+      act(() => {
+        vi.advanceTimersByTime(2600);
+      });
+      expect(prev.className).not.toMatch(/hidden/);
+      expect(next.className).not.toMatch(/hidden/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders VideoStage for video files', async () => {
@@ -133,5 +159,39 @@ describe('MediaViewer interaction', () => {
 
     expect((window as any).platform.saveFileAs).toHaveBeenCalled();
     expect((window as any).platform.writeFileBinary).toHaveBeenCalledWith('/saved/output.png', 'BASE64');
+  });
+
+  it('zooms the image stage with a plain wheel event', async () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
+    const { getByTestId } = render(<MediaViewer />);
+    const stage = getByTestId('image-stage') as HTMLElement;
+    const before = stage.style.transform;
+    fireEvent.wheel(stage, {
+      deltaY: -100,
+      clientX: 120,
+      clientY: 120,
+      altKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      metaKey: false,
+    });
+    await waitFor(() => expect(stage.style.transform).not.toBe(before));
+  });
+
+  it('zooms the image stage with ctrl+wheel trackpad events', async () => {
+    useStore.getState().setMediaViewer({ files: [fileRef('a')], currentId: 'a', origin: 'desk' });
+    const { getByTestId } = render(<MediaViewer />);
+    const stage = getByTestId('image-stage') as HTMLElement;
+    const before = stage.style.transform;
+    fireEvent.wheel(stage, {
+      deltaY: -24,
+      clientX: 120,
+      clientY: 120,
+      altKey: false,
+      ctrlKey: true,
+      shiftKey: false,
+      metaKey: false,
+    });
+    await waitFor(() => expect(stage.style.transform).not.toBe(before));
   });
 });

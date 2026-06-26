@@ -46,21 +46,7 @@ export async function hanaFetch(
       signal: controller.signal,
     });
     if (!res.ok) {
-      let detail = "";
-      try {
-        const cloned = res.clone();
-        const text = await cloned.text();
-        if (text) {
-          try {
-            const json = JSON.parse(text);
-            detail = json.error || json.message || text;
-          } catch {
-            detail = text;
-          }
-        }
-      } catch {
-        // ignore body parse failures
-      }
+      const detail = await readErrorMessage(res);
       throw new Error(
         detail
           ? `hanaFetch ${path}: ${res.status} ${res.statusText} - ${detail}`
@@ -70,6 +56,23 @@ export async function hanaFetch(
     return res;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function readErrorMessage(res: Response): Promise<string | null> {
+  try {
+    const text = await res.text();
+    if (!text) return null;
+    try {
+      const data = JSON.parse(text);
+      if (typeof data?.error === 'string' && data.error.trim()) return data.error.trim();
+      if (typeof data?.message === 'string' && data.message.trim()) return data.message.trim();
+    } catch {
+      return text.trim() || null;
+    }
+    return text.trim() || null;
+  } catch {
+    return null;
   }
 }
 

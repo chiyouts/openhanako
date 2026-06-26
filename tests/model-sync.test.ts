@@ -50,6 +50,27 @@ const KNOWN_MODELS = {
   "zhipu-coding": {
     "glm-5.2": { name: "GLM-5.2", context: 1000000, maxOutput: 131072, image: false, reasoning: true, xhigh: true },
   },
+  volcengine: {
+    "doubao-seed-2-0-pro-260215": {
+      name: "Doubao Seed 2.0 Pro",
+      context: 262144,
+      maxOutput: 16384,
+      image: true,
+      reasoning: true,
+    },
+  },
+  "opencode-go": {
+    "glm-5.2": {
+      name: "GLM-5.2",
+      context: 1000000,
+      maxOutput: 131072,
+      image: false,
+      reasoning: true,
+      xhigh: true,
+      compat: { thinkingFormat: "zhipu", reasoningProfile: "zhipu-openai" },
+      toolUse: { supportsTools: true, dialect: "openai", toolResultFormat: "message" },
+    },
+  },
   anthropic: {
     "claude-fable-5": {
       name: "Claude Fable 5",
@@ -1030,6 +1051,32 @@ describe("syncModels", () => {
     expect(mimo.compat).not.toHaveProperty("reasoningProfile");
   });
 
+  it("projects Volcengine reasoning models with Volcengine thinking compat", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      volcengine: {
+        base_url: "https://ark.cn-beijing.volces.com/api/v3",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["doubao-seed-2-0-pro-260215"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const model = result.providers.volcengine.models[0];
+    expect(model).toMatchObject({
+      id: "doubao-seed-2-0-pro-260215",
+      reasoning: true,
+      compat: {
+        supportsDeveloperRole: false,
+        thinkingFormat: "volcengine",
+      },
+    });
+  });
+
   it("projects Claude Fable adaptive-only profile for Anthropic Messages providers", async () => {
     const syncModels = await loadSync();
 
@@ -1335,6 +1382,30 @@ describe("syncModels", () => {
     expect(result.providers.ollama.models[0].id).toBe("llama3");
   });
 
+  it("projects known Ollama vision model families as image-capable even when discovery saved bare ids", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      ollama: {
+        base_url: "http://localhost:11434/v1",
+        api: "openai-completions",
+        auth_type: "none",
+        models: [
+          "llava:latest",
+          { id: "minicpm-v:8b", name: "MiniCPM-V 8B" },
+        ],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.ollama.models.map((model) => [model.id, model.input])).toEqual([
+      ["llava:latest", ["text", "image"]],
+      ["minicpm-v:8b", ["text", "image"]],
+    ]);
+  });
+
   it("derives no-auth policy from ProviderRegistry for existing Ollama configs", async () => {
     const { ModelManager } = await import("../core/model-manager.ts");
     fs.writeFileSync(path.join(tmpDir, "added-models.yaml"), [
@@ -1632,6 +1703,48 @@ describe("syncModels", () => {
         supportsReasoningEffort: false,
         thinkingFormat: "zhipu",
         reasoningProfile: "zhipu-openai",
+      },
+    });
+  });
+
+  it("projects OpenCode Go GLM-5.2 with explicit Zhipu thinking compat", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      "opencode-go": {
+        base_url: "https://opencode.ai/zen/go/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: ["glm-5.2"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers["opencode-go"]).toMatchObject({
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      api: "openai-completions",
+      apiKey: "hana-runtime-api-key:opencode-go",
+    });
+    expect(result.providers["opencode-go"].models[0]).toMatchObject({
+      id: "glm-5.2",
+      name: "GLM-5.2",
+      contextWindow: 1000000,
+      maxTokens: 131072,
+      reasoning: true,
+      xhigh: true,
+      compat: {
+        supportsDeveloperRole: false,
+        supportsStore: false,
+        supportsReasoningEffort: false,
+        thinkingFormat: "zhipu",
+        reasoningProfile: "zhipu-openai",
+      },
+      toolUse: {
+        supportsTools: true,
+        dialect: "openai",
+        toolResultFormat: "message",
       },
     });
   });

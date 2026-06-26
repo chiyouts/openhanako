@@ -23,6 +23,7 @@ import {
   readSubagentSessionMetaSync,
 } from "../lib/subagent-executor-metadata.ts";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.ts";
+import { isSessionJsonlFilename } from "../lib/session-jsonl.ts";
 import { SubagentRunStore } from "../lib/subagent-run-store.ts";
 import { SubagentThreadStore } from "../lib/subagent-thread-store.ts";
 import { persistBrowserScreenshotFileSync } from "../lib/session-files/browser-screenshot-file.ts";
@@ -43,6 +44,13 @@ import { parseSkillMetadata } from "../lib/skills/skill-metadata.ts";
 import { safeConversationStem } from "../lib/conversations/agent-phone-projection.ts";
 import { DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.ts";
 import { ProviderCatalogStore } from "./provider-catalog.ts";
+import { sessionIdFromFilename } from "../lib/session-jsonl.ts";
+import {
+  filesystemIdentityKeySync,
+  isDirectoryLikeDirentSync,
+  isFileLikeDirentSync,
+  readDirectoryLikeDirentsSync,
+} from "../shared/link-aware-fs.ts";
 
 const moduleLog = createModuleLogger("migrations");
 
@@ -136,6 +144,8 @@ const migrations = {
   41: migrateIdentityUserNamePlaceholders,
   // Provider Catalog v2：provider/model/capability canonical store 一次性 cutover
   42: migrateProviderCatalogV2Cutover,
+  // Codex 生图参数改为 mode schema 的 resolution 后，清掉旧配置残留的 size 默认值
+  43: migrateCodexImageGenerationDefaultsToResolutionSchema,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -196,7 +206,7 @@ function cleanDanglingProviderRefs(ctx) {
 
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch { return; }
 
   for (const dir of agentDirs) {
@@ -320,7 +330,7 @@ function migrateBridgeToPerAgent(ctx) {
   }
   if (!fallbackAgentId) {
     try {
-      const dirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+      const dirs = readDirectoryLikeDirentsSync(agentsDir);
       for (const d of dirs) {
         if (fs.existsSync(path.join(agentsDir, d.name, "config.yaml"))) {
           fallbackAgentId = d.name;
@@ -396,8 +406,8 @@ function migrateSubagentExecutorMetadata(ctx) {
 
   const agentDirs = (() => {
     try {
-      return fs.readdirSync(agentsDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory() && fs.existsSync(path.join(agentsDir, d.name, "config.yaml")));
+      return readDirectoryLikeDirentsSync(agentsDir)
+        .filter((d) => fs.existsSync(path.join(agentsDir, d.name, "config.yaml")));
     } catch {
       return [];
     }
@@ -437,7 +447,7 @@ function migrateSubagentExecutorMetadata(ctx) {
     let sessionFiles = [];
     try {
       sessionFiles = fs.readdirSync(sessionDir)
-        .filter((name) => name.endsWith(".jsonl"))
+        .filter(isSessionJsonlFilename)
         .map((name) => path.join(sessionDir, name));
     } catch {
       sessionFiles = [];
@@ -504,7 +514,7 @@ function migrateSubagentExecutorMetadata(ctx) {
     let childFiles = [];
     try {
       childFiles = fs.readdirSync(subagentDir)
-        .filter((name) => name.endsWith(".jsonl"))
+        .filter(isSessionJsonlFilename)
         .map((name) => path.join(subagentDir, name));
     } catch {
       childFiles = [];
@@ -643,7 +653,7 @@ function normalizeCompositeModelRefs(ctx, { migrationId }) {
   // ── agent config.yaml ──
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     agentDirs = [];
   }
@@ -712,7 +722,7 @@ function migrateChannelsToGlobalDefaultOff(ctx) {
 
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     agentDirs = [];
   }
@@ -784,7 +794,7 @@ function migrateBridgeReadOnlyToGlobal(ctx) {
 
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     agentDirs = [];
   }
@@ -867,7 +877,7 @@ function migrateWorkspaceToPerAgent(ctx) {
 
   if (!targetAgentId) {
     try {
-      const dirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+      const dirs = readDirectoryLikeDirentsSync(agentsDir);
       for (const d of dirs) {
         if (fs.existsSync(path.join(agentsDir, d.name, "config.yaml"))) {
           targetAgentId = d.name;
@@ -901,7 +911,7 @@ function migrateWorkspaceToPerAgent(ctx) {
   // ── 3. 非主 agent 的巡检默认关闭 ──
 
   try {
-    const dirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    const dirs = readDirectoryLikeDirentsSync(agentsDir);
     for (const d of dirs) {
       if (d.name === targetAgentId) continue; // 主 agent 保持原状
       const cfgPath = path.join(agentsDir, d.name, "config.yaml");
@@ -931,7 +941,7 @@ function migrateHeartbeatDefaultExplicitOff(ctx) {
   const { agentsDir, log } = ctx;
   let dirs;
   try {
-    dirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    dirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return;
   }
@@ -959,7 +969,7 @@ function migrateBeautifyDefaultExplicitOff(ctx) {
   const { agentsDir, log } = ctx;
   let dirs;
   try {
-    dirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    dirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return;
   }
@@ -990,7 +1000,7 @@ function migrateWorkflowDefaultExplicitOff(ctx) {
   const { agentsDir, log } = ctx;
   let dirs;
   try {
-    dirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    dirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return;
   }
@@ -1134,7 +1144,7 @@ function migrateVisionToImage(ctx) {
   // ── 2. agent/*/config.yaml 的 models.overrides（兜底残留）──
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     agentDirs = [];
   }
@@ -1231,7 +1241,7 @@ function repairCronJobModelRefs(ctx) {
 
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return;
   }
@@ -1289,8 +1299,7 @@ function migrateCronJobsToAutomationReadModel(ctx) {
   } catch {}
 
   try {
-    for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
+    for (const entry of readDirectoryLikeDirentsSync(agentsDir)) {
       paths.push(path.join(agentsDir, entry.name, "desk", "cron-jobs.json"));
     }
   } catch {}
@@ -1343,6 +1352,51 @@ function migrateProviderCatalogV2Cutover(ctx) {
   log?.(`[migrations] #42: provider catalog v2 ready (${Object.keys(catalog.providers || {}).length} providers)`);
 }
 
+const CODEX_IMAGE_PROVIDER_ID = "openai-codex-oauth";
+
+function migrateCodexImageGenerationDefaultsToResolutionSchema(ctx) {
+  const { hanakoHome, prefs, log } = ctx;
+  const preferences = prefs.getPreferences();
+  const prefsChanged = removeCodexImageSizeDefault(
+    preferences?.imageGeneration?.providerDefaults,
+  );
+  if (prefsChanged) {
+    prefs.savePreferences(preferences);
+  }
+
+  const pluginChanged = removeCodexImageSizeDefaultFromPluginConfig(hanakoHome, log);
+  log?.(`[migrations] #43: Codex stale image size defaults removed (preferences=${prefsChanged}, pluginConfig=${pluginChanged})`);
+}
+
+function removeCodexImageSizeDefault(providerDefaults) {
+  const defaults = migrationRecord(providerDefaults);
+  const codexDefaults = migrationRecord(defaults?.[CODEX_IMAGE_PROVIDER_ID]);
+  if (!codexDefaults || !Object.prototype.hasOwnProperty.call(codexDefaults, "size")) {
+    return false;
+  }
+  delete codexDefaults.size;
+  return true;
+}
+
+function removeCodexImageSizeDefaultFromPluginConfig(hanakoHome, log) {
+  const configPath = path.join(hanakoHome, "plugin-data", "image-gen", "config.json");
+  if (!fs.existsSync(configPath)) return false;
+
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch (err) {
+    log?.(`[migrations] #43: image-gen plugin config unreadable, skipped (${err.message})`);
+    return false;
+  }
+
+  const changed = removeCodexImageSizeDefault(config?.global?.providerDefaults);
+  if (!changed) return false;
+
+  atomicWriteSync(configPath, JSON.stringify(config, null, 2) + "\n");
+  return true;
+}
+
 function migrateDirectNotifyAutomationsToAgentRuns(ctx) {
   const { hanakoHome, agentsDir, log } = ctx;
   const paths = [];
@@ -1356,8 +1410,7 @@ function migrateDirectNotifyAutomationsToAgentRuns(ctx) {
   } catch {}
 
   try {
-    for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
+    for (const entry of readDirectoryLikeDirentsSync(agentsDir)) {
       paths.push(path.join(agentsDir, entry.name, "desk", "cron-jobs.json"));
     }
   } catch {}
@@ -1390,8 +1443,7 @@ function repairAutomationOwnershipAfterAgentRunConsolidation(ctx) {
   } catch {}
 
   try {
-    for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
+    for (const entry of readDirectoryLikeDirentsSync(agentsDir)) {
       stores.push({
         jobsPath: path.join(agentsDir, entry.name, "desk", "cron-jobs.json"),
         fallbackAgentId: entry.name,
@@ -1688,7 +1740,7 @@ function migrateLearnedSkillsToGlobalSkillPool(ctx) {
 
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return;
   }
@@ -1763,7 +1815,7 @@ function migrateAgentPhoneRuntimeOutOfProjection(ctx) {
 
   let agentEntries;
   try {
-    agentEntries = fs.readdirSync(agentsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+    agentEntries = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     log?.("[migrations] #32: no agents dir");
     return;
@@ -1864,7 +1916,7 @@ function cleanupSummarizerCompilerRemnants(ctx) {
   // ── agent config.yaml ──
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     agentDirs = [];
   }
@@ -1920,6 +1972,7 @@ function backfillLegacySessionFiles(ctx) {
   let skipped = 0;
 
   for (const sessionPath of sessionPaths) {
+    const sessionId = sessionIdFromFilename(path.basename(sessionPath));
     let lines;
     try {
       lines = fs.readFileSync(sessionPath, "utf-8").split("\n").filter(Boolean);
@@ -1941,7 +1994,7 @@ function backfillLegacySessionFiles(ctx) {
       if (entry?.type !== "message" || msg?.role !== "toolResult") continue;
 
       for (const ref of legacySessionFileRefs(msg)) {
-        const ok = registerLegacySessionFile({ registry, sessionPath, ref, hanakoHome, log });
+        const ok = registerLegacySessionFile({ registry, sessionId, sessionPath, ref, hanakoHome, log });
         if (ok) registered++;
         else skipped++;
       }
@@ -1951,6 +2004,7 @@ function backfillLegacySessionFiles(ctx) {
         try {
           persistBrowserScreenshotFileSync({
             hanakoHome,
+            sessionId,
             sessionPath,
             base64: screenshot.base64,
             mimeType: screenshot.mimeType || "image/png",
@@ -2145,7 +2199,7 @@ function migrateBridgeSessionKeysToAgentScoped(ctx) {
   const { agentsDir, log } = ctx;
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return;
   }
@@ -2351,7 +2405,7 @@ function promoteAgentVideoOverrides(ctx) {
 
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return 0;
   }
@@ -2439,7 +2493,7 @@ function promoteVideoOverrideIntoAddedModels(providers, modelId, video) {
 function collectAgentSessionMetaPaths(agentsDir) {
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return [];
   }
@@ -2548,7 +2602,7 @@ function migrateIdentityUserNamePlaceholders(ctx) {
 function collectAgentIdentityPaths(agentsDir) {
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return [];
   }
@@ -2756,7 +2810,7 @@ function normalizeLegacyMemoryMasterDefaults(ctx) {
   const { agentsDir, log } = ctx;
   let agentDirs;
   try {
-    agentDirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return 0;
   }
@@ -2793,14 +2847,13 @@ function normalizeLegacyMemoryMasterDefaults(ctx) {
 function collectLegacySessionJsonlPaths(agentsDir) {
   let agents = [];
   try {
-    agents = fs.readdirSync(agentsDir, { withFileTypes: true });
+    agents = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return [];
   }
 
   const out = [];
   for (const agent of agents) {
-    if (!agent.isDirectory()) continue;
     const agentDir = path.join(agentsDir, agent.name);
     collectJsonlRecursive(path.join(agentDir, "sessions"), out);
     collectJsonlRecursive(path.join(agentDir, "subagent-sessions"), out);
@@ -2811,14 +2864,13 @@ function collectLegacySessionJsonlPaths(agentsDir) {
 function collectAgentParentSessionJsonlPaths(agentsDir) {
   let agents = [];
   try {
-    agents = fs.readdirSync(agentsDir, { withFileTypes: true });
+    agents = readDirectoryLikeDirentsSync(agentsDir);
   } catch {
     return [];
   }
 
   const out = [];
   for (const agent of agents) {
-    if (!agent.isDirectory()) continue;
     collectJsonlRecursive(path.join(agentsDir, agent.name, "sessions"), out);
   }
   return out;
@@ -2845,7 +2897,11 @@ function summarizeDeferredSubagentTask(task) {
   return null;
 }
 
-function collectJsonlRecursive(dir, out) {
+function collectJsonlRecursive(dir, out, seen = new Set()) {
+  const dirKey = filesystemIdentityKeySync(dir);
+  if (seen.has(dirKey)) return;
+  seen.add(dirKey);
+
   let entries = [];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -2854,9 +2910,9 @@ function collectJsonlRecursive(dir, out) {
   }
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      collectJsonlRecursive(fullPath, out);
-    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+    if (isDirectoryLikeDirentSync(dir, entry)) {
+      collectJsonlRecursive(fullPath, out, seen);
+    } else if (isSessionJsonlFilename(entry.name) && isFileLikeDirentSync(dir, entry)) {
       out.push(fullPath);
     }
   }
@@ -2941,12 +2997,13 @@ function pushLegacyFileRef(refs, candidate, defaults: any = {}) {
   });
 }
 
-function registerLegacySessionFile({ registry, sessionPath, ref, hanakoHome, log }) {
+function registerLegacySessionFile({ registry, sessionId = null, sessionPath, ref, hanakoHome, log }) {
   if (!ref?.filePath || !path.isAbsolute(ref.filePath)) return false;
   if (!fs.existsSync(ref.filePath)) return false;
 
   try {
     registry.registerFile({
+      ...(sessionId ? { sessionId } : {}),
       sessionPath,
       filePath: ref.filePath,
       label: ref.label || path.basename(ref.filePath),
@@ -3286,8 +3343,7 @@ function removeAgentPhoneReplyInstructions(ctx) {
   }
 
   if (fs.existsSync(agentsDir)) {
-    for (const agentEntry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-      if (!agentEntry.isDirectory()) continue;
+    for (const agentEntry of readDirectoryLikeDirentsSync(agentsDir)) {
       const conversationsDir = path.join(agentsDir, agentEntry.name, "phone", "conversations");
       if (!fs.existsSync(conversationsDir)) continue;
       for (const entry of fs.readdirSync(conversationsDir, { withFileTypes: true })) {

@@ -1,15 +1,26 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSettingsStore } from '../store';
+import { hanaFetch } from '../api';
 import { t, VALID_THEMES, autoSaveConfig } from '../helpers';
 import { SelectWidget } from '@/ui';
 import { Toggle } from '../widgets/Toggle';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
 import { NumberInput } from '../components/NumberInput';
+import { StepSlider, type StepSliderOption } from '../components/StepSlider';
+import {
+  applyChatLayout,
+  mergeChatLayout,
+  normalizeChatLayout,
+  type ChatBodyFontSizeOffset,
+  type ChatLayoutContentWidth,
+  type ChatLayoutPreferences,
+} from '../../chat/layout';
 import {
   applyEditorTypography,
   mergeEditorTypography,
   normalizeEditorTypography,
+  type EditorMarkdownContentWidth,
   type EditorMarkdownTypography,
 } from '../../editor/typography';
 import {
@@ -25,6 +36,11 @@ import {
   serifFromFontPresetId,
 } from '../../utils/font-presets';
 import { readConfigBoolean } from '../resource-state';
+import {
+  normalizeSidebarUiPrefs,
+  type SidebarSessionListRowMode,
+  type SidebarUiPrefs,
+} from '../../../../../shared/sidebar-ui-state.ts';
 import styles from '../Settings.module.css';
 import registry from '../../../shared/theme-registry';
 
@@ -45,6 +61,8 @@ const VOICE_RECORD_SHORTCUT_MAC = ['⌘', '⇧', 'M'];
 const VOICE_RECORD_SHORTCUT_DEFAULT = ['Ctrl', 'Shift', 'M'];
 
 type MarkdownTypographyKey = Exclude<keyof EditorMarkdownTypography, 'fontPreset'>;
+type MarkdownNumericTypographyKey = Exclude<MarkdownTypographyKey, 'contentWidth' | 'bodyFontSize'>;
+type ReadingContentWidth = EditorMarkdownContentWidth | ChatLayoutContentWidth;
 
 interface AppearancePrefs {
   currentTheme: string;
@@ -66,22 +84,40 @@ function readAppearancePrefs(): AppearancePrefs {
 }
 
 const EDITOR_FONT_SIZE_ROWS: Array<{
-  key: MarkdownTypographyKey;
+  key: MarkdownNumericTypographyKey;
   label: string;
   hint: string;
   min: number;
   max: number;
 }> = [
-  { key: 'bodyFontSize', label: 'settings.editor.markdownBodyFontSize', hint: 'settings.editor.markdownBodyFontSizeHint', min: 12, max: 24 },
   { key: 'heading1FontSize', label: 'settings.editor.markdownHeading1FontSize', hint: 'settings.editor.markdownHeading1FontSizeHint', min: 16, max: 40 },
   { key: 'heading2FontSize', label: 'settings.editor.markdownHeading2FontSize', hint: 'settings.editor.markdownHeading2FontSizeHint', min: 15, max: 34 },
   { key: 'heading3FontSize', label: 'settings.editor.markdownHeading3FontSize', hint: 'settings.editor.markdownHeading3FontSizeHint', min: 14, max: 30 },
 ];
 
+const BODY_FONT_SIZE_OFFSETS = [-2, -1, 0, 1, 2] as const;
+
+const CONTENT_WIDTH_STEPS: Array<{
+  value: string;
+  width: ReadingContentWidth;
+  labelKey?: string;
+}> = [
+  { value: '640', width: 640 },
+  { value: '720', width: 720 },
+  { value: '800', width: 800 },
+  { value: 'unlimited', width: 'unlimited', labelKey: 'settings.appearance.readingWidthUnlimited' },
+];
+
+function formatBodyFontSizeOffset(offset: number): string {
+  return offset > 0 ? `+${offset}` : String(offset);
+}
+
 export function InterfaceTab() {
   const settingsConfig = useSettingsStore(s => s.settingsConfig);
   const platformName = useSettingsStore(s => s.platformName);
+  const showToast = useSettingsStore(s => s.showToast);
   const [appearancePrefs, setAppearancePrefs] = useState<AppearancePrefs>(() => readAppearancePrefs());
+  const [sidebarUiPrefs, setSidebarUiPrefs] = useState<SidebarUiPrefs | null>(null);
   const refreshAppearancePrefs = useCallback(() => {
     setAppearancePrefs(readAppearancePrefs());
   }, []);
@@ -102,6 +138,29 @@ export function InterfaceTab() {
     () => normalizeEditorTypography(settingsConfig?.editor),
     [settingsConfig?.editor],
   );
+  const chatLayout = useMemo(
+    () => normalizeChatLayout(settingsConfig?.chat),
+    [settingsConfig?.chat],
+  );
+  const contentWidthOptions: Array<StepSliderOption & { width: ReadingContentWidth }> = CONTENT_WIDTH_STEPS.map(option => {
+    const label = option.labelKey ? t(option.labelKey) : option.value;
+    const valueLabel = option.width === 'unlimited' ? t('settings.appearance.readingWidthUnlimited') : option.value;
+    return {
+      value: option.value,
+      width: option.width,
+      label,
+      valueLabel,
+    };
+  });
+  const bodyFontSizeOptions: Array<StepSliderOption & { offset: ChatBodyFontSizeOffset }> = BODY_FONT_SIZE_OFFSETS.map(offset => {
+    const label = formatBodyFontSizeOffset(offset);
+    return {
+      value: String(offset),
+      offset,
+      label,
+      valueLabel: label,
+    };
+  });
   const fontSelectOptions = [
     { value: FOLLOW_READING_FONT_ID, label: t('settings.fonts.followReading') },
     ...READING_FONT_PRESETS.map(preset => ({
@@ -113,6 +172,22 @@ export function InterfaceTab() {
   const voiceShortcutKeys = platformName === 'darwin'
     ? VOICE_RECORD_SHORTCUT_MAC
     : VOICE_RECORD_SHORTCUT_DEFAULT;
+
+  useEffect(() => {
+    let cancelled = false;
+    hanaFetch('/api/preferences/sidebar-ui')
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return;
+        setSidebarUiPrefs(normalizeSidebarUiPrefs(data?.sidebarUi));
+      })
+      .catch(err => {
+        if (!cancelled) console.warn('[settings] sidebar UI preferences load failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const saveEditorTypography = async (patch: Partial<EditorMarkdownTypography>) => {
     const previousConfig = useSettingsStore.getState().settingsConfig || {};
@@ -134,6 +209,26 @@ export function InterfaceTab() {
     platform?.settingsChanged?.('editor-typography-changed', { editor: restored });
   };
 
+  const saveChatLayout = async (patch: Partial<ChatLayoutPreferences>) => {
+    const previousConfig = useSettingsStore.getState().settingsConfig || {};
+    const previousChat = previousConfig.chat;
+    const next = mergeChatLayout(previousChat, patch);
+    useSettingsStore.setState({ settingsConfig: { ...previousConfig, chat: next } });
+    applyChatLayout(next);
+    platform?.settingsChanged?.('chat-layout-changed', { chat: next });
+
+    const saved = await autoSaveConfig({ chat: next }, { silent: true });
+    if (saved) {
+      useSettingsStore.getState().showToast(t('settings.autoSaved'), 'success');
+      return;
+    }
+
+    const restored = normalizeChatLayout(previousChat);
+    useSettingsStore.setState({ settingsConfig: previousConfig });
+    applyChatLayout(restored);
+    platform?.settingsChanged?.('chat-layout-changed', { chat: restored });
+  };
+
   const saveHardwareAcceleration = async (next: boolean) => {
     const previousConfig = useSettingsStore.getState().settingsConfig || {};
     useSettingsStore.setState({ settingsConfig: { ...previousConfig, hardware_acceleration: next } });
@@ -147,6 +242,34 @@ export function InterfaceTab() {
 
     useSettingsStore.setState({ settingsConfig: previousConfig });
   };
+
+  const saveSessionListRowMode = useCallback(async (singleLine: boolean) => {
+    const previousPrefs = sidebarUiPrefs;
+    const basePrefs = previousPrefs ?? normalizeSidebarUiPrefs({});
+    const rowMode: SidebarSessionListRowMode = singleLine ? 'single-line' : 'two-line';
+    const optimistic = normalizeSidebarUiPrefs({
+      ...basePrefs,
+      sessionList: { ...basePrefs.sessionList, rowMode },
+    });
+    setSidebarUiPrefs(optimistic);
+    try {
+      const res = await hanaFetch('/api/preferences/sidebar-ui', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionList: { rowMode } }),
+      });
+      const data = await res.json();
+      const saved = normalizeSidebarUiPrefs(data?.sidebarUi);
+      setSidebarUiPrefs(saved);
+      window.dispatchEvent(new CustomEvent('hana-settings', {
+        detail: { type: 'sidebar-ui-changed', sidebarUi: saved },
+      }));
+      window.platform?.settingsChanged?.('sidebar-ui-changed', { sidebarUi: saved });
+    } catch (err: unknown) {
+      setSidebarUiPrefs(previousPrefs);
+      showToast(t('settings.saveFailed') + ': ' + (err instanceof Error ? err.message : String(err)), 'error');
+    }
+  }, [showToast, sidebarUiPrefs]);
 
   const locale = settingsConfig?.locale || 'zh-CN';
   const localeVal = ['zh-CN', 'zh-TW', 'ja', 'ko', 'en'].includes(locale) ? locale
@@ -226,6 +349,38 @@ export function InterfaceTab() {
             </button>
           ))}
         </div>
+        <SettingsSection.Card>
+          <SettingsRow
+            label={t('settings.appearance.bodyFontSizeOffset')}
+            hint={t('settings.appearance.bodyFontSizeOffsetHint')}
+            control={
+              <StepSlider
+                ariaLabel={t('settings.appearance.bodyFontSizeOffset')}
+                options={bodyFontSizeOptions}
+                value={String(chatLayout.bodyFontSizeOffset)}
+                onChange={(value) => {
+                  const option = bodyFontSizeOptions.find(item => item.value === value);
+                  if (option) saveChatLayout({ bodyFontSizeOffset: option.offset });
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            label={t('settings.appearance.chatWidth')}
+            hint={t('settings.appearance.chatWidthHint')}
+            control={
+              <StepSlider
+                ariaLabel={t('settings.appearance.chatWidth')}
+                options={contentWidthOptions}
+                value={String(chatLayout.contentWidth)}
+                onChange={(value) => {
+                  const option = contentWidthOptions.find(item => item.value === value);
+                  if (option) saveChatLayout({ contentWidth: option.width as ChatLayoutContentWidth });
+                }}
+              />
+            }
+          />
+        </SettingsSection.Card>
       </SettingsSection>
 
       <SettingsSection title={t('settings.appearance.title')}>
@@ -280,6 +435,19 @@ export function InterfaceTab() {
         />
       </SettingsSection>
 
+      <SettingsSection title={t('settings.interface.sidebar')}>
+        <SettingsRow
+          label={t('settings.interface.sessionListSingleLine')}
+          hint={t('settings.interface.sessionListSingleLineHint')}
+          control={
+            <Toggle
+              on={sidebarUiPrefs ? sidebarUiPrefs.sessionList.rowMode === 'single-line' : undefined}
+              onChange={saveSessionListRowMode}
+            />
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection title={t('settings.editor.title')}>
         <SettingsRow
           label={t('settings.editor.markdownFont')}
@@ -294,6 +462,34 @@ export function InterfaceTab() {
                   fallback: FOLLOW_READING_FONT_ID,
                 }),
               })}
+            />
+          }
+        />
+        <SettingsRow
+          label={t('settings.editor.markdownBodyFontSize')}
+          hint={t('settings.editor.markdownBodyFontSizeHint')}
+          control={
+            <NumberInput
+              value={editorTypography.markdown.bodyFontSize}
+              onChange={(value) => saveEditorTypography({ bodyFontSize: value })}
+              unit="px"
+              min={12}
+              max={24}
+            />
+          }
+        />
+        <SettingsRow
+          label={t('settings.editor.markdownContentWidth')}
+          hint={t('settings.editor.markdownContentWidthHint')}
+          control={
+            <StepSlider
+              ariaLabel={t('settings.editor.markdownContentWidth')}
+              options={contentWidthOptions}
+              value={String(editorTypography.markdown.contentWidth)}
+              onChange={(value) => {
+                const option = contentWidthOptions.find(item => item.value === value);
+                if (option) saveEditorTypography({ contentWidth: option.width as EditorMarkdownContentWidth });
+              }}
             />
           }
         />

@@ -22,7 +22,7 @@ export const markdownTheme = EditorView.theme({
     overflow: 'auto',
     fontFamily: 'var(--editor-markdown-font-family, var(--font-serif))',
     lineHeight: 'var(--editor-markdown-line-height)',
-    padding: 'calc(var(--space-xl) + var(--space-lg)) 0 var(--space-md)',
+    padding: 'calc(var(--space-xl) + var(--space-lg)) 0 var(--preview-markdown-editor-bottom-space, var(--space-md))',
   },
   '&.cm-markdown-has-top-cover .cm-scroller': {
     paddingTop: '0',
@@ -30,6 +30,14 @@ export const markdownTheme = EditorView.theme({
   '.cm-content': {
     width: '100%',
     padding: '0 var(--editor-markdown-content-padding-x)',
+  },
+  '.cm-line': {
+    maxWidth: 'var(--editor-markdown-content-width)',
+    margin: '0 auto',
+    boxSizing: 'border-box',
+  },
+  '.cm-line.cm-markdown-cover-line': {
+    maxWidth: 'none',
   },
   '.cm-activeLine': { backgroundColor: 'transparent' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
@@ -54,6 +62,8 @@ export const markdownTheme = EditorView.theme({
   },
   '.cm-markdown-cover': {
     position: 'relative',
+    width: '100%',
+    maxWidth: 'none',
     minHeight: '160px',
     maxHeight: '720px',
     margin: '0 auto',

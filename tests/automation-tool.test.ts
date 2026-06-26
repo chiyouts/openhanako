@@ -72,6 +72,18 @@ describe("automation tool", () => {
         jobData: expect.objectContaining({
           label: "Morning Review",
           actorAgentId: "agent-b",
+          executionContext: expect.objectContaining({
+            notificationContext: {
+              bridgeDeliveryTarget: {
+                kind: "bridge",
+                platform: "wechat",
+                chatType: "dm",
+                chatId: "owner",
+                sessionKey: "wechat_dm_owner@agent-a",
+                agentId: "agent-a",
+              },
+            },
+          }),
         }),
         apply: expect.any(Function),
       }),
@@ -254,6 +266,44 @@ describe("automation tool", () => {
         agentId: "agent-b",
         prompt: "edited agent run prompt",
       }),
+    }));
+  });
+
+  it("stores every suggestions in milliseconds before the desktop card applies them", async () => {
+    const store = makeStore();
+    const { store: suggestionStore, created } = makeSuggestionStore("automation_suggestion_every", "7200");
+    const tool = createAutomationTool(store, {
+      automationSuggestionStore: suggestionStore,
+      getAgentId: () => "agent-a",
+      getSessionCwd: () => "/workspace/current",
+      getSessionWorkspaceFolders: () => [],
+      getHomeCwd: (agentId: string) => `/home/${agentId}`,
+    });
+
+    const result = await tool.execute(
+      "call_every",
+      {
+        action: "create",
+        scheduleType: "every",
+        schedule: "120",
+        label: "Two hour reminder",
+        prompt: "remind me every two hours",
+      },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionFile: () => "/sessions/agent-a.jsonl" } },
+    );
+
+    expect(result.details.jobData).toMatchObject({
+      type: "every",
+      schedule: 7_200_000,
+    });
+
+    await created[0].apply();
+
+    expect(store.addJob).toHaveBeenCalledWith(expect.objectContaining({
+      type: "every",
+      schedule: 7_200_000,
     }));
   });
 
