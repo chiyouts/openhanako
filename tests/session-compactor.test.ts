@@ -29,6 +29,7 @@ vi.mock("../lib/pi-sdk/index.js", () => ({
 
 import {
   compactSessionWithCachePreservation,
+  compactSessionWithCachePreservationRecoveringRuntime,
   createCachePreservingCompactionResult,
   runCachePreservingCompactionForSession,
 } from "../core/session-compactor.ts";
@@ -246,6 +247,54 @@ describe("session-compactor", () => {
       reasoning: "medium",
       toolChoice: "none",
     });
+  });
+
+  it("projects MCP resource content before cache-preserving compaction provider calls", async () => {
+    const resultStream = {
+      result: vi.fn(async () => ({
+        stopReason: "stop",
+        content: [{ type: "text", text: "resource summary" }],
+      })),
+    };
+    const streamFn = vi.fn(async () => resultStream);
+    const resourceBlock = {
+      type: "resource",
+      resource: {
+        uri: "file:///workspace/spec.md",
+        name: "spec.md",
+        mimeType: "text/markdown",
+        text: "Compaction must keep this visible.",
+      },
+    };
+
+    await createCachePreservingCompactionResult({
+      preparation: {
+        firstKeptEntryId: "entry-keep",
+        tokensBefore: 1234,
+        messagesToSummarize: [
+          {
+            role: "toolResult",
+            toolCallId: "call_read",
+            toolName: "read_resource",
+            content: [resourceBlock],
+          },
+        ],
+        settings: { reserveTokens: 1000 },
+      },
+      model: { id: "gpt-5", provider: "openai", api: "openai-responses", reasoning: false },
+      systemPrompt: "system prompt",
+      streamFn,
+      convertToLlm: vi.fn(async (messages) => messages),
+    } as any);
+
+    const [, context] = streamFn.mock.calls[0] as any;
+    const projected = context.messages[0].content[0];
+    expect(projected.type).toBe("text");
+    expect(projected.text).toContain("uri: file:///workspace/spec.md");
+    expect(projected.text).toContain("name: spec.md");
+    expect(projected.text).toContain("mimeType: text/markdown");
+    expect(projected.text).toContain("Compaction must keep this visible.");
+    expect(resourceBlock.resource.text).toBe("Compaction must keep this visible.");
   });
 
   it("writes cache-preserving compaction results back into the session branch", async () => {
@@ -498,6 +547,29 @@ describe("session-compactor", () => {
       "Cache-preserving compaction extension is not installed",
     );
     expect(session.compact).not.toHaveBeenCalled();
+  });
+
+  it("reloads the session runtime once when the compaction hook is missing", async () => {
+    const staleSession = {
+      compact: vi.fn(),
+      extensionRunner: { hasHandlers: vi.fn(() => false) },
+    };
+    const reloadedSession = {
+      compact: vi.fn(async () => "ok"),
+      extensionRunner: { hasHandlers: vi.fn((event) => event === "session_before_compact") },
+    };
+    const reloadSessionRuntime = vi.fn(async () => reloadedSession);
+
+    await expect(compactSessionWithCachePreservationRecoveringRuntime({
+      session: staleSession,
+      sessionPath: "/sessions/a.jsonl",
+      customInstructions: "focus",
+      reloadSessionRuntime,
+    })).resolves.toMatchObject({ result: "ok", session: reloadedSession, recovered: true });
+
+    expect(staleSession.compact).not.toHaveBeenCalled();
+    expect(reloadSessionRuntime).toHaveBeenCalledWith("/sessions/a.jsonl");
+    expect(reloadedSession.compact).toHaveBeenCalledWith("focus");
   });
 
   it("reports stale extension runners before invoking manual compaction", async () => {

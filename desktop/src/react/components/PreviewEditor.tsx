@@ -12,7 +12,7 @@
  * - 文件系统 source of truth，直接对接文件读写
  */
 
-import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle } from 'react';
+import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle, useLayoutEffect, useState } from 'react';
 import {
   EditorView, keymap, highlightActiveLine, drawSelection,
   lineNumbers,
@@ -101,6 +101,7 @@ export interface PreviewEditorProps {
 
 const SAVE_DELAY = 600;
 const CHECKPOINT_INTERVAL = 5 * 60 * 1000;
+const EDITOR_HOST_MIN_SIZE_PX = 1;
 
 interface SaveJob {
   text: string;
@@ -200,6 +201,24 @@ function restoreScrollPosition(view: EditorView, scrollTop: number, scrollLeft: 
   window.requestAnimationFrame?.(restore);
 }
 
+function editorHostBoxSize(el: HTMLElement): { width: number; height: number } {
+  const rect = el.getBoundingClientRect();
+  return {
+    width: Math.max(rect.width, el.clientWidth, el.offsetWidth),
+    height: Math.max(rect.height, el.clientHeight, el.offsetHeight),
+  };
+}
+
+function isEditorHostReady(el: HTMLElement): boolean {
+  if (!el.isConnected) return false;
+  const doc = el.ownerDocument;
+  const win = doc.defaultView;
+  if (!win || win.closed) return false;
+  if (doc.visibilityState === 'hidden') return false;
+  const { width, height } = editorHostBoxSize(el);
+  return width >= EDITOR_HOST_MIN_SIZE_PX && height >= EDITOR_HOST_MIN_SIZE_PX;
+}
+
 function replaceDocumentPreservingSelection(view: EditorView, content: string): boolean {
   const current = view.state.doc.toString();
   if (current === content) return false;
@@ -213,6 +232,18 @@ function replaceDocumentPreservingSelection(view: EditorView, content: string): 
   });
   restoreScrollPosition(view, scrollTop, scrollLeft);
   return true;
+}
+
+function syncEditorRootToDom(view: EditorView): void {
+  const root = view.dom.getRootNode();
+  const currentRoot: unknown = view.root;
+  if (root === currentRoot) return;
+  const nodeType = (root as Node).nodeType;
+  const isDocument = nodeType === 9;
+  const isShadowRoot = nodeType === 11 && 'host' in root;
+  if (isDocument || isShadowRoot) {
+    view.setRoot(root as Document | ShadowRoot);
+  }
 }
 
 interface MarkdownAttachmentSource {
@@ -329,6 +360,8 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
   function PreviewEditor({ content, filePath, remoteContentRef, fileVersion, saveDocument, mode, language, onSelectionChange, onSelectionCommit, onStatsChange, onContentChange, initialScrollSnapshot, contentHash, onScrollSnapshotChange, readOnly = false }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
+    const [editorHostReadySignal, setEditorHostReadySignal] = useState(0);
+    const lastEditorHostReadyRef = useRef(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const saveInFlightRef = useRef(false);
     const pendingSaveRef = useRef<SaveJob | null>(null);
@@ -374,6 +407,79 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
       conceal: new Compartment(),
       theme: new Compartment(),
     });
+
+    useLayoutEffect(() => {
+      const host = containerRef.current;
+      if (!host) return undefined;
+      const doc = host.ownerDocument;
+      const win = doc.defaultView ?? window;
+      let disposed = false;
+      let rafId: number | null = null;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let resizeObserver: ResizeObserver | null = null;
+
+      const clearPending = () => {
+        if (rafId !== null) {
+          win.cancelAnimationFrame?.(rafId);
+          rafId = null;
+        }
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+      };
+
+      const check = () => {
+        rafId = null;
+        retryTimer = null;
+        if (disposed) return;
+        const ready = isEditorHostReady(host);
+        if (ready && !lastEditorHostReadyRef.current && !viewRef.current) {
+          setEditorHostReadySignal(signal => signal + 1);
+        }
+        lastEditorHostReadyRef.current = ready;
+        if (!ready) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            scheduleCheck();
+          }, 250);
+        }
+      };
+
+      const scheduleCheck = () => {
+        if (disposed || rafId !== null || retryTimer) return;
+        if (typeof win.requestAnimationFrame === 'function') {
+          rafId = win.requestAnimationFrame(check);
+        } else {
+          retryTimer = setTimeout(check, 0);
+        }
+      };
+
+      const requestCheck = () => {
+        if (disposed) return;
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+        scheduleCheck();
+      };
+
+      if (typeof win.ResizeObserver === 'function') {
+        resizeObserver = new win.ResizeObserver(requestCheck);
+        resizeObserver.observe(host);
+      }
+      doc.addEventListener('visibilitychange', requestCheck);
+      win.addEventListener('resize', requestCheck);
+      check();
+
+      return () => {
+        disposed = true;
+        clearPending();
+        resizeObserver?.disconnect();
+        doc.removeEventListener('visibilitychange', requestCheck);
+        win.removeEventListener('resize', requestCheck);
+      };
+    }, []);
 
     useImperativeHandle(ref, () => ({
       getView: () => viewRef.current,
@@ -575,8 +681,9 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
     }, [mode, readOnly, saveToFile]);
 
     // Create editor
-    useEffect(() => {
+    useLayoutEffect(() => {
       if (!containerRef.current) return;
+      if (!editorHostReadySignal || !isEditorHostReady(containerRef.current)) return;
       const c = cRef.current;
       const isMd = mode === 'markdown';
       const isCsv = mode === 'csv';
@@ -677,7 +784,11 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
 
       const state = EditorState.create({ doc: content, extensions });
       const view = new EditorView({ state, parent: containerRef.current });
-      const onSelectionCommitEvent = () => {
+      const selectionCommitWindow = containerRef.current.ownerDocument.defaultView ?? window;
+      const handledSelectionCommitEvents = new WeakSet<Event>();
+      const onSelectionCommitEvent = (event: Event) => {
+        if (handledSelectionCommitEvents.has(event)) return;
+        handledSelectionCommitEvents.add(event);
         selectionCommitCbRef.current?.(view);
       };
       let scrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -742,6 +853,9 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
       view.dom.addEventListener('mouseup', onSelectionCommitEvent);
       view.dom.addEventListener('touchend', onSelectionCommitEvent);
       view.dom.addEventListener('keyup', onSelectionCommitEvent);
+      selectionCommitWindow.addEventListener('mouseup', onSelectionCommitEvent);
+      selectionCommitWindow.addEventListener('touchend', onSelectionCommitEvent);
+      selectionCommitWindow.addEventListener('keyup', onSelectionCommitEvent);
       view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
       view.dom.addEventListener('dragover', onCoverDragOver, true);
       view.dom.addEventListener('dragleave', onCoverDragLeave, true);
@@ -764,6 +878,9 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
         view.dom.removeEventListener('mouseup', onSelectionCommitEvent);
         view.dom.removeEventListener('touchend', onSelectionCommitEvent);
         view.dom.removeEventListener('keyup', onSelectionCommitEvent);
+        selectionCommitWindow.removeEventListener('mouseup', onSelectionCommitEvent);
+        selectionCommitWindow.removeEventListener('touchend', onSelectionCommitEvent);
+        selectionCommitWindow.removeEventListener('keyup', onSelectionCommitEvent);
         view.scrollDOM.removeEventListener('scroll', onScroll);
         view.dom.removeEventListener('dragover', onCoverDragOver, true);
         view.dom.removeEventListener('dragleave', onCoverDragLeave, true);
@@ -771,7 +888,13 @@ export const PreviewEditor = forwardRef<PreviewEditorHandle, PreviewEditorProps>
         view.destroy();
         viewRef.current = null;
       };
-    }, [mode, language, readOnly, filePath, remoteContentRef, emitStatsIfChanged, insertMarkdownAttachments]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 mode/language/readOnly/filePath/remoteContentRef 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
+    }, [editorHostReadySignal, mode, language, readOnly, filePath, remoteContentRef, emitStatsIfChanged, insertMarkdownAttachments]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 host 可测量以及 mode/language/readOnly/filePath/remoteContentRef 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
+
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      syncEditorRootToDom(view);
+    });
 
     useEffect(() => {
       const view = viewRef.current;
