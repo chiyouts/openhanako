@@ -169,6 +169,15 @@ export function filePathForPreviewDocumentTarget(target: PreviewDocumentTarget, 
   return joinWorkspaceFilePath(basePath, normalized.subdir || '', normalized.name);
 }
 
+function nativeRootForWorkbenchMount(state: Pick<StoreState, 'studioWorkspaces'>, mountId: string): string {
+  const workspaces = Array.isArray(state.studioWorkspaces)
+    ? state.studioWorkspaces
+    : [];
+  const match = workspaces.find((workspace) =>
+    typeof workspace?.mountId === 'string' && workspace.mountId === mountId);
+  return typeof match?.nativeRootPath === 'string' ? match.nativeRootPath : '';
+}
+
 function resourceRefForPreviewDocumentTarget(
   target: PreviewDocumentTarget,
   state: ReturnType<typeof useStore.getState>,
@@ -203,16 +212,6 @@ function mountIdFromResourceDescriptor(resource: ResourceChangeEvent['resource']
       : '';
   return mountId || null;
 }
-
-function nativeRootForWorkbenchMount(state: Pick<StoreState, 'studioWorkspaces'>, mountId: string): string {
-  const workspaces = Array.isArray(state.studioWorkspaces)
-    ? state.studioWorkspaces
-    : [];
-  const match = workspaces.find((workspace) =>
-    typeof workspace?.mountId === 'string' && workspace.mountId === mountId);
-  return typeof match?.nativeRootPath === 'string' ? match.nativeRootPath : '';
-}
-
 export function openPreviewDocumentWatchFilePaths(): string[] {
   const state = useStore.getState();
   const targets = openPreviewDocumentTargets();

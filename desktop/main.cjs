@@ -575,6 +575,58 @@ function applyWindowThemeColors(win, rawTheme) {
   }
 }
 
+function summarizeBrowserWindowOptionsForDiagnostics(label, opts) {
+  const webPreferences = opts?.webPreferences || {};
+  return {
+    label,
+    platform: process.platform,
+    width: opts?.width,
+    height: opts?.height,
+    minWidth: opts?.minWidth,
+    minHeight: opts?.minHeight,
+    hasIcon: !!opts?.icon,
+    frame: opts?.frame !== false,
+    hasBackgroundColor: typeof opts?.backgroundColor === "string",
+    titleBarStyle: opts?.titleBarStyle || null,
+    show: opts?.show === true,
+    webPreferences: {
+      hasPreload: !!webPreferences.preload,
+      contextIsolation: webPreferences.contextIsolation !== false,
+      nodeIntegration: webPreferences.nodeIntegration === true,
+    },
+  };
+}
+
+function createBrowserWindowWithDiagnostics(label, opts, { windowsMinimalRetry = false } = {}) {
+  try {
+    return new BrowserWindow(opts);
+  } catch (err) {
+    const summary = summarizeBrowserWindowOptionsForDiagnostics(label, opts);
+    console.error(`[desktop] ${label} BrowserWindow creation failed:`, {
+      message: redactMainLogText(err?.message || String(err)),
+      options: summary,
+    });
+    if (process.platform !== "win32" || !windowsMinimalRetry) throw err;
+
+    const retryOpts = {
+      width: opts?.width || 960,
+      height: opts?.height || 820,
+      minWidth: opts?.minWidth,
+      minHeight: opts?.minHeight,
+      title: opts?.title || "HanaAgent",
+      show: opts?.show === true,
+      ...(opts?.x != null ? { x: opts.x } : {}),
+      ...(opts?.y != null ? { y: opts.y } : {}),
+      webPreferences: opts?.webPreferences,
+    };
+    console.warn(`[desktop] retrying ${label} BrowserWindow with minimal Windows options`, {
+      original: summary,
+      retry: summarizeBrowserWindowOptionsForDiagnostics(`${label}:minimal`, retryOpts),
+    });
+    return new BrowserWindow(retryOpts);
+  }
+}
+
 function applyTransparentWindowBackground(win) {
   if (!win || win.isDestroyed()) return;
   try {
@@ -1768,7 +1820,7 @@ function createMainWindow() {
     opts.y = saved.y;
   }
 
-  mainWindow = new BrowserWindow(opts);
+  mainWindow = createBrowserWindowWithDiagnostics("main", opts, { windowsMinimalRetry: true });
   attachRendererLaunchDiagnostics(mainWindow, "main");
   applyWindowThemeColors(mainWindow, initialTheme);
 
@@ -4662,6 +4714,14 @@ app.whenReady().then(async () => {
     const migratedSetupComplete = await migrateSetupCompleteViaServerIfNeeded();
     if (isSetupComplete() || migratedSetupComplete) {
       // 已完成配置：直接创建主窗口
+      if (process.platform === "win32") {
+        markGpuStartupPhase({
+          hanakoHome,
+          platform: process.platform,
+          phase: "main-window-starting",
+          startupId: desktopStartupId,
+        });
+      }
       createMainWindow();
       registerQuickChatShortcutBestEffort();
       if (process.platform === "win32") {
@@ -4675,6 +4735,14 @@ app.whenReady().then(async () => {
     } else if (hasExistingConfig()) {
       // 老用户：已有 api_key，跳过填写直接看教程
       console.log("[desktop] 检测到已有配置，跳到教程页");
+      if (process.platform === "win32") {
+        markGpuStartupPhase({
+          hanakoHome,
+          platform: process.platform,
+          phase: "onboarding-window-starting",
+          startupId: desktopStartupId,
+        });
+      }
       createOnboardingWindow({ skipToTutorial: "1" });
       if (process.platform === "win32") {
         markGpuStartupPhase({
@@ -4687,6 +4755,14 @@ app.whenReady().then(async () => {
     } else {
       // 全新用户：完整 onboarding 向导
       console.log("[desktop] 首次启动，显示 Onboarding 向导");
+      if (process.platform === "win32") {
+        markGpuStartupPhase({
+          hanakoHome,
+          platform: process.platform,
+          phase: "onboarding-window-starting",
+          startupId: desktopStartupId,
+        });
+      }
       createOnboardingWindow();
       if (process.platform === "win32") {
         markGpuStartupPhase({

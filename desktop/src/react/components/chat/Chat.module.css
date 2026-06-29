@@ -82,6 +82,14 @@
     min-width: 0;
 }
 
+/* InteractiveCard 等宽内容块需要 message 撑满可用宽度。
+ * 正常情况下 .messageGroupAssistant { align-items: flex-start }
+ * 导致 .message shrink-wrap 到内容宽度；但当消息包含 interactive card 时，
+ * 强制撑到 92% 以便卡片拿到合理的渲染宽度。 */
+.messageHasWideBlock {
+    width: 92%;
+}
+
 .message + .message {
     margin-top: var(--space-4);
 }
@@ -1810,6 +1818,10 @@
     overflow: hidden;
 }
 
+.sessionShellActive {
+    animation: hana-fade-in var(--duration-fast) var(--ease-out);
+}
+
 .sessionPanel {
     position: absolute;
     inset: 0;
@@ -1865,6 +1877,12 @@
 :global(.mobile-desktop-root) .sessionPanel {
     padding-left: var(--space-16);
     padding-right: var(--space-16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sessionShellActive {
+        animation: none;
+    }
 }
 
 :global(.mobile-desktop-root) .messageUser,
