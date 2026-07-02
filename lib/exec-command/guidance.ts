@@ -7,7 +7,8 @@ export function execCommandDescription({ platform = process.platform }: { platfo
   if (platform === "win32") {
     common.push(
       "On Windows the default shell is PowerShell. Use PowerShell cmdlets and syntax by default.",
-      "Use shell=\"cmd\" only for cmd.exe builtins or batch files, and shell=\"bash\" only for explicit POSIX/Git Bash commands.",
+      "Use shell=\"cmd\" only for cmd.exe builtins or batch files.",
+      "Use shell=\"bash\" only for explicit POSIX commands; the bundled runtime provides an sh-compatible shell (POSIX sh syntax, not full Bash). Bash-specific features require a system Git Bash install.",
       "Avoid POSIX heredocs on Windows; use python -c, PowerShell here-strings, or a temporary file instead.",
     );
   } else {

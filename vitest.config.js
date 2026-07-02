@@ -18,6 +18,8 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       ".cache/**",
+      // git worktree 副本有自己的测试快照，混进主树测试集会双份执行、断言错位
+      ".claude/worktrees/**",
       "desktop/native/**/.build/**",
       "dist-computer-use/**",
     ],

@@ -1106,9 +1106,10 @@ async function _spawnServerOnce(serverInfoPath) {
   };
   serverEnv = await serverEnvironmentForNetworkProxy(serverEnv);
 
-  // Windows: 注入 PortableGit 路径，并从注册表补齐当前系统 / 用户 PATH。
+  // Windows: 注入 bundled Git runtime（MinGit）路径，并从注册表补齐当前系统 / 用户 PATH。
   if (process.platform === "win32") {
-    // PortableGit 结构：cmd/git.exe, bin/bash.exe, usr/bin/*, mingw64/bin/*
+    // MinGit 结构：cmd/git.exe, usr/bin/*（含 sh.exe）, mingw64/bin/*；
+    // bin/ 是老 PortableGit 布局的遗留，不存在时被 existsSync 过滤
     const gitRoot = path.join(process.resourcesPath || "", "git");
     const gitPaths = [
       path.join(gitRoot, "bin"),

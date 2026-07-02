@@ -15,7 +15,8 @@
  *   3. git / python / node 这类 argv 稳定的工具走专用 runner
  *   4. 只有显式 POSIX shell 命令走 bash/ash/sh 兼容层
  *
- * POSIX/Git runtime 优先使用打包进 resources/git 的 bundled PortableGit runtime。
+ * POSIX/Git runtime 优先使用打包进 resources/git 的 bundled Git runtime（MinGit：
+ * git.exe + usr/bin/sh.exe，无 bash.exe；旧安装可能仍是 PortableGit 布局）。
  * 沙盒开启时找不到 bundled runtime 就 fail fast；沙盒关闭时才允许系统 Git Bash 兜底。
  */
 
@@ -154,7 +155,7 @@ function probeShell(shell, args, env = process.env) {
  * 查找顺序：
  * 1. 系统 Git Bash（标准 + 常见安装位置）
  * 2. 注册表查询 Git 安装路径
- * 3. 内嵌 PortableGit 的 POSIX runtime（打包进 resources/git/）
+ * 3. 内嵌 bundled Git runtime 的 POSIX shell（打包进 resources/git/，MinGit 为 usr/bin/sh.exe）
  * 4. PATH 上的 bash.exe / sh.exe
  * 5. MSYS2 / Cygwin
  */
@@ -167,6 +168,9 @@ function getBundledShellCandidates(env = process.env, deps: Record<string, any> 
       { relative: ["bin", "bash.exe"], args: ["-lc"], label: "PortableGit bash.exe" },
       { relative: ["usr", "bin", "bash.exe"], args: ["-lc"], label: "PortableGit usr/bin/bash.exe" },
       { relative: ["mingw64", "bin", "bash.exe"], args: ["-lc"], label: "PortableGit mingw64/bin/bash.exe" },
+      // MinGit 的 POSIX shell：usr/bin/sh.exe（bash 以 POSIX/sh 模式运行）。
+      // 对外契约是 sh-compatible，不承诺 Bash 特性；label 里不能出现 bash。
+      { relative: ["usr", "bin", "sh.exe"], args: ["-c"], label: "MinGit usr/bin/sh.exe" },
       { relative: ["mingw64", "bin", "sh.exe"], args: ["-c"], label: "PortableGit sh.exe" },
       { relative: ["mingw64", "bin", "ash.exe"], args: ["-c"], label: "Legacy MinGit ash.exe" },
       { relative: ["mingw64", "bin", "busybox.exe"], args: ["sh", "-c"], label: "Legacy MinGit busybox.exe" },
@@ -198,7 +202,7 @@ function getBundledGitCandidates(env = process.env, deps: Record<string, any> = 
       if (exists(git) && !found.some(c => c.git === git)) {
         found.push({
           git,
-          label: `Bundled PortableGit git.exe (${git})`,
+          label: `Bundled Git runtime git.exe (${git})`,
           bundledRoot: gitRoot,
         });
       }
@@ -255,12 +259,12 @@ function findGitRuntime({ env = process.env, bundledOnly = false } = {}) {
   if (bundledOnly) {
     throw new Error(
       "[win32-exec] Sandboxed Git commands require bundled Git runtime, " +
-      "but resources/git/cmd/git.exe was not found. Rebuild the Windows package with vendor/git-portable."
+      "but resources/git/cmd/git.exe was not found. Rebuild the Windows package with vendor/mingit."
     );
   }
 
   throw new Error(
-    "[win32-exec] No usable git.exe found. Install Git for Windows or rebuild HanaAgent with bundled PortableGit."
+    "[win32-exec] No usable git.exe found. Install Git for Windows or rebuild HanaAgent with bundled MinGit."
   );
 }
 
@@ -320,7 +324,7 @@ function getAllShellCandidates({ preferBundled = false, bundledOnly = false, env
     } catch {}
   }
 
-  // ── 3. 内嵌 PortableGit 的 POSIX runtime ──
+  // ── 3. 内嵌 bundled Git runtime 的 POSIX shell ──
   if (!preferBundled) {
     for (const candidate of bundled) {
       if (!found.some(c => c.shell === candidate.shell)) found.push(candidate);
@@ -412,7 +416,7 @@ function findAndCacheShell(startAfter: any, options: Record<string, any> = {}) {
     throw new Error(
       `[win32-exec] Sandboxed POSIX commands require bundled POSIX runtime under resources/git.\n` +
       `Tried bundled candidates:\n${allLabels.map(s => `  - ${s}`).join("\n") || "  - (none found)"}\n\n` +
-      `Rebuild the Windows package with vendor/git-portable, or disable sandbox explicitly.`
+      `Rebuild the Windows package with vendor/mingit, or disable sandbox explicitly.`
     );
   }
   throw new Error(
@@ -974,14 +978,14 @@ function collectWin32EnvironmentDiagnostics(env, context) {
   const firstEntries = pathEntries.slice(0, 6)
     .map((entry) => redactWin32DiagnosticPath(entry, context.sandbox, env));
   const system32Index = pathIndex(pathEntries, /\\windows\\system32(?:\\|$)/i);
-  const portableGitIndex = pathIndex(pathEntries, /\\(?:resources\\git|git)\\(?:bin|usr\\bin|mingw64\\bin|cmd)(?:\\|$)/i);
+  const bundledGitIndex = pathIndex(pathEntries, /\\(?:resources\\git|git)\\(?:bin|usr\\bin|mingw64\\bin|cmd)(?:\\|$)/i);
   return [
     `ComSpec: ${redactWin32DiagnosticPath(envValue(env, "ComSpec") || envValue(env, "COMSPEC") || "(unset)", context.sandbox, env)}`,
     `SystemRoot: ${redactWin32DiagnosticPath(envValue(env, "SystemRoot") || "(unset)", context.sandbox, env)}`,
     `PATHEXT: ${envValue(env, "PATHEXT") || "(unset)"}`,
     `PATH entries: ${pathEntries.length}; first 6: ${JSON.stringify(firstEntries)}`,
     `PATH System32 index: ${system32Index}`,
-    `PATH PortableGit index: ${portableGitIndex}`,
+    `PATH bundled Git index: ${bundledGitIndex}`,
     `TEMP: ${redactWin32DiagnosticPath(envValue(env, "TEMP") || "(unset)", context.sandbox, env)}`,
     `TMP: ${redactWin32DiagnosticPath(envValue(env, "TMP") || "(unset)", context.sandbox, env)}`,
     `LOCALAPPDATA: ${redactWin32DiagnosticPath(envValue(env, "LOCALAPPDATA") || "(unset)", context.sandbox, env)}`,

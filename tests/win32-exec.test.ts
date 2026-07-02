@@ -1255,7 +1255,7 @@ describe("createWin32Exec", () => {
     expect(diagnostic).toContain("Executable: C:\\Windows\\System32\\cmd.exe");
     expect(diagnostic).toContain("Output bytes before failure: 7");
     expect(diagnostic).toContain("PATH System32 index: 0");
-    expect(diagnostic).toContain("PATH PortableGit index: 1");
+    expect(diagnostic).toContain("PATH bundled Git index: 1");
     expect(diagnostic).toContain("No fallback was attempted");
     expect(diagnostic).not.toContain("C:\\Users\\Hana");
     expect(spawnAndStream).toHaveBeenCalledTimes(1);
