@@ -162,7 +162,22 @@ function unsupportedMessageNotice(payload: Record<string, any>) {
   return `钉钉消息类型 ${msgtype} 暂未接入文本内容，请在钉钉中改发文字。`;
 }
 
-function normalizeDingTalkInboundMessage(payload: Record<string, any>, agentId: string) {
+function resolveDingTalkProfile(payload: Record<string, any>, previous: Record<string, any> = {}) {
+  const displayName = cleanString(payload.senderNick)
+    || cleanString(payload.senderName)
+    || cleanString(payload.senderStaffName)
+    || cleanString(payload.sender?.nick)
+    || cleanString(payload.sender?.name)
+    || cleanString(previous.displayName);
+  const avatarUrl = cleanString(payload.senderAvatar)
+    || cleanString(payload.senderAvatarUrl)
+    || cleanString(payload.sender?.avatar)
+    || cleanString(payload.sender?.avatarUrl)
+    || cleanString(previous.avatarUrl);
+  return { displayName, avatarUrl };
+}
+
+function normalizeDingTalkInboundMessage(payload: Record<string, any>, agentId: string, profileCache: Map<string, any>) {
   const conversationId = cleanString(payload.conversationId);
   const userId = cleanString(payload.senderStaffId)
     || cleanString(payload.senderId)
@@ -182,6 +197,9 @@ function normalizeDingTalkInboundMessage(payload: Record<string, any>, agentId: 
   const sessionKey = isGroup
     ? `dt_group_${chatId}@${agentId}`
     : `dt_dm_${userId}@${agentId}`;
+  const previousProfile = profileCache.get(userId) || {};
+  const profile = resolveDingTalkProfile(payload, previousProfile);
+  profileCache.set(userId, profile);
 
   return {
     platform: "dingtalk",
@@ -190,7 +208,10 @@ function normalizeDingTalkInboundMessage(payload: Record<string, any>, agentId: 
     userId,
     sessionKey,
     text,
-    senderName: cleanString(payload.senderNick) || "DingTalk User",
+    senderName: profile.displayName || "DingTalk User",
+    displayName: profile.displayName || undefined,
+    avatarUrl: profile.avatarUrl || undefined,
+    principalId: userId,
     isGroup,
     _msgId: cleanString(payload.msgId) || cleanString(payload.messageId) || null,
   };
@@ -256,6 +277,7 @@ export function createDingTalkAdapter({
   let ws: any = null;
   let stopped = false;
   let reconnectTimer: any = null;
+  const profileCache = new Map<string, any>();
 
   async function getAccessToken() {
     if (accessToken && Date.now() < tokenExpiresAt - TOKEN_EXPIRY_SKEW_MS) return accessToken;
@@ -333,7 +355,7 @@ export function createDingTalkAdapter({
     if (!payload || typeof payload !== "object") return;
     if (payload.robotCode && contract.robotCode && payload.robotCode !== contract.robotCode) return;
 
-    const normalized = normalizeDingTalkInboundMessage(payload, agentId);
+    const normalized = normalizeDingTalkInboundMessage(payload, agentId, profileCache);
     if (!normalized) return;
     try {
       onMessage(normalized);

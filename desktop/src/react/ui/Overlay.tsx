@@ -16,6 +16,8 @@ interface OverlayProps {
   /** 应用到内容容器的 class。不提供时使用默认卡片外观 */
   className?: string;
   backdropClassName?: string;
+  /** Constrain the overlay to the nearest positioned ancestor instead of the viewport. */
+  contained?: boolean;
   duration?: number;
   /** 禁用 Overlay 默认的容器进出动画（hana-scale-in / hana-fade-down），让 className 自带的动画接管。 */
   disableContainerAnimation?: boolean;
@@ -40,6 +42,7 @@ export function Overlay({
   zIndex = 1000,
   className,
   backdropClassName,
+  contained = false,
   duration = 250,
   disableContainerAnimation = false,
 }: OverlayProps) {
@@ -102,6 +105,7 @@ export function Overlay({
 
   const backdropCls = [
     styles.backdrop,
+    contained && styles['contained-backdrop'],
     backdrop === 'dim' && styles['backdrop-dim'],
     backdrop === 'blur' && styles['backdrop-blur'],
     stageClass(stage, styles.enter, styles.exit),
@@ -110,6 +114,7 @@ export function Overlay({
 
   const containerCls = [
     styles.container,
+    contained && styles['contained-container'],
     !disableContainerAnimation && stageClass(stage, styles['container-enter'], styles['container-exit']),
     className || styles.card,
   ].filter(Boolean).join(' ');

@@ -257,6 +257,8 @@ describe("secret custody across HTTP routes", () => {
 
     expect(readBody.telegram.token).toBe(MASKED_SECRET);
     expect(readBody.feishu.appSecret).toBe(MASKED_SECRET);
+    expect(readBody.feishu.region).toBe("feishu_cn");
+    expect(readBody.feishu.domain).toBe("https://open.feishu.cn");
     expect(readBody.dingtalk.clientSecret).toBe(MASKED_SECRET);
     expect(readBody.dingtalk.clientId).toBe("dt-client");
     expect(readBody.dingtalk.robotCode).toBe("ding-robot");
@@ -283,6 +285,24 @@ describe("secret custody across HTTP routes", () => {
     expect(agent.updateConfig).toHaveBeenCalledWith({
       bridge: {
         telegram: { token: "tg-secret", enabled: false },
+      },
+    });
+
+    agent.updateConfig.mockClear();
+    const feishuWriteRes = await app.request("/api/bridge/config?agentId=hana", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "feishu",
+        credentials: { appId: "cli-id", appSecret: MASKED_SECRET, region: "lark_global" },
+        enabled: true,
+      }),
+    });
+
+    expect(feishuWriteRes.status).toBe(200);
+    expect(agent.updateConfig).toHaveBeenCalledWith({
+      bridge: {
+        feishu: { appId: "cli-id", appSecret: "fs-secret", region: "lark_global", enabled: true },
       },
     });
   });
@@ -458,7 +478,7 @@ describe("secret custody across HTTP routes", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         platform: "feishu",
-        credentials: { appId: "cli-id", appSecret: "fs-plaintext" },
+        credentials: { appId: "cli-id", appSecret: "fs-plaintext", region: "lark_global" },
       }),
     });
     const body = await res.json();
@@ -468,15 +488,22 @@ describe("secret custody across HTTP routes", () => {
       info: {
         msg: expect.any(String),
         credentialOk: true,
+        region: "lark_global",
+        domain: "https://open.larksuite.com",
         eventDelivery: "long_connection",
         callbackUrlRequired: false,
+        credentialVerification: {
+          status: "tested",
+          method: "tenant_access_token",
+          endpoint: "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal",
+        },
         longConnection: {
           status: "not_tested",
         },
       },
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+      "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal",
       expect.objectContaining({
         body: JSON.stringify({ app_id: "cli-id", app_secret: "fs-plaintext" }),
         signal: expect.any(AbortSignal),
@@ -519,6 +546,8 @@ describe("secret custody across HTTP routes", () => {
       error: "app not found",
       info: {
         credentialOk: false,
+        region: "feishu_cn",
+        domain: "https://open.feishu.cn",
         eventDelivery: "long_connection",
         callbackUrlRequired: false,
         httpStatus: 400,
@@ -527,6 +556,39 @@ describe("secret custody across HTTP routes", () => {
         logId: "202605300001",
       },
     });
+  });
+
+  it("rejects unsupported Feishu regions on config save", async () => {
+    const { createBridgeRoute } = await import("../server/routes/bridge.ts");
+    const agent = {
+      id: "hana",
+      config: { bridge: { feishu: { appId: "cli-id", appSecret: "fs-secret" } } },
+      updateConfig: vi.fn(),
+    };
+    const engine = {
+      currentAgentId: "hana",
+      getAgent: (id) => id === "hana" ? agent : null,
+      getBridgeIndex: () => ({}),
+      getBridgeReadOnly: () => false,
+      getBridgeReceiptEnabled: () => true,
+    };
+    const app = new Hono();
+    app.route("/api", createBridgeRoute(engine, { getStatus: () => ({}) }));
+
+    const res = await app.request("/api/bridge/config?agentId=hana", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "feishu",
+        credentials: { appId: "cli-id", appSecret: "fs-secret", region: "unknown-region" },
+        enabled: true,
+      }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body).toMatchObject({ ok: false, error: expect.stringMatching(/unsupported Feishu region/) });
+    expect(agent.updateConfig).not.toHaveBeenCalled();
   });
 
   it("resolves masked bridge test credentials from the explicit agent only", async () => {

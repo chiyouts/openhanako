@@ -30,6 +30,7 @@ function bridgeState(overrides = {}) {
     status: {
       telegram: {},
       feishu: {},
+      dingtalk: {},
       qq: {},
       wechat: {},
       permissionMode: 'auto',
@@ -51,6 +52,16 @@ function bridgeState(overrides = {}) {
     setFsAppId: vi.fn(),
     fsAppSecret: '',
     setFsAppSecret: vi.fn(),
+    fsRegion: 'feishu_cn',
+    setFsRegion: vi.fn(),
+    dtClientId: '',
+    setDtClientId: vi.fn(),
+    dtClientSecret: '',
+    setDtClientSecret: vi.fn(),
+    dtRobotCode: '',
+    setDtRobotCode: vi.fn(),
+    dtRestBaseUrl: '',
+    setDtRestBaseUrl: vi.fn(),
     qqAppId: '',
     setQqAppId: vi.fn(),
     qqAppSecret: '',
@@ -133,5 +144,19 @@ describe('BridgeTab permission mode', () => {
     const trigger = screen.getByRole('button', { name: /common\.loading/ }) as HTMLButtonElement;
     expect(trigger.disabled).toBe(true);
     expect(screen.queryByRole('button', { name: /settings\.bridge\.permissionModeAuto/ })).toBeNull();
+  });
+
+  it('renders settings platforms in descriptor order including DingTalk', () => {
+    vi.mocked(useBridgeState).mockReturnValue(bridgeState() as never);
+
+    render(<BridgeTab />);
+
+    const ids = ['wechat', 'telegram', 'feishu', 'dingtalk', 'qq'];
+    const positions = ids.map((id) => {
+      const element = screen.getByTestId(`platform-${id}`);
+      return Array.from(document.body.querySelectorAll('[data-testid^="platform-"]')).indexOf(element);
+    });
+
+    expect(positions).toEqual([0, 1, 2, 3, 4]);
   });
 });

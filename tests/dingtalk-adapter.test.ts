@@ -135,6 +135,7 @@ describe("DingTalk bridge adapter", () => {
       senderNick: "Alice",
       senderStaffId: "manager1234",
       senderId: "sender-open-id",
+      senderAvatarUrl: "https://example.com/alice.png",
       msgtype: "text",
       text: { content: "hello DingTalk!" },
       robotCode: "ding-robot",
@@ -148,6 +149,9 @@ describe("DingTalk bridge adapter", () => {
       sessionKey: "dt_dm_manager1234@hana",
       text: "hello DingTalk!",
       senderName: "Alice",
+      displayName: "Alice",
+      avatarUrl: "https://example.com/alice.png",
+      principalId: "manager1234",
       isGroup: false,
       _msgId: "ding-msg-1",
     }));

@@ -250,6 +250,13 @@ jobs:
         run: |
           node scripts/merge-latest-mac-yml.cjs artifacts latest-mac.yml
 
+      # 更新摘要必须在本地 tag 前生成并提交。CI 只校验，不调用 LLM。
+      - name: Validate committed release digest
+        run: |
+          node scripts/validate-release-digest.mjs \
+            --tag "${{ github.ref_name }}" \
+            --file release-digest.v1.json
+
       # 单点上传所有 release assets（dmg/zip/exe/AppImage/deb/yml），blockmap 不上传
       - name: Upload release assets
         env:
@@ -276,6 +283,9 @@ jobs:
           echo "=== Uploading latest-mac.yml (merged) ==="
           gh release upload "${{ github.ref_name }}" latest-mac.yml --clobber
 
+          echo "=== Uploading release digest ==="
+          gh release upload "${{ github.ref_name }}" release-digest.v1.json --clobber
+
           echo "=== Uploading latest-linux.yml ==="
           LINUX_YML=$(find artifacts -name 'latest-linux.yml' | head -1)
           if [ -n "$LINUX_YML" ]; then
@@ -301,6 +311,7 @@ jobs:
           echo "$ASSETS" | grep -qx 'latest-mac.yml' || MISSING+=("latest-mac.yml")
           echo "$ASSETS" | grep -qx 'latest.yml' || MISSING+=("latest.yml")
           echo "$ASSETS" | grep -qx 'latest-linux.yml' || MISSING+=("latest-linux.yml")
+          echo "$ASSETS" | grep -qx 'release-digest.v1.json' || MISSING+=("release-digest.v1.json")
           echo "$ASSETS" | grep -qE '^HanaAgent-.*-macOS-arm64\.dmg$' || MISSING+=("macOS-arm64.dmg")
           echo "$ASSETS" | grep -qE '^HanaAgent-.*-macOS-arm64\.zip$' || MISSING+=("macOS-arm64.zip")
           echo "$ASSETS" | grep -qE '^HanaAgent-.*-macOS-x64\.dmg$' || MISSING+=("macOS-x64.dmg")
@@ -329,3 +340,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release edit "${{ github.ref_name }}" --prerelease --draft=false
+
+  mirror-atomgit:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+
+      - name: Mirror published release to AtomGit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          ATOMGIT_OWNER: liliMozi
+          ATOMGIT_REPO: OpenHanako-Releases
+        run: |
+          node scripts/mirror-release-to-atomgit.mjs --tag "${{ github.ref_name }}"

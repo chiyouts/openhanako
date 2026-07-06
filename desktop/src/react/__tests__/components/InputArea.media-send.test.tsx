@@ -9,6 +9,7 @@ import { useStore } from '../../stores';
 const mocks = vi.hoisted(() => ({
   clearContent: vi.fn(),
   hanaFetch: vi.fn(),
+  upsertOptimisticSessionFirstMessage: vi.fn(),
   wsSend: vi.fn(),
 }));
 
@@ -52,8 +53,12 @@ vi.mock('../../components/input/extensions/skill-badge', () => ({
   SkillBadge: {},
 }));
 
+import { createTestTranslator } from '../helpers/i18n-test-strings';
+
+const testT = createTestTranslator();
+
 vi.mock('../../hooks/use-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ t: testT }),
 }));
 
 vi.mock('../../hooks/use-config', () => ({
@@ -68,6 +73,7 @@ vi.mock('../../hooks/use-hana-fetch', () => ({
 vi.mock('../../stores/session-actions', () => ({
   ensureSession: vi.fn(async () => true),
   loadSessions: vi.fn(),
+  upsertOptimisticSessionFirstMessage: mocks.upsertOptimisticSessionFirstMessage,
 }));
 
 vi.mock('../../stores/desk-actions', () => ({

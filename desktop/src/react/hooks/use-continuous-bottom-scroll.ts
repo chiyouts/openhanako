@@ -43,6 +43,7 @@ export interface ContinuousBottomScrollController {
 const DEFAULT_STICKY_THRESHOLD = 48;
 const DEFAULT_LARGE_JUMP_PX = 720;
 const FOLLOW_TIME_CONSTANT_MS = 85;
+const SCROLL_EPSILON_PX = 0.5;
 
 function finiteNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -77,6 +78,7 @@ export function useContinuousBottomScroll({
   const followingRef = useRef(false);
   const instantLandingArmedRef = useRef(false);
   const programmaticScrollTopRef = useRef<number | null>(null);
+  const lastObservedScrollHeightRef = useRef<number | null>(null);
 
   activeRef.current = active;
   thresholdRef.current = stickyThreshold;
@@ -131,9 +133,15 @@ export function useContinuousBottomScroll({
     const current = finiteNumber(el.scrollTop);
     const delta = target - current;
 
-    if (Math.abs(delta) <= 0.5 || delta < 0) {
+    if (Math.abs(delta) <= SCROLL_EPSILON_PX) {
       setProgrammaticScrollTop(el, target);
       stopFollow();
+      return;
+    }
+
+    if (delta < 0) {
+      stopFollow();
+      checkSticky();
       return;
     }
 
@@ -153,7 +161,7 @@ export function useContinuousBottomScroll({
     const alpha = Number.isFinite(rawAlpha) ? rawAlpha : 1;
     setProgrammaticScrollTop(el, current + delta * alpha);
     rafRef.current = window.requestAnimationFrame(runFrame);
-  }, [scrollRef, setProgrammaticScrollTop, stopFollow]);
+  }, [checkSticky, scrollRef, setProgrammaticScrollTop, stopFollow]);
 
   const followBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -161,10 +169,16 @@ export function useContinuousBottomScroll({
 
     const target = maxScrollTop(el);
     const delta = target - finiteNumber(el.scrollTop);
-    if (delta <= 0.5) {
+    if (Math.abs(delta) <= SCROLL_EPSILON_PX) {
       // Already at bottom: a no-op follow must NOT consume an armed instant landing — the arm is
       // reserved for the first *meaningful* growth (the async hydrate after a switch).
       setProgrammaticScrollTop(el, target);
+      return;
+    }
+
+    if (delta < 0) {
+      stopFollow();
+      checkSticky();
       return;
     }
 
@@ -188,7 +202,7 @@ export function useContinuousBottomScroll({
     lastFrameTimeRef.current = null;
     followingRef.current = true;
     rafRef.current = window.requestAnimationFrame(runFrame);
-  }, [runFrame, scrollRef, stopFollow]);
+  }, [checkSticky, runFrame, scrollRef, stopFollow]);
 
   const scrollToBottom = useCallback((options: ScrollToBottomOptions = {}) => {
     const el = scrollRef.current;
@@ -252,15 +266,31 @@ export function useContinuousBottomScroll({
 
   useLayoutEffect(() => {
     const ResizeObserverImpl = window.ResizeObserver;
+    const el = scrollRef.current;
     const target = contentRef?.current ?? scrollRef.current;
-    if (!active || !target || !ResizeObserverImpl) return undefined;
+    if (!active || !el || !target || !ResizeObserverImpl) return undefined;
+
+    lastObservedScrollHeightRef.current = finiteNumber(el.scrollHeight);
 
     const observer = new ResizeObserverImpl(() => {
+      const previousScrollHeight = lastObservedScrollHeightRef.current;
+      const nextScrollHeight = finiteNumber(el.scrollHeight);
+      lastObservedScrollHeightRef.current = nextScrollHeight;
+
+      if (
+        previousScrollHeight !== null
+        && nextScrollHeight < previousScrollHeight - SCROLL_EPSILON_PX
+      ) {
+        stopFollow();
+        checkSticky();
+        return;
+      }
+
       followBottom();
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [active, contentRef, followBottom, scrollRef]);
+  }, [active, checkSticky, contentRef, followBottom, scrollRef, stopFollow]);
 
   return useMemo(() => ({
     isStickyRef,

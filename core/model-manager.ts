@@ -511,11 +511,11 @@ export class ModelManager {
    * 解析 utility 模型 + API 凭证完整配置
    * 委托 ExecutionRouter
    */
-  resolveUtilityConfig(agentConfig, sharedModels, utilApi) {
+  resolveUtilityConfig(agentConfig, sharedModels, utilApi, options = {}) {
     if (!this.executionRouter) {
       throw new Error(t("error.noUtilityModel"));
     }
-    return this.executionRouter.resolveUtilityConfig(agentConfig, sharedModels, utilApi);
+    return this.executionRouter.resolveUtilityConfig(agentConfig, sharedModels, utilApi, options);
   }
 
   /**

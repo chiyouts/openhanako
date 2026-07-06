@@ -124,15 +124,17 @@ export class ExecutionRouter {
    * @param {object} agentConfig
    * @param {{ utility?: string|object, utility_large?: string|object }} sharedModels
    * @param {{ provider?: string, api_key?: string, base_url?: string }} utilApiOverride
+   * @param {{ requireUtilityLarge?: boolean }} options
    * @returns {{
    *   utility: object,
-   *   utility_large: object,
+   *   utility_large: object|null,
    *   api_key: string, base_url: string, api: string,
    *   large_api_key: string, large_base_url: string, large_api: string,
    * }}
    */
-  resolveUtilityConfig(agentConfig, sharedModels, utilApiOverride) {
+  resolveUtilityConfig(agentConfig, sharedModels, utilApiOverride, options: any = {}) {
     const cfg = agentConfig || {};
+    const requireUtilityLarge = options?.requireUtilityLarge !== false;
     const chatModelRef = cfg.models?.chat || null;
 
     // 用户明确配置的 utility 模型
@@ -144,13 +146,13 @@ export class ExecutionRouter {
     const largeModelRef = userSetUtilityLarge || chatModelRef;
 
     if (!utilityModelRef) throw new Error(t("error.noUtilityModel"));
-    if (!largeModelRef) throw new Error(t("error.noUtilityLargeModel"));
+    if (requireUtilityLarge && !largeModelRef) throw new Error(t("error.noUtilityLargeModel"));
 
     const utilModel = this._resolveModel(utilityModelRef);
     if (!utilModel) throw new Error(t("error.modelNotFound", { id: utilityModelRef }));
 
-    const largeModel = this._resolveModel(largeModelRef);
-    if (!largeModel) throw new Error(t("error.modelNotFound", { id: largeModelRef }));
+    const largeModel = largeModelRef ? this._resolveModel(largeModelRef) : null;
+    if (largeModelRef && !largeModel) throw new Error(t("error.modelNotFound", { id: largeModelRef }));
 
     // utility 凭证
     let apiKey, baseUrl, api, utilCred;
@@ -180,8 +182,11 @@ export class ExecutionRouter {
     }
 
     // utility_large 凭证（provider 相同则复用）
-    let large_api_key = apiKey, large_base_url = baseUrl, large_api = api, largeCred = utilCred;
-    if (largeModel.provider !== utilModel.provider) {
+    let large_api_key = largeModel ? apiKey : null;
+    let large_base_url = largeModel ? baseUrl : null;
+    let large_api = largeModel ? api : null;
+    let largeCred = largeModel ? utilCred : null;
+    if (largeModel && largeModel.provider !== utilModel.provider) {
       largeCred = this._providerRegistry.getCredentials(largeModel.provider);
       if (!largeCred?.api) throw new Error(t("error.providerMissingApi", { provider: largeModel.provider }));
       if (!largeCred.baseUrl || (!largeCred.apiKey && !hasCredentialHeaders(largeCred) && !this._allowsMissingApiKey(largeModel.provider, largeCred.baseUrl))) {
@@ -194,7 +199,7 @@ export class ExecutionRouter {
 
     return {
       utility: withCredentialMetadata(utilModel, utilCred),
-      utility_large: withCredentialMetadata(largeModel, largeCred),
+      utility_large: largeModel ? withCredentialMetadata(largeModel, largeCred) : null,
       api_key: apiKey,
       base_url: baseUrl,
       api,

@@ -66,6 +66,16 @@ function BridgeEditorProbe() {
   );
 }
 
+function BridgeOwnerProbe() {
+  const { status, setOwner } = useBridgeState();
+  return (
+    <div>
+      <span data-testid="telegram-owner">{status?.owner?.telegram || 'none'}</span>
+      <button type="button" onClick={() => setOwner('telegram', 'owner-1')}>set owner</button>
+    </div>
+  );
+}
+
 describe('useBridgeState snapshot hydration', () => {
   beforeEach(() => {
     Object.keys(mockState).forEach(key => delete mockState[key]);
@@ -166,5 +176,37 @@ describe('useBridgeState snapshot hydration', () => {
     render(<BridgeEditorProbe />);
 
     expect(screen.getByTestId('public-ishiki-input')).toHaveValue('saved public ishiki');
+  });
+
+  it('applies owner status returned by setOwner without waiting for a later refresh', async () => {
+    mockHanaFetch.mockImplementation((url: string, opts?: RequestInit) => {
+      if (url === '/api/bridge/status?agentId=hana') {
+        return new Promise<Response>(() => {});
+      }
+      if (url === '/api/bridge/owner?agentId=hana') {
+        expect(opts).toMatchObject({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform: 'telegram', userId: 'owner-1' }),
+        });
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          status: {
+            ...mockState.settingsSnapshot.data.bridgeStatus,
+            owner: { telegram: 'owner-1' },
+          },
+        })));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+
+    render(<BridgeOwnerProbe />);
+
+    expect(screen.getByTestId('telegram-owner')).toHaveTextContent('none');
+    fireEvent.click(screen.getByRole('button', { name: 'set owner' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('telegram-owner')).toHaveTextContent('owner-1');
+    });
   });
 });

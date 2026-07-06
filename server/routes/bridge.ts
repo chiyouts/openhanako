@@ -9,9 +9,10 @@ import path from "path";
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.ts";
 import { debugLog } from "../../lib/debug-log.ts";
-import { parseSessionKey, collectKnownUsers, KNOWN_PLATFORMS } from "../../lib/bridge/session-key.ts";
+import { parseSessionKey, collectKnownUsers, KNOWN_PLATFORMS, resolveBridgeSessionIdentity } from "../../lib/bridge/session-key.ts";
 import { isBridgeOwner, resolveBridgeOwnerUserId } from "../../lib/bridge/owner-policy.ts";
 import { collectBridgeMediaAllowedRoots, isInsideBridgeMediaRoot } from "../../lib/bridge/media-roots.ts";
+import { sanitizeBridgeVisibleText } from "../../shared/bridge-visible-text.ts";
 import { t } from "../../lib/i18n.ts";
 import { resolveAgent, resolveAgentStrict } from "../utils/resolve-agent.ts";
 import { telegramBotOptions } from "../../lib/net/outbound-proxy.ts";
@@ -33,24 +34,64 @@ import { recordSecurityAuditEvent } from "../http/security-audit.ts";
 import { normalizeBridgePermissionMode, SESSION_PERMISSION_MODES } from "../../core/session-permission-mode.ts";
 
 const MAX_BRIDGE_MEDIA_SIZE = 50 * 1024 * 1024;
-const FEISHU_TENANT_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
+const DEFAULT_FEISHU_REGION = "feishu_cn";
+const FEISHU_DOMAIN_BY_REGION: Record<string, string> = Object.freeze({
+  feishu_cn: "https://open.feishu.cn",
+  lark_global: "https://open.larksuite.com",
+});
 
-function feishuLongConnectionInfo() {
+function normalizeFeishuRegion(region: any = DEFAULT_FEISHU_REGION) {
+  const value = typeof region === "string" ? region.trim() : region;
+  if (value === undefined || value === null || value === "") return DEFAULT_FEISHU_REGION;
+  if (value === "feishu_cn" || value === "lark_global") return value;
+  throw new Error(`unsupported Feishu region: ${value}`);
+}
+
+function resolveFeishuDomain(region: any = DEFAULT_FEISHU_REGION) {
+  const normalizedRegion = normalizeFeishuRegion(region);
   return {
+    region: normalizedRegion,
+    domain: FEISHU_DOMAIN_BY_REGION[normalizedRegion],
+    tenantTokenUrl: `${FEISHU_DOMAIN_BY_REGION[normalizedRegion]}/open-apis/auth/v3/tenant_access_token/internal`,
+  };
+}
+
+function feishuStatusDomainInfo(cfg: any = {}) {
+  try {
+    return { ...resolveFeishuDomain(cfg?.region), configError: null };
+  } catch (err: any) {
+    return {
+      region: cfg?.region || DEFAULT_FEISHU_REGION,
+      domain: null,
+      tenantTokenUrl: null,
+      configError: err?.message || String(err),
+    };
+  }
+}
+
+function feishuLongConnectionInfo(domainInfo: any) {
+  return {
+    region: domainInfo.region,
+    domain: domainInfo.domain,
     eventDelivery: "long_connection",
     callbackUrlRequired: false,
+    credentialVerification: {
+      status: "tested",
+      method: "tenant_access_token",
+      endpoint: domainInfo.tenantTokenUrl,
+    },
     longConnection: {
       status: "not_tested",
-      reason: "bridge/test validates credentials only; the runtime WSClient reports live long-connection status after the connector is enabled.",
+      reason: "bridge/test validates credentials by tenant token only; runtime WSClient long-connection status is reported after the connector is enabled.",
     },
   };
 }
 
-function feishuTestInfo({ credentialOk, response, data }: { credentialOk?: any; response?: any; data?: any } = {}) {
+function feishuTestInfo({ credentialOk, response, data, domainInfo }: { credentialOk?: any; response?: any; data?: any; domainInfo?: any } = {}) {
   const logId = data?.error?.log_id || data?.log_id || null;
   return {
     credentialOk,
-    ...feishuLongConnectionInfo(),
+    ...feishuLongConnectionInfo(domainInfo || resolveFeishuDomain()),
     ...(response ? { httpStatus: response.status } : {}),
     ...(data?.code !== undefined ? { feishuCode: data.code } : {}),
     ...(data?.msg ? { feishuMessage: data.msg } : {}),
@@ -121,6 +162,7 @@ export function buildBridgeStatus(engine: any, manager: any, agent: any) {
   const live = manager?.getStatus?.(agent.id) || {};
   const bridge = agent.config?.bridge || {};
   const index = engine.getBridgeIndex?.(agent.id) || {};
+  const feishuDomainInfo = feishuStatusDomainInfo(bridge.feishu);
 
   const platformStatus = (plat: any, cfg: any, extraFields: any) => {
     return {
@@ -189,7 +231,12 @@ export function buildBridgeStatus(engine: any, manager: any, agent: any) {
       configured: !!tgToken, token: maskSecretValue(tgToken),
     }),
     feishu: platformStatus("feishu", bridge.feishu, {
-      configured: !!(fsAppId && fsAppSecret), appId: fsAppId, appSecret: maskSecretValue(fsAppSecret),
+      configured: !!(fsAppId && fsAppSecret && !feishuDomainInfo.configError),
+      appId: fsAppId,
+      appSecret: maskSecretValue(fsAppSecret),
+      region: feishuDomainInfo.region,
+      domain: feishuDomainInfo.domain,
+      configError: feishuDomainInfo.configError,
     }),
     dingtalk: platformStatus("dingtalk", bridge.dingtalk, {
       configured: dtConfigured,
@@ -260,7 +307,7 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
     const agent = resolveAgentStrict(engine, c);
     agent.updateConfig({ bridge: { [platform]: { owner: userId || null } } });
     debugLog()?.log("api", `POST /api/bridge/owner agent=${agent.id} platform=${platform} owner=${userId ? "[set]" : "[cleared]"}`);
-    return c.json({ ok: true });
+    return c.json({ ok: true, status: buildBridgeStatus(engine, resolveBridgeManager(), agent) });
   });
 
   /** 保存凭证 + 启停平台（写入 agent.config.bridge） */
@@ -288,6 +335,13 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
       Object.assign(patch, resolveBridgeCredentials(platform, credentials, bridgeCfg));
     }
     if (typeof enabled === "boolean") patch.enabled = enabled;
+    if (platform === "feishu") {
+      try {
+        patch.region = resolveFeishuDomain(patch.region).region;
+      } catch (err: any) {
+        return c.json({ ok: false, error: err?.message || String(err) }, 400);
+      }
+    }
     if (platform === "dingtalk") {
       try {
         assertNoUnsupportedDingTalkRobotFields(patch);
@@ -412,14 +466,15 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
         lastActive = stat.mtimeMs;
       } catch {}
 
-      const userId = entry.userId || (plat === "wechat" && chatType === "dm" ? chatId : null);
-      const aliases = Array.isArray(entry.qqPrincipal?.aliases) ? entry.qqPrincipal.aliases : undefined;
+      const identity = resolveBridgeSessionIdentity(entry, { sessionKey, parsed: { platform: plat, chatType, chatId } });
+      const userId = identity.userId || (plat === "wechat" && chatType === "dm" ? chatId : null);
+      const aliases = identity.aliases;
       const isOwner = isBridgeOwner({ platform: plat, chatType, userId, aliases, agent });
 
       sessions.push({
         sessionKey, platform: plat, chatType, chatId, file, sessionPath: fp, lastActive,
-        displayName: entry.name || null,
-        avatarUrl: entry.avatarUrl || null,
+        displayName: identity.displayName || null,
+        avatarUrl: identity.avatarUrl || null,
         isOwner,
       });
     }
@@ -471,9 +526,10 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
 
         const hasMedia = mediaCount > 0;
         if (!textContent && !hasMedia) continue;
+        const visibleContent = sanitizeBridgeVisibleText(textContent) || (hasMedia ? `[图片 x${mediaCount}]` : "");
         messages.push({
           role: msg.role,
-          content: textContent || (hasMedia ? `[图片 x${mediaCount}]` : ""),
+          content: visibleContent,
           hasMedia,
           mediaCount,
           ts: line.timestamp || null,
@@ -641,7 +697,8 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
         const me = await bot.getMe();
         return c.json({ ok: true, info: { username: me.username, name: me.first_name } });
       } else if (platform === "feishu") {
-        const resp = await fetch(FEISHU_TENANT_TOKEN_URL, {
+        const domainInfo = resolveFeishuDomain(effectiveCredentials.region);
+        const resp = await fetch(domainInfo.tenantTokenUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -656,14 +713,14 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
             ok: true,
             info: {
               msg: t("error.tokenSuccess"),
-              ...feishuTestInfo({ credentialOk: true, response: resp, data }),
+              ...feishuTestInfo({ credentialOk: true, response: resp, data, domainInfo }),
             },
           });
         }
         return c.json({
           ok: false,
           error: data.msg || t("error.verifyFailed"),
-          info: feishuTestInfo({ credentialOk: false, response: resp, data }),
+          info: feishuTestInfo({ credentialOk: false, response: resp, data, domainInfo }),
         });
       } else if (platform === "dingtalk") {
         const dingtalkCredentials = normalizeDingTalkBridgeCredentials(effectiveCredentials);

@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { t } from '../../helpers';
+import { SelectWidget, type SelectOption } from '@/ui';
 import { KeyInput } from '../../widgets/KeyInput';
 import { Toggle } from '../../widgets/Toggle';
 import { BridgeStatusDot, BridgeStatusText, OwnerSelect } from './BridgeWidgets';
@@ -17,9 +18,10 @@ import styles from '../../Settings.module.css';
 export interface CredentialField {
   key: string;
   label: string;
-  type: 'text' | 'secret';
+  type: 'text' | 'secret' | 'select';
   value: string;
   onChange: (v: string) => void;
+  options?: SelectOption[];
 }
 
 interface PlatformSectionProps {
@@ -72,7 +74,13 @@ export function PlatformSection({
     <SettingsSection title={title} context={statusContext}>
       {credentialFields.map((field, idx) => {
         const isLast = idx === lastFieldIndex;
-        const input = field.type === 'secret' ? (
+        const input = field.type === 'select' ? (
+          <SelectWidget
+            value={field.value}
+            onChange={field.onChange}
+            options={field.options || []}
+          />
+        ) : field.type === 'secret' ? (
           <div className="bridge-input-row">
             <KeyInput
               value={field.value}

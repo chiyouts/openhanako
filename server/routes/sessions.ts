@@ -48,6 +48,7 @@ import {
 import { SessionManager } from "../../lib/pi-sdk/index.ts";
 import { TODO_STATE_CUSTOM_TYPE } from "../../lib/tools/todo-constants.ts";
 import { mergeWorkspaceHistory } from "../../shared/workspace-history.ts";
+import { sanitizeBridgeVisibleText } from "../../shared/bridge-visible-text.ts";
 import {
   deleteSessionFileSidecarSync,
   moveSessionFileSidecarSync,
@@ -273,6 +274,11 @@ function resolveHistoryPageBounds(sourceMessages, { beforeId, limit, forceAll })
     : total;
   const startIdx = Math.max(0, endIdx - limit);
   return { total, startIdx, endIdx, hasMore: startIdx > 0 };
+}
+
+function isBridgeSessionPath(sessionPath) {
+  if (typeof sessionPath !== "string" || !sessionPath) return false;
+  return sessionPath.split(/[\\/]+/).includes("bridge");
 }
 
 /**
@@ -1070,6 +1076,9 @@ export function createSessionsRoute(engine, hub = null) {
       // 标成「已同步」会让 /rc 消息永久漏掉，issue #1610 的反方向竞态）。
       const revision = await readSessionFileRevision(resolvedSessionPath);
       const sourceMessages = await loadSessionHistoryMessages(engine, resolvedSessionPath);
+      const sanitizeVisibleContent = isBridgeSessionPath(resolvedSessionPath)
+        ? sanitizeBridgeVisibleText
+        : (value) => (typeof value === "string" ? value : "");
 
       // 分页参数
       const beforeId = c.req.query("before") != null ? Number(c.req.query("before")) : null;
@@ -1195,12 +1204,13 @@ export function createSessionsRoute(engine, hub = null) {
           if (currentIndex >= pageBounds.startIdx && currentIndex < pageBounds.endIdx) {
             const { text, images } = extractTextContent(m.content);
             const visibleImages = filterUnreferencedInlineImages(text, images);
+            const content = sanitizeVisibleContent(text);
             messages.push({
               id: String(currentIndex),
               sourceIndex,
               ...(m.id ? { entryId: m.id } : {}),
               role: "user",
-              content: text,
+              content,
               images: visibleImages.length ? visibleImages : undefined,
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),
             });
@@ -1211,12 +1221,13 @@ export function createSessionsRoute(engine, hub = null) {
           displayIdx += 1;
           if (currentIndex >= pageBounds.startIdx && currentIndex < pageBounds.endIdx) {
             const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
+            const content = sanitizeVisibleContent(text);
             messages.push({
               id: String(currentIndex),
               sourceIndex,
               ...(m.id ? { entryId: m.id } : {}),
               role: "assistant",
-              content: text,
+              content,
               ...(contentHasThinkingBlock(m.content, { stripThink: true }) ? { thinking } : {}),
               toolCalls: toolUses.length ? toolUses : undefined,
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),

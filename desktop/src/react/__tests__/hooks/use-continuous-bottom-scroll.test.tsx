@@ -119,6 +119,29 @@ describe('useContinuousBottomScroll', () => {
     expect(metrics.scrollTop).toBeLessThan(760);
   });
 
+  it('does not force an upward snap when content shrinks during active follow', () => {
+    const metrics = { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 };
+    render(<Harness onController={() => {}} />);
+    const scrollEl = document.querySelector('[data-testid="scroll"]') as HTMLElement;
+    setScrollMetrics(scrollEl, metrics);
+
+    act(() => {
+      metrics.scrollHeight = 1060;
+      MockResizeObserver.instances[0].trigger();
+      flushRaf(16);
+    });
+    expect(metrics.scrollTop).toBeGreaterThan(700);
+    const scrollTopDuringFollow = metrics.scrollTop;
+
+    act(() => {
+      metrics.scrollHeight = 920;
+      MockResizeObserver.instances[0].trigger();
+      flushRaf(32);
+    });
+
+    expect(metrics.scrollTop).toBe(scrollTopDuringFollow);
+  });
+
   it('does not follow content growth after the user scrolls away from bottom', () => {
     const metrics = { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 };
     render(<Harness onController={() => {}} />);

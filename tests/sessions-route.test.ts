@@ -2257,6 +2257,32 @@ describe("sessions route", () => {
     ]);
   });
 
+  it("strips Bridge internal time tags from loadMessages history for bridge sessions", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.ts");
+    const msgUtils = await import("../core/message-utils.ts");
+    const app = new Hono();
+    const bridgePath = "/tmp/agents/hana/sessions/bridge/owner/tg.jsonl";
+
+    vi.mocked(msgUtils.extractTextContent)
+      .mockReturnValueOnce({ text: "<t>07-03 13:00</t> hello", images: [], thinking: "", toolUses: [] });
+    vi.mocked(msgUtils.loadSessionHistoryMessages).mockResolvedValueOnce([
+      { role: "user", content: "<t>07-03 13:00</t> hello" },
+    ]);
+
+    const engine = {
+      agentsDir: "/tmp/agents",
+      deferredResults: null,
+    };
+
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request(`/api/sessions/messages?path=${encodeURIComponent(bridgePath)}`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.messages[0].content).toBe("hello");
+  });
+
   it("returns empty assistant thinking blocks from history as completed thinking", async () => {
     const { createSessionsRoute } = await import("../server/routes/sessions.ts");
     const msgUtils = await import("../core/message-utils.ts");

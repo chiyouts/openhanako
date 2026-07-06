@@ -14,6 +14,15 @@
       "title": "Hana Gallery",
       "upload": "Upload your own",
       "close": "Close Hana Gallery"
+    },
+    "notice": {
+      "taskCreated": "Cover background task created.",
+      "generateFailed": "Cover generation failed: {error}",
+      "applySuccess": "Uploaded image applied as cover.",
+      "applySuccessGallery": "Applied \"{title}\" as cover.",
+      "applyFailed": "Failed to apply cover: {error}",
+      "selectImageFile": "Please choose an image file for the cover.",
+      "readImageFailed": "Failed to read the image."
     }
   },
   "selection": {
@@ -64,6 +73,7 @@
     "created": "Channel #{name} created ✿",
     "createFailed": "Create failed",
     "alreadyExists": "Channel already exists",
+    "unpinPluginTab": "Unpin \"{label}\"",
     "deleteChannel": "Delete channel",
     "deleteConfirm": "Delete channel \"{name}\"? Message history cannot be recovered.",
     "deleted": "Channel deleted",
@@ -216,6 +226,7 @@
       "deleteFailed": "Delete failed",
       "daysAgo": "Archived {days} days ago"
     },
+    "rcTakingOver": "{platform} active",
     "subagentRunStateUnrecoverable": "Historical sub-session run state is unrecoverable",
     "subagentLinkUnrecoverable": "Historical sub-session link is unrecoverable",
     "capabilityDrift": {
@@ -310,7 +321,13 @@
       "fallbackAssistant": "Assistant message"
     },
     "modelSwitching": "Switching model, please wait",
-    "unknownCommand": "[Unknown command] {text}"
+    "unknownCommand": "[Unknown command] {text}",
+    "workflowInline": {
+      "running": "◐ Running",
+      "done": "✓ Done",
+      "failed": "✗ Failed",
+      "aborted": "⊘ Stopped"
+    }
   },
   "time": {
     "justNow": "Just now",
@@ -356,6 +373,11 @@
     "askMode": "Ask before acting",
     "readOnlyMode": "Read-only mode",
     "accessModeLocked": "Access mode cannot be changed right now",
+    "noAskThisConversation": "Don't ask again in this conversation",
+    "confirmMoreOptions": "More confirmation options",
+    "attachmentDirectory": "[Directory] {label}",
+    "attachmentFile": "[Attachment] {label}",
+    "referenceDocument": "[Reference] {path}",
     "deskContext": "With desk context",
     "pastedImage": "Pasted image",
     "textModelImageFileOnly": "The current model cannot view images and auxiliary vision is not enabled: images are sent as files, so the model only sees the file path, not the image content.",
@@ -377,20 +399,22 @@
     "commandMenu": "Command menu",
     "docContext": "With document",
     "thinkingLevel": {
-      "off": "off",
-      "auto": "auto",
-      "medium": "medium",
-      "high": "high",
-      "xhigh": "max",
-      "max": "max"
+      "off": "Off",
+      "auto": "Auto",
+      "low": "Light",
+      "medium": "Medium",
+      "high": "Deep",
+      "xhigh": "Max",
+      "max": "Max"
     },
     "thinkingDesc": {
-      "off": "no reasoning",
-      "auto": "model decides depth",
-      "medium": "balanced reasoning",
-      "high": "deep reasoning",
-      "xhigh": "maximum reasoning",
-      "max": "maximum reasoning"
+      "off": "No reasoning",
+      "auto": "Model decides depth",
+      "low": "Light reasoning",
+      "medium": "Balanced reasoning",
+      "high": "Deep reasoning",
+      "xhigh": "Maximum reasoning",
+      "max": "Maximum reasoning"
     },
     "contextWindow": "Context {windowK}k",
     "tokensUsed": "Used {tokensK}k ({pct}%)",
@@ -981,10 +1005,6 @@
         "emptyPreview": "No observation yet",
         "clearObservation": "Clear observation"
       },
-      "editableMemory": {
-        "title": "Editable Memory",
-        "description": "When enabled, Facts in current memory are split into an editable area while the agent keeps reading timeline sections from read-only summaries."
-      },
       "compaction": {
         "title": "Compaction mode",
         "description": "Auto prefers cache-preserving compaction. Normal compaction lets Pi SDK run its native summarizer, which is better for unstable history formats.",
@@ -1267,6 +1287,15 @@
       "updateCheckBtn": "Check for updates",
       "updateNeedInstall": "Please move HanaAgent to the Applications folder first",
       "updateDiskSpace": "Not enough disk space to download update",
+      "updateDigestCta": "What you get in this update",
+      "updateDigestTitle": "What you get in this update",
+      "updateDigestClose": "Close",
+      "updateDigestKind": {
+        "feature": "Feature",
+        "fix": "Fix",
+        "improvement": "Improvement",
+        "migration": "Migration"
+      },
       "launchAtLogin": "Launch at login",
       "keepAwake": "Keep running while locked",
       "betaUpdates": "Receive beta updates",
@@ -1639,6 +1668,15 @@
       "saveFacts": "Save Facts",
       "factsSaved": "Facts saved",
       "readonlyTimelineTitle": "Timeline Memory",
+      "editEntry": "Edit",
+      "editDone": "Done",
+      "editSave": "Save",
+      "saveToday": "Save Today",
+      "todaySaved": "Today saved",
+      "saveLongterm": "Save Long-term",
+      "longtermSaved": "Long-term context saved",
+      "saveDay": "Save this day",
+      "daySaved": "Day saved",
       "sections": {
         "today": "Today",
         "week": "Earlier this week",
@@ -1753,7 +1791,8 @@
       "injectAgentsMd": "Inject AGENTS.md",
       "injectAgentsMdDesc": "When enabled, new sessions read AGENTS.md from the current working directory up to the Git root.",
       "injectClaudeMd": "Inject CLAUDE.md",
-      "injectClaudeMdDesc": "When enabled, new sessions read CLAUDE.md from the current working directory up to the Git root."
+      "injectClaudeMdDesc": "When enabled, new sessions read CLAUDE.md from the current working directory up to the Git root.",
+      "agentDeskSection": "Agent desk settings"
     },
     "toolCaps": {
       "title": "Skill Installation Permissions"
@@ -1783,6 +1822,10 @@
       "learnHint": "Try asking your assistant: install this local skill package / find me some safe and useful skills from GitHub",
       "reloaded": "Skills reloaded",
       "reload": "Reload skills",
+      "toggleEnable": "Enable Skill",
+      "toggleDisable": "Disable Skill",
+      "toggleEnableNamed": "Enable {name}",
+      "toggleDisableNamed": "Disable {name}",
       "compatTitle": "Compatible Skills",
       "compatDesc": "Auto-discover skills installed by other AI tools",
       "compatNoSkills": "No external skills found",
@@ -1998,6 +2041,9 @@
       "telegramToken": "Bot Token",
       "telegramHint": "Get from @BotFather",
       "feishu": "Feishu",
+      "feishuRegion": "Region",
+      "feishuRegionFeishuCn": "Feishu China",
+      "feishuRegionLarkGlobal": "Lark Global",
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
       "feishuHint": "Get from Feishu Open Platform; events use long connection, no local callback URL needed",
@@ -2515,7 +2561,19 @@
     "resetContextTip": "Next message will start a new conversation",
     "replyInterrupted": "(Reply interrupted — the content above may be incomplete)",
     "replyFailed": "(Reply generation failed. Please try again later.)",
-    "sessionBusy": "The desktop session is still responding, please try again later"
+    "sessionBusy": "The desktop session is still responding, please try again later",
+    "platform": {
+      "telegram": "Telegram",
+      "feishu": "Feishu",
+      "wechat": "WeChat",
+      "qq": "QQ",
+      "bridge": "Bridge"
+    }
+  },
+  "link": {
+    "copyPath": "Copy path",
+    "copyLink": "Copy link",
+    "openInSystemBrowser": "Open in system browser"
   },
   "notification": {
     "turnCompletionBody": "This turn is complete"
@@ -2690,9 +2748,9 @@
     "installSkillGithubApiError": "GitHub API access failed: {msg}",
     "installSkillStarTooLow": "This repo only has {stars} stars (threshold {min}), installation rejected for safety.",
     "installSkillNoSkillMd": "SKILL.md not found in {owner}/{repo} (tried paths: {paths}).",
-    "installSkillSafetyFailed": "[Security] Skill safety review failed, installation blocked.\nReason: {reason}\n\nPlease inform the user about the safety review failure and the specific reason. Users can disable safety reviews in settings (not recommended).",
+    "installSkillSafetyFailed": "[Security warning] Skill safety review failed, so the skill has not been installed yet.\nReason: {reason}\n\nTell the user that if this skill comes from an unknown source, they should inspect SKILL.md and its bundled files first. If the user explicitly confirms they trust this skill and wants to continue, call install_skill again with risk_accepted=true and the returned risk_confirmation_token.",
     "installSkillNameInvalid": "Invalid skill name{name}. Only letters, numbers, underscores, and hyphens are allowed.",
-    "installSkillSuccess": "Skill \"{name}\" installed successfully!\nSource: {source} (⭐ {stars} stars)\nReason: {reason}",
+    "installSkillSuccess": "Skill \"{name}\" installed successfully!\nSource: {source}\nReason: {reason}",
     "installSkillNeedInput": "Please provide github_url, local_path, fileId, or a source FileRef.",
     "installSkillNeedName": "skill_name is required when using skill_content mode.",
     "installSkillSuccessLocal": "Skill \"{name}\" installed successfully!\nReason: {reason}",
@@ -2700,6 +2758,7 @@
     "installSkillNoUtility": "Safety review unavailable: utility model not configured. Please configure it in settings.",
     "installSkillUtilityIncomplete": "Safety review unavailable: utility model config incomplete (missing API key or base URL). Please complete it in settings.",
     "installSkillSafetyPassed": "✓ Safety review passed",
+    "installSkillSafetyOverride": "⚠ Safety review failed; installation continued after explicit user confirmation.\nRisk reason: {reason}",
     "installSkillSafetyEmpty": "Safety review returned empty response",
     "installSkillSafetyUnexpected": "Safety review returned unexpected format: {reply}",
     "installSkillSafetyTimeout": "Safety review timeout or network error",
@@ -2874,8 +2933,7 @@
       "memory": "Memory System",
       "memoryDesc": "Enable/disable memory for current Agent",
       "memoryFacts": "Memory Facts",
-      "memoryFactsDesc": "Editable current-memory Facts for this Agent. Requires the Editable Memory experiment.",
-      "memoryFactsDisabled": "Editable Memory experiment is disabled.",
+      "memoryFactsDesc": "Editable current-memory Facts for this Agent.",
       "experience": "Experience",
       "experienceDesc": "Enable/disable the current Agent's experience library",
       "agentName": "Agent Name",
@@ -3069,6 +3127,11 @@
   "preview.exitMarkdownPreview": "Back to editing",
   "preview.markdownEditorStatus": "Selected {selected} chars · Total {total} chars",
   "preview.markdownAttachmentInsertFailed": "Failed to insert attachment",
+  "preview.fileMovedOrDeleted": "The original draft was moved or deleted",
+  "preview.legacyImageUpgrade": "This image preview has been upgraded. Click to open in the new viewer.",
+  "preview.coverLayoutSaveFailed": "Failed to save cover layout. The file may have been modified externally.",
+  "preview.coverDeleted": "Cover removed.",
+  "preview.coverDeleteFailed": "Failed to remove cover. The file may have been modified externally.",
   "subagent": {
     "status": {
       "interrupted": "Interrupted",
@@ -3167,6 +3230,7 @@
     "retry": "Retry"
   },
   "mobile": {
+    "startupFailed": "HanaAgent failed to start",
     "auth": {
       "scopeError": "Current login lacks workspace access. Please re-enter the access key.",
       "loginFailed": "Login failed",
@@ -3198,7 +3262,9 @@
     "reject": "Deny",
     "computerApp": {
       "title": "Allow Hana to use the computer",
-      "body": "Hana wants to control this app to continue the current task."
+      "body": "Hana wants to control this app to continue the current task.",
+      "controlTitle": "Allow Hana to control {appName}",
+      "defaultAppName": "this app"
     },
     "sessionFolders": {
       "title": "Allow Hana to modify folder authorization for this conversation",

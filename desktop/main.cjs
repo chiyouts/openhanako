@@ -349,7 +349,7 @@ const _browserViews = new Map();   // sessionPath -> BrowserWorkspace; BrowserWo
 let _currentBrowserSession = null; // 当前浏览器绑定的 sessionPath
 let _currentBrowserTabId = null;   // 当前浏览器绑定的 tabId
 let _browserAcceptCookies = true;
-let _browserCookiePolicyInstalled = false;
+const _browserCookiePolicyInstalledPartitions = new Set();
 
 /** Vite 入口页面统一加载（dev → Vite dev server，其他优先 dist-renderer，最后才回退 src） */
 const _isDev = process.argv.includes("--dev");
@@ -2330,8 +2330,21 @@ const SNAPSHOT_SCRIPT = `(function() {
 
 const DEFAULT_BROWSER_WORKSPACE_KEY = "__hana_default_browser__";
 
+function _normalizeBrowserSessionPath(sessionPath) {
+  return typeof sessionPath === "string" && sessionPath.trim() ? sessionPath : null;
+}
+
 function _browserWorkspaceKey(sessionPath) {
-  return sessionPath || DEFAULT_BROWSER_WORKSPACE_KEY;
+  return _normalizeBrowserSessionPath(sessionPath) || DEFAULT_BROWSER_WORKSPACE_KEY;
+}
+
+function _browserProfileKey(sessionPath) {
+  const key = _browserWorkspaceKey(sessionPath);
+  return crypto.createHash("sha256").update(key).digest("hex").slice(0, 32);
+}
+
+function _browserPartitionName(sessionPath) {
+  return `persist:hana-browser-${_browserProfileKey(sessionPath)}`;
 }
 
 function _newBrowserTabId() {
@@ -2340,7 +2353,7 @@ function _newBrowserTabId() {
 
 function _createBrowserWorkspace(sessionPath) {
   return {
-    sessionPath: sessionPath || null,
+    sessionPath: _normalizeBrowserSessionPath(sessionPath),
     activeTabId: null,
     tabs: new Map(),
   };
@@ -2400,9 +2413,10 @@ function _activeBrowserTabRecord(workspace) {
   return workspace.tabs.get(workspace.activeTabId) || workspace.tabs.values().next().value || null;
 }
 
-/** 按 sessionPath 查找当前 active tab view，fallback 到当前活跃 view（兼容旧调用） */
+/** 按 sessionPath 查找当前 active tab view；只有无显式 sessionPath 的旧调用才 fallback 到当前活跃 view。 */
 function _getViewForSession(sessionPath, tabId = null) {
-  const workspace = _getBrowserWorkspace(sessionPath);
+  const explicitSessionPath = _normalizeBrowserSessionPath(sessionPath);
+  const workspace = _getBrowserWorkspace(explicitSessionPath);
   if (workspace) {
     const tab = tabId ? workspace.tabs.get(tabId) : _activeBrowserTabRecord(workspace);
     if (!tab) return null;
@@ -2412,6 +2426,7 @@ function _getViewForSession(sessionPath, tabId = null) {
     }
     return tab.view;
   }
+  if (explicitSessionPath) return null;
   if (_browserWebView && _isBrowserViewDestroyed(_browserWebView)) {
     _forgetBrowserView(_browserWebView, "destroyed");
     return null;
@@ -2518,14 +2533,15 @@ function _removeBrowserTabRecord(view) {
   return null;
 }
 
-function _browserSession() {
-  return session.fromPartition("persist:hana-browser");
+function _browserSession(sessionPath = null) {
+  return session.fromPartition(_browserPartitionName(sessionPath));
 }
 
-function _installBrowserCookiePolicy() {
-  if (_browserCookiePolicyInstalled) return;
-  _browserCookiePolicyInstalled = true;
-  const ses = _browserSession();
+function _installBrowserCookiePolicy(sessionPath = null) {
+  const partitionName = _browserPartitionName(sessionPath);
+  if (_browserCookiePolicyInstalledPartitions.has(partitionName)) return;
+  _browserCookiePolicyInstalledPartitions.add(partitionName);
+  const ses = _browserSession(sessionPath);
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
     if (_browserAcceptCookies) {
       callback({ requestHeaders: details.requestHeaders });
@@ -2552,19 +2568,44 @@ function _installBrowserCookiePolicy() {
 
 function _setBrowserAcceptCookies(enabled) {
   _browserAcceptCookies = enabled !== false;
-  _installBrowserCookiePolicy();
 }
 
 async function _clearBrowserCookiesAndSiteData() {
-  const ses = _browserSession();
-  await ses.clearStorageData({
-    storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
-  });
+  const partitionNames = new Set([
+    "persist:hana-browser",
+    _browserPartitionName(null),
+  ]);
+  for (const workspace of _browserViews.values()) {
+    partitionNames.add(_browserPartitionName(workspace.sessionPath));
+  }
+  await Promise.all(Array.from(partitionNames).map((partitionName) => {
+    const ses = session.fromPartition(partitionName);
+    return ses.clearStorageData({
+      storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
+    });
+  }));
+}
+
+function _normalizeBrowserViewerOpenPayload(payload) {
+  if (typeof payload === "string") {
+    return { url: payload || null, sessionPath: null };
+  }
+  if (payload && typeof payload === "object") {
+    return {
+      url: typeof payload.url === "string" && payload.url ? payload.url : null,
+      sessionPath: _normalizeBrowserSessionPath(payload.sessionPath),
+    };
+  }
+  return { url: null, sessionPath: null };
+}
+
+function _resolveBrowserIpcSessionPath(sessionPath) {
+  return _normalizeBrowserSessionPath(sessionPath) || _currentBrowserSession || null;
 }
 
 function _createBrowserWebContentsView(sessionPath, tabId = null) {
-  _installBrowserCookiePolicy();
-  const ses = session.fromPartition("persist:hana-browser");
+  _installBrowserCookiePolicy(sessionPath);
+  const ses = _browserSession(sessionPath);
   const view = new WebContentsView({
     webPreferences: {
       session: ses,
@@ -3909,52 +3950,66 @@ wrapIpcBestEffortHandler("quick-chat-open-session", (_event, sessionPath) => {
 wrapIpcBestEffortHandler("open-settings", (_event, tab, theme) => createSettingsWindow(tab, theme));
 
 // 浏览器查看器窗口
-wrapIpcBestEffortHandler("open-browser-viewer", async (_event, theme, url) => {
+wrapIpcBestEffortHandler("open-browser-viewer", async (_event, theme, payload) => {
   if (theme) _browserViewerTheme = theme;
+  const { url, sessionPath: sp } = _normalizeBrowserViewerOpenPayload(payload);
   createBrowserViewerWindow();
 
   if (url && isAllowedBrowserUrl(url)) {
-    await _openUrlInNewBrowserTab(null, url);
+    await _openUrlInNewBrowserTab(sp, url);
     return;
   }
 
-  if (!_browserWebView) {
-    const workspace = _ensureBrowserWorkspace(null);
-    const tab = _ensureBrowserTabForSession(null);
-    workspace.activeTabId = tab.tabId;
-    _switchActiveBrowserTab(null, tab.tabId);
-  } else {
+  if (!sp && _browserWebView) {
     _notifyViewerUrl(_browserWebView.webContents.getURL());
+    return;
   }
+
+  const workspace = _ensureBrowserWorkspace(sp);
+  const tab = _ensureBrowserTabForSession(sp);
+  workspace.activeTabId = tab.tabId;
+  _switchActiveBrowserTab(sp, tab.tabId);
 });
-wrapIpcBestEffortHandler("browser-go-back", () => { if (_browserWebView) _browserWebView.webContents.goBack(); });
-wrapIpcBestEffortHandler("browser-go-forward", () => { if (_browserWebView) _browserWebView.webContents.goForward(); });
-wrapIpcBestEffortHandler("browser-reload", () => { if (_browserWebView) _browserWebView.webContents.reload(); });
-wrapIpcBestEffortHandler("browser-new-tab", async () => {
-  await _openUrlInNewBrowserTab(_currentBrowserSession, null);
+wrapIpcBestEffortHandler("browser-go-back", (_event, sessionPath) => {
+  const view = _getViewForSession(_resolveBrowserIpcSessionPath(sessionPath));
+  if (view) view.webContents.goBack();
 });
-wrapIpcBestEffortHandler("browser-switch-tab", (_event, tabId) => {
+wrapIpcBestEffortHandler("browser-go-forward", (_event, sessionPath) => {
+  const view = _getViewForSession(_resolveBrowserIpcSessionPath(sessionPath));
+  if (view) view.webContents.goForward();
+});
+wrapIpcBestEffortHandler("browser-reload", (_event, sessionPath) => {
+  const view = _getViewForSession(_resolveBrowserIpcSessionPath(sessionPath));
+  if (view) view.webContents.reload();
+});
+wrapIpcBestEffortHandler("browser-new-tab", async (_event, sessionPath) => {
+  await _openUrlInNewBrowserTab(_resolveBrowserIpcSessionPath(sessionPath), null);
+});
+wrapIpcBestEffortHandler("browser-switch-tab", (_event, tabId, sessionPath) => {
   if (typeof tabId !== "string" || !tabId) return;
-  _switchActiveBrowserTab(_currentBrowserSession, tabId);
+  _switchActiveBrowserTab(_resolveBrowserIpcSessionPath(sessionPath), tabId);
 });
-wrapIpcBestEffortHandler("browser-close-tab", (_event, tabId) => {
+wrapIpcBestEffortHandler("browser-close-tab", (_event, tabId, sessionPath) => {
   if (typeof tabId !== "string" || !tabId) return;
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
   return handleBrowserCommand("closeTab", {
-    sessionPath: _currentBrowserSession,
+    sessionPath: sp,
     tabId,
   });
 });
 wrapIpcBestEffortHandler("close-browser-viewer", () => {
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.close();
 });
-wrapIpcBestEffortHandler("browser-emergency-stop", () => {
+wrapIpcBestEffortHandler("browser-emergency-stop", (_event, sessionPath) => {
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
   // 有 session 归属时必须经过 server 的 BrowserManager，保持 UI 和运行时状态一致。
-  if (_currentBrowserSession) {
-    return closeBrowserSessionViaServer(_currentBrowserSession);
+  if (sp) {
+    return closeBrowserSessionViaServer(sp);
   }
   // 兼容无 sessionPath 的旧浏览器实例：没有 server 状态可同步，只能本地清理。
-  if (_browserWebView) {
-    _detachActiveBrowserView({ destroy: true, hideIfVisible: true, reason: "emergency-stop" });
+  const view = _getViewForSession(null);
+  if (view) {
+    _detachActiveBrowserView({ view, sessionPath: null, destroy: true, hideIfVisible: true, reason: "emergency-stop" });
   }
 });
 

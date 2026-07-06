@@ -52,7 +52,6 @@ import { callText } from "./llm-client.ts";
 import { createModuleLogger } from "../lib/debug-log.ts";
 import {
   CACHE_SNAPSHOT_EXPERIMENT_ID,
-  EDITABLE_MEMORY_EXPERIMENT_ID,
   PROACTIVE_SUBAGENT_EXPERIMENT_ID,
   getResolvedExperimentValue,
 } from "../lib/experiments/registry.ts";
@@ -397,10 +396,6 @@ export class Agent {
           this._cb?.getPreferences?.(),
           CACHE_SNAPSHOT_EXPERIMENT_ID,
         ),
-        getEditableMemoryEnabled: () => getResolvedExperimentValue(
-          this._cb?.getPreferences?.(),
-          EDITABLE_MEMORY_EXPERIMENT_ID,
-        ) === true,
         buildSessionCacheSnapshot: (sessionPath, options) => (
           this._cb?.getEngine?.()?.buildSessionCacheSnapshot?.(sessionPath, options)
         ),
@@ -580,7 +575,7 @@ export class Agent {
         cfg.capabilities = { ...cfg.capabilities, learn_skills: globalLearn };
         return cfg;
       },
-      resolveUtilityConfig: () => this._cb?.resolveUtilityConfig?.(),
+      resolveUtilityConfig: (options) => this._cb?.resolveUtilityConfig?.(options),
       onInstalled: async (skillName) => {
         await this._onInstallCallback?.(skillName);
       },

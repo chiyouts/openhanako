@@ -18,7 +18,8 @@ interface PlatformStatusBase {
 }
 
 export interface TelegramStatus extends PlatformStatusBase { token?: string }
-export interface FeishuStatus extends PlatformStatusBase { appId?: string; appSecret?: string }
+export type FeishuRegion = 'feishu_cn' | 'lark_global';
+export interface FeishuStatus extends PlatformStatusBase { appId?: string; appSecret?: string; region?: FeishuRegion; domain?: string | null }
 export interface DingTalkStatus extends PlatformStatusBase { clientId?: string; clientSecret?: string; robotCode?: string; restBaseUrl?: string }
 export interface QQStatus extends PlatformStatusBase { appID?: string; appSecret?: string }
 export interface WechatStatus extends PlatformStatusBase { token?: string }
@@ -40,6 +41,10 @@ export interface BridgeStatus {
 }
 
 export type BridgePlatform = 'telegram' | 'feishu' | 'dingtalk' | 'whatsapp' | 'qq' | 'wechat';
+
+function normalizeFeishuRegion(value: unknown): FeishuRegion {
+  return value === 'lark_global' ? 'lark_global' : 'feishu_cn';
+}
 
 function normalizeBridgeStatus(data: any): BridgeStatus | null {
   if (!data || typeof data !== 'object') return null;
@@ -65,6 +70,7 @@ function bridgeCredentials(status: BridgeStatus | null) {
     tgToken: status?.telegram?.token || '',
     fsAppId: status?.feishu?.appId || '',
     fsAppSecret: status?.feishu?.appSecret || '',
+    fsRegion: normalizeFeishuRegion(status?.feishu?.region),
     dtClientId: status?.dingtalk?.clientId || '',
     dtClientSecret: status?.dingtalk?.clientSecret || '',
     dtRobotCode: status?.dingtalk?.robotCode || '',
@@ -110,6 +116,7 @@ export function useBridgeState() {
   const [tgToken, setTgToken] = useState(snapshotCredentials.tgToken);
   const [fsAppId, setFsAppId] = useState(snapshotCredentials.fsAppId);
   const [fsAppSecret, setFsAppSecret] = useState(snapshotCredentials.fsAppSecret);
+  const [fsRegion, setFsRegion] = useState<FeishuRegion>(snapshotCredentials.fsRegion);
   const [dtClientId, setDtClientId] = useState(snapshotCredentials.dtClientId);
   const [dtClientSecret, setDtClientSecret] = useState(snapshotCredentials.dtClientSecret);
   const [dtRobotCode, setDtRobotCode] = useState(snapshotCredentials.dtRobotCode);
@@ -123,6 +130,7 @@ export function useBridgeState() {
     setTgToken(nextCredentials.tgToken);
     setFsAppId(nextCredentials.fsAppId);
     setFsAppSecret(nextCredentials.fsAppSecret);
+    setFsRegion(nextCredentials.fsRegion);
     setDtClientId(nextCredentials.dtClientId);
     setDtClientSecret(nextCredentials.dtClientSecret);
     setDtRobotCode(nextCredentials.dtRobotCode);
@@ -252,11 +260,17 @@ export function useBridgeState() {
     const agentId = selectedAgentId;
     try {
       const agentQuery = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
-      await hanaFetch(`/api/bridge/owner${agentQuery}`, {
+      const res = await hanaFetch(`/api/bridge/owner${agentQuery}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ platform: plat, userId: userId || null }),
       });
+      const data = await res.json().catch(() => null);
+      if (selectedAgentIdRef.current === agentId) {
+        const nextStatus = normalizeBridgeStatus(data?.status);
+        if (nextStatus) applyStatus(nextStatus);
+        else await loadStatus();
+      }
       showToast(t('settings.bridge.ownerSaved'), 'success');
     } catch {
       showToast(t('settings.saveFailed'), 'error');
@@ -299,7 +313,7 @@ export function useBridgeState() {
     selectedAgentId, setSelectedAgentId,
     publicIshiki, setPublicIshiki, savePublicIshiki,
     tgToken, setTgToken,
-    fsAppId, setFsAppId, fsAppSecret, setFsAppSecret,
+    fsAppId, setFsAppId, fsAppSecret, setFsAppSecret, fsRegion, setFsRegion,
     dtClientId, setDtClientId, dtClientSecret, setDtClientSecret, dtRobotCode, setDtRobotCode, dtRestBaseUrl, setDtRestBaseUrl,
     qqAppId, setQqAppId, qqAppSecret, setQqAppSecret,
     saveBridgeConfig, testPlatform, setOwner, saveGlobalSettings,

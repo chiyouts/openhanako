@@ -47,6 +47,7 @@ import { isAllowedChatImageMime, isChatImageBase64WithinLimit } from "../../shar
 import { isAllowedChatVideoMime, isChatVideoBase64WithinLimit } from "../../shared/video-mime.ts";
 import { isAllowedChatAudioMime, isChatAudioBase64WithinLimit } from "../../shared/audio-mime.ts";
 import { getAssistantTextPhase } from "../../shared/text-signature.ts";
+import { summarizeToolArgs } from "../../shared/tool-arg-summary.ts";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -60,16 +61,10 @@ import {
 const log = createModuleLogger("chat");
 const wsLog = createModuleLogger("ws");
 
-/** tool_start 事件只广播这些 arg 字段，避免传输完整文件内容（同步维护：chat-render-shim.ts extractToolDetail） */
-const TOOL_ARG_SUMMARY_KEYS = ["file_path", "path", "command", "pattern", "url", "query", "key", "value", "action", "type", "schedule", "prompt", "label"];
-
 export function summarizeToolStartArgs(toolName: any, rawArgs: any, startedAt = Date.now()) {
-  if (!rawArgs || typeof rawArgs !== "object") return undefined;
-  const args = {};
-  for (const k of TOOL_ARG_SUMMARY_KEYS) {
-    if (rawArgs[k] !== undefined) args[k] = rawArgs[k];
-  }
-  return Object.keys(args).length ? args : undefined;
+  void toolName;
+  void startedAt;
+  return summarizeToolArgs(rawArgs);
 }
 
 /**

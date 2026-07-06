@@ -5,6 +5,7 @@
 :global(.settings-panel) {
     --settings-nav-width: 180px;
     --paper-texture-attachment: scroll;
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -34,6 +35,7 @@
 :global(body.paper-texture) .agent-delete-card,
 :global(body.paper-texture) .agent-name-input,
 :global(body.paper-texture) .model-capsule-input,
+:global(body.paper-texture) .model-capsule-trigger,
 :global(body.paper-texture) .settings-input,
 :global(body.paper-texture) .settings-textarea,
 :global(body.paper-texture) .settings-folder-browse,
@@ -1841,9 +1843,26 @@
 }
 
 .model-capsule-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--space-8) var(--space-12);
+    font-family: inherit;
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    color: var(--text);
     border: none;
     border-radius: 0;
-    background: transparent;
+    background-color: var(--bg-card);
+    cursor: default;
+    text-align: left;
+    transition: color var(--duration-fast) var(--ease-out);
+}
+
+.model-capsule:has(.model-capsule-trigger:hover),
+.model-capsule:has(.model-capsule-trigger[data-open="true"]) {
+    border-color: var(--accent);
 }
 
 .model-capsule-provider-icon {
@@ -6180,11 +6199,20 @@ a.about-link:hover {
     border-radius: var(--radius-lg);
     width: 90%;
     max-width: 560px;
-    max-height: 100%;
+    max-height: min(760px, calc(100vh - var(--space-40) - var(--space-40)));
+    min-height: 0;
     display: flex;
     flex-direction: column;
     box-shadow: 0 8px 32px var(--shadow);
     overflow: hidden;
+}
+
+.compiled-memory-viewer-backdrop {
+    padding: var(--space-40) var(--space-24);
+}
+
+.compiled-memory-viewer {
+    max-height: 100%;
 }
 
 .memory-viewer-header {
@@ -6260,8 +6288,30 @@ a.about-link:hover {
     opacity: 1;
 }
 
+.compiled-edit-toggle-btn {
+    font-size: var(--fs-hint);
+    color: var(--text-light);
+    background: none;
+    border: 1px solid var(--overlay-light);
+    border-radius: var(--radius-input, 6px);
+    padding: 2px 8px;
+    cursor: default;
+    opacity: 0.7;
+    transition: opacity var(--duration-fast);
+}
+
+.compiled-edit-toggle-btn:hover {
+    opacity: 1;
+}
+
+.compiled-clear-btn:disabled,
+.compiled-edit-toggle-btn:disabled {
+    opacity: 0.45;
+}
+
 .compiled-memory-body {
     font-size: var(--fs-ui);
+    min-height: 0;
 }
 
 .compiled-memory-md {
@@ -6301,6 +6351,7 @@ a.about-link:hover {
     display: flex;
     flex-direction: column;
     gap: var(--space-16);
+    min-height: 0;
 }
 
 .compiled-memory-editor-label,
@@ -6312,8 +6363,11 @@ a.about-link:hover {
 
 .compiled-memory-facts-editor {
     width: 100%;
-    min-height: 150px;
-    resize: vertical;
+    height: 150px;
+    min-height: 110px;
+    max-height: 220px;
+    resize: none;
+    overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: var(--radius-input, 6px);
     background: var(--bg);
@@ -6327,25 +6381,6 @@ a.about-link:hover {
 .compiled-memory-facts-editor:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.compiled-memory-editor-actions {
-    display: flex;
-    justify-content: flex-end;
-}
-
-.compiled-memory-save-btn {
-    font-size: var(--fs-caption);
-    color: var(--button-text);
-    background: var(--accent);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-input, 6px);
-    padding: var(--space-4) var(--space-12);
-    cursor: default;
-}
-
-.compiled-memory-save-btn:disabled {
-    opacity: 0.55;
 }
 
 .compiled-memory-readonly-list {
@@ -6368,6 +6403,61 @@ a.about-link:hover {
 
 .compiled-view-btn {
     width: 100%;
+}
+
+.compiled-memory-edit-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    border-top: 1px solid var(--overlay-light);
+    padding-top: var(--space-16);
+}
+
+.compiled-memory-edit-section:first-child {
+    border-top: none;
+    padding-top: 0;
+}
+
+.compiled-memory-week-days {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+}
+
+.compiled-memory-week-day-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    border-left: 2px solid var(--overlay-light);
+    padding-left: var(--space-8);
+}
+
+.compiled-memory-week-day-label {
+    font-size: var(--fs-hint);
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.compiled-memory-week-day-editor {
+    width: 100%;
+    height: 96px;
+    min-height: 72px;
+    max-height: 140px;
+    resize: none;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input, 6px);
+    background: var(--bg);
+    color: var(--text);
+    padding: var(--space-8) var(--space-16);
+    font: inherit;
+    line-height: 1.65;
+    outline: none;
+}
+
+.compiled-memory-week-day-editor:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 /* 实验功能：Cache Snapshot 观察区 */

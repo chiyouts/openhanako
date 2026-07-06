@@ -364,6 +364,24 @@ describe("模型选择无 fallback", () => {
         .toThrow(/noUtilityLargeModel|utility_large 模型|utility_large model/);
     });
 
+    it("明确 small-only 调用时不要求 utility_large", () => {
+      const mm = new ModelManager({ hanakoHome: tempDir });
+      setupRouter(mm);
+      mm._availableModels = [
+        { id: "some-model", provider: "x", _cred: { api: "openai-completions", apiKey: "sk-test", baseUrl: "https://test.example.com/v1" } },
+      ];
+
+      const result = mm.resolveUtilityConfig(
+        {},
+        { utility: { id: "some-model", provider: "x" } },
+        {},
+        { requireUtilityLarge: false },
+      );
+
+      expect(result.utility).toMatchObject({ id: "some-model", provider: "x" });
+      expect(result.utility_large).toBeNull();
+    });
+
     it("utility 和 utility_large 都配置时正常返回", () => {
       const mm = new ModelManager({ hanakoHome: tempDir });
       mm._availableModels = [

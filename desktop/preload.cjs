@@ -19,6 +19,17 @@ function resolveTheme() {
   return themeRegistry.resolveSavedTheme(saved, isDark).concrete;
 }
 
+function normalizeBrowserViewerOpenTarget(target) {
+  if (typeof target === "string") return { url: target };
+  if (target && typeof target === "object") {
+    return {
+      url: typeof target.url === "string" ? target.url : undefined,
+      sessionPath: typeof target.sessionPath === "string" ? target.sessionPath : undefined,
+    };
+  }
+  return {};
+}
+
 contextBridge.exposeInMainWorld("hana", {
   getServerPort: () => ipcRenderer.invoke("get-server-port"),
   getServerToken: () => ipcRenderer.invoke("get-server-token"),
@@ -119,20 +130,20 @@ contextBridge.exposeInMainWorld("hana", {
     return () => ipcRenderer.removeListener("server-restarted", handler);
   },
   // 浏览器查看器窗口
-  openBrowserViewer: (url) => ipcRenderer.invoke("open-browser-viewer", resolveTheme(), url),
+  openBrowserViewer: (target) => ipcRenderer.invoke("open-browser-viewer", resolveTheme(), normalizeBrowserViewerOpenTarget(target)),
   onBrowserUpdate: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on("browser-update", handler);
     return () => ipcRenderer.removeListener("browser-update", handler);
   },
-  browserGoBack: () => ipcRenderer.invoke("browser-go-back"),
-  browserGoForward: () => ipcRenderer.invoke("browser-go-forward"),
-  browserReload: () => ipcRenderer.invoke("browser-reload"),
-  browserNewTab: () => ipcRenderer.invoke("browser-new-tab"),
-  browserSwitchTab: (tabId) => ipcRenderer.invoke("browser-switch-tab", tabId),
-  browserCloseTab: (tabId) => ipcRenderer.invoke("browser-close-tab", tabId),
+  browserGoBack: (sessionPath) => ipcRenderer.invoke("browser-go-back", sessionPath),
+  browserGoForward: (sessionPath) => ipcRenderer.invoke("browser-go-forward", sessionPath),
+  browserReload: (sessionPath) => ipcRenderer.invoke("browser-reload", sessionPath),
+  browserNewTab: (sessionPath) => ipcRenderer.invoke("browser-new-tab", sessionPath),
+  browserSwitchTab: (tabId, sessionPath) => ipcRenderer.invoke("browser-switch-tab", tabId, sessionPath),
+  browserCloseTab: (tabId, sessionPath) => ipcRenderer.invoke("browser-close-tab", tabId, sessionPath),
   closeBrowserViewer: () => ipcRenderer.invoke("close-browser-viewer"),
-  browserEmergencyStop: () => ipcRenderer.invoke("browser-emergency-stop"),
+  browserEmergencyStop: (sessionPath) => ipcRenderer.invoke("browser-emergency-stop", sessionPath),
   // 派生 Viewer 窗口（只读文件副本，多实例）
   spawnViewer: (data) => ipcRenderer.invoke("spawn-viewer", data),
   onViewerLoad: (cb) => ipcRenderer.on("viewer-load", (_, data) => cb(data)),

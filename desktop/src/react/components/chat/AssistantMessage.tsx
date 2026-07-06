@@ -35,9 +35,9 @@ import { resolveFileRefUrl } from '../../services/resource-url';
 import type { FileRef } from '../../types/file-ref';
 import { openPreview } from '../../stores/preview-actions';
 import { replayLatestUserMessage } from '../../stores/message-turn-actions';
-import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
+import { selectSelectedIdsBySession } from '../../stores/session-selectors';
 import { extractSelectedTexts, extractTextBlockPlainText } from '../../utils/message-text';
-import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display';
+import { AgentAvatar, resolveAgentDisplayInfo, type AgentDisplayInfo } from '../../utils/agent-display';
 import { ScheduleEditor } from '../automation/ScheduleEditor';
 import { SelectWidget, type SelectOption } from '@/ui';
 import {
@@ -56,6 +56,9 @@ interface Props {
   sessionPath: string;
   agentId?: string | null;
   readOnly?: boolean;
+  agentDisplay: AgentDisplayInfo & { yuan: string };
+  isStreaming: boolean;
+  isSelected: boolean;
   isLatestAssistantMessage?: boolean;
   showTurnCompletionTime?: boolean;
   assistantTurnSelectionIds?: readonly string[];
@@ -73,29 +76,20 @@ export const AssistantMessage = memo(function AssistantMessage({
   sessionPath,
   agentId,
   readOnly = false,
+  agentDisplay,
+  isStreaming,
+  isSelected,
   isLatestAssistantMessage = false,
   showTurnCompletionTime = false,
   assistantTurnSelectionIds,
   retrySourceMessage = null,
   messageRef,
 }: Props) {
-  const agents = useStore(s => s.agents);
-  const globalAgentName = useStore(s => s.agentName) || 'Hanako';
-  const globalYuan = useStore(s => s.agentYuan) || 'hanako';
-  const isStreaming = useStore(s => selectIsStreamingSession(s, sessionPath));
-  const selectedIds = useStore(s => selectSelectedIdsBySession(s, sessionPath));
-  const isSelected = selectedIds.includes(message.id);
   const t = window.t ?? ((p: string) => p);
 
-  // Resolve agent identity from agentId prop; fall back to global values
-  const displayInfo = resolveAgentDisplayInfo({
-    id: agentId || null,
-    agents,
-    fallbackAgentName: globalAgentName,
-    fallbackAgentYuan: globalYuan,
-  });
-  const displayName = displayInfo.displayName;
-  const displayYuan = displayInfo.yuan || globalYuan;
+  const displayInfo = agentDisplay;
+  const displayName = agentDisplay.displayName;
+  const displayYuan = agentDisplay.yuan;
 
   const blocks = useMemo(
     () => (message.blocks || [])

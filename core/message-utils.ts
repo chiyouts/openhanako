@@ -15,15 +15,8 @@ import {
 } from "../lib/turn-input-presentation.ts";
 import { repairOversizedSessionEntriesInFile } from "./session-jsonl-file.ts";
 import { isAssistantCommentaryTextBlock } from "../shared/text-signature.ts";
-
-/**
- * 工具调用参数摘要键列表
- * 提取工具调用时只保留这些键作为摘要信息
- */
-export const TOOL_ARG_SUMMARY_KEYS = [
-  "file_path", "path", "command", "pattern", "url", "query",
-  "key", "value", "action", "type", "schedule", "prompt", "label",
-];
+import { TOOL_ARG_SUMMARY_KEYS, summarizeToolArgs } from "../shared/tool-arg-summary.ts";
+export { TOOL_ARG_SUMMARY_KEYS };
 
 const SESSION_TAIL_READ_THRESHOLD = 256 * 1024;
 const ATTACHED_IMAGE_MARKER_RE = /\[attached_image:\s*[^\]]+\]/g;
@@ -69,17 +62,12 @@ export function extractTextContent(content, { stripThink = false } = {}) {
   const toolUses = content
     .filter(isToolCallBlock)
     .map(block => {
-      const args = {};
       const params = getToolArgs(block);
-      if (params && typeof params === "object") {
-        for (const k of TOOL_ARG_SUMMARY_KEYS) {
-          if (params[k] !== undefined) args[k] = params[k];
-        }
-      }
+      const args = summarizeToolArgs(params);
       return {
         id: typeof block.id === "string" && block.id ? block.id : undefined,
         name: block.name,
-        args: Object.keys(args).length ? args : undefined,
+        ...(args ? { args } : {}),
       };
     });
   return { text, thinking, toolUses, images };

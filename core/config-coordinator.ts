@@ -343,11 +343,17 @@ export class ConfigCoordinator {
       throw new Error(`resolveUtilityConfig: agent ${agentId || "(focus)"} not found`);
     }
     const models = this._d.getModels();
-    return models.resolveUtilityConfig(
+    const resolverArgs = [
       agent.config,
       this.getSharedModels(),
       this.getUtilityApi(),
-    );
+    ];
+    if (options?.requireUtilityLarge !== undefined) {
+      resolverArgs.push({
+        requireUtilityLarge: options.requireUtilityLarge,
+      });
+    }
+    return models.resolveUtilityConfig(...resolverArgs);
   }
 
   // ── Agent Order ──

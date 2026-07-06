@@ -1,5 +1,6 @@
 import React from 'react';
-import type { AutoUpdateState } from '../types';
+import type { AutoUpdateState, LocalizedReleaseText, ReleaseDigest, ReleaseDigestItem } from '../types';
+import { Overlay } from '../ui/Overlay';
 import styles from './AutoUpdateStatus.module.css';
 
 interface AutoUpdateStatusProps {
@@ -26,6 +27,79 @@ function InstallIcon() {
   );
 }
 
+function digestLocale(): keyof LocalizedReleaseText {
+  const lang = (document.documentElement.lang || navigator.language || '').toLowerCase();
+  return lang.startsWith('zh') ? 'zh' : 'en';
+}
+
+function digestText(value: LocalizedReleaseText | undefined, locale: keyof LocalizedReleaseText): string {
+  if (!value) return '';
+  return value[locale] || value.en || value.zh || '';
+}
+
+function kindLabel(kind: ReleaseDigestItem['kind']): string {
+  return t(`settings.about.updateDigestKind.${kind}`);
+}
+
+function hasVisibleDigest(digest: ReleaseDigest | null | undefined): digest is ReleaseDigest {
+  return Boolean(digest && (!digest.noUserFacingChanges || digest.items.length > 0));
+}
+
+function ReleaseDigestEntry({ digest }: { digest: ReleaseDigest | null | undefined }) {
+  const [open, setOpen] = React.useState(false);
+  if (!hasVisibleDigest(digest)) return null;
+
+  const locale = digestLocale();
+  const titleId = `release-digest-${digest.tag || digest.version || 'current'}`;
+
+  return (
+    <>
+      <button type="button" className={styles.digestTrigger} onClick={() => setOpen(true)}>
+        {t('settings.about.updateDigestCta')}
+      </button>
+      <Overlay
+        open={open}
+        onClose={() => setOpen(false)}
+        className={styles.digestDialog}
+        zIndex={1400}
+      >
+        <section role="dialog" aria-modal="true" aria-labelledby={titleId} className={styles.digestPanel}>
+          <div className={styles.digestHeader}>
+            <div>
+              <div className={styles.digestEyebrow}>{digest.tag}</div>
+              <h2 id={titleId} className={styles.digestTitle}>{t('settings.about.updateDigestTitle')}</h2>
+            </div>
+            <button type="button" className={styles.digestClose} onClick={() => setOpen(false)}>
+              {t('settings.about.updateDigestClose')}
+            </button>
+          </div>
+
+          <p className={styles.digestSummary}>{digestText(digest.summary, locale)}</p>
+
+          <div className={styles.digestList}>
+            {digest.items.map((item, index) => (
+              <article key={item.id || `${item.kind}-${index}`} className={styles.digestItem}>
+                <div className={styles.digestItemMeta}>
+                  <span className={styles.digestKind}>{kindLabel(item.kind)}</span>
+                </div>
+                <h3 className={styles.digestItemTitle}>{digestText(item.title, locale)}</h3>
+                <p className={styles.digestItemSummary}>{digestText(item.summary, locale)}</p>
+                {item.details.length > 0 && (
+                  <ul className={styles.digestDetails}>
+                    {item.details.map((detail, detailIndex) => (
+                      <li key={detailIndex}>{digestText(detail, locale)}</li>
+                    ))}
+                  </ul>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      </Overlay>
+    </>
+  );
+}
+
 export function AutoUpdateStatus({ state, agentName = 'Hanako', onInstall }: AutoUpdateStatusProps) {
   if (!state || state.status === 'idle') {
     return null;
@@ -45,6 +119,7 @@ export function AutoUpdateStatus({ state, agentName = 'Hanako', onInstall }: Aut
           <div className={styles.barTrack} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
             <div className={styles.barFill} style={{ width: `${percent}%` }} />
           </div>
+          <ReleaseDigestEntry digest={state.digest} />
         </div>
       </div>
     );
@@ -62,6 +137,7 @@ export function AutoUpdateStatus({ state, agentName = 'Hanako', onInstall }: Aut
                 <InstallIcon />
               </button>
             )}
+            <ReleaseDigestEntry digest={state.digest} />
           </div>
           <div className={`${styles.message} ${styles.hint}`}>{t('settings.about.updateInstallManualHint')}</div>
         </div>
@@ -104,6 +180,9 @@ export function AutoUpdateStatus({ state, agentName = 'Hanako', onInstall }: Aut
     <div className={styles.root}>
       <div className={styles.row}>
         <span className={styles.message}>{message}</span>
+        {(state.status === 'available' || state.status === 'installing') && (
+          <ReleaseDigestEntry digest={state.digest} />
+        )}
       </div>
     </div>
   );

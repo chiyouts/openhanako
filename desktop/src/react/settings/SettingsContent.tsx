@@ -269,6 +269,7 @@ export function SettingsContent({
             </ErrorBoundary>
           </div>
         </div>
+        <CompiledMemoryViewer />
       </div>
 
       <Toast />
@@ -276,7 +277,6 @@ export function SettingsContent({
       <AgentCreateOverlay />
       <AgentDeleteOverlay />
       <MemoryViewer />
-      <CompiledMemoryViewer />
       <ClearMemoryConfirm />
       <BridgeTutorial />
       <WechatQrcodeOverlay />

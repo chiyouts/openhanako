@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "tag": "v0.357.17",
+  "version": "0.357.17",
+  "previousTag": "v0.357.16",
+  "generatedAt": "2026-07-06T00:54:00.000Z",
+  "noUserFacingChanges": false,
+  "summary": {
+    "zh": "记忆时间线会按逻辑日正确归档，日记忆不再把跨天对话混进错误日期。",
+    "en": "Memory timeline entries now attach to the correct logical day, so daily summaries stop mixing cross-day conversations into the wrong date."
+  },
+  "counts": {
+    "feature": 0,
+    "fix": 1,
+    "improvement": 0,
+    "migration": 0
+  },
+  "source": {
+    "owner": "liliMozi",
+    "repo": "openhanako",
+    "commitRange": "v0.357.16..1b850da24",
+    "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.357.17",
+    "releaseNotes": ""
+  },
+  "items": [
+    {
+      "id": "memory-timeline-logical-day",
+      "kind": "fix",
+      "importance": "medium",
+      "title": {
+        "zh": "记忆时间线按逻辑日归档",
+        "en": "Memory timeline respects logical days"
+      },
+      "summary": {
+        "zh": "修复记忆编译时 timeline 条目归属错误的问题，跨天 session 的摘要不会再污染相邻日期的日记忆。",
+        "en": "Fixes timeline assignment during memory compilation so cross-day session summaries no longer bleed into neighboring daily memory entries."
+      },
+      "details": [],
+      "sources": [
+        { "type": "commit", "ref": "1b850da24", "title": "fix: assign memory timeline entries by logical day" }
+      ]
+    }
+  ]
+}
