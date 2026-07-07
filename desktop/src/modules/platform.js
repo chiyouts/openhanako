@@ -74,7 +74,7 @@
     unwatchWorkspace: async () => false,
     onWorkspaceChanged: () => {},
     spawnViewer: async () => null,
-    onViewerLoad: () => {},
+    viewerRequestLoad: async () => null,
     viewerClose: () => {},
     onViewerClosed: () => {},
 

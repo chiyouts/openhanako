@@ -38,6 +38,22 @@ const CHAPTER_RAIL_HOVER_ZONE_PX = 64;
 const CHAPTER_RAIL_TOP_OFFSET_PX = 76;
 const CHAPTER_RAIL_HEIGHT_RATIO = 0.5;
 
+/** 提纲导轨悬停热区命中判定：右缘（与聊天页 ChatMessageSurface.handleShellPointerMove 一致）。
+    抽成纯函数以便单测：PreviewPanel 渲染栈重（platform/store/resource-watch 依赖），
+    直接对 pointermove 断言需要 mock 出真实 rect 尺寸，不如把几何判定单独验证。 */
+export function chapterRailHoverHit(
+  rect: { top: number; right: number; height: number },
+  clientX: number,
+  clientY: number,
+): boolean {
+  const xFromRight = rect.right - clientX;
+  const yFromTop = clientY - rect.top;
+  const inRailX = xFromRight >= 0 && xFromRight <= CHAPTER_RAIL_HOVER_ZONE_PX;
+  const inRailY = yFromTop >= CHAPTER_RAIL_TOP_OFFSET_PX
+    && yFromTop <= CHAPTER_RAIL_TOP_OFFSET_PX + rect.height * CHAPTER_RAIL_HEIGHT_RATIO;
+  return inRailX && inRailY;
+}
+
 function isEditable(previewItem: PreviewItem | null): boolean {
   if (!previewItem) return false;
   if (previewItem.status === 'missing') return false;
@@ -299,12 +315,7 @@ export function PreviewPanel() {
 
   const handleBodyShellPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const xFromLeft = event.clientX - rect.left;
-    const yFromTop = event.clientY - rect.top;
-    const inRailX = xFromLeft >= 0 && xFromLeft <= CHAPTER_RAIL_HOVER_ZONE_PX;
-    const inRailY = yFromTop >= CHAPTER_RAIL_TOP_OFFSET_PX
-      && yFromTop <= CHAPTER_RAIL_TOP_OFFSET_PX + rect.height * CHAPTER_RAIL_HEIGHT_RATIO;
-    setChapterRailVisible(inRailX && inRailY);
+    setChapterRailVisible(chapterRailHoverHit(rect, event.clientX, event.clientY));
   }, []);
 
   const handleBodyShellPointerLeave = useCallback(() => {

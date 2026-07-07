@@ -1044,6 +1044,7 @@ describe('ws-message-handler turn_end side effects', () => {
 
     expect(useStore.getState().streamingSessions).toEqual([]);
     expect(useStore.getState().inputFocusTrigger).toBe(1);
+    expect(useStore.getState().inputFocusTriggerSource).toBe('restore');
   });
 
   it('stale status=false does not finish the newer local stream turn', () => {

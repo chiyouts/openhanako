@@ -233,6 +233,17 @@ export function useContinuousBottomScroll({
         const expected = programmaticScrollTopRef.current;
         const current = finiteNumber(el.scrollTop);
         if (expected !== null && Math.abs(current - expected) <= 1) return;
+        // A scroll event whose scrollHeight already differs from what we last observed cannot be
+        // user intent (a wheel/touch/keyboard scroll is cancelled explicitly elsewhere, and a
+        // scrollbar drag never changes content height). It's the browser clamping/anchoring the
+        // scroll position in reaction to a same-frame content-size change (e.g. process-fold
+        // collapse or typing-indicator removal at turn end) — ignore it and let the
+        // ResizeObserver branch below handle the resulting follow.
+        const lastObserved = lastObservedScrollHeightRef.current;
+        if (lastObserved !== null
+          && Math.abs(finiteNumber(el.scrollHeight) - lastObserved) > SCROLL_EPSILON_PX) {
+          return;
+        }
         if (distanceFromBottom(el) > finiteNumber(thresholdRef.current, DEFAULT_STICKY_THRESHOLD)) {
           cancelFollow();
           return;
@@ -281,6 +292,27 @@ export function useContinuousBottomScroll({
         previousScrollHeight !== null
         && nextScrollHeight < previousScrollHeight - SCROLL_EPSILON_PX
       ) {
+        // Content shrank (e.g. process-fold collapse / typing-indicator removal at turn end).
+        // If we were actively sticky, keep following to the new bottom instead of dropping out —
+        // the user hadn't scrolled away, the content just got shorter underneath them.
+        if (isStickyRef.current) {
+          // If a follow animation is already mid-flight, let it be: its own runFrame will settle
+          // against the new (smaller) target on its next tick, and followBottom()'s reentrancy
+          // guard (rafRef.current !== null) would no-op here anyway. This preserves "don't force
+          // an upward snap mid-animation" — a shrink that lands behind an in-flight animation's
+          // current position shouldn't yank the view backwards mid-motion.
+          if (followingRef.current) {
+            followBottom();
+            return;
+          }
+          // Otherwise we were at rest (already caught up to the old bottom). The shrink can leave
+          // scrollTop resting past the new maxScrollTop — a real browser clamps that overscroll
+          // natively and instantly, so mirror that here instead of waiting for unrelated future
+          // growth to paper over the drift.
+          const stickyEl = scrollRef.current;
+          if (stickyEl) setProgrammaticScrollTop(stickyEl, maxScrollTop(stickyEl));
+          return;
+        }
         stopFollow();
         checkSticky();
         return;
@@ -290,7 +322,7 @@ export function useContinuousBottomScroll({
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [active, checkSticky, contentRef, followBottom, scrollRef, stopFollow]);
+  }, [active, checkSticky, contentRef, followBottom, scrollRef, setProgrammaticScrollTop, stopFollow]);
 
   return useMemo(() => ({
     isStickyRef,

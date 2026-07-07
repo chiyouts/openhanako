@@ -241,7 +241,7 @@ function requestInputFocusForCurrentSession(sessionPath: string | null): void {
   const state = useStore.getState();
   if (state.pendingNewSession) return;
   if (state.currentSessionPath !== sessionPath) return;
-  state.requestInputFocus?.();
+  state.requestInputFocus?.('restore');
 }
 
 function applyTurnEndSideEffects(msg: any): void {

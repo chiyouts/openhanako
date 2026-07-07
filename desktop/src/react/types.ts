@@ -453,8 +453,8 @@ export interface PlatformApi {
   readXlsxHtml(path: string): Promise<string | null>;
   /** 派生一个只读 Viewer 窗口展示指定文件。返回 windowId（主进程 BrowserWindow.id）。 */
   spawnViewer(data: { filePath: string; title: string; type: string; language?: string | null }): Promise<number | null>;
-  /** Viewer 窗口接收文件元信息（viewer-window-entry 调用）。 */
-  onViewerLoad?(callback: (data: { filePath: string; title: string; type: string; language?: string | null; windowId: number }) => void): void;
+  /** Viewer 窗口挂载后主动拉取自己的文件元信息（viewer-window-entry 调用）。无载荷或窗口未知时返回 null。 */
+  viewerRequestLoad?(): Promise<{ filePath: string; title: string; type: string; language?: string | null; windowId: number } | null>;
   /** Viewer 窗口内"关闭"按钮触发。 */
   viewerClose?(): void;
   /** 主窗口监听任意 viewer 关闭，payload 是 windowId（用于清理 pinnedViewers store）。 */

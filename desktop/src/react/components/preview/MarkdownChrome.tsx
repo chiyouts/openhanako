@@ -136,7 +136,7 @@ export function ChapterRail({
       active
       activeId={activeHeadingId}
       railVisible={railVisible}
-      side="left"
+      side="right"
       ariaLabel="Markdown sections"
       jumpLabel={item => `Jump to ${item.label}`}
       onJump={item => onJump(item.payload)}

@@ -1940,6 +1940,7 @@ function createMainWindow() {
       if (vw && !vw.isDestroyed()) vw.destroy();
     }
     _viewerWindows.clear();
+    _viewerPayloads.clear();
     if (_screenshotWin && !_screenshotWin.isDestroyed()) {
       _screenshotWin.destroy();
       _screenshotWin = null;
@@ -4014,10 +4015,17 @@ wrapIpcBestEffortHandler("browser-emergency-stop", (_event, sessionPath) => {
 });
 
 // ── 派生 Viewer 窗口（只读文件副本，多实例） ──
-// 语义：接 spawn-viewer → 开新 BrowserWindow，把文件元信息通过 `viewer-load` 推给
-// viewer-window-entry.tsx。Viewer 自己 watchFile 做 live 只读刷新，不跟主面板互通；
-// 窗口 close 时只广播一个 `viewer-closed` 给主 renderer 清 pinnedViewers store。
+// 语义：接 spawn-viewer → 开新 BrowserWindow，把文件元信息存入 _viewerPayloads；
+// viewer-window-entry.tsx 挂载后通过 `viewer-request-load` 主动拉取。Viewer 自己
+// watchFile 做 live 只读刷新，不跟主面板互通；窗口 close 时只广播一个 `viewer-closed`
+// 给主 renderer 清 pinnedViewers store。
+//
+// 显式拉取而非 did-finish-load 时机推送：推送是一次性的，若渲染侧监听器注册
+// （React useEffect，晚于 commit+paint）落在推送之后，payload 永久丢失，
+// 窗口卡死在 Loading（冷启动下 V8 首编译 + splash 抢 CPU 时必现）。拉取契约下
+// payload 常驻 Map，渲染侧任何时候发起请求都能拿到，消灭了时序假设。
 const _viewerWindows = new Map(); // windowId -> BrowserWindow
+const _viewerPayloads = new Map(); // windowId -> load payload (sans windowId key)
 
 wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
   if (!data?.filePath || !path.isAbsolute(data.filePath)) return null;
@@ -4045,23 +4053,30 @@ wrapIpcBestEffortHandler("spawn-viewer", (_event, data) => {
 
   const windowId = win.id;
   _viewerWindows.set(windowId, win);
+  _viewerPayloads.set(windowId, data);
 
   loadWindowURL(win, "viewer-window");
 
-  win.webContents.on("did-finish-load", () => {
-    if (!win.isDestroyed()) {
-      win.webContents.send("viewer-load", { ...data, windowId });
-    }
-  });
-
   win.on("closed", () => {
     _viewerWindows.delete(windowId);
+    _viewerPayloads.delete(windowId);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("viewer-closed", windowId);
     }
   });
 
   return windowId;
+});
+
+// viewer-request-load：viewer 窗口挂载后主动拉取自己的载荷。
+// 用 BrowserWindow.fromWebContents 从 sender 反推 windowId，不接受调用方传参，
+// 避免拿到别的 viewer 窗口的数据。窗口已关闭或压根不是已知 viewer 窗口时返回 null。
+wrapIpcHandler("viewer-request-load", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return null;
+  const data = _viewerPayloads.get(win.id);
+  if (!data) return null;
+  return { ...data, windowId: win.id };
 });
 
 wrapIpcBestEffortHandler("viewer-close", (event) => {
