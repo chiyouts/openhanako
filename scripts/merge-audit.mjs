@@ -175,7 +175,7 @@ function main() {
   for (const sha of mergeShas) {
     const audited = auditMerge(sha, refTree);
     if (!audited) continue;
-    const subject = git(["log", "-1", "--format=%h %ad %s", "--date=format:%Y-%m-%d", sha]).trim();
+    const subject = git(["log", "-1", "--format=%h %ad %s", "--date=short", sha]).trim();
     const entry = { sha, subject, skipped: audited.skipped ?? null, findings: audited.findings };
     merges.push(entry);
     for (const finding of entry.findings) {
