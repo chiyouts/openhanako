@@ -986,6 +986,7 @@ describe("sessions route", () => {
       agentsDir,
       agentIdFromSessionPath: vi.fn(() => "deleted"),
       isAgentDeleted: vi.fn(() => true),
+      isDeletedAgentSession: vi.fn(() => true),
       continueDeletedAgentSession: vi.fn(async () => ({
         sessionPath: newPath,
         agentId: "hana",
@@ -1045,6 +1046,7 @@ describe("sessions route", () => {
       agentsDir,
       agentIdFromSessionPath: vi.fn(() => "deleted"),
       isAgentDeleted: vi.fn(() => true),
+      isDeletedAgentSession: vi.fn(() => true),
       continueDeletedAgentSession: vi.fn(async () => {
         throw emptyError;
       }),
@@ -1074,6 +1076,7 @@ describe("sessions route", () => {
       agentsDir: "/tmp/agents",
       agentIdFromSessionPath: vi.fn(() => "deleted"),
       isAgentDeleted: vi.fn(() => true),
+      isDeletedAgentSession: vi.fn(() => true),
       setSessionPinned: vi.fn(),
       switchSession: vi.fn(),
       saveSessionTitle: vi.fn(),
@@ -1111,6 +1114,32 @@ describe("sessions route", () => {
     expect(engine.setSessionPinned).toHaveBeenCalledWith({ sessionPath: deletedPath }, false);
     expect(engine.saveSessionTitle).not.toHaveBeenCalled();
     expect(engine.switchSession).not.toHaveBeenCalled();
+  });
+
+  it("deleted-agent 门禁以 engine.isDeletedAgentSession 为准（manifest 归属存活时放行 pin）", async () => {
+    const { createSessionsRoute } = await import("../server/routes/sessions.ts");
+    const app = new Hono();
+    // 物理路径在已删除 agent 目录（路径口径会拦），manifest 归属存活 agent（权威口径放行）
+    const movedPath = "/tmp/agents/deleted/sessions/moved.jsonl";
+    const engine = {
+      agentsDir: "/tmp/agents",
+      agentIdFromSessionPath: vi.fn(() => "deleted"),
+      isAgentDeleted: vi.fn(() => true),
+      isDeletedAgentSession: vi.fn(() => false),
+      setSessionPinned: vi.fn(async () => "2026-07-08T00:00:00.000Z"),
+      rcState: null,
+    };
+    app.route("/api", createSessionsRoute(engine));
+
+    const res = await app.request("/api/sessions/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: movedPath, pinned: true }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(engine.setSessionPinned).toHaveBeenCalled();
+    expect(engine.isDeletedAgentSession).toHaveBeenCalledWith(movedPath);
   });
 
   it("rejects session projection when the authenticated Studio differs from the server Studio", async () => {
@@ -1270,9 +1299,15 @@ describe("sessions route", () => {
       })),
     };
 
+    const agentIdFromSessionPath = vi.fn((_sp: any) => "hana");
     const engine = {
       agentsDir: "/tmp/agents",
-      agentIdFromSessionPath: vi.fn(() => "hana"),
+      agentIdFromSessionPath,
+      resolveSessionOwnership: vi.fn((ref) => {
+        const sp = typeof ref === "string" ? ref : ref?.sessionPath || null;
+        const agentId = sp ? agentIdFromSessionPath(sp) || null : null;
+        return { agentId, source: agentId ? "path" : "none", agentDeleted: false };
+      }),
       getAgent: vi.fn(() => ({ summaryManager })),
     };
 
@@ -1570,12 +1605,18 @@ describe("sessions route", () => {
       },
     ]);
 
+    const agentIdFromSessionPath = vi.fn((sp) => {
+      const rel = path.relative("/tmp/agents", sp);
+      return rel.split(path.sep)[0] || null;
+    });
     const engine = {
       agentsDir: "/tmp/agents",
       deferredResults: null,
-      agentIdFromSessionPath: vi.fn((sp) => {
-        const rel = path.relative("/tmp/agents", sp);
-        return rel.split(path.sep)[0] || null;
+      agentIdFromSessionPath,
+      resolveSessionOwnership: vi.fn((ref) => {
+        const sp = typeof ref === "string" ? ref : ref?.sessionPath || null;
+        const agentId = sp ? agentIdFromSessionPath(sp) || null : null;
+        return { agentId, source: agentId ? "path" : "none", agentDeleted: false };
       }),
       getAgent: vi.fn((id) => (id === "hanako" ? { agentName: "Hanako" } : null)),
     };
@@ -1684,6 +1725,7 @@ describe("sessions route", () => {
       agentsDir: "/tmp/agents",
       currentSessionPath: sessionPath,
       agentIdFromSessionPath: vi.fn(() => "hana"),
+      resolveSessionOwnership: vi.fn(() => ({ agentId: "hana", source: "path", agentDeleted: false })),
       getAgent: vi.fn((id) => (id === "hana" ? { agentName: "小花" } : null)),
       deferredResults: {
         query: vi.fn(() => ({

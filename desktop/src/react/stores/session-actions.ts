@@ -628,6 +628,7 @@ export async function switchSession(path: string): Promise<void> {
     return;
   }
 
+  useStore.getState().clearStaleMessageLocate(path);
   useStore.setState({ pendingSessionSwitchPath: path });
 
   if (isDeletedAgentSession(path)) {

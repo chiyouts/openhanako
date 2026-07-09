@@ -29,6 +29,11 @@ function writeServerRuntimeSentinels(nodeModulesDir) {
   writeFile(nodeModulesDir, "qrcode/package.json", JSON.stringify({ name: "qrcode" }));
   writeFile(nodeModulesDir, "better-sqlite3/package.json", JSON.stringify({ name: "better-sqlite3" }));
   writeFile(nodeModulesDir, "better-sqlite3/build/Release/better_sqlite3.node", "native");
+  writeFile(
+    nodeModulesDir,
+    "@earendil-works/pi-agent-core/package.json",
+    JSON.stringify({ name: "@earendil-works/pi-agent-core" }),
+  );
 }
 
 afterEach(() => {
@@ -60,6 +65,53 @@ describe("fix-modules bundled server dependencies", () => {
       "Release",
       "better_sqlite3.node",
     ))).toBe(true);
+  });
+
+  it("removes copied node_modules .bin directories including scoped nested packages", () => {
+    const tmp = makeTempDir();
+    const serverDir = path.join(tmp, "resources", "server");
+    const serverBuildModules = path.join(tmp, "dist-server", "mac-arm64", "node_modules");
+    const targetModules = path.join(serverDir, "node_modules");
+
+    fs.mkdirSync(serverDir, { recursive: true });
+    writeServerRuntimeSentinels(serverBuildModules);
+    writeFile(serverBuildModules, ".bin/root-cli", "root");
+    writeFile(
+      serverBuildModules,
+      "@earendil-works/pi-coding-agent/node_modules/.bin/jiti",
+      "nested scoped",
+    );
+    writeFile(serverBuildModules, "plain-package/node_modules/.bin/plain-cli", "nested plain");
+    writeFile(serverBuildModules, "@earendil-works/pi-coding-agent/package.json", JSON.stringify({
+      name: "@earendil-works/pi-coding-agent",
+    }));
+    writeFile(serverBuildModules, "plain-package/package.json", JSON.stringify({
+      name: "plain-package",
+    }));
+
+    copyBundledServerNodeModules(serverDir, serverBuildModules, { log: () => {} });
+
+    expect(fs.existsSync(path.join(targetModules, ".bin"))).toBe(false);
+    expect(fs.existsSync(path.join(
+      targetModules,
+      "@earendil-works",
+      "pi-coding-agent",
+      "node_modules",
+      ".bin",
+    ))).toBe(false);
+    expect(fs.existsSync(path.join(
+      targetModules,
+      "plain-package",
+      "node_modules",
+      ".bin",
+    ))).toBe(false);
+    expect(fs.existsSync(path.join(
+      targetModules,
+      "@earendil-works",
+      "pi-coding-agent",
+      "package.json",
+    ))).toBe(true);
+    expect(fs.existsSync(path.join(targetModules, "plain-package", "package.json"))).toBe(true);
   });
 
   it("fails fast when the packaged server node_modules misses a startup dependency", () => {

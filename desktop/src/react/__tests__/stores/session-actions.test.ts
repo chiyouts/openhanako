@@ -252,6 +252,7 @@ function installStoreMethods() {
   s.setDeskCurrentPath = vi.fn((path: string) => { mockState.deskCurrentPath = path; });
   s.setDeskFiles = vi.fn((files: unknown[]) => { mockState.deskFiles = files; });
   s.setDeskJianContent = vi.fn((content: string | null) => { mockState.deskJianContent = content; });
+  s.clearStaleMessageLocate = vi.fn();
 }
 
 import { hanaFetch } from '../../hooks/use-hana-fetch';

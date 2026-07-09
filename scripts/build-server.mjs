@@ -48,6 +48,7 @@ import {
   buildBetterSqliteRuntimeSmokeScript,
   buildJiebaRuntimeSmokeScript,
   buildExternalPackage,
+  collectBareImportPackageNames,
   collectInstalledOptionalDependencyDirs,
   verifyExternalEntrypoints,
 } from "./build-server-deps.mjs";
@@ -323,8 +324,9 @@ console.log("[build-server] resource files copied");
 
 // ── 4. External dependencies ──
 // 从 vite.config.server.js 的 external 列表自动派生需要安装的包。
-// 规则：external ∩ rootPkg.dependencies = 需要安装的包。
-// 这消除了手动维护两个列表导致的遗漏（如 #242 ws 缺失）。
+// 规则：string external 必须在 rootPkg.dependencies 中显式声明；RegExp external
+// 从 root dependencies 中匹配派生。这样打包产物的根 node_modules 解析契约是显式的，
+// 不依赖上游包嵌套依赖的安装形态。
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8"));
 
 // defineConfig 是纯 identity 函数，import 安全无副作用
@@ -342,7 +344,6 @@ for (const ext of viteExternals) {
   if (typeof ext === "string") {
     if (builtinSet.has(ext)) continue;
     if (deps[ext]) externalDeps[ext] = deps[ext];
-    // 不在 dependencies 中的（如 fsevents、photon-node）由 transitive 或 optional 提供
   } else if (ext instanceof RegExp) {
     for (const dep of Object.keys(deps)) {
       if (ext.test(dep)) externalDeps[dep] = deps[dep];
@@ -361,6 +362,20 @@ if (undeclaredPluginDeps.length > 0) {
   throw new Error(
     "[build-server] bundled plugin imports npm packages missing from root dependencies: "
       + undeclaredPluginDeps.join(", "),
+  );
+}
+
+const bundleExternalImports = collectBareImportPackageNames(
+  fs.readFileSync(path.join(bundleOutDir, "index.js"), "utf-8"),
+)
+  .filter((packageName) => !builtinSet.has(packageName));
+const missingBundleExternalDeps = bundleExternalImports
+  .filter((packageName) => !externalDeps[packageName]);
+if (missingBundleExternalDeps.length > 0) {
+  throw new Error(
+    "[build-server] server bundle imports external packages missing from packaged dependencies: "
+      + missingBundleExternalDeps.join(", ")
+      + ". Add them to root package.json dependencies.",
   );
 }
 
@@ -396,7 +411,7 @@ ensureNodePtySpawnHelperExecutable(outDir);
 
 // ── 5b. 验证所有 Vite external 在 node_modules 中可达 ──
 // 遍历 string 类型的 external，检查 node_modules 中是否存在。
-// RegExp external（如 /^@mariozechner\//）不在此检查范围内，
+// RegExp external（如 /^@mariozechner\// 与 /^@earendil-works\//）不在此检查范围内，
 // 因为匹配的包已通过派生逻辑显式安装或作为 transitive dep 存在。
 // platform-optional（fsevents）允许缺失，其余缺失说明 transitive 链断了。
 const OPTIONAL_EXTERNALS = new Set(["fsevents"]);
@@ -437,16 +452,37 @@ if (fs.existsSync(patchScript)) {
 // 符号链接指向构建机器的绝对路径，codesign 会报错
 // server 运行时不需要这些 CLI 工具
 function removeBinDirs(nmDir) {
-  const topBin = path.join(nmDir, ".bin");
-  if (fs.existsSync(topBin)) fs.rmSync(topBin, { recursive: true });
-  // 嵌套的 node_modules/.bin
-  for (const entry of fs.readdirSync(nmDir, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const nested = path.join(nmDir, entry.name, "node_modules", ".bin");
-    if (fs.existsSync(nested)) fs.rmSync(nested, { recursive: true });
+  let removedDirs = 0;
+
+  function walk(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const full = path.join(dir, entry.name);
+      if (entry.name === ".bin" && path.basename(dir) === "node_modules") {
+        fs.rmSync(full, { recursive: true, force: true });
+        removedDirs++;
+        continue;
+      }
+
+      walk(full);
+    }
   }
+
+  walk(nmDir);
+  return removedDirs;
 }
-removeBinDirs(path.join(outDir, "node_modules"));
+const removedBinDirs = removeBinDirs(path.join(outDir, "node_modules"));
+if (removedBinDirs > 0) {
+  console.log(`[build-server] cleanup: removed ${removedBinDirs} node_modules/.bin director${removedBinDirs === 1 ? "y" : "ies"}`);
+}
 
 console.log("[build-server] dependencies installed");
 

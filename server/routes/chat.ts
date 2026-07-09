@@ -244,8 +244,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
 
   function isDeletedAgentSessionPath(sessionPath) {
     if (!sessionPath) return false;
-    const agentId = engine.agentIdFromSessionPath?.(sessionPath) || null;
-    return !!agentId && engine.isAgentDeleted?.(agentId) === true;
+    return engine.isDeletedAgentSession?.(sessionPath) === true;
   }
 
   function rejectDeletedAgentSession(ws, sessionPath) {
@@ -379,12 +378,19 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
 
   function broadcast(msg) {
     const hardenedMsg = hardenStudio(msg);
+    // 扇出前解析一次 sessionId（不随每个订阅者重复解析）：event 本身若已带
+    // sessionId（如 createSessionStreamEventWsMessage 产出的流事件）优先用它，
+    // 否则按 sessionPath 现查一次。只用于 wsClientCanReceiveEvent 的匹配，
+    // 不写回 hardenedMsg —— 出站 wire payload 保持原样，本机桌面端行为不变。
+    const resolvedSessionId = hardenedMsg?.sessionPath && !hardenedMsg?.sessionId
+      ? sessionIdForPath(hardenedMsg.sessionPath)
+      : null;
     // 同一条消息发给 N 个 client 时只序列化一次。lazy：没有任何 client
     // 能收到时连 JSON.stringify 都省掉。
     let serialized = null;
     for (const [clientWs, client] of clients) {
       if (clientWs.readyState !== 1) continue; // OPEN
-      if (wsClientCanReceiveEvent(client, hardenedMsg)) {
+      if (wsClientCanReceiveEvent(client, hardenedMsg, { resolvedSessionId })) {
         if (serialized === null) serialized = JSON.stringify(hardenedMsg);
         wsSendSerialized(clientWs, serialized);
       }
@@ -1459,6 +1465,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
             client = subscribeWsClientToSession(client, {
               studioId: requestContext.studioId,
               sessionPath: msg.sessionPath,
+              sessionId: sessionIdForPath(msg.sessionPath),
             });
             clients.set(ws, client);
           }

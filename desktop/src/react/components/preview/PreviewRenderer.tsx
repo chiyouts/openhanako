@@ -30,6 +30,7 @@ import {
   hasMarkdownCoverDropImage,
 } from '../../utils/markdown-cover-drop';
 import { parseCSV, injectCopyButtons } from '../../utils/format';
+import { observeMarkdownRhythmSnap } from '../../utils/markdown-rhythm';
 import { fileIconSvg } from '../../utils/icons';
 import { openFilePreview } from '../../utils/file-preview';
 import { openInternalLink, resolveLinkTarget, type LinkOpenContext } from '../../utils/link-open';
@@ -552,6 +553,7 @@ function MarkdownPreview({ previewItem }: { previewItem: PreviewItem }) {
   useEffect(() => {
     if (divRef.current) {
       injectCopyButtons(divRef.current);
+      return observeMarkdownRhythmSnap(divRef.current);
     }
   }, [body]);
   useMermaidDiagrams(divRef, [body]);

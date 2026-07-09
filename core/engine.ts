@@ -909,6 +909,8 @@ export class HanaEngine {
   async deleteAgent(agentId) { return this._agentMgr.deleteAgent(agentId); }
   setPrimaryAgent(agentId) { return this._agentMgr.setPrimaryAgent(agentId); }
   agentIdFromSessionPath(p) { return this._agentMgr.agentIdFromSessionPath(p); }
+  resolveSessionOwnership(ref) { return this._sessionCoord.resolveSessionOwnership(ref); }
+  isDeletedAgentSession(ref) { return this._sessionCoord.resolveSessionOwnership(ref).agentDeleted; }
   async createSessionForAgent(agentId, cwd, mem, model, opts: any = {}) {
     return this._agentMgr.createSessionForAgent(agentId, cwd, mem, model, opts);
   }
@@ -1331,7 +1333,7 @@ export class HanaEngine {
   resolveUtilityConfig( options: any = {}) {
     const resolvedOptions = { ...(options || {}) };
     if (!resolvedOptions.agentId && resolvedOptions.sessionPath) {
-      const ownerAgentId = this.agentIdFromSessionPath(resolvedOptions.sessionPath);
+      const ownerAgentId = this.resolveSessionOwnership(resolvedOptions.sessionPath).agentId;
       if (ownerAgentId) resolvedOptions.agentId = ownerAgentId;
     }
     const config = this._configCoord.resolveUtilityConfig(resolvedOptions);
@@ -2522,7 +2524,7 @@ export class HanaEngine {
   _utilityOptionsForContext( opts: any = {}) {
     if (opts?.agentId) return { agentId: opts.agentId, sessionPath: opts.sessionPath || null };
     if (opts?.sessionPath) {
-      const agentId = this.agentIdFromSessionPath(opts.sessionPath);
+      const agentId = this.resolveSessionOwnership(opts.sessionPath).agentId;
       if (agentId) return { agentId, sessionPath: opts.sessionPath };
     }
     return undefined;

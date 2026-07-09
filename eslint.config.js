@@ -17,6 +17,8 @@ export default [
       'desktop/native/**/.build/**',
       '.claude/**',
       '.cache/**',
+      // .docs/ 不入版本控制、CI 不可见；lint 覆盖它会造成本地/CI 语义不对称
+      '.docs/**',
       '**/*.cjs',
     ],
   },
@@ -147,7 +149,7 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['@mariozechner/*'],
+          group: ['@mariozechner/*', '@earendil-works/*'],
           message: '请从 lib/pi-sdk/index.js 导入，不要直接引用 PI SDK 包。',
         }],
       }],

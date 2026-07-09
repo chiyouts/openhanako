@@ -374,7 +374,7 @@ await engine.registerExtensionFactory(createCompactionGuardExtension({
       },
       attribution: sessionUsageAttribution(
         sessionPath,
-        sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null,
+        sessionPath ? engine.resolveSessionOwnership?.(sessionPath)?.agentId || null : null,
       ),
     };
   },
@@ -601,7 +601,7 @@ hub.eventBus.handle("utility:call-text", async (payload: any = {}) => {
     : null;
   const agentId = typeof payload.agentId === "string" && payload.agentId.trim()
     ? payload.agentId.trim()
-    : (sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null);
+    : (sessionPath ? engine.resolveSessionOwnership?.(sessionPath)?.agentId || null : null);
   const utility = engine.resolveUtilityConfig({ agentId, sessionPath });
   const text = await callText({
     api: utility.api,
@@ -636,7 +636,7 @@ hub.eventBus.handle("model:sample-text", async (payload: any = {}) => {
     : null;
   const agentId = typeof payload.agentId === "string" && payload.agentId.trim()
     ? payload.agentId.trim()
-    : (sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null);
+    : (sessionPath ? engine.resolveSessionOwnership?.(sessionPath)?.agentId || null : null);
   const pluginId = typeof payload.pluginId === "string" && payload.pluginId.trim()
     ? payload.pluginId.trim()
     : null;

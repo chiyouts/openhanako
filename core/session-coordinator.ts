@@ -686,7 +686,7 @@ export class SessionCoordinator {
    * @param {(cwd, customTools?, opts?) => object} deps.buildTools
    * @param {(event, sp) => void} deps.emitEvent
    * @param {() => string|null} deps.getHomeCwd
-   * @param {(path) => string|null} deps.agentIdFromSessionPath
+   * @param {(path) => string|null} deps.agentIdFromSessionPath（仅作 resolveSessionOwnership 的路径回退与 manifest bootstrap 推导，归属语义禁止直接调用）
    * @param {(id) => Promise} deps.switchAgentOnly - 仅切换 agent 指针
    * @param {() => object} deps.getConfig
    * @param {() => Map} deps.getAgents
@@ -834,6 +834,16 @@ export class SessionCoordinator {
   _sessionIdForPath(sessionPath: any) {
     try {
       return this._resolveSessionManifestForPath(sessionPath)?.sessionId || null;
+    } catch (err) {
+      log.warn(`session manifest lookup failed for ${path.basename(sessionPath || "")}: ${err?.message || err}`);
+      return null;
+    }
+  }
+
+  /** 列表/只读富化专用：manifest 查询失败降级 null，单条失败不清空整个列表（#414 拓扑加固） */
+  _resolveSessionManifestForPathQuiet(sessionPath: any) {
+    try {
+      return this._resolveSessionManifestForPath(sessionPath);
     } catch (err) {
       log.warn(`session manifest lookup failed for ${path.basename(sessionPath || "")}: ${err?.message || err}`);
       return null;
@@ -1745,7 +1755,7 @@ export class SessionCoordinator {
       sessionKind: pluginSessionMeta?.kind || null,
       sessionVisibility: pluginSessionMeta?.visibility || "public",
       memoryReflectionSnapshot,
-      // #1624：session 级提示数据，归属 sessionEntry（keyed by sessionPath），不挂 agent/engine
+      // #1624：session 级提示数据，归属 sessionEntry（this._sessions 由 _sessionRuntimeKeyForPath 以 sessionId 优先键控，sessionPath 仅为兼容退化键），不挂 agent/engine
       capabilityDrift,
       capabilityDriftDismissedFingerprint: restoredDriftDismissedFingerprint,
       lastTouchedAt: Date.now(),
@@ -1950,11 +1960,12 @@ export class SessionCoordinator {
 
   async continueDeletedAgentSession(sourceSessionPath: any) {
     this._assertActiveDesktopSessionPath(sourceSessionPath, "continueDeletedAgentSession");
-    const sourceAgentId = this._d.agentIdFromSessionPath(sourceSessionPath);
+    const ownership = this.resolveSessionOwnership(sourceSessionPath);
+    const sourceAgentId = ownership.agentId;
     if (!sourceAgentId) {
       throw new Error(`continueDeletedAgentSession: cannot resolve source agentId for ${sourceSessionPath}`);
     }
-    if (!this._d.isAgentDeleted?.(sourceAgentId)) {
+    if (!ownership.agentDeleted) {
       throw new Error(`continueDeletedAgentSession: source agent "${sourceAgentId}" is not deleted`);
     }
     try {
@@ -2399,7 +2410,7 @@ export class SessionCoordinator {
     // 切到已有 session 时清空 pendingModel（用户的临时选择不应跟到别的 session）
     this._pendingModel = null;
 
-    const targetAgentId = this._d.agentIdFromSessionPath(sessionPath);
+    const targetAgentId = this.resolveSessionOwnership(sessionPath).agentId;
     if (targetAgentId && targetAgentId !== this._d.getActiveAgentId()) {
       // Phase 1: 跨 agent 切换只切指针，不清旧 session
       await this._d.switchAgentOnly(targetAgentId);
@@ -2946,7 +2957,7 @@ export class SessionCoordinator {
         },
         attribution: {
           kind: "session",
-          agentId: this._d.agentIdFromSessionPath?.(sessionPath) || this._d.getActiveAgentId?.() || null,
+          agentId: this.resolveSessionOwnership(sessionPath).agentId || this._d.getActiveAgentId?.() || null,
           ...(sessionId ? { sessionId } : {}),
           sessionPath,
         },
@@ -3516,12 +3527,12 @@ export class SessionCoordinator {
     const paths = new Set();
     for (const [sessionKey, entry] of this._sessions) {
       const sessionPath = this._sessionPathForEntry(entry, sessionKey);
-      const entryAgentId = entry?.agentId || this._d.agentIdFromSessionPath?.(sessionPath);
+      const entryAgentId = entry?.agentId || this.resolveSessionOwnership(sessionPath).agentId;
       if (entryAgentId === agentId) paths.add(sessionPath);
     }
     for (const [sessionKey, entry] of this._hibernatedSessionMeta) {
       const sessionPath = this._sessionPathForEntry(entry, sessionKey);
-      const entryAgentId = entry?.agentId || this._d.agentIdFromSessionPath?.(sessionPath);
+      const entryAgentId = entry?.agentId || this.resolveSessionOwnership(sessionPath).agentId;
       if (entryAgentId === agentId) paths.add(sessionPath);
     }
     let discarded = 0;
@@ -3548,9 +3559,8 @@ export class SessionCoordinator {
       } else {
         await this._teardownSessionEntry(entry, sessionPath, "close_all");
       }
-      // closeAll 只卸载运行时 sidecar，不代表删除 session。
-      // pending confirmation 必须 abort；后台任务结果由 DeferredResultCoordinator
-      // 按 sessionPath 持久投递，closeAll 只卸载 runtime，不应清掉 pending。
+      // closeAll 只卸载运行时 sidecar，不代表删除 session。pending confirmation 必须 abort；
+      // DeferredResultCoordinator 自己的持久化存储按字面 sessionPath 记录（独立于本文件 this._sessions 的 _sessionRuntimeKeyForPath sessionId 优先键控），closeAll 只卸载 runtime，不应清掉 pending。
       this._d.getConfirmStore?.()?.abortBySession(sessionPath);
     }
     try {
@@ -3609,9 +3619,48 @@ export class SessionCoordinator {
     }
   }
 
+  /**
+   * Session 归属的唯一判定边界：manifest.ownerAgentId 为权威，
+   * 无 manifest（或字段缺失）时回退路径目录段推导（读时兼容旧数据），
+   * 两者皆无时返回 none。授权/门禁/归属语义一律走这里，
+   * 禁止调用点各自从路径现推。
+   * 显式契约：store 查询抛错（页损坏等）时捕获 + warn + 按路径回退，
+   * 绝不向调用方抛底层存储错误（对齐 listSessions 降级哲学）。
+   * @returns {{ agentId: string|null, source: "manifest"|"path"|"none", agentDeleted: boolean }}
+   */
+  resolveSessionOwnership(ref: any) {
+    const normalized = this._normalizeSessionRef(ref);
+    let manifest = null;
+    if (normalized.sessionId) {
+      try {
+        manifest = this._resolveSessionManifestForId(normalized.sessionId);
+      } catch (err) {
+        log.warn(`resolveSessionOwnership: manifest lookup failed for ${normalized.sessionId}: ${err?.message || err}`);
+      }
+    } else if (normalized.sessionPath) {
+      manifest = this._resolveSessionManifestForPathQuiet(normalized.sessionPath);
+    }
+    if (manifest?.ownerAgentId) {
+      return {
+        agentId: manifest.ownerAgentId,
+        source: "manifest",
+        agentDeleted: this._d.isAgentDeleted?.(manifest.ownerAgentId) === true,
+      };
+    }
+    const sessionPath = normalized.sessionPath || manifest?.currentLocator?.path || null;
+    const pathAgentId = sessionPath ? this._d.agentIdFromSessionPath?.(sessionPath) || null : null;
+    if (pathAgentId) {
+      return {
+        agentId: pathAgentId,
+        source: "path",
+        agentDeleted: this._d.isAgentDeleted?.(pathAgentId) === true,
+      };
+    }
+    return { agentId: null, source: "none", agentDeleted: false };
+  }
+
   _isDeletedAgentSessionPath(sessionPath: any) {
-    const agentId = this._d.agentIdFromSessionPath?.(sessionPath);
-    return !!agentId && this._d.isAgentDeleted?.(agentId) === true;
+    return this.resolveSessionOwnership(sessionPath).agentDeleted;
   }
 
   isRunnableSessionPath(sessionPath: any) {
@@ -3758,7 +3807,7 @@ export class SessionCoordinator {
       throw new Error("reloadSessionRuntime: session belongs to a deleted agent");
     }
     this._assertCurrentActiveSessionLocator(sessionPath, "reloadSessionRuntime");
-    const targetAgentId = this._d.agentIdFromSessionPath(sessionPath);
+    const targetAgentId = this.resolveSessionOwnership(sessionPath).agentId;
     if (!targetAgentId) {
       throw new Error(`reloadSessionRuntime: cannot resolve agentId for ${sessionPath}`);
     }
@@ -3822,7 +3871,7 @@ export class SessionCoordinator {
       return existing.session;
     }
 
-    const targetAgentId = this._d.agentIdFromSessionPath(sessionPath);
+    const targetAgentId = this.resolveSessionOwnership(sessionPath).agentId;
     if (!targetAgentId) {
       throw new Error(`ensureSessionLoaded: cannot resolve agentId for ${sessionPath}`);
     }
@@ -3916,7 +3965,7 @@ export class SessionCoordinator {
           }
           const sessKey = path.basename(s.path);
           const metaEntry = meta[sessKey];
-          const manifest = this._resolveSessionManifestForPath(s.path);
+          const manifest = this._resolveSessionManifestForPathQuiet(s.path);
           const runtimeEntry = this._sessionFolderEntry(s.path);
           if (hasSessionPermissionModeFields(runtimeEntry)) {
             s.permissionMode = normalizeSessionPermissionMode(runtimeEntry);
@@ -5101,7 +5150,7 @@ export class SessionCoordinator {
           attribution: parentSessionPath
             ? {
                 kind: "session",
-                agentId: this._d.agentIdFromSessionPath?.(parentSessionPath) || null,
+                agentId: this.resolveSessionOwnership(parentSessionPath).agentId || null,
                 ...(parentSessionId ? { sessionId: parentSessionId } : {}),
                 sessionPath: parentSessionPath,
                 childAgentId: opts.subagentContext ? targetAgent.id || null : undefined,

@@ -13,6 +13,7 @@ import { hanaFetch } from '../hooks/use-hana-fetch';
 import { useI18n } from '../hooks/use-i18n';
 import { formatSessionDate } from '../utils/format';
 import { switchSession, archiveSession, renameSession, pinSession, createNewSession } from '../stores/session-actions';
+import { locateSearchHit } from '../stores/chat-find-actions';
 import { setBrowserStateForPath } from '../stores/browser-slice';
 import { sessionScopedListIncludes } from '../stores/session-slice';
 import type { Session, Agent } from '../types';
@@ -725,6 +726,7 @@ function SessionListInner() {
       agents={agents}
       activeSessionPath={activeSessionPath}
       pendingNewSession={pendingNewSession}
+      query={searchQueryTrimmed}
     />
   ) : viewMode === 'project' ? (
     <ProjectSessionView
@@ -1359,6 +1361,7 @@ function SessionSearchResults({
   agents,
   activeSessionPath,
   pendingNewSession,
+  query,
 }: {
   titleResults: SessionSearchResult[];
   contentResults: SessionSearchResult[];
@@ -1367,6 +1370,7 @@ function SessionSearchResults({
   agents: Agent[];
   activeSessionPath: string | null;
   pendingNewSession: boolean;
+  query: string;
 }) {
   const { t } = useI18n();
 
@@ -1383,6 +1387,7 @@ function SessionSearchResults({
           agents={agents}
           activeSessionPath={activeSessionPath}
           pendingNewSession={pendingNewSession}
+          query={query}
         />
       )}
       {status === 'title' && (
@@ -1396,6 +1401,7 @@ function SessionSearchResults({
           activeSessionPath={activeSessionPath}
           pendingNewSession={pendingNewSession}
           placeholder={status === 'content' && contentResults.length === 0 ? t('sidebar.searchingContent') : null}
+          query={query}
         />
       )}
       {status === 'done' && !hasResults && (
@@ -1412,6 +1418,7 @@ function SessionSearchSection({
   activeSessionPath,
   pendingNewSession,
   placeholder = null,
+  query,
 }: {
   title: string;
   results: SessionSearchResult[];
@@ -1419,6 +1426,7 @@ function SessionSearchSection({
   activeSessionPath: string | null;
   pendingNewSession: boolean;
   placeholder?: string | null;
+  query: string;
 }) {
   return (
     <section className={styles.sessionSearchSection}>
@@ -1431,20 +1439,23 @@ function SessionSearchSection({
           result={result}
           isActive={!pendingNewSession && result.path === activeSessionPath}
           agents={agents}
+          query={query}
         />
       ))}
     </section>
   );
 }
 
-const SessionSearchItem = memo(function SessionSearchItem({
+export const SessionSearchItem = memo(function SessionSearchItem({
   result,
   isActive,
   agents,
+  query,
 }: {
   result: SessionSearchResult;
   isActive: boolean;
   agents: Agent[];
+  query: string;
 }) {
   const { t } = useI18n();
   const parts: string[] = [];
@@ -1457,8 +1468,12 @@ const SessionSearchItem = memo(function SessionSearchItem({
   if (result.modified) parts.push(formatSessionDate(result.modified));
 
   const handleClick = useCallback(() => {
+    if (result.matchKind === 'content' && query.trim()) {
+      void locateSearchHit(result.path, query);
+      return;
+    }
     switchSession(result.path);
-  }, [result.path]);
+  }, [result.matchKind, result.path, query]);
 
   return (
     <button

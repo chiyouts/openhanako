@@ -284,6 +284,10 @@
     "markAllComplete": "すべて完了にする"
   },
   "chat": {
+    "find": {
+      "locateFailed": "メッセージを特定できませんでした",
+      "placeholder": "会話内を検索"
+    },
     "send": "送信",
     "steer": "操舵",
     "stop": "停止",

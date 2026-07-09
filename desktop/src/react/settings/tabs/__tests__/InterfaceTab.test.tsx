@@ -208,7 +208,7 @@ describe('InterfaceTab appearance state', () => {
     expect(editorWidthSlider.max).toBe('3');
     expect(editorWidthSlider.step).toBe('1');
     expect(editorWidthSlider.value).toBe('1');
-    expect(editorNumberInputs[0].value).toBe('15');
+    expect(editorNumberInputs[0].value).toBe('16');
 
     expect(screen.queryByText('720 px')).toBeNull();
     expect(screen.queryByText('settings.appearance.documentWidth')).toBeNull();

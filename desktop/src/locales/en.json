@@ -284,6 +284,10 @@
     "markAllComplete": "Mark all as complete"
   },
   "chat": {
+    "find": {
+      "locateFailed": "Could not locate that message",
+      "placeholder": "Find in conversation"
+    },
     "send": "Send",
     "steer": "Steer",
     "stop": "Stop",
