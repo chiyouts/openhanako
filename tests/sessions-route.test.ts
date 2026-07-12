@@ -52,6 +52,13 @@ vi.mock("../core/message-utils.js", () => ({
   isActiveSessionPath: vi.fn(() => true),
   isActiveDesktopSessionPath: vi.fn(() => true),
   isArchivedDesktopSessionPath: vi.fn(() => true),
+  // 本文件的测试不构造 hana-message-origin 条目，恒等直通即等价于真实实现
+  // （annotateOriginMessages 只在遇到该 customType 时才会摘除/注释条目）。
+  annotateOriginMessages: vi.fn((messages) => messages || []),
+  // 同理：本文件的测试不构造 hana-session-collab-decision 条目，空索引 + 直通
+  // 等价于真实实现（灰测修复 C：草稿卡确认状态持久化，见 tests/session-collab-decision.test.ts）。
+  collectSessionCollabDecisions: vi.fn(() => new Map()),
+  overlaySessionCollabDecision: vi.fn((block) => block),
 }));
 
 vi.mock("../core/session-turn-actions.js", () => ({
@@ -537,8 +544,14 @@ describe("sessions route", () => {
       memoryEnabled: true,
       planMode: false,
       memoryModelUnavailableReason: null,
-      createDetachedSession: vi.fn(async () => ({ sessionPath: "/tmp/agents/hana/sessions/quick.jsonl", agentId: "hana" })),
+      createDetachedSession: vi.fn(async () => ({
+        sessionPath: "/tmp/agents/hana/sessions/quick.jsonl",
+        sessionId: "sess_quick",
+        agentId: "hana",
+      })),
       persistSessionMeta: vi.fn(),
+      setSessionProjectAssignment: vi.fn(async () => {}),
+      updateConfig: vi.fn(async () => {}),
       getAgent: vi.fn(() => ({ agentName: "Hana" })),
       getSessionWorkspaceFolders: vi.fn(() => [extra]),
       getSessionPermissionMode: vi.fn(() => "auto"),
@@ -554,6 +567,7 @@ describe("sessions route", () => {
         workspaceFolders: [extra],
         agentId: "hana",
         permissionMode: "auto",
+        projectId: "project-quick",
       }),
     });
     const data = await res.json();
@@ -567,12 +581,18 @@ describe("sessions route", () => {
       visibleInSessionList: true,
       permissionMode: "auto",
     });
+    expect(engine.setSessionProjectAssignment).toHaveBeenCalledWith({
+      sessionPath: "/tmp/agents/hana/sessions/quick.jsonl",
+      projectId: "project-quick",
+    });
     expect(data).toMatchObject({
       ok: true,
       path: "/tmp/agents/hana/sessions/quick.jsonl",
+      sessionId: "sess_quick",
       agentId: "hana",
       currentSessionPath: "/tmp/agents/hana/sessions/focused.jsonl",
       permissionMode: "auto",
+      projectId: "project-quick",
     });
     expect(hub.eventBus.emit).toHaveBeenCalledWith(
       expect.objectContaining({

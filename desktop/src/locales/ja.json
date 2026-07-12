@@ -119,6 +119,11 @@
     "createIntroOptional": "説明",
     "unpinPluginTab": "「{label}」の固定を解除"
   },
+  "announcement": {
+    "title": "アップデート完了 · v{version}",
+    "fallbackBody": "HanaAgent は v{version} に更新されました。",
+    "confirm": "OK"
+  },
   "skills": {
     "panel": {
       "title": "Skills",
@@ -1196,6 +1201,10 @@
           "office": {
             "label": "Office",
             "summary": "Agent にドキュメントの読み取りと HTML から PDF への変換を許可"
+          },
+          "session": {
+            "label": "セッション連携",
+            "summary": "他のセッションを一覧・閲覧し、確認カード経由でメッセージ送信やセッション作成を行う"
           }
         }
       },
@@ -1730,6 +1739,12 @@
       "injectAgentsMdDesc": "オンにすると、新規セッションは現在の作業ディレクトリから Git ルートまでの AGENTS.md を読み込みます。",
       "injectClaudeMd": "CLAUDE.md を注入",
       "injectClaudeMdDesc": "オンにすると、新規セッションは現在の作業ディレクトリから Git ルートまでの CLAUDE.md を読み込みます。",
+      "projectSkillsTitle": "プロジェクトスキルの検出",
+      "projectSkillsDesc": "この Agent が新しいセッションに読み込むプロジェクトスキルのディレクトリを選択します。",
+      "discoverProjectSkills": "プロジェクトスキルを読み込む",
+      "discoverProjectSkillsDesc": "現在のプロジェクトの .agents/skills からスキルを検出して読み込みます。",
+      "discoverCompatibleProjectSkills": "他ツールのプロジェクトスキルを読み込む",
+      "discoverCompatibleProjectSkillsDesc": "Claude Code、Codex、OpenClaw のプロジェクトスキルも検出します。",
       "agentDeskSection": "Agent デスク設定"
     },
     "toolCaps": {
@@ -1986,11 +2001,12 @@
       "feishuAppSecret": "App Secret",
       "feishuHint": "Feishu オープンプラットフォームから取得。イベントは長接続で受信するため、ローカル callback URL は不要です",
       "dingtalk": "DingTalk",
+      "dingtalkCorpId": "Corp ID",
       "dingtalkClientId": "Client ID / AppKey",
       "dingtalkClientSecret": "Client Secret / AppSecret",
       "dingtalkRobotCode": "Robot Code",
-      "dingtalkRestBaseUrl": "REST Base URL",
-      "dingtalkHint": "内部アプリ認証情報は token/Stream に、Robot Code はエンタープライズ Bot 送信に使います。REST Base URL の既定値は https://api.dingtalk.io/v1.0 です",
+      "dingtalkApiBaseUrl": "API Base URL",
+      "dingtalkHint": "Corp ID とアプリ認証情報は新しい token API に使います。Client ID と Client Secret は Stream 接続にも使い、Robot Code は返信送信に使います。API Base URL の既定値は https://api.dingtalk.com/v1.0 です",
       "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
@@ -2014,12 +2030,15 @@
       "connected": "接続済み",
       "disconnected": "未接続",
       "error": "接続に失敗しました",
+      "connectionToggle": "接続を有効または無効にする",
       "test": "接続テスト",
       "testOk": "接続に成功しました",
+      "dingtalkCredentialTestOk": "認証情報を確認しました。Stream 接続とロボット返信は有効化後に確認されます",
       "testFail": "テストに失敗しました",
+      "secretStoredPlaceholder": "保存済みです。置き換えるには新しい値を入力してください",
       "noToken": "先に Bot Token を入力してください",
       "noCredentials": "先に App ID と App Secret を入力してください",
-      "noDingtalkCredentials": "先に Client ID、Client Secret、Robot Code、REST Base URL を入力してください",
+      "noDingtalkCredentials": "先に Corp ID、Client ID、Client Secret、Robot Code、API Base URL を入力してください",
       "globalSettings": "グローバル設定",
       "agentSettings": "エージェント",
       "permissionMode": "権限モード",
@@ -2063,11 +2082,12 @@
       ],
       "tutorialDtSteps": [
         "<code>open.dingtalk.com</code> にアクセスし、開発者コンソールを開きます",
+        "企業情報から <code>Corp ID</code> をコピーします",
         "内部企業アプリを作成し、アプリ認証情報から <code>Client ID/AppKey</code> と <code>Client Secret/AppSecret</code> をコピーします",
         "アプリロボット機能を追加し、ロボット詳細から <code>Robot Code</code> をコピーします",
         "ロボットのメッセージ送受信に必要な権限を確認し、対象企業範囲へ公開します",
-        "DingTalk 互換ゲートウェイを明示的に使う場合を除き、REST Base URL は <code>https://api.dingtalk.io/v1.0</code> のままにします",
-        "上の入力欄に Client ID、Client Secret、Robot Code、REST Base URL を貼り付け、接続テスト後にスイッチをオンにします"
+        "DingTalk 互換ゲートウェイを明示的に使う場合を除き、API Base URL は <code>https://api.dingtalk.com/v1.0</code> のままにします",
+        "上の入力欄に Corp ID、Client ID、Client Secret、Robot Code、API Base URL を貼り付けます。新しい token テストと Stream 接続の両方が成功すると、メッセージを完全に送受信できます"
       ],
       "whatsappHint": "近日対応予定"
     },
@@ -2476,6 +2496,9 @@
     "cwdSkillsHint": ".agents/skills/ ディレクトリを作成して始めましょう",
     "cwdSkillsDesc": "スキルはワークスペースに連動します",
     "cwdSkillsDrop": "フォルダまたは .zip をドロップしてスキルをインストール",
+    "cwdSkillActive": "読み込み済み",
+    "cwdSkillInactive": "未読み込み",
+    "cwdSkillShadowed": "優先元により無効",
     "deleteSkill": "スキルを削除",
     "openInFinder": "フォルダを開く",
     "jianLabel": "Jian",
@@ -3304,5 +3327,21 @@
     "fileSummaryMore": "- 他 {count} 件のファイル",
     "fileSummaryHeader": "生成されたファイル:",
     "mediaNoDisplayableFiles": "生成結果に表示可能なファイルがありません"
+  },
+  "sessionCollab": {
+    "messagePrefix": "[エージェント「{name}」からのメッセージです。ユーザー本人ではありません]",
+    "fromAgent": "{name} からのメッセージ",
+    "expand": "展開",
+    "collapse": "折りたたむ",
+    "confirmSend": "送信",
+    "confirmCreate": "作成して送信",
+    "ignore": "無視",
+    "expired": "下書きの期限が切れました。エージェントに再作成させてください",
+    "inFlight": "実行中です",
+    "halfCreated": "セッションは作成されました（{id}）が、最初のメッセージの送信に失敗しました。再試行するか、セッションを開いて手動で送信してください",
+    "createdSession": "セッションを作成しました {id}",
+    "sendFailed": "送信に失敗しました：{error}",
+    "rejectFailed": "無視に失敗しました：{error}",
+    "messageField": "メッセージ内容"
   }
 }

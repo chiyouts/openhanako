@@ -8,12 +8,13 @@ import { ContextRing } from '../../components/input/ContextRing';
 import { useStore } from '../../stores';
 import { refreshSessionCapabilities } from '../../stores/session-actions';
 
-const { sendMock } = vi.hoisted(() => ({
+const { sendMock, getWebSocketMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
+  getWebSocketMock: vi.fn(),
 }));
 
 vi.mock('../../services/websocket', () => ({
-  getWebSocket: vi.fn(() => ({ readyState: 1, send: sendMock })),
+  getWebSocket: getWebSocketMock,
 }));
 
 vi.mock('../../stores/session-actions', () => ({
@@ -23,8 +24,10 @@ vi.mock('../../stores/session-actions', () => ({
 describe('ContextRing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getWebSocketMock.mockReturnValue({ readyState: WebSocket.OPEN, send: sendMock });
     useStore.setState({
       agentYuan: 'hanako',
+      currentSessionId: 'sess_a',
       currentSessionPath: '/session/a.jsonl',
       contextTokens: null,
       contextWindow: null,
@@ -38,6 +41,7 @@ describe('ContextRing', () => {
     cleanup();
     useStore.setState({
       currentSessionPath: null,
+      currentSessionId: null,
       contextTokens: null,
       contextWindow: null,
       contextPercent: null,
@@ -139,7 +143,30 @@ describe('ContextRing', () => {
     fireEvent.click(container.querySelector('button') as HTMLButtonElement);
     fireEvent.click(screen.getByText('input.compact'));
 
-    expect(sendMock).toHaveBeenCalledWith(JSON.stringify({ type: 'compact', sessionPath: '/session/a.jsonl' }));
+    expect(sendMock).toHaveBeenCalledWith(JSON.stringify({ type: 'compact', sessionId: 'sess_a' }));
     expect(refreshSessionCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('shows an error instead of sending when session identity is unavailable', () => {
+    useStore.setState({ currentSessionId: null, compactingSessions: [] } as never);
+
+    const { container } = render(<ContextRing />);
+    fireEvent.click(container.querySelector('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByText('input.compact'));
+
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useStore.getState().toasts.at(-1)).toMatchObject({ type: 'error' });
+  });
+
+  it('shows an error instead of silently dropping while WebSocket is disconnected', () => {
+    getWebSocketMock.mockReturnValue({ readyState: WebSocket.CLOSED, send: sendMock });
+    useStore.setState({ compactingSessions: [] } as never);
+
+    const { container } = render(<ContextRing />);
+    fireEvent.click(container.querySelector('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByText('input.compact'));
+
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useStore.getState().toasts.at(-1)).toMatchObject({ type: 'error' });
   });
 });

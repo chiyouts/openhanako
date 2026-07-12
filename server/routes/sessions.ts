@@ -39,7 +39,11 @@ import {
   isValidSessionPath,
   isActiveDesktopSessionPath,
   isArchivedDesktopSessionPath,
+  annotateOriginMessages,
+  collectSessionCollabDecisions,
+  overlaySessionCollabDecision,
 } from "../../core/message-utils.ts";
+import { MESSAGE_ORIGIN_RECORD_TYPE } from "../../core/desktop-session-submit.ts";
 import { sessionFileRevision } from "../../core/session-list-projection-cache.ts";
 import {
   extractLatestTodos,
@@ -1180,6 +1184,30 @@ export function createSessionsRoute(engine, hub = null) {
       // 标成「已同步」会让 /rc 消息永久漏掉，issue #1610 的反方向竞态）。
       const revision = await readSessionFileRevision(resolvedSessionPath);
       const sourceMessages = await loadSessionHistoryMessages(engine, resolvedSessionPath);
+      // annotateOriginMessages 会把 origin custom 条目从数组里摘掉、把 origin/displayText
+      // 并进其后第一条 user 消息。下面的主展示循环大量以 sourceIndex 回查
+      // sourceMessages[sourceIndex]（nextImmediateDisplayableAssistantIndex、
+      // recordDeferredInterlude 等），如果直接把循环换成过滤后的短数组，sourceIndex
+      // 会和 sourceMessages 错位，静默污染 deferred/subagent 块的归属。这里改用
+      // zip 只取 annotateOriginMessages 的注释结果、映射回原始下标，循环本身仍遍历
+      // 原始 sourceMessages，不破坏既有 sourceIndex 语义。
+      const originBySourceIndex = new Map();
+      {
+        const annotatedMessages = annotateOriginMessages(sourceMessages);
+        let annotatedIdx = 0;
+        for (let i = 0; i < sourceMessages.length; i += 1) {
+          const original = sourceMessages[i];
+          if (original?.role === "custom" && original.customType === MESSAGE_ORIGIN_RECORD_TYPE) continue;
+          const annotated = annotatedMessages[annotatedIdx];
+          annotatedIdx += 1;
+          if (original?.role === "user" && annotated?.origin) {
+            originBySourceIndex.set(i, {
+              origin: annotated.origin,
+              ...(typeof annotated.displayText === "string" ? { displayText: annotated.displayText } : {}),
+            });
+          }
+        }
+      }
       const sanitizeVisibleContent = isBridgeSessionPath(resolvedSessionPath)
         ? sanitizeBridgeVisibleText
         : (value) => (typeof value === "string" ? value : "");
@@ -1204,6 +1232,10 @@ export function createSessionsRoute(engine, hub = null) {
       const turnInputConsumptionEntryIds = new Set();
       const deferredStore = engine.deferredResults;
       const receiverName = resolveDeferredReceiverName(engine, resolvedSessionPath);
+      // 草稿卡确认状态持久化（灰测修复 C）：决策 custom 消息本身 display:false
+      // 不会进展示（与 origin 记录同理），只用来覆盖后面 toolResult 分支产出的
+      // suggestion_card block 的 status，让重开 session 不再回弹 pending。
+      const sessionCollabDecisions = collectSessionCollabDecisions(sourceMessages);
       for (const message of sourceMessages) {
         if (message?.role !== "custom" || message.customType !== TURN_INPUT_CONSUMPTION_EVENT_TYPE) continue;
         const parsed = parseTurnInputConsumptionRecord(message.data);
@@ -1309,6 +1341,7 @@ export function createSessionsRoute(engine, hub = null) {
             const { text, images } = extractTextContent(m.content);
             const visibleImages = filterUnreferencedInlineImages(text, images);
             const content = sanitizeVisibleContent(text);
+            const originInfo = originBySourceIndex.get(sourceIndex);
             messages.push({
               id: String(currentIndex),
               sourceIndex,
@@ -1317,6 +1350,8 @@ export function createSessionsRoute(engine, hub = null) {
               content,
               images: visibleImages.length ? visibleImages : undefined,
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),
+              ...(originInfo?.origin ? { origin: originInfo.origin } : {}),
+              ...(typeof originInfo?.displayText === "string" ? { displayText: originInfo.displayText } : {}),
             });
           }
         } else if (m.role === "assistant") {
@@ -1342,7 +1377,8 @@ export function createSessionsRoute(engine, hub = null) {
           if (afterIndex >= pageBounds.startIdx && afterIndex < pageBounds.endIdx) {
             const extracted = extractBlocks(m.toolName, m.details, m);
             for (const b of extracted) {
-              blocks.push({ ...b, afterIndex, sourceIndex });
+              const overlaid = overlaySessionCollabDecision(b, sessionCollabDecisions);
+              blocks.push({ ...overlaid, afterIndex, sourceIndex });
             }
           }
         } else if (m.role === "custom") {
@@ -1745,6 +1781,13 @@ export function createSessionsRoute(engine, hub = null) {
         ? body.workspaceFolders.filter(p => typeof p === "string" && p.trim())
         : [];
       const memFlag = memoryEnabled !== false;
+      const projectId = Object.prototype.hasOwnProperty.call(body, "projectId")
+        ? (
+            typeof engine.normalizeSessionProjectAssignmentId === "function"
+              ? engine.normalizeSessionProjectAssignmentId(body.projectId)
+              : (typeof body.projectId === "string" && body.projectId.trim() ? body.projectId.trim() : null)
+          )
+        : null;
 
       const detachedOptions: {
         cwd: any;
@@ -1775,7 +1818,15 @@ export function createSessionsRoute(engine, hub = null) {
       const result = await engine.createDetachedSession(detachedOptions);
       const newSessionPath = result.sessionPath;
       const newAgentId = result.agentId;
+      const newSessionId = result.sessionId || engine.getSessionIdForPath?.(newSessionPath) || null;
       engine.persistSessionMeta?.();
+      if (projectId && typeof engine.setSessionProjectAssignment === "function") {
+        await engine.setSessionProjectAssignment({ sessionPath: newSessionPath, projectId });
+      }
+      if (cwd && body.recordWorkspaceHistory === true) {
+        const history = mergeWorkspaceHistory(engine.config?.cwd_history, [cwd]);
+        await engine.updateConfig?.({ last_cwd: cwd, cwd_history: history });
+      }
 
       const resolvedPermissionMode = engine.getSessionPermissionMode?.(newSessionPath)
         || permissionMode
@@ -1784,11 +1835,13 @@ export function createSessionsRoute(engine, hub = null) {
       const response = {
         ok: true,
         path: newSessionPath,
+        sessionId: newSessionId,
         cwd: result.session?.sessionManager?.getCwd?.() || cwd || engine.cwd || null,
         workspaceFolders: engine.getSessionWorkspaceFolders?.(newSessionPath) || workspaceFolders,
         authorizedFolders: engine.getSessionAuthorizedFolders?.(newSessionPath) || [],
         agentId: newAgentId,
         agentName: engine.getAgent?.(newAgentId)?.agentName || newAgentId || engine.agentName,
+        projectId,
         currentSessionPath: engine.currentSessionPath || null,
         planMode: resolvedPermissionMode === "read_only",
         permissionMode: resolvedPermissionMode,
@@ -2262,6 +2315,7 @@ export function createSessionsRoute(engine, hub = null) {
       }
       const activeKey = activePathForArchivedSession(sessionPath);
       return await withSessionLifecycleLock([activeKey, sessionPath], async () => {
+        const draftSessionId = sessionId || engine.getSessionIdForPath?.(activeKey) || null;
         await cleanupSessionLifecycle([activeKey, sessionPath], "parent session deleted");
         try {
           await fs.unlink(sessionPath);
@@ -2271,6 +2325,9 @@ export function createSessionsRoute(engine, hub = null) {
             return c.json({ error: t("error.sessionNotFound") }, 404);
           }
           throw err;
+        }
+        if (draftSessionId) {
+          try { engine.deleteSessionInputDrafts?.(draftSessionId); } catch { /* 草稿清理失败不阻塞删除 */ }
         }
         // 清理 titles.json 孤儿（key = 对应的活跃路径）
         try { await engine.clearSessionTitle(activeKey); } catch {}

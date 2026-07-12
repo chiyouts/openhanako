@@ -16,7 +16,7 @@ const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const { PNG } = require("pngjs");
-const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, installDownloadedUpdate } = require("./auto-updater.cjs");
+const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, installDownloadedUpdate, normalizeReleaseDigest } = require("./auto-updater.cjs");
 const {
   getAutoLaunchStatus,
   setAutoLaunchEnabled,
@@ -450,6 +450,7 @@ let forceQuitApp = false;   // 启动失败等场景需要真正退出，绕过"
 let _startHiddenAtLogin = false; // 登录项启动时不抢前台，只在托盘常驻
 const SERVER_SHUTDOWN_GRACE_MS = 17000; // server gracefulShutdown 内部 15s force timer + 余量
 const SERVER_FORCE_KILL_WAIT_MS = 5000;
+const STALE_SERVER_EXIT_GRACE_MS = 2000; // 残留 server 终止/自然退出的确认宽限
 const SERVER_SHUTDOWN_POLL_MS = 200;
 
 // ── 主进程 i18n ──
@@ -773,6 +774,8 @@ const {
   SERVER_INFO_FIRST_WAIT_MS,
   shouldKeepWaitingForServerInfo,
 } = require("./src/shared/server-readiness.cjs");
+const { resolveStaleServerInfoDisposition } = require("./src/shared/stale-server-info.cjs");
+const { resolvePostUpdateAnnouncement } = require("./src/shared/post-update-announcement.cjs");
 
 /**
  * 轮询 server-info.json 等待 server 就绪
@@ -1008,22 +1011,49 @@ async function startServer() {
         return; // 跳过启动
       }
 
+      let knownDead = false;
       if (verification.terminate) {
         console.log(`[desktop] 可信旧 server 不可复用（${verification.reason}），正在终止 PID ${existingInfo.pid}`);
         killPid(existingInfo.pid);
-        const deadline = Date.now() + 2000;
-        while (Date.now() < deadline) {
-          try { process.kill(existingInfo.pid, 0); } catch { break; }
-          await new Promise(r => setTimeout(r, 100));
+        knownDead = await waitForProcessExit(null, existingInfo.pid, STALE_SERVER_EXIT_GRACE_MS);
+        if (!knownDead) {
+          killPid(existingInfo.pid, true);
+          knownDead = await waitForProcessExit(null, existingInfo.pid, SERVER_FORCE_KILL_WAIT_MS);
         }
-        killPid(existingInfo.pid, true);
       } else {
         console.warn(`[desktop] server-info 不可信，拒绝复用且不自动终止 PID ${existingInfo.pid}: ${verification.reason}`);
+        // 旧 server 可能正处于 gracefulShutdown（此时 health 必然失败），给一个
+        // 短宽限观察它是否自行退出，避免误判成长期残留
+        knownDead = await waitForProcessExit(null, existingInfo.pid, STALE_SERVER_EXIT_GRACE_MS);
       }
-    }
 
-    // PID 已死或已 kill，删除脏文件
-    try { fs.unlinkSync(serverInfoPath); } catch {}
+      const desiredNetwork = readDesiredServerNetworkConfig();
+      const stalePort = Number(existingInfo.port);
+      const portConflict = desiredNetwork.config
+        ? (Number.isInteger(stalePort) && stalePort === desiredNetwork.config.listenPort)
+        : null;
+      const disposition = resolveStaleServerInfoDisposition({ pidAlive: true, knownDead, portConflict });
+
+      if (!disposition.removeInfoFile) {
+        // 残留进程还活着：server-info.json 是下次启动定位它的唯一线索，保留
+        console.warn(`[desktop] 残留 server PID ${existingInfo.pid} 仍存活，保留 server-info.json 供下次启动识别`);
+        if (disposition.failFast) {
+          const err = new Error(
+            `STALE_SERVER_UNCLEANED: residual HanaAgent server (PID ${existingInfo.pid}) is still running and holds port ${Number.isInteger(stalePort) ? stalePort : "unknown"} (${verification.reason}). ` +
+            `Quit it from Task Manager (look for hana-server.exe) or restart the computer, then launch HanaAgent again.`
+          );
+          err.code = "STALE_SERVER_UNCLEANED";
+          throw err;
+        }
+        // 端口不冲突：继续 spawn 新 server。_spawnServerOnce 会按 poll 契约删除
+        // 旧文件，新 server 就绪后重写；残留进程仍可通过任务管理器发现
+      } else {
+        try { fs.unlinkSync(serverInfoPath); } catch {}
+      }
+    } else {
+      // PID 已死，删除脏文件
+      try { fs.unlinkSync(serverInfoPath); } catch {}
+    }
   }
 
   // ── 2. 打包模式：先校验关键 external 文件是否齐全 ──
@@ -1395,7 +1425,8 @@ function buildLaunchFailureDialogDetail(err, crashInfo) {
   const structuredPortConflict = err?.startupError?.code === "PORT_IN_USE"
     ? formatPortInUseStartupError(err.startupError)
     : null;
-  const rootServerError = structuredPortConflict || extractRootServerStartupError(_serverLogs);
+  const staleServerError = err?.code === "STALE_SERVER_UNCLEANED" ? err.message : null;
+  const rootServerError = structuredPortConflict || staleServerError || extractRootServerStartupError(_serverLogs);
   const tail = crashInfo.length > 800 ? "...\n" + crashInfo.slice(-800) : crashInfo;
   if (!rootServerError) return tail;
   if (tail.trimStart().startsWith(rootServerError)) return tail;
@@ -1482,6 +1513,41 @@ function createSplashWindow() {
 
 // ── 窗口状态记忆 ──
 const windowStatePath = path.join(hanakoHome, "user", "window-state.json");
+
+// ── 升级后首启公告：最后看过公告的版本记录 ──
+const lastSeenVersionPath = path.join(hanakoHome, "user", "last-seen-version.json");
+
+function writeLastSeenVersion(version) {
+  fs.mkdirSync(path.dirname(lastSeenVersionPath), { recursive: true });
+  fs.writeFileSync(lastSeenVersionPath, JSON.stringify({ version }));
+}
+
+function computePendingAnnouncement() {
+  let lastSeenVersion = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(lastSeenVersionPath, "utf-8"));
+    if (typeof parsed?.version === "string" && parsed.version) lastSeenVersion = parsed.version;
+  } catch {}
+  const { pending, seedVersion } = resolvePostUpdateAnnouncement({
+    currentVersion: app.getVersion(),
+    lastSeenVersion,
+    isPackagedLike: app.isPackaged || process.env.HANA_FORCE_ANNOUNCEMENT === "1",
+    setupComplete: isSetupComplete(),
+  });
+  if (seedVersion) {
+    writeLastSeenVersion(seedVersion);
+    return null;
+  }
+  if (!pending) return null;
+  let digest = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), "release-digest.v1.json"), "utf-8"));
+    digest = normalizeReleaseDigest(parsed, app.getVersion());
+  } catch {
+    digest = null;
+  }
+  return { version: app.getVersion(), digest };
+}
 
 function loadWindowState() {
   try {
@@ -3917,6 +3983,8 @@ wrapIpcHandler("run-edit-command", (event, command) => {
   return true;
 });
 wrapIpcHandler("get-app-version", () => app.getVersion());
+wrapIpcBestEffortHandler("get-pending-announcement", () => computePendingAnnouncement());
+wrapIpcBestEffortHandler("ack-announcement", () => writeLastSeenVersion(app.getVersion()));
 // 旧版兼容：check-update 返回 auto-updater 状态中的可用版本信息
 wrapIpcHandler("check-update", () => {
   const s = getUpdateState();

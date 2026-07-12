@@ -1106,6 +1106,7 @@ function ProjectBlock({
         }}
         onContextMenu={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           onOpenProjectMenu({ x: event.clientX, y: event.clientY }, project);
         }}
         onDragStart={(event) => onProjectDragStart(event, project.id)}
@@ -1222,6 +1223,7 @@ function FolderBlock({
         }}
         onContextMenu={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           onOpenFolderMenu({ x: event.clientX, y: event.clientY }, folder);
         }}
         onDragStart={(event) => onFolderDragStart(event, folder.id)}

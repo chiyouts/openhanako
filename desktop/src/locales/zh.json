@@ -119,6 +119,11 @@
     "filesUnsupported": "频道暂只支持文本消息，文件不会加入普通聊天附件",
     "unpinPluginTab": "取消固定「{label}」"
   },
+  "announcement": {
+    "title": "更新完成 · v{version}",
+    "fallbackBody": "HanaAgent 已更新至 v{version}。",
+    "confirm": "知道了"
+  },
   "skills": {
     "panel": {
       "title": "Skills",
@@ -1229,6 +1234,10 @@
             "label": "Office",
             "summary": "让 Agent 读取文档、转换 HTML 到 PDF"
           },
+          "session": {
+            "label": "跨会话协作",
+            "summary": "列出/读取其它会话，经确认卡发送消息或创建会话"
+          },
           "update_settings": {
             "label": "修改设置",
             "summary": "让 Agent 修改应用配置项"
@@ -1796,6 +1805,12 @@
       "injectAgentsMdDesc": "开启后，新会话会读取当前工作目录到 Git 根目录之间的 AGENTS.md。",
       "injectClaudeMd": "注入 CLAUDE.md",
       "injectClaudeMdDesc": "开启后，新会话会读取当前工作目录到 Git 根目录之间的 CLAUDE.md。",
+      "projectSkillsTitle": "项目技能发现",
+      "projectSkillsDesc": "选择这个 Agent 在新会话中加载哪些项目技能目录。",
+      "discoverProjectSkills": "加载项目技能",
+      "discoverProjectSkillsDesc": "发现并加载当前项目 .agents/skills 中的技能。",
+      "discoverCompatibleProjectSkills": "加载其他工具的项目技能",
+      "discoverCompatibleProjectSkillsDesc": "同时发现项目内 Claude Code、Codex 与 OpenClaw 的技能目录。",
       "agentDeskSection": "Agent 工作台设置"
     },
     "toolCaps": {
@@ -2052,11 +2067,12 @@
       "feishuAppSecret": "App Secret",
       "feishuHint": "从飞书开放平台获取；使用长连接接收事件，不需要本地回调 URL",
       "dingtalk": "钉钉",
+      "dingtalkCorpId": "Corp ID",
       "dingtalkClientId": "Client ID / AppKey",
       "dingtalkClientSecret": "Client Secret / AppSecret",
       "dingtalkRobotCode": "Robot Code",
-      "dingtalkRestBaseUrl": "REST Base URL",
-      "dingtalkHint": "企业内部应用凭证用于 token/Stream；Robot Code 用于企业机器人发送；REST Base URL 默认 https://api.dingtalk.io/v1.0",
+      "dingtalkApiBaseUrl": "API Base URL",
+      "dingtalkHint": "Corp ID 和应用凭证用于新版 token 接口；Client ID 与 Client Secret 也用于建立 Stream 长连接，Robot Code 用于发送回复。API Base URL 默认 https://api.dingtalk.com/v1.0",
       "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
@@ -2080,12 +2096,15 @@
       "connected": "已连接",
       "disconnected": "未连接",
       "error": "连接失败",
+      "connectionToggle": "启用或停用连接",
       "test": "测试连接",
       "testOk": "连接成功",
+      "dingtalkCredentialTestOk": "凭证验证成功；Stream 长连接和机器人回复将在启用后确认",
       "testFail": "测试失败",
+      "secretStoredPlaceholder": "已保存，输入新值以替换",
       "noToken": "请先输入 Bot Token",
       "noCredentials": "请先填写 App ID 和 App Secret",
-      "noDingtalkCredentials": "请先填写 Client ID、Client Secret、Robot Code 和 REST Base URL",
+      "noDingtalkCredentials": "请先填写 Corp ID、Client ID、Client Secret、Robot Code 和 API Base URL",
       "globalSettings": "全局设置",
       "agentSettings": "角色",
       "permissionMode": "权限模式",
@@ -2129,11 +2148,12 @@
       ],
       "tutorialDtSteps": [
         "前往 <code>open.dingtalk.com</code>，进入「开发者后台」",
+        "从企业信息中复制企业的 <code>Corp ID</code>",
         "创建「企业内部应用」，在应用凭证中复制 <code>Client ID/AppKey</code> 和 <code>Client Secret/AppSecret</code>",
         "添加「应用机器人」能力，复制机器人详情里的 <code>Robot Code</code>",
         "确认应用已开通机器人收发消息所需权限，并发布到企业可用范围",
-        "REST Base URL 保持默认 <code>https://api.dingtalk.io/v1.0</code>，除非你明确要接入钉钉兼容网关",
-        "将 Client ID、Client Secret、Robot Code 和 REST Base URL 粘贴到上方输入框，测试通过后打开开关即可"
+        "API Base URL 保持默认 <code>https://api.dingtalk.com/v1.0</code>，除非你明确要接入钉钉兼容网关",
+        "将 Corp ID、Client ID、Client Secret、Robot Code 和 API Base URL 粘贴到上方输入框。新版 token 测试与 Stream 长连接都正常后，机器人才能完整收发消息"
       ],
       "whatsappHint": "即将支持"
     },
@@ -2476,6 +2496,9 @@
     "cwdSkillsHint": "在文件夹下创建 .agents/skills/ 目录即可",
     "cwdSkillsDesc": "技能跟随工作台",
     "cwdSkillsDrop": "拖入文件夹或 .zip 安装技能",
+    "cwdSkillActive": "已加载",
+    "cwdSkillInactive": "未加载",
+    "cwdSkillShadowed": "已被覆盖",
     "deleteSkill": "删除技能",
     "openInFinder": "打开文件夹",
     "jianLabel": "笺",
@@ -3310,5 +3333,21 @@
     "copyPath": "复制路径",
     "copyLink": "复制链接",
     "openInSystemBrowser": "用系统浏览器打开"
+  },
+  "sessionCollab": {
+    "messagePrefix": "[来自 Agent「{name}」的消息，非用户本人]",
+    "fromAgent": "来自 {name} 的消息",
+    "expand": "展开",
+    "collapse": "收起",
+    "confirmSend": "发送",
+    "confirmCreate": "创建并发送",
+    "ignore": "忽略",
+    "expired": "草稿已过期，请让 Agent 重新发起",
+    "inFlight": "正在执行中",
+    "halfCreated": "会话已创建（{id}），首条消息投递失败，可重试或打开该会话手动发送",
+    "createdSession": "已创建会话 {id}",
+    "sendFailed": "发送失败：{error}",
+    "rejectFailed": "忽略失败：{error}",
+    "messageField": "消息内容"
   }
 }

@@ -895,6 +895,62 @@
         "groundingMode": "prompted"
       }
     },
+    "gpt-5.6": {
+      "name": "GPT-5.6",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-responses",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.6-sol": {
+      "name": "GPT-5.6 Sol",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-responses",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.6-terra": {
+      "name": "GPT-5.6 Terra",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-responses",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.6-luna": {
+      "name": "GPT-5.6 Luna",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-responses",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
     "text-embedding-3-large": {
       "name": "Text Embedding 3 Large",
       "context": 8191,
@@ -2588,6 +2644,15 @@
       "maxOutput": 32768,
       "image": true,
       "reasoning": true,
+      "thinkingLevels": ["off", "low", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "low": "low",
+        "medium": "high",
+        "high": "high",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "high",
       "compat": {
         "thinkingFormat": "kimi",
         "reasoningProfile": "kimi-openai"
@@ -5362,6 +5427,34 @@
       "maxOutput": 131072,
       "reasoning": true
     },
+    "grok-4.5": {
+      "name": "Grok 4.5",
+      "context": 500000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true
+    },
+    "grok-4.5-latest": {
+      "name": "Grok 4.5 Latest",
+      "context": 500000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true
+    },
+    "grok-build-latest": {
+      "name": "Grok Build Latest",
+      "context": 500000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true
+    },
+    "grok-4.3": {
+      "name": "Grok 4.3",
+      "context": 1000000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true
+    },
     "grok-4": {
       "name": "Grok 4",
       "context": 256000,
@@ -5501,6 +5594,90 @@
     }
   },
   "openrouter": {
+    "openai/gpt-5.6-sol": {
+      "name": "OpenAI GPT-5.6 Sol",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-completions",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "openai/gpt-5.6-sol-pro": {
+      "name": "OpenAI GPT-5.6 Sol Pro",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-completions",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "openai/gpt-5.6-terra": {
+      "name": "OpenAI GPT-5.6 Terra",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-completions",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "openai/gpt-5.6-terra-pro": {
+      "name": "OpenAI GPT-5.6 Terra Pro",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-completions",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "openai/gpt-5.6-luna": {
+      "name": "OpenAI GPT-5.6 Luna",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-completions",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "openai/gpt-5.6-luna-pro": {
+      "name": "OpenAI GPT-5.6 Luna Pro",
+      "context": 1050000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-completions",
+      "thinkingLevels": ["off", "low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": "none",
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
     "anthropic/claude-3-haiku": {
       "name": "Anthropic/Claude 3 Haiku",
       "context": 200000,
@@ -6570,10 +6747,127 @@
     },
     "gpt-5.5": {
       "name": "GPT-5.5",
-      "context": 400000,
+      "context": 272000,
       "maxOutput": 128000,
       "image": true,
-      "reasoning": true
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "low",
+        "xhigh": "xhigh"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.4": {
+      "name": "GPT-5.4",
+      "context": 272000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "low",
+        "xhigh": "xhigh"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.4-mini": {
+      "name": "GPT-5.4 Mini",
+      "context": 272000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "low",
+        "xhigh": "xhigh"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.2": {
+      "name": "GPT-5.2",
+      "context": 272000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "low",
+        "xhigh": "xhigh"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.3-codex-spark": {
+      "name": "GPT-5.3 Codex Spark",
+      "context": 128000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "low",
+        "xhigh": "xhigh"
+      },
+      "defaultThinkingLevel": "medium",
+      "legacyCompatibility": true
+    },
+    "gpt-5.6-sol": {
+      "name": "GPT-5.6 Sol",
+      "context": 353400,
+      "maxContext": 372000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "low"
+    },
+    "gpt-5.6-terra": {
+      "name": "GPT-5.6 Terra",
+      "context": 353400,
+      "maxContext": 372000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
+    },
+    "gpt-5.6-luna": {
+      "name": "GPT-5.6 Luna",
+      "context": 353400,
+      "maxContext": 372000,
+      "maxOutput": 128000,
+      "image": true,
+      "reasoning": true,
+      "api": "openai-codex-responses",
+      "thinkingLevels": ["low", "medium", "high", "max"],
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "xhigh": "max"
+      },
+      "defaultThinkingLevel": "medium"
     }
   },
   "volcengine-coding": {

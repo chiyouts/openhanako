@@ -398,6 +398,7 @@ function MarkdownCoverView({ previewItem, cover }: { previewItem: PreviewItem; c
       }}
       onContextMenu={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         setMenu({ x: event.clientX, y: event.clientY });
       }}
       onDragOver={handleCoverDragOver}

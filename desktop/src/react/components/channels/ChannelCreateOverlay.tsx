@@ -112,6 +112,7 @@ export function ChannelCreateOverlay() {
 
   return (
     <Overlay
+      scope="window"
       open={visible}
       onClose={handleCancel}
       backdrop="blur"

@@ -142,6 +142,7 @@ export interface Agent {
   yuan: string;
   isPrimary: boolean;
   hasAvatar?: boolean;
+  avatarRevision?: string | null;
   chatModel?: { id: string; provider?: string | null } | null;
   homeFolder?: string | null;
   memoryMasterEnabled?: boolean;
@@ -510,6 +511,8 @@ export interface PlatformApi {
 
   // ── App info ──
   getAppVersion?(): Promise<string>;
+  getPendingAnnouncement?(): Promise<{ version: string; digest: ReleaseDigest | null } | null>;
+  ackAnnouncement?(): Promise<void>;
   checkUpdate?(): Promise<{ version: string; downloadUrl: string } | null>;
 
   // ── Auto-update (Windows) ──

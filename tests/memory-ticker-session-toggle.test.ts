@@ -176,6 +176,35 @@ describe("memory ticker respects session-level memory toggle", () => {
     expect(assemble).toHaveBeenCalled();
   });
 
+  it("awaits an asynchronous fresh memory-model resolver before invoking memory LLM work", async () => {
+    let releaseModel;
+    const modelPromise = new Promise((resolve) => { releaseModel = resolve; });
+    const getResolvedMemoryModel = vi.fn(() => modelPromise);
+    const { ticker, summaryManager } = makeTicker(tmpDir, () => true, { getResolvedMemoryModel });
+
+    ticker.notifyTurn(sessionPath);
+    const pending = ticker.flushSessionAndCompile(sessionPath);
+    await Promise.resolve();
+    expect(summaryManager.rollingSummary).not.toHaveBeenCalled();
+
+    const freshModel = {
+      model: "fresh-model",
+      provider: "oauth-provider",
+      api: "openai-completions",
+      api_key: "fresh-token",
+      base_url: "https://fresh.example/v1",
+    };
+    releaseModel(freshModel);
+    await pending;
+
+    expect(summaryManager.rollingSummary).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      freshModel,
+      expect.any(Object),
+    );
+  });
+
   it("flushSessionAndCompile summarizes an unfinished turn bucket and resets the turn count", async () => {
     const { ticker, summaryManager } = makeTicker(tmpDir, () => true);
 
@@ -224,7 +253,8 @@ describe("memory ticker respects session-level memory toggle", () => {
     const pending = ticker.notifySessionEnd(sessionPath);
     // 同步断言：返回值是 Promise，但调用方这一行不应被 LLM 挡住
     expect(pending).toBeInstanceOf(Promise);
-    // rollingSummary 已经在后台启动（同步触发 Promise 构造）
+    // fresh resolver 是异步边界；让一个 microtask 通过后，后台 rollingSummary 启动。
+    await Promise.resolve();
     expect(summaryManager.rollingSummary).toHaveBeenCalledOnce();
     // 关键：不 await pending，测试仍能走到下一行 —— 证明 fire-and-forget
   });

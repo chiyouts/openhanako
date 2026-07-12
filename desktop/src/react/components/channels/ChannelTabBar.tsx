@@ -154,6 +154,7 @@ export function ChannelTabBar() {
     // Only plugin tabs can be hidden
     if (typeof tab !== 'string' || !tab.startsWith('plugin:')) return;
     e.preventDefault();
+    e.stopPropagation();
     const label = getTabLabel(tab, pluginPages, locale);
     setMenu({
       position: { x: e.clientX, y: e.clientY },
@@ -268,6 +269,7 @@ export function ChannelTabBar() {
           onContextMenu={(e, tab) => {
             if (typeof tab !== 'string' || !tab.startsWith('plugin:')) return;
             e.preventDefault();
+            e.stopPropagation();
             const label = getTabLabel(tab, pluginPages, locale);
             setMenu({
               position: { x: e.clientX, y: e.clientY },

@@ -94,6 +94,7 @@ const DAILY_STEP_KEYS = ["compileDaily", "compileToday", "rollDailyWindow", "com
  * @param {(sessionPath: string) => object|null} [opts.readMemoryReflectionSnapshot] - 返回 session 创建时冻结的记忆反思快照
  * @param {string} [opts.agentId] - 当前 agent id，用于实验观察产物归属
  * @param {string} [opts.agentDir] - 当前 agent 数据目录，用于实验观察产物落盘
+ * @param {import('../../core/env-change-ledger.ts').EnvChangeLedger} [opts.envChangeLedger] - 进程内环境变更台账
  */
 export function createMemoryTicker(opts) {
   const {
@@ -118,6 +119,7 @@ export function createMemoryTicker(opts) {
     ensureSessionLoaded,
     getSessionStreamFn,
     getSessionIdForPath,
+    envChangeLedger,
     memoryDir = path.dirname(memoryMdPath),
   } = opts;
   const _memoryReflectionRunner = memoryReflectionRunner || { runMemoryReflection: defaultRunMemoryReflection };
@@ -154,6 +156,33 @@ export function createMemoryTicker(opts) {
       outputPath: factsMdPath,
     });
     return factsMdPath;
+  };
+  const _readFactsLines = () => {
+    try {
+      return fs.readFileSync(factsMdPath, "utf-8")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+    } catch (err) {
+      return err?.code === "ENOENT" ? [] : null;
+    }
+  };
+  const _recordNewFactLines = (beforeLines) => {
+    if (!envChangeLedger || !Array.isArray(beforeLines)) return;
+    const afterLines = _readFactsLines();
+    if (!Array.isArray(afterLines)) return;
+    const before = new Set(beforeLines);
+    const seen = new Set();
+    const addedLines = afterLines.filter((line) => {
+      if (before.has(line) || seen.has(line)) return false;
+      seen.add(line);
+      return true;
+    }).slice(0, 5);
+    if (addedLines.length === 0) return;
+    envChangeLedger.append({
+      type: "memory_facts",
+      payload: { addedLines },
+    });
   };
   const _dailyDir = () => path.join(memoryDir, "daily");
   const _createSourceTimeRangeResolver = () => {
@@ -638,7 +667,7 @@ export function createMemoryTicker(opts) {
       if (memoryReflectionSnapshot) {
         rollingOptions.memoryReflectionSnapshot = memoryReflectionSnapshot;
       }
-      const resolvedModel = getResolvedMemoryModel();
+      const resolvedModel = await getResolvedMemoryModel();
       const cacheSnapshotMode = _getCacheSnapshotReflectionMode();
       if (cacheSnapshotMode === "write") {
         try {
@@ -692,7 +721,7 @@ export function createMemoryTicker(opts) {
   async function _doCompileTodayAndAssemble() {
     try {
       const resetAt = _getCompiledResetAt();
-      await compileToday(summaryManager, todayMdPath, getResolvedMemoryModel(), { since: resetAt });
+      await compileToday(summaryManager, todayMdPath, await getResolvedMemoryModel(), { since: resetAt });
       assemble(_factsSourcePath(), todayMdPath, weekMdPath, longtermMdPath, memoryMdPath);
       onCompiled?.();
       debugLog()?.log("memory", "today compiled + assembled");
@@ -721,7 +750,7 @@ export function createMemoryTicker(opts) {
       // week.md 迁移后被更名为 .migrated.bak，之后每次调用都会因文件不存在而 no-op，
       // 不需要独立 checkpoint。必须早于本函数末尾的 assemble（读 weekMdPath）之前跑完。
       try {
-        await migrateLegacyWeekToLongterm(memoryDir, longtermMdPath, getResolvedMemoryModel());
+        await migrateLegacyWeekToLongterm(memoryDir, longtermMdPath, await getResolvedMemoryModel());
       } catch (err) {
         hasFailed = true;
         log.error(`week.md 迁移失败: ${err.message}`);
@@ -734,7 +763,7 @@ export function createMemoryTicker(opts) {
       if (!_dailyStepsCompleted.has("compileDaily")) {
         try {
           const yesterday = shiftLogicalDate(todayStr, -1);
-          await compileDaily(summaryManager, _dailyDir(), yesterday, getResolvedMemoryModel(), {
+          await compileDaily(summaryManager, _dailyDir(), yesterday, await getResolvedMemoryModel(), {
             since: resetAt,
             todayDraftPath: todayMdPath,
           });
@@ -751,7 +780,7 @@ export function createMemoryTicker(opts) {
       // Step 1: compileToday（日期切换后刷新 today.md，新一天无 session 时会清空）
       if (!_dailyStepsCompleted.has("compileToday")) {
         try {
-          await compileToday(summaryManager, todayMdPath, getResolvedMemoryModel(), { since: resetAt });
+          await compileToday(summaryManager, todayMdPath, await getResolvedMemoryModel(), { since: resetAt });
           _markDailyStepCompleted("compileToday", context);
           _markSuccess("compileToday");
           _markStepRecovered("compileToday(daily)");
@@ -767,7 +796,7 @@ export function createMemoryTicker(opts) {
       // 判断的是"更早"的条目，但保持与 compileWeek→compileLongterm 相同的顺序约束更安全）。
       if (!_dailyStepsCompleted.has("rollDailyWindow") && _dailyStepsCompleted.has("compileDaily")) {
         try {
-          const { failed } = await rollDailyWindow(_dailyDir(), longtermMdPath, getResolvedMemoryModel(), {
+          const { failed } = await rollDailyWindow(_dailyDir(), longtermMdPath, await getResolvedMemoryModel(), {
             referenceDate: todayStr,
           });
           if (failed.length > 0) {
@@ -786,9 +815,11 @@ export function createMemoryTicker(opts) {
       // Step 3: compileFacts（独立于 step 1-2）——恒走增量编译，facts.md 是唯一产物
       if (!_dailyStepsCompleted.has("compileFacts")) {
         try {
-          await compileEditableFacts(summaryManager, factsMdPath, getResolvedMemoryModel(), {
+          const factsBefore = _readFactsLines();
+          await compileEditableFacts(summaryManager, factsMdPath, await getResolvedMemoryModel(), {
             since: resetAt,
           });
+          _recordNewFactLines(factsBefore);
           _markDailyStepCompleted("compileFacts", context);
           _markSuccess("compileFacts");
           _markStepRecovered("compileFacts");
@@ -813,7 +844,7 @@ export function createMemoryTicker(opts) {
       if (!_dailyStepsCompleted.has("deepMemory")) {
         try {
           const { processed, factsAdded } = await processDirtySessions(
-            summaryManager, factStore, getResolvedMemoryModel(), {
+            summaryManager, factStore, await getResolvedMemoryModel(), {
               since: resetAt,
               timeZone: _getTimezone(),
               getSourceTimeRange: _createSourceTimeRangeResolver(),

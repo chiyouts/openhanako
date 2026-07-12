@@ -30,7 +30,7 @@ describe("install_skill safety review", () => {
   it("does not cap the utility review output with maxTokens", async () => {
     (callText as any).mockResolvedValueOnce("safe");
 
-    const result = await safetyReview("---\nname: demo\n---\n# Demo\n", () => ({
+    const result = await safetyReview("---\nname: demo\n---\n# Demo\n", async () => ({
       utility: "utility-model",
       api_key: "key",
       base_url: "https://example.test",
@@ -44,7 +44,7 @@ describe("install_skill safety review", () => {
 
   it("uses a small-utility-only resolver for install skill safety review", async () => {
     (callText as any).mockResolvedValueOnce("safe");
-    const resolveUtilityConfig = vi.fn((options) => {
+    const resolveUtilityConfig = vi.fn(async (options) => {
       expect(options).toMatchObject({
         requireUtilityLarge: false,
         purpose: "install_skill_safety",
@@ -69,11 +69,21 @@ describe("install_skill safety review", () => {
     const managerSource = fs.readFileSync(path.join(process.cwd(), "core", "agent-manager.ts"), "utf-8");
 
     expect(agentSource).toContain(
-      "resolveUtilityConfig: (options) => this._cb?.resolveUtilityConfig?.(options)",
+      "resolveUtilityConfig: (options) => this._cb?.resolveUtilityConfigFresh?.(options)",
     );
     expect(managerSource).toContain(
-      "resolveUtilityConfig: (options) => getEngine()?.resolveUtilityConfig?.({ ...(options || {}), agentId: ag.id })",
+      "resolveUtilityConfigFresh: (options) => getEngine()?.resolveUtilityConfigFresh?.({ ...(options || {}), agentId: ag.id })",
     );
+  });
+
+  it("does not call the review network boundary when fresh utility resolution fails", async () => {
+    const result = await safetyReview(
+      "---\nname: demo\n---\n# Demo\n",
+      async () => { throw new Error("oauth refresh failed"); },
+    );
+
+    expect(result).toEqual({ safe: false, reason: "oauth refresh failed" });
+    expect(callText).not.toHaveBeenCalled();
   });
 
   it("returns a soft confirmation gate when safety review fails", async () => {

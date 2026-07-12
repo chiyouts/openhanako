@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   stripCssComments,
+  stripCustomPropertyDeclarations,
   findBareSpacing,
   findHardcodedColors,
   findBareDurations,
@@ -35,6 +36,28 @@ describe("style-discipline matchers", () => {
       animation: spin 0.8s linear; transition-delay: 0s; }`;
     const hits = findBareDurations(css);
     expect(hits.map(h => h.literal)).toEqual(["0.16s", "0.8s"]);
+  });
+
+  /**
+   * 立法（2026-07-09 样式立法⑤收尾）：token 定义行（`--x: ...`）是字面量的唯一
+   * 合法归宿——立法本身就是把散落字面量收进定义行，扫描器再把定义行计为违例，
+   * 会导致每次立法都顶高 styles.css / mobile-entry.css 基线，"只减不增"棘轮失真。
+   * 故定义行与 themes/ 同机制排除出扫描域；var() 引用位不受影响照常扫描。
+   */
+  it("strips custom property declaration lines (token 定义行豁免), keeps usages", () => {
+    const css = `:root { --scrim-15: rgba(0, 0, 0, 0.15); --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+      --duration-slowish: 0.16s; --space-13: 13px; }
+    .a { background: rgba(0, 0, 0, 0.3); --local-ink: #3B3D3F; color: #abc;
+      padding: 7px; transition: width 0.16s; }`;
+    const stripped = stripCustomPropertyDeclarations(css);
+    expect(findHardcodedColors(stripped).map(h => h.literal)).toEqual(["rgba(0, 0, 0, 0.3)", "#abc"]);
+    expect(findBareSpacing(stripped)).toEqual([{ property: "padding", value: "7px" }]);
+    expect(findBareDurations(stripped).map(h => h.literal)).toEqual(["0.16s"]);
+  });
+
+  it("custom property stripping leaves var() references untouched", () => {
+    const css = `.a { color: var(--text, #333); box-shadow: var(--shadow-md); }`;
+    expect(stripCustomPropertyDeclarations(css)).toBe(css);
   });
 });
 

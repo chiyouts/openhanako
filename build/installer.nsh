@@ -147,7 +147,7 @@ CRCCheck off
   FileOpen $0 "${_SCRIPT}" w
   FileWrite $0 `$$ErrorActionPreference = 'SilentlyContinue'$\r$\n`
   FileWrite $0 `$$installDir = [Environment]::GetEnvironmentVariable('HANA_INSTALL_DIR')$\r$\n`
-  FileWrite $0 `if ([string]::IsNullOrWhiteSpace($$installDir)) { exit 1 }$\r$\n`
+  FileWrite $0 `if ([string]::IsNullOrWhiteSpace($$installDir)) { exit 3 }$\r$\n`
   FileWrite $0 `$$installFull = [System.IO.Path]::GetFullPath($$installDir).TrimEnd('\')$\r$\n`
   FileWrite $0 `$$installPrefix = $$installFull + '\'$\r$\n`
   FileWrite $0 `$$selfPid = $$PID$\r$\n`
@@ -165,13 +165,16 @@ CRCCheck off
   FileWrite $0 `  $$quotedPrefix = '"' + $$installPrefix$\r$\n`
   FileWrite $0 `  return $$value.StartsWith($$installPrefix, [StringComparison]::OrdinalIgnoreCase) -or $$value.IndexOf($$quotedPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or $$value.IndexOf(' ' + $$installPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0$\r$\n`
   FileWrite $0 `}$\r$\n`
-  FileWrite $0 `$$matches = @(Get-CimInstance Win32_Process | Where-Object {$\r$\n`
+  FileWrite $0 `$$all = $$null$\r$\n`
+  FileWrite $0 `try { $$all = @(Get-CimInstance Win32_Process -ErrorAction Stop) } catch { exit 2 }$\r$\n`
+  FileWrite $0 `if ($$all.Count -eq 0) { exit 2 }$\r$\n`
+  FileWrite $0 `$$matches = @($$all | Where-Object {$\r$\n`
   FileWrite $0 `  $$_.ProcessId -ne $$selfPid -and $$_.ProcessId -ne $$installerPid -and ((Test-HanaPath $$_.ExecutablePath) -or (Test-HanaCommand $$_.CommandLine))$\r$\n`
   FileWrite $0 `})$\r$\n`
   FileWrite $0 `$$matches | ForEach-Object {$\r$\n`
   FileWrite $0 `  Write-Output ("HanaAgent-owned process still running: {0} pid={1} path={2}" -f $$_.Name, $$_.ProcessId, $$_.ExecutablePath)$\r$\n`
   FileWrite $0 `}$\r$\n`
-  FileWrite $0 `if ($$matches.Count -gt 0) { exit 0 } else { exit 1 }$\r$\n`
+  FileWrite $0 `if ($$matches.Count -gt 0) { exit 0 } else { exit 10 }$\r$\n`
   FileClose $0
   Pop $0
 !macroend
@@ -268,6 +271,11 @@ CRCCheck off
   !insertmacro hanakoInstallTimingMark "customCheckAppRunning" "start"
   !insertmacro hanakoBypassOldUninstallerForUpdate
   !insertmacro hanakoStopInstallDirProcesses
+  ; Finder exit contract: 0 = found HanaAgent-owned processes, 10 = confirmed
+  ; none, anything else = query unavailable (PowerShell blocked / WMI broken).
+  ; $R9 = 1 when the query is unavailable and we must fall back to the
+  ; cmd-based image-name sweep below.
+  StrCpy $R9 0
   !insertmacro hanakoFindInstallDirProcesses $R0
   ${If} $R0 == 0
     DetailPrint "Detected HanaAgent-owned process in install directory; closing it before install."
@@ -290,10 +298,26 @@ CRCCheck off
         !insertmacro hanakoStopInstallDirProcesses
         Sleep 1000
         Goto hanako_check_install_dir_processes
+      ${ElseIf} $R0 != 10
+        DetailPrint "HanaAgent process query became unavailable (code $R0); switching to image-name cleanup."
+        StrCpy $R9 1
       ${EndIf}
+  ${ElseIf} $R0 != 10
+    DetailPrint "HanaAgent process query unavailable (code $R0); falling back to image-name cleanup."
+    StrCpy $R9 1
   ${EndIf}
 
+  ; Image-name sweep runs for fresh installs (legacy behavior), and for
+  ; updates whenever the precise install-dir query is unavailable.
+  StrCpy $R8 0
+  ${If} $R9 == 1
+    StrCpy $R8 1
+  ${EndIf}
   ${IfNot} ${isUpdated}
+    StrCpy $R8 1
+  ${EndIf}
+
+  ${If} $R8 == 1
   !insertmacro hanakoFindRunningProcesses $R0
   ${If} $R0 == 0
     DetailPrint "Detected HanaAgent.exe, Hanako.exe, or hana-server.exe; closing them before install."

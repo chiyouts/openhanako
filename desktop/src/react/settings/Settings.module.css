@@ -330,6 +330,8 @@
 .settings-main > .settings-tab-content {
     width: 100%;
     max-width: 640px;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 .settings-main-wide > .settings-tab-title,
@@ -2129,6 +2131,8 @@
     outline: none;
     transition: border-color var(--duration-slow) var(--ease-out);
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .settings-input:focus {
@@ -4118,6 +4122,8 @@ a.about-link:hover {
     display: flex;
     gap: 0;
     height: 420px;
+    max-width: 100%;
+    min-width: 0;
     background: var(--bg-card, var(--bg));
     border: 1px solid var(--overlay-light);
     border-radius: var(--radius-card, 8px);
@@ -5003,6 +5009,10 @@ a.about-link:hover {
     font-weight: 600;
     margin: 0;
     color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .pv-empty {

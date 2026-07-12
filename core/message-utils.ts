@@ -9,6 +9,8 @@ import { isToolCallBlock, getToolArgs } from "./llm-utils.ts";
 import { SessionManager } from "../lib/pi-sdk/index.ts";
 import { isSessionJsonlFilename } from "../lib/session-jsonl.ts";
 import { DEFERRED_RESULT_RECORD_TYPE } from "../lib/deferred-result-notification.ts";
+import { MESSAGE_ORIGIN_RECORD_TYPE } from "./desktop-session-submit.ts";
+import { SESSION_COLLAB_DECISION_RECORD_TYPE } from "../lib/session-collab/decision-record.ts";
 import {
   TURN_INPUT_CONSUMPTION_EVENT_TYPE,
   TURN_INPUT_PRESENTATION_EVENT_TYPE,
@@ -163,6 +165,8 @@ function historyMessageFromEntry(entry) {
       entry.customType === DEFERRED_RESULT_RECORD_TYPE
       || entry.customType === TURN_INPUT_PRESENTATION_EVENT_TYPE
       || entry.customType === TURN_INPUT_CONSUMPTION_EVENT_TYPE
+      || entry.customType === MESSAGE_ORIGIN_RECORD_TYPE
+      || entry.customType === SESSION_COLLAB_DECISION_RECORD_TYPE
     )
   ) {
     const message: Record<string, any> = {
@@ -176,6 +180,62 @@ function historyMessageFromEntry(entry) {
     return message;
   }
   return null;
+}
+
+/** origin custom 条目注释其后第一条 user 消息（契约见 desktop-session-submit recordMessageOriginEntry）。返回过滤掉 origin 条目的新数组。 */
+export function annotateOriginMessages(messages) {
+  const out = [];
+  let pendingOrigin = null;
+  for (const m of messages || []) {
+    if (m?.role === "custom" && m.customType === MESSAGE_ORIGIN_RECORD_TYPE) {
+      pendingOrigin = m.data || null;
+      continue;
+    }
+    if (m?.role === "user" && pendingOrigin?.origin) {
+      out.push({
+        ...m,
+        origin: pendingOrigin.origin,
+        ...(typeof pendingOrigin.displayText === "string" ? { displayText: pendingOrigin.displayText } : {}),
+      });
+      pendingOrigin = null;
+      continue;
+    }
+    if (m?.role === "user") { pendingOrigin = null; }
+    out.push(m);
+  }
+  return out;
+}
+
+/**
+ * 草稿卡确认状态持久化（灰测修复 C，契约见 lib/session-collab/decision-record.ts）：
+ * 从原始消息流里收集决策 custom 条目，按 suggestionId 建索引，供
+ * overlaySessionCollabDecision 覆盖 suggestion_card block 的 status。
+ * 同一 suggestionId 出现多条决策时后者覆盖前者（消息流本身有序，正常不会发生）。
+ */
+export function collectSessionCollabDecisions(messages) {
+  const map = new Map();
+  for (const m of messages || []) {
+    if (m?.role !== "custom" || m.customType !== SESSION_COLLAB_DECISION_RECORD_TYPE) continue;
+    const suggestionId = m.data?.suggestionId;
+    if (typeof suggestionId === "string" && suggestionId) map.set(suggestionId, m.data);
+  }
+  return map;
+}
+
+/**
+ * 用决策记录覆盖 suggestion_card block 的 status（+ resultSessionId），
+ * 让重开 session 后草稿卡不再回弹 pending。非 suggestion_card 或未命中决策
+ * 的 block 原样返回（不拷贝，避免无意义的引用变更）。
+ */
+export function overlaySessionCollabDecision(block, decisionsBySuggestionId) {
+  if (!block || block.type !== "suggestion_card" || !block.suggestionId) return block;
+  const decision = decisionsBySuggestionId?.get?.(block.suggestionId);
+  if (!decision) return block;
+  return {
+    ...block,
+    status: decision.status,
+    ...(decision.resultSessionId ? { resultSessionId: decision.resultSessionId } : {}),
+  };
 }
 
 async function looksLikePiSessionFile(sessionPath) {

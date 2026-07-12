@@ -204,6 +204,7 @@ export function CompiledMemoryViewer() {
 
   return (
     <Overlay
+      scope="inline"
       open={visible}
       onClose={close}
       backdrop="blur"

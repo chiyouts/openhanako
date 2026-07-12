@@ -1,6 +1,7 @@
 import React from 'react';
-import type { AutoUpdateState, LocalizedReleaseText, ReleaseDigest, ReleaseDigestItem } from '../types';
+import type { AutoUpdateState, ReleaseDigest } from '../types';
 import { Overlay } from '../ui/Overlay';
+import { digestLocale, digestText, kindLabel } from './shared/release-digest-text';
 import styles from './AutoUpdateStatus.module.css';
 
 interface AutoUpdateStatusProps {
@@ -27,20 +28,6 @@ function InstallIcon() {
   );
 }
 
-function digestLocale(): keyof LocalizedReleaseText {
-  const lang = (document.documentElement.lang || navigator.language || '').toLowerCase();
-  return lang.startsWith('zh') ? 'zh' : 'en';
-}
-
-function digestText(value: LocalizedReleaseText | undefined, locale: keyof LocalizedReleaseText): string {
-  if (!value) return '';
-  return value[locale] || value.en || value.zh || '';
-}
-
-function kindLabel(kind: ReleaseDigestItem['kind']): string {
-  return t(`settings.about.updateDigestKind.${kind}`);
-}
-
 function hasVisibleDigest(digest: ReleaseDigest | null | undefined): digest is ReleaseDigest {
   return Boolean(digest && (!digest.noUserFacingChanges || digest.items.length > 0));
 }
@@ -58,6 +45,7 @@ function ReleaseDigestEntry({ digest }: { digest: ReleaseDigest | null | undefin
         {t('settings.about.updateDigestCta')}
       </button>
       <Overlay
+        scope="inline"
         open={open}
         onClose={() => setOpen(false)}
         className={styles.digestDialog}

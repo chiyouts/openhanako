@@ -18,6 +18,17 @@ export function stripCssComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+/**
+ * 立法（2026-07-09 样式立法⑤收尾）：custom property 定义行（`--x: ...`）是
+ * 字面量的唯一合法归宿——立法就是把散落字面量收进定义行，若扫描器把定义行
+ * 也计为违例，每次立法都会顶高 styles.css / mobile-entry.css 的基线，
+ * "只减不增"棘轮失真。故定义行与 themes/ 同机制排除出扫描域。
+ * 只剥声明（锚定在 `{`/`;` 之后），`var(--x, fallback)` 引用位不受影响。
+ */
+export function stripCustomPropertyDeclarations(src) {
+  return src.replace(/(^|[;{])(\s*)--[\w-]+\s*:[^;}]*/g, "$1$2");
+}
+
 const SPACING_PROP = /(?:^|[\s;{])((?:padding|margin)(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?|gap|row-gap|column-gap)\s*:\s*([^;}]+)/g;
 
 export function findBareSpacing(css) {
@@ -75,7 +86,7 @@ export function collectCssFiles(root = CSS_ROOT) {
 export function scan(root = CSS_ROOT) {
   const result = {};
   for (const file of collectCssFiles(root)) {
-    const css = stripCssComments(fs.readFileSync(file, "utf-8"));
+    const css = stripCustomPropertyDeclarations(stripCssComments(fs.readFileSync(file, "utf-8")));
     const rel = path.relative(process.cwd(), file).split(path.sep).join("/");
     const counts = {
       "bare-spacing": findBareSpacing(css).length,

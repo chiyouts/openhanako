@@ -89,7 +89,7 @@ export async function safetyReview(skillContent: any, resolveUtilityConfig: any)
 
   let utilCfg;
   try {
-    utilCfg = resolveSafetyReviewUtilityConfig(resolveUtilityConfig);
+    utilCfg = await resolveSafetyReviewUtilityConfig(resolveUtilityConfig);
   } catch (err) {
     return { safe: false, reason: err instanceof Error && err.message ? err.message : t("error.installSkillNoUtility") };
   }

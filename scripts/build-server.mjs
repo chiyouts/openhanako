@@ -57,6 +57,7 @@ import {
   copyBundledPluginRuntimeDependencies,
 } from "./build-server-plugin-runtime-deps.mjs";
 import { copyServerRuntimeAssets } from "./build-server-runtime-assets.mjs";
+import { pruneRuntimeDeadFiles } from "./build-server-prune.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -632,6 +633,19 @@ const exceljsDist = path.join(nmDir, "exceljs", "dist");
 if (fs.existsSync(exceljsDist)) {
   fs.rmSync(exceljsDist, { recursive: true, force: true });
   console.log("[build-server] cleanup: removed exceljs/dist/ (~21MB browser bundle)");
+}
+
+// ── 8e. 删除 node_modules 运行时死重文件 ──
+// nft 的 protectedDirs（Pi SDK 等 server 直接依赖）跳过了未追踪文件裁剪，
+// 其内嵌 vendored node_modules 带来数千个 .ts/.map/.md。这些扩展名在
+// node_modules 内运行时必然不读（Node 拒绝对 node_modules 做 type stripping，
+// 无 --enable-source-maps，SDK 运行时只读用户目录的 .md），按扩展名整体删除，
+// license/notice 类文件保留（第三方协议合规）。Windows NSIS 逐文件解压 +
+// Defender 逐文件扫描，文件数直接决定安装时长。
+{
+  const { removedFiles: prunedFiles, removedSize: prunedSize } = pruneRuntimeDeadFiles(nmDir);
+  const prunedMB = (prunedSize / 1024 / 1024).toFixed(1);
+  console.log(`[build-server] prune: removed ${prunedFiles} runtime-dead files from node_modules (${prunedMB}MB)`);
 }
 
 // ── 9. 更新 package.json ──

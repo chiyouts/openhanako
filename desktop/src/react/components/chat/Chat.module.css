@@ -431,6 +431,65 @@
     animation: hana-chat-soft-down-in 130ms var(--ease-out) both;
 }
 
+/* ── 跨 session Agent 来源消息卡（居中，对标 interludeRow） ── */
+.agentOriginRow {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin: var(--space-16) 0;
+    font-family: var(--font-sans);
+}
+
+.agentOriginCard {
+    background: var(--tool-bg);
+    border-radius: var(--radius-sm);
+    padding: var(--space-12) var(--space-16);
+    width: min(560px, 100%);
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.agentOriginHeader {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    margin-bottom: var(--space-8);
+}
+
+.agentOriginAvatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.agentOriginName {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.agentOriginBody {
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.agentOriginBodyCollapsed {
+    max-height: calc(1.6em * 12);
+    overflow: hidden;
+}
+
+.agentOriginToggle {
+    margin-top: var(--space-8);
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+}
+
 .interludeTrigger {
     width: min(100%, 680px);
     min-width: 0;
@@ -890,6 +949,63 @@
     .automationDraftActions {
         justify-content: flex-end;
     }
+}
+
+/* ── 跨 session 协作草稿确认卡（send / create） ── */
+
+.sessionCollabDraftAvatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.sessionCollabDraftBody {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: var(--space-12);
+}
+
+.sessionCollabDraftTitleInput {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--overlay-light, rgba(0, 0, 0, 0.08));
+    border-radius: var(--radius-sm);
+    outline: none;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-ui);
+    padding: 5px 8px;
+}
+
+.sessionCollabDraftTextarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 72px;
+    max-height: 220px;
+    resize: vertical;
+    border: 1px solid var(--overlay-light, rgba(0, 0, 0, 0.08));
+    border-radius: var(--radius-sm);
+    outline: none;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    padding: var(--space-8);
+}
+
+.sessionCollabDraftTextarea:focus,
+.sessionCollabDraftTitleInput:focus {
+    border-color: var(--accent);
+}
+
+.sessionCollabDraftError {
+    font-size: var(--fs-hint);
+    color: var(--danger, #b45a5a);
 }
 
 /* ── 设置确认卡片 ── */
@@ -1613,9 +1729,6 @@
     border: 0.5px solid var(--border, rgba(0,0,0,0.08));
     border-radius: var(--radius-chat-card);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-    contain: layout paint;
-    content-visibility: auto;
-    contain-intrinsic-size: 360px 450px;
     transition: border-color var(--duration-fast);
 }
 
@@ -1782,9 +1895,6 @@
 .browserScreenshot {
     margin: 8px 0;
     max-width: 600px;
-    contain: layout paint;
-    content-visibility: auto;
-    contain-intrinsic-size: 600px 360px;
     animation: hana-chat-soft-up-in 130ms var(--ease-out) both;
 }
 

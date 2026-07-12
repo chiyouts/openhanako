@@ -54,6 +54,13 @@
     --tooltip-border: transparent;
     --tooltip-shadow: rgba(0, 0, 0, 0.16);
 
+    /* scrim 遮罩分档（样式立法⑤ 任务 B）：overlay/backdrop 压暗背景专用，
+       禁止用于 box-shadow（overlay 语境在暗主题会翻白，见 --overlay-* 同类事故） */
+    --scrim-15: rgba(0, 0, 0, 0.15);
+    --scrim-30: rgba(0, 0, 0, 0.3);
+    --scrim-35: rgba(0, 0, 0, 0.35);
+    --scrim-45: rgba(0, 0, 0, 0.45);
+
     /* 动效 · 时长（三档：所有 transition / 短动画归到这三档） */
     --duration-instant: 0.1s;       /* 瞬：hover、关闭、退场、撤销 */
     --duration-fast:    0.15s;      /* 快：默认（按钮、面板、focus、状态切换）*/

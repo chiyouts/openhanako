@@ -16,11 +16,11 @@
 /* ── backdrop 视觉变体 ── */
 
 .backdrop-dim {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--scrim-35);
 }
 
 .backdrop-blur {
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--scrim-30);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
 }

@@ -1,6 +1,7 @@
 import type { AudioWaveform } from './chat-types';
 import type { JSONContent } from '@tiptap/core';
 import { sessionScopedKey } from './session-slice';
+import { notifyDraftCleared, notifyDraftSet } from './input-draft-sync';
 
 export interface AttachedFile {
   fileId?: string;
@@ -51,6 +52,8 @@ export interface InputSlice {
   drafts: Record<string, string>;
   /** 按 session path 存储的输入框富文本草稿（内存级，关窗口清空） */
   draftDocs: Record<string, JSONContent>;
+  /** 草稿持久化 hydrate 完成时间戳（0 = 未 hydrate）；InputArea 恢复 effect 依赖它重跑 */
+  draftsHydratedAt: number;
   deskContextAttached: boolean;
   docContextAttached: boolean;
   inputFocusTrigger: number;
@@ -64,6 +67,8 @@ export interface InputSlice {
   removeAttachedFile: (index: number) => void;
   setAttachedFiles: (files: AttachedFile[]) => void;
   clearAttachedFiles: () => void;
+  /** 清理指定 session 的附件；只有目标仍是当前 session 时才同步清空可见附件。 */
+  clearAttachedFilesForSession: (sessionPath: string) => void;
   setDraft: (sessionPath: string, text: string, doc?: JSONContent | null) => void;
   clearDraft: (sessionPath: string) => void;
   setDeskContextAttached: (attached: boolean) => void;
@@ -106,6 +111,7 @@ export const createInputSlice = (
   attachedFilesBySession: {},
   drafts: {},
   draftDocs: {},
+  draftsHydratedAt: 0,
   deskContextAttached: false,
   docContextAttached: false,
   inputFocusTrigger: 0,
@@ -124,6 +130,18 @@ export const createInputSlice = (
     set((s) => syncCurrentSessionAttachments(s as InputSlice & { currentSessionPath?: string | null }, files)),
   clearAttachedFiles: () =>
     set((s) => syncCurrentSessionAttachments(s as InputSlice & { currentSessionPath?: string | null }, [])),
+  clearAttachedFilesForSession: (sessionPath) =>
+    set((s) => {
+      const state = s as InputSlice & { currentSessionPath?: string | null };
+      const key = sessionScopedKey(state as any, sessionPath) || sessionPath;
+      const attachedFilesBySession = { ...s.attachedFilesBySession };
+      delete attachedFilesBySession[key];
+      delete attachedFilesBySession[sessionPath];
+      return {
+        attachedFilesBySession,
+        ...(state.currentSessionPath === sessionPath ? { attachedFiles: [] } : {}),
+      };
+    }),
   setDraft: (sessionPath, text, doc) =>
     set((s) => {
       const key = sessionScopedKey(s as any, sessionPath) || sessionPath;
@@ -133,6 +151,7 @@ export const createInputSlice = (
       else delete draftDocs[key];
       if (key !== sessionPath) delete drafts[sessionPath];
       if (key !== sessionPath) delete draftDocs[sessionPath];
+      notifyDraftSet(key, text, doc ?? null);
       return { drafts, draftDocs };
     }),
   clearDraft: (sessionPath) =>
@@ -144,6 +163,7 @@ export const createInputSlice = (
       delete rest[sessionPath];
       delete draftDocs[key];
       delete draftDocs[sessionPath];
+      notifyDraftCleared(key);
       return { drafts: rest, draftDocs };
     }),
   setDeskContextAttached: (attached) => set({ deskContextAttached: attached }),

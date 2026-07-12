@@ -197,7 +197,8 @@ describe("server startup diagnostics contract", () => {
     expect(mainSource).toContain("parsePortInUseStartupError");
     expect(mainSource).toContain("extractRootServerStartupError");
     expect(mainSource).toContain("buildLaunchFailureDialogDetail");
-    expect(mainSource).toContain("const rootServerError = structuredPortConflict || extractRootServerStartupError(_serverLogs)");
+    expect(mainSource).toContain('err?.code === "STALE_SERVER_UNCLEANED" ? err.message : null');
+    expect(mainSource).toContain("const rootServerError = structuredPortConflict || staleServerError || extractRootServerStartupError(_serverLogs)");
     expect(mainSource).toContain("tail.trimStart().startsWith(rootServerError)");
     expect(mainSource).not.toContain("tail.includes(rootServerError)");
     expect(mainSource).toContain("return `${rootServerError}\\n\\n${tail}`");

@@ -1,144 +1,56 @@
 {
   "schemaVersion": 1,
-  "tag": "v0.371.19",
-  "version": "0.371.19",
-  "previousTag": "v0.358.8",
-  "generatedAt": "2026-07-08T18:32:24.000Z",
+  "tag": "v0.380.10",
+  "version": "0.380.10",
+  "previousTag": "v0.380.9",
+  "generatedAt": "2026-07-11T00:31:45.000Z",
   "noUserFacingChanges": false,
   "summary": {
-    "zh": "新增 Cmd+F 会话内查找，Markdown 阅读改为报纸式排版，工具调用卡片视觉更统一，会话列表和归档同步更稳定，底层 SDK 与模型词典同步升级。",
-    "en": "Added Cmd+F in-conversation find, switched Markdown reading to a newsprint-style layout, unified the look of tool-call cards, made session list and archive syncing more reliable, and upgraded the underlying SDK and model dictionary."
+    "zh": "手动压缩上下文改为按会话身份定位，并明确反馈成功、无需压缩或失败结果。",
+    "en": "Manual context compaction now targets sessions by ID and clearly reports accepted, noop, or failed outcomes."
   },
   "counts": {
-    "feature": 1,
+    "feature": 0,
     "fix": 1,
-    "improvement": 2,
-    "migration": 1
+    "improvement": 0,
+    "migration": 0
   },
   "source": {
     "owner": "liliMozi",
     "repo": "openhanako",
-    "commitRange": "v0.358.8..5fda3b892",
-    "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.371.19",
+    "commitRange": "v0.380.9..b32b5415b",
+    "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.380.10",
     "releaseNotes": ""
   },
   "items": [
     {
-      "id": "conversation-find-bar",
-      "kind": "feature",
-      "importance": "high",
-      "title": {
-        "zh": "新增 Cmd+F 会话内查找",
-        "en": "Added Cmd+F in-conversation find"
-      },
-      "summary": {
-        "zh": "可以在当前会话内按关键词查找命中消息，结果按消息级别定位，自动跳转并高亮最佳匹配位置。",
-        "en": "You can now search within the current conversation by keyword, with results resolved at the message level and the view jumping straight to the best match with highlighting."
-      },
-      "details": [
-        {
-          "zh": "会话列表的内容搜索命中也会直接跳转到匹配消息，而不只是切换到会话开头。",
-          "en": "Content-search hits from the session list now jump to the matching message instead of just switching to the top of the conversation."
-        }
-      ],
-      "sources": [
-        { "type": "commit", "ref": "d8b4d93b0", "title": "feat(search): message-level find core with displayable-index semantics" },
-        { "type": "commit", "ref": "165b99c24", "title": "feat(server): /api/sessions/find message-level hit route aligned with messages indexing" },
-        { "type": "commit", "ref": "95bd94fc7", "title": "feat(chat): Cmd+F in-conversation find bar with whole-session hits" },
-        { "type": "commit", "ref": "57aee7d91", "title": "feat(sessions): content search hits jump to best-match message instead of bare switch" },
-        { "type": "commit", "ref": "f55efd818", "title": "feat(chat): message locate consumption on surface with load-until-visible and find marks" },
-        { "type": "commit", "ref": "37a5232f8", "title": "fix(chat): find bar refocus-on-reopen and debounce close semantics" },
-        { "type": "commit", "ref": "cf0e10ca4", "title": "fix(chat): locate live-id messages via revision reconcile and scope find marks to message bodies" }
-      ]
-    },
-    {
-      "id": "session-list-archive-reliability",
+      "id": "manual-compaction-session-id",
       "kind": "fix",
       "importance": "high",
       "title": {
-        "zh": "会话列表与归档同步更稳定",
-        "en": "Session list and archive syncing are more reliable"
+        "zh": "手动压缩按会话 ID 生效",
+        "en": "Manual compaction is session-ID authoritative"
       },
       "summary": {
-        "zh": "修复了单个会话条目异常会导致整个会话列表被清空的问题，以及远程客户端在会话归档后订阅静默断流的问题。",
-        "en": "Fixed an issue where a single broken session entry could clear the entire session list, and where remote clients would silently stop receiving updates after a session was archived."
+        "zh": "手动压缩会准确作用在当前会话，并给出成功、无需压缩或失败的明确反馈，不再静默按路径猜测。",
+        "en": "Manual compaction now hits the focused session reliably and surfaces accepted, noop, or failure feedback instead of silent path-based guesses."
       },
       "details": [
         {
-          "zh": "会话归属判断统一收敛到 manifest 权威源，减少路径推导带来的边界情况。",
-          "en": "Session ownership resolution is now consistently anchored to the manifest as the source of truth, reducing edge cases from path-based inference."
+          "zh": "桌面与移动端手动压缩均改为以会话 ID 为准。",
+          "en": "Desktop and mobile manual compaction both resolve targets by session ID."
+        },
+        {
+          "zh": "旧的路径寻址仍在协议边界兼容转换，但结果会明确回传。",
+          "en": "Legacy path addressing remains converted at the protocol boundary, with explicit terminal outcomes."
         }
       ],
       "sources": [
-        { "type": "commit", "ref": "68bf90ae2", "title": "fix(session): 列表链路单点失败不再清空整个会话列表" },
-        { "type": "commit", "ref": "5dbf549fc", "title": "fix(ws): 远程客户端会话订阅按 sessionId 匹配，归档不再静默断流" },
-        { "type": "commit", "ref": "8e4c0970f", "title": "fix(session): 新增 resolveSessionOwnership 归属边界，manifest.ownerAgentId 为权威" },
-        { "type": "commit", "ref": "e17132226", "title": "fix(session): coordinator 归属消费点收敛到 resolveSessionOwnership" },
-        { "type": "commit", "ref": "92cdfaba0", "title": "fix(session): engine/server 基础层归属消费点收敛到 resolveSessionOwnership" },
-        { "type": "commit", "ref": "b6b4b8d40", "title": "fix(session): server routes 门禁与归属消费点收敛到 manifest 权威" },
-        { "type": "commit", "ref": "5cf01f0a4", "title": "fix(session): 启动 rescan 回填存量 manifest 缺失的 ownerAgentId（只补缺不覆盖）" }
-      ]
-    },
-    {
-      "id": "newsprint-typography",
-      "kind": "improvement",
-      "importance": "medium",
-      "title": {
-        "zh": "Markdown 阅读排版升级为报纸式版式",
-        "en": "Markdown reading view adopts a newsprint-style layout"
-      },
-      "summary": {
-        "zh": "引入 PT Serif 衬线字体与基线网格结构，表格和代码块的间距对齐阅读节奏，长文阅读更沉静统一。",
-        "en": "Introduces the PT Serif typeface and a baseline-grid structure, with tables and code blocks snapped to the reading rhythm for a calmer, more consistent long-form reading experience."
-      },
-      "details": [],
-      "sources": [
-        { "type": "commit", "ref": "2b7afdbf7", "title": "feat(typography): PT Serif text-face token and radius-xs" },
-        { "type": "commit", "ref": "a89753af3", "title": "feat(typography): markdown reading defaults switch to newsprint metrics" },
-        { "type": "commit", "ref": "4ea552c2d", "title": "feat(preview): newsprint baseline-grid structure for markdown preview" },
-        { "type": "commit", "ref": "fe41c0ba8", "title": "feat(preview): rhythm snap for tables and code blocks" },
-        { "type": "commit", "ref": "384939a13", "title": "feat(design): fs-micro sixth type tier, dead space-token fix, token-reference guard" }
-      ]
-    },
-    {
-      "id": "tool-card-task-family",
-      "kind": "improvement",
-      "importance": "medium",
-      "title": {
-        "zh": "工具调用与子任务卡片视觉统一为「任务族」",
-        "en": "Tool-call and subagent cards unified into a consistent \"task family\" look"
-      },
-      "summary": {
-        "zh": "工具条、Subagent/Workflow 卡片收敛为统一的四角圆角矩形容器样式，深浅主题下的色阶层次更一致，视觉噪音更少。",
-        "en": "Tool bars and Subagent/Workflow cards now share a unified rounded-rectangle container style, with more consistent color depth across light and dark themes and less visual noise."
-      },
-      "details": [],
-      "sources": [
-        { "type": "commit", "ref": "8bb1c85e7", "title": "feat(chat): ChatResourceCard 支持 task variant，Subagent/Workflow 卡收敛任务族容器" },
-        { "type": "commit", "ref": "088c07fa5", "title": "feat(design): --tool-bg 全主题加深一档，非任务语义借用点迁移 --overlay-subtle" },
-        { "type": "commit", "ref": "d1e005b99", "title": "feat(chat): 工具条收敛任务族形态——四角圆角矩形，去 accent 竖线与 accent 呼吸点" },
-        { "type": "commit", "ref": "4d97a0fec", "title": "feat(chat): 任务族第二轮——底色中性化、连续 Subagent 卡融合、工具条对齐任务块宽度" },
-        { "type": "commit", "ref": "950e5a0f3", "title": "fix(design): --tool-bg 亮色主题降至用户气泡同深度" },
-        { "type": "commit", "ref": "d3cc83604", "title": "fix(design): --tool-bg 对齐收纳条（各主题 --overlay-subtle 同值），收纳条 hover 迁 --overlay-light" }
-      ]
-    },
-    {
-      "id": "sdk-and-model-dictionary-upgrade",
-      "kind": "migration",
-      "importance": "medium",
-      "title": {
-        "zh": "底层 Pi SDK 升级，模型能力词典同步刷新",
-        "en": "Underlying Pi SDK upgraded, model capability dictionary refreshed"
-      },
-      "summary": {
-        "zh": "升级到 @earendil-works 维护的 Pi SDK 0.80.3，并同步刷新已知模型目录（含 MiniMax-M3 上下文窗口调整），模型可用性与能力信息更准确。",
-        "en": "Upgraded to Pi SDK 0.80.3 (now maintained under the @earendil-works scope) and refreshed the known-models catalog accordingly, including a context-window adjustment for MiniMax-M3, for more accurate model availability and capability info."
-      },
-      "details": [],
-      "sources": [
-        { "type": "commit", "ref": "3413ec434", "title": "feat(sdk): 升级 Pi SDK 至 @earendil-works 0.80.3（scope 迁移）" },
-        { "type": "commit", "ref": "526a06481", "title": "fix(models): 用 pi-ai 0.80.3 目录对表刷新 known-models 词典" },
-        { "type": "commit", "ref": "934fab018", "title": "fix(models): fallbacks 与词典对齐 + MiniMax-M3 context 用户策展 500k" }
+        {
+          "type": "commit",
+          "ref": "b32b5415b",
+          "title": "fix: make manual compaction session-id authoritative"
+        }
       ]
     }
   ]

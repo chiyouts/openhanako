@@ -337,6 +337,16 @@ export class ConfigCoordinator {
   }
 
   resolveUtilityConfig( options: any = {}) {
+    const { models, resolverArgs } = this._utilityResolverArgs(options);
+    return models.resolveUtilityConfig(...resolverArgs);
+  }
+
+  async resolveUtilityConfigFresh( options: any = {}) {
+    const { models, resolverArgs } = this._utilityResolverArgs(options);
+    return models.resolveUtilityConfigFresh(...resolverArgs);
+  }
+
+  _utilityResolverArgs( options: any = {}) {
     const { agentId } = options || {};
     const agent = agentId ? this._d.getAgentById?.(agentId) : this._d.getAgent();
     if (!agent) {
@@ -353,7 +363,7 @@ export class ConfigCoordinator {
         requireUtilityLarge: options.requireUtilityLarge,
       });
     }
-    return models.resolveUtilityConfig(...resolverArgs);
+    return { models, resolverArgs };
   }
 
   // ── Agent Order ──
