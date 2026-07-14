@@ -92,6 +92,12 @@
     "noAvailableMembers": "没有可添加的 Agent",
     "agentActivity": "Agent 动态",
     "agentSettings": "群聊设置",
+    "exportTitle": "保存当前聊天",
+    "exportDescription": "将当前群聊或私聊保存为 Markdown 文件，下载到系统下载文件夹。",
+    "exportAction": "导出当前聊天",
+    "exporting": "正在导出…",
+    "exportSuccess": "聊天记录已下载：{filename}",
+    "exportFailed": "导出聊天记录失败：{message}",
     "toolPermission": "工具权限",
     "agentIdle": "空闲",
     "phoneReceivedNewMessages": "收到新的群聊消息",
@@ -141,9 +147,9 @@
     "empty": "还没有对话哦 ✿",
     "activity": "助手活动",
     "jian": "书桌",
-    "bridge": "接入社交平台",
+    "bridge": "社交平台",
     "toggle": "侧边栏",
-    "bridgeShort": "接入社交平台",
+    "bridgeShort": "社交平台",
     "pinned": "置顶",
     "searchPlaceholder": "搜索聊天记录",
     "searchClear": "清空搜索",
@@ -196,6 +202,10 @@
     "pinFailed": "置顶 session 失败",
     "unpinFailed": "取消置顶失败",
     "archive": "归档",
+    "copyId": "复制 Session ID",
+    "copyIdDone": "Session ID 已复制",
+    "copyIdFailed": "复制 Session ID 失败",
+    "copyIdUnavailable": "这个 Session 暂时没有可复制的 ID",
     "deletedAgent": {
       "title": "Agent 已删除",
       "description": "这段对话会保留为只读历史。继续聊天会用主 Agent 新建一个 session，并尝试压缩旧上下文。",
@@ -430,7 +440,26 @@
     "confirmMoreOptions": "更多确认选项",
     "attachmentDirectory": "[目录] {label}",
     "attachmentFile": "[附件] {label}",
-    "referenceDocument": "[参考文档] {path}"
+    "referenceDocument": "[参考文档] {path}",
+    "mention": {
+      "title": "引用内容",
+      "tab": { "files": "文件", "sessions": "对话", "agents": "助手" },
+      "empty": "没有匹配项",
+      "singleAgent": "每个回合暂时只能邀请一位助手审阅"
+    }
+  },
+  "agentReview": {
+    "running": "正在审阅当前对话",
+    "completed": "另一位助手的审阅结果",
+    "failed": "审阅失败，主助手尚未回答",
+    "cancelled": "审阅已取消",
+    "openSession": "打开审阅对话",
+    "sessionUnavailable": "找不到这个审阅对话",
+    "requestReceived": "已收到来自另一个对话的审阅请求",
+    "openReviewedSession": "打开被审阅对话",
+    "reviewedSessionFallback": "来源对话",
+    "reviewSessionFallback": "{name} 的审阅对话",
+    "interjectionUnavailable": "助手审阅不能作为插话发送，请等待当前回复结束"
   },
   "slash": {
     "diary": "写今日日记",
@@ -913,7 +942,11 @@
       "{name} 闻到了某个下午的橘子味",
       "那些对话还带着体温"
     ],
-    "installing": "{name} 正在更新到 v{version}，请稍候……"
+    "installing": "{name} 正在更新到 v{version}，请稍候……",
+    "preparing": {
+      "named": "{name} 正在准备新家……",
+      "anonymous": "你的助手正在准备新家……"
+    }
   },
   "settings": {
     "title": "设置",
@@ -1288,16 +1321,35 @@
       "updateAvailable": "有新版本可用：v{version}",
       "updateDownload": "下载",
       "updateChecking": "正在检查更新…",
-      "updateDownloading": "{agentName}正在准备新家 {percent}%",
+      "updateDownloading": "{agentName}正在准备新家",
       "updateReadyInstall": "v{version} 已就绪",
       "updateInstalling": "正在安装更新，HanaAgent 会自动重启…",
       "updateInstallManualHint": "点「重启更新」后安装，直接退出不会自动安装",
       "updateInstall": "重启更新",
       "updateInstallNow": "重启立即更新",
+      "updateApply": "更新",
+      "updateApplyAutoHint": "不点击也会在下次启动时自动生效",
+      "trainStickerTitle": "有新版本可用",
+      "trainStickerDownloading": "下载中 {percent}%",
+      "trainStickerApplying": "正在应用更新…",
+      "shellStickerTitle": "平台更新可用，需重启",
+      "shellStickerTitleBlocking": "完成此更新后才能继续接收新版本",
+      "fallbackStickerTitle": "版本 {fromVersion} 连续启动失败，已退回 {toVersion}。出问题的版本已被隔离，不会自动重试。",
+      "fallbackStickerAckLabel": "知道了",
+      "updateHistoryTitle": "更新历史",
+      "updateHistorySubtitle": "最近 5 个已发布版本",
+      "updateHistoryLoading": "正在读取更新历史…",
+      "updateHistoryOffline": "暂时无法连接发布网站，当前展示随应用保存的版本。",
+      "updateHistoryPartial": "目前只找到部分带有更新说明的版本。",
+      "updateHistoryUnavailable": "暂时无法读取更新历史，请稍后再试。",
       "updateProgress": "{percent}%",
       "updateError": "检查更新失败",
       "updateLatest": "已是最新版本",
+      "updateLatestCheckedAt": "已是最新（上次检查 {time}）",
+      "updateManifestReleasedAt": "货架清单签发于 {date}",
+      "updateManifestReleasedAtViaMirror": "货架清单签发于 {date}（经备用源）",
       "updateCheckBtn": "检查更新",
+      "updateRetryBtn": "重试",
       "updateNeedInstall": "请先将 HanaAgent 移动到应用程序文件夹",
       "updateDiskSpace": "磁盘空间不足，无法下载更新",
       "updateDigestCta": "此次更新你将获得",
@@ -2864,7 +2916,8 @@
     "tray": {
       "show": "显示 HanaAgent",
       "settings": "设置",
-      "quit": "退出"
+      "quit": "退出",
+      "repairArtifacts": "修复组件…"
     },
     "dialog": {
       "selectFolder": "选择工作文件夹",
@@ -2880,10 +2933,16 @@
       "serverFilesNotReady": "自动更新刚完成，新版本文件还在落地（缺少 {missing}），已等待 {waited}s 仍未就绪。请稍后重新启动 HanaAgent。",
       "serverModuleMissing": "Server 启动时找不到模块 {module}。\n通常是自动更新刚完成、新版本文件还在写入磁盘导致的。\n建议：等待 1-2 分钟后重新启动 HanaAgent；若反复出现，请前往 GitHub 反馈。",
       "installFailedTitle": "HanaAgent 更新",
-      "installFailedBody": "更新安装失败：\n{error}\n\n请重启 HanaAgent 后重试，或前往设置页面手动检查更新。"
+      "installFailedBody": "更新安装失败：\n{error}\n\n请重启 HanaAgent 后重试，或前往设置页面手动检查更新。",
+      "repairArtifactsTitle": "修复组件",
+      "repairArtifactsBody": "此操作会把 HanaAgent 的应用组件重置为安装包自带的版本，并重启应用。你的数据（助手、会话、设置）不受影响。",
+      "repairArtifactsConfirm": "修复并重启",
+      "repairArtifactsCancel": "取消",
+      "trainUpdateApplyFailedBody": "HanaAgent v{version}\n\n更新应用失败：\n{error}\n\n请重新启动应用。"
     },
     "notification": {
-      "ready": "通知已就绪"
+      "ready": "通知已就绪",
+      "componentQuarantined": "组件已自动回退到上一版本，功能不受影响"
     }
   },
   "devtools": {

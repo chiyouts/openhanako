@@ -37,13 +37,35 @@ contextBridge.exposeInMainWorld("hana", {
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
   getPendingAnnouncement: () => ipcRenderer.invoke("get-pending-announcement"),
   ackAnnouncement: () => ipcRenderer.invoke("ack-announcement"),
-  checkUpdate: () => ipcRenderer.invoke("check-update"),
   // Auto-update (Windows)
   autoUpdateCheck: () => ipcRenderer.invoke("auto-update-check"),
   autoUpdateDownload: () => ipcRenderer.invoke("auto-update-download"),
   autoUpdateInstall: () => ipcRenderer.invoke("auto-update-install"),
   autoUpdateState: () => ipcRenderer.invoke("auto-update-state"),
   autoUpdateSetChannel: (ch) => ipcRenderer.invoke("auto-update-set-channel", ch),
+  // 列车更新（OTA）：暂存状态查询 / 手动检查 / 立即应用（下载+激活+重启，仅由用户点击触发）
+  trainUpdateStatus: () => ipcRenderer.invoke("train-update-status"),
+  trainUpdateCheck: () => ipcRenderer.invoke("train-update-check"),
+  trainUpdateApply: () => ipcRenderer.invoke("train-update-apply"),
+  onTrainUpdateAvailable: (cb) => {
+    const handler = (_, payload) => cb(payload);
+    ipcRenderer.on("train-update-available", handler);
+    return () => ipcRenderer.removeListener("train-update-available", handler);
+  },
+  // 崩溃回退的一次性用户提示：广播（运行时触发）+ ack（用户点掉后清空
+  // 主进程内存里的状态，同一次事件不重复提示）。
+  onTrainFallbackNotice: (cb) => {
+    const handler = (_, payload) => cb(payload);
+    ipcRenderer.on("train-fallback-notice", handler);
+    return () => ipcRenderer.removeListener("train-fallback-notice", handler);
+  },
+  ackTrainFallbackNotice: () => ipcRenderer.invoke("train-fallback-notice-ack"),
+  onTrainUpdateProgress: (cb) => {
+    const handler = (_, progress) => cb(progress);
+    ipcRenderer.on("train-update-progress", handler);
+    return () => ipcRenderer.removeListener("train-update-progress", handler);
+  },
+  getUpdateDigestHistory: () => ipcRenderer.invoke("get-update-digest-history"),
   getAutoLaunchStatus: () => ipcRenderer.invoke("get-auto-launch-status"),
   setAutoLaunchEnabled: (enabled) => ipcRenderer.invoke("set-auto-launch-enabled", enabled),
   getKeepAwakeStatus: () => ipcRenderer.invoke("get-keep-awake-status"),

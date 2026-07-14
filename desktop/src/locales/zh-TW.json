@@ -91,6 +91,12 @@
     "noAvailableMembers": "沒有可新增的 Agent",
     "agentActivity": "Agent 動態",
     "agentSettings": "群聊設定",
+    "exportTitle": "儲存目前聊天",
+    "exportDescription": "將目前群聊或私聊儲存為 Markdown 檔案，下載到系統下載資料夾。",
+    "exportAction": "匯出目前聊天",
+    "exporting": "正在匯出…",
+    "exportSuccess": "聊天記錄已下載：{filename}",
+    "exportFailed": "匯出聊天記錄失敗：{message}",
     "toolPermission": "工具權限",
     "agentIdle": "空閒",
     "phoneReceivedNewMessages": "收到新的群聊訊息",
@@ -196,6 +202,10 @@
     "pinFailed": "置頂 session 失敗",
     "unpinFailed": "取消置頂失敗",
     "archive": "封存",
+    "copyId": "複製 Session ID",
+    "copyIdDone": "Session ID 已複製",
+    "copyIdFailed": "複製 Session ID 失敗",
+    "copyIdUnavailable": "這個 Session 暫時沒有可複製的 ID",
     "deletedAgent": {
       "title": "Agent 已刪除",
       "description": "這段對話會保留為唯讀歷史。繼續聊天會用主 Agent 新建一個 session，並嘗試壓縮舊上下文。",
@@ -430,7 +440,26 @@
     "confirmMoreOptions": "更多确认选项",
     "attachmentDirectory": "[目录] {label}",
     "attachmentFile": "[附件] {label}",
-    "referenceDocument": "[参考文档] {path}"
+    "referenceDocument": "[参考文档] {path}",
+    "mention": {
+      "title": "引用內容",
+      "tab": { "files": "檔案", "sessions": "對話", "agents": "助手" },
+      "empty": "沒有符合項目",
+      "singleAgent": "每個回合暫時只能邀請一位助手審閱"
+    }
+  },
+  "agentReview": {
+    "running": "正在審閱目前對話",
+    "completed": "另一位助手的審閱結果",
+    "failed": "審閱失敗，主助手尚未回答",
+    "cancelled": "審閱已取消",
+    "openSession": "開啟審閱對話",
+    "sessionUnavailable": "找不到這個審閱對話",
+    "requestReceived": "已收到來自另一個對話的審閱請求",
+    "openReviewedSession": "開啟被審閱對話",
+    "reviewedSessionFallback": "來源對話",
+    "reviewSessionFallback": "{name} 的審閱對話",
+    "interjectionUnavailable": "助手審閱不能作為插話傳送，請等待目前回覆結束"
   },
   "slash": {
     "diary": "寫今日日記",
@@ -913,7 +942,11 @@
       "{name} 聞到了某個下午的橘子味",
       "那些對話還帶著體溫"
     ],
-    "installing": "{name} 正在更新到 v{version}，請稍候……"
+    "installing": "{name} 正在更新到 v{version}，請稍候……",
+    "preparing": {
+      "named": "{name} 正在準備新家……",
+      "anonymous": "你的助手正在準備新家……"
+    }
   },
   "settings": {
     "title": "設定",
@@ -1222,16 +1255,35 @@
       "updateAvailable": "有新版本可用：v{version}",
       "updateDownload": "下載",
       "updateChecking": "正在檢查更新…",
-      "updateDownloading": "{agentName}正在準備新家 {percent}%",
+      "updateDownloading": "{agentName}正在準備新家",
       "updateReadyInstall": "v{version} 已就緒",
       "updateInstalling": "正在安裝更新，HanaAgent 會自動重新啟動…",
       "updateInstallManualHint": "點「重啟更新」後安裝，直接退出不會自動安裝",
       "updateInstall": "重新啟動更新",
       "updateInstallNow": "重新啟動立即更新",
+      "updateApply": "更新",
+      "updateApplyAutoHint": "不點擊也會在下次啟動時自動生效",
+      "trainStickerTitle": "有新版本可用",
+      "trainStickerDownloading": "下載中 {percent}%",
+      "trainStickerApplying": "正在套用更新…",
+      "shellStickerTitle": "平台更新可用，需重新啟動",
+      "shellStickerTitleBlocking": "完成此更新後才能繼續接收新版本",
+      "fallbackStickerTitle": "版本 {fromVersion} 連續啟動失敗，已退回 {toVersion}。出問題的版本已被隔離，不會自動重試。",
+      "fallbackStickerAckLabel": "知道了",
+      "updateHistoryTitle": "更新歷史",
+      "updateHistorySubtitle": "最近 5 個已發佈版本",
+      "updateHistoryLoading": "正在讀取更新歷史…",
+      "updateHistoryOffline": "暫時無法連線發佈網站，目前顯示隨應用程式儲存的版本。",
+      "updateHistoryPartial": "目前只找到部分附有更新說明的版本。",
+      "updateHistoryUnavailable": "暫時無法讀取更新歷史，請稍後再試。",
       "updateProgress": "{percent}%",
       "updateError": "檢查更新失敗",
       "updateLatest": "已是最新版本",
+      "updateLatestCheckedAt": "已是最新（上次檢查 {time}）",
+      "updateManifestReleasedAt": "貨架清單簽發於 {date}",
+      "updateManifestReleasedAtViaMirror": "貨架清單簽發於 {date}（經備用源）",
       "updateCheckBtn": "檢查更新",
+      "updateRetryBtn": "重試",
       "updateNeedInstall": "請先將 HanaAgent 移動到應用程式資料夾",
       "updateDiskSpace": "磁碟空間不足，無法下載更新",
       "updateDigestCta": "此次更新你將獲得",
@@ -2863,7 +2915,8 @@
     "tray": {
       "show": "顯示 HanaAgent",
       "settings": "設定",
-      "quit": "結束"
+      "quit": "結束",
+      "repairArtifacts": "修復元件…"
     },
     "dialog": {
       "selectFolder": "選擇工作資料夾",
@@ -2879,10 +2932,16 @@
       "serverFilesNotReady": "自動更新剛完成，新版本檔案仍在寫入磁碟（缺少 {missing}），已等待 {waited} 秒仍未就緒。請稍後重新啟動 HanaAgent。",
       "serverModuleMissing": "Server 啟動失敗：找不到模組 {module}。\n通常是自動更新剛完成、新版本檔案仍在寫入磁碟所致。\n建議：等待 1-2 分鐘後重新啟動 HanaAgent；若反覆出現，請至 GitHub 回報。",
       "installFailedTitle": "HanaAgent 更新",
-      "installFailedBody": "更新安裝失敗：\n{error}\n\n請重新啟動 HanaAgent 後重試，或前往設定頁面手動檢查更新。"
+      "installFailedBody": "更新安裝失敗：\n{error}\n\n請重新啟動 HanaAgent 後重試，或前往設定頁面手動檢查更新。",
+      "repairArtifactsTitle": "修復元件",
+      "repairArtifactsBody": "此操作會將 HanaAgent 的應用元件重設為安裝包內建的版本，並重新啟動應用程式。你的資料（助手、對話、設定）不受影響。",
+      "repairArtifactsConfirm": "修復並重新啟動",
+      "repairArtifactsCancel": "取消",
+      "trainUpdateApplyFailedBody": "HanaAgent v{version}\n\n更新套用失敗：\n{error}\n\n請重新啟動應用程式。"
     },
     "notification": {
-      "ready": "通知已就緒"
+      "ready": "通知已就緒",
+      "componentQuarantined": "元件已自動回退到上一版本，功能不受影響"
     }
   },
   "devtools": {

@@ -7,6 +7,7 @@ import { resolveConnection } from "./local-server.ts";
 import { HanaCliClient } from "./client.ts";
 import { printSessions, printStatus, startChat } from "./chat.ts";
 import { spawnServerForeground, startLocalServerAndWait } from "./server-runner.ts";
+import { runBundlePull, runBundleStatus } from "./bundle.ts";
 import { ansi } from "./terminal-theme.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,8 +30,22 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (args.command === "serve") {
-    spawnServerForeground({ projectRoot: PROJECT_ROOT, extraArgs: args.passthrough });
+    await spawnServerForeground({
+      projectRoot: PROJECT_ROOT,
+      extraArgs: args.passthrough,
+      channel: args.channel,
+      allowDataDowngrade: args.allowDataDowngrade,
+    });
     return 0;
+  }
+
+  if (args.command === "bundle") {
+    // Pure local + network operation against the release shelf — never
+    // needs (or starts) a running server, so it skips resolveConnection.
+    if (args.subcommand === "pull") {
+      return await runBundlePull({ channel: args.channel });
+    }
+    return await runBundleStatus({ channel: args.channel });
   }
 
   let connection: any = resolveConnection({ url: args.url, token: args.token });

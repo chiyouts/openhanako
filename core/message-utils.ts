@@ -9,7 +9,11 @@ import { isToolCallBlock, getToolArgs } from "./llm-utils.ts";
 import { SessionManager } from "../lib/pi-sdk/index.ts";
 import { isSessionJsonlFilename } from "../lib/session-jsonl.ts";
 import { DEFERRED_RESULT_RECORD_TYPE } from "../lib/deferred-result-notification.ts";
-import { MESSAGE_ORIGIN_RECORD_TYPE } from "./desktop-session-submit.ts";
+import {
+  AGENT_REVIEW_RECORD_TYPE,
+  MESSAGE_ORIGIN_RECORD_TYPE,
+  MESSAGE_PRESENTATION_RECORD_TYPE,
+} from "./desktop-session-submit.ts";
 import { SESSION_COLLAB_DECISION_RECORD_TYPE } from "../lib/session-collab/decision-record.ts";
 import {
   TURN_INPUT_CONSUMPTION_EVENT_TYPE,
@@ -18,6 +22,7 @@ import {
 import { repairOversizedSessionEntriesInFile } from "./session-jsonl-file.ts";
 import { isAssistantCommentaryTextBlock } from "../shared/text-signature.ts";
 import { TOOL_ARG_SUMMARY_KEYS, summarizeToolArgs } from "../shared/tool-arg-summary.ts";
+import { projectSessionMessageForDisplay } from "./session-reminders.ts";
 export { TOOL_ARG_SUMMARY_KEYS };
 
 const SESSION_TAIL_READ_THRESHOLD = 256 * 1024;
@@ -93,7 +98,7 @@ export function filterUnreferencedInlineImages(text, images) {
 }
 
 /**
- * 优先从 session JSONL 读取完整历史。
+ * 优先从 session JSONL 读取完整历史，并在返回边界移除模型专用的 Reminder 展示内容。
  * engine.messages 可能只是当前上下文窗口，切回页面时会导致旧消息缺失。
  * 读文件失败时再退回内存态，避免历史接口直接空白。
  */
@@ -111,7 +116,7 @@ export async function loadSessionHistoryMessages(engine, explicitPath) {
         const message = historyMessageFromEntry(entry);
         if (message) messages.push(message);
       }
-      if (messages.length > 0) return messages;
+      if (messages.length > 0) return messages.map(projectSessionMessageForDisplay);
     }
   } catch {
     // 旧文件或损坏文件继续走兼容读取，不让历史页直接空白。
@@ -132,7 +137,7 @@ export async function loadSessionHistoryMessages(engine, explicitPath) {
       }
     }
 
-    if (messages.length > 0) return messages;
+    if (messages.length > 0) return messages.map(projectSessionMessageForDisplay);
   } catch {
     // 文件读取失败
   }
@@ -166,6 +171,8 @@ function historyMessageFromEntry(entry) {
       || entry.customType === TURN_INPUT_PRESENTATION_EVENT_TYPE
       || entry.customType === TURN_INPUT_CONSUMPTION_EVENT_TYPE
       || entry.customType === MESSAGE_ORIGIN_RECORD_TYPE
+      || entry.customType === AGENT_REVIEW_RECORD_TYPE
+      || entry.customType === MESSAGE_PRESENTATION_RECORD_TYPE
       || entry.customType === SESSION_COLLAB_DECISION_RECORD_TYPE
     )
   ) {
@@ -189,6 +196,12 @@ export function annotateOriginMessages(messages) {
   for (const m of messages || []) {
     if (m?.role === "custom" && m.customType === MESSAGE_ORIGIN_RECORD_TYPE) {
       pendingOrigin = m.data || null;
+      continue;
+    }
+    if (m?.role === "custom" && (
+      m.customType === AGENT_REVIEW_RECORD_TYPE
+      || m.customType === MESSAGE_PRESENTATION_RECORD_TYPE
+    )) {
       continue;
     }
     if (m?.role === "user" && pendingOrigin?.origin) {

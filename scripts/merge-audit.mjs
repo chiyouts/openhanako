@@ -6,8 +6,8 @@
  * （即另一侧的改动被无声丢弃），并对每处受灾用三方合并判定"当前 HEAD 是否已补回"。
  *
  * 背景：这类事故在 `git log` / `git log -S` 里完全隐形（merge commit 默认不展示
- * diff），2026-07-06 曾据此挖出 2eff6f453 覆盖 infinity 侧 10 文件 + 8 依赖、
- * deaf16616 覆盖 PlanModeButton 的两起真实事故。原理与判读手册见 .docs/MERGE-AUDIT.md。
+ * diff）。本工具把双侧都改过、却被整文件解决成单侧内容的情况列为 real loss；
+ * 修复时应逐项恢复缺失语义，再重新运行同一审计直到结果为 0 real loss。
  *
  * 用法：
  *   node scripts/merge-audit.mjs                 # 审计当前分支全部 first-parent merge
@@ -200,7 +200,7 @@ function main() {
       `\naudited ${merges.length} merge(s): ${realCount} real loss, ${conflictCount} conflict (needs human), ${expectedCount} expected noise\n`,
     );
     if (realCount > 0) {
-      process.stdout.write("real loss = 该侧改动至今不在被审计 ref 上。按 .docs/MERGE-AUDIT.md 判读与修复。\n");
+      process.stdout.write("real loss = 该侧改动至今不在被审计 ref 上。逐项恢复缺失语义后，重新运行同一审计确认归零。\n");
     }
   }
 

@@ -10,7 +10,7 @@
  *   - 含 usr/bin/sh.exe（bash 以 POSIX/sh 模式运行）与常用 coreutils
  *   - 不含 bash.exe / Git Bash 交互层 / Perl / Tcl-Tk
  * 体积与文件数远小于 PortableGit（约 367 个文件 / 94MB），无需再做裁剪。
- * 设计见 .docs/specs/2026-07-02-windows-mingit-runtime.md
+ * 下载版本与 SHA-256 固定在本文件中；必需 runtime 文件缺失时构建立即失败。
  */
 
 import { execFileSync } from "child_process";

@@ -738,6 +738,31 @@ export function handleServerMessage(msg: any): void {
       }
       break;
 
+    case 'agent_review_status': {
+      const sp = nonEmptyString(msg.sessionPath);
+      const requestId = nonEmptyString(msg.requestId);
+      if (!sp || !requestId) break;
+      const session = sessionScopedValue(useStore.getState(), useStore.getState().chatSessions, sp);
+      const item = session?.items.find((candidate: any) => (
+        candidate.type === 'message' && candidate.data.role === 'user' && candidate.data.id === requestId
+      ));
+      if (!item || item.type !== 'message') break;
+      useStore.getState().appendOptimisticUserMessage(sp, {
+        ...item.data,
+        agentReview: {
+          requestId,
+          status: msg.status,
+          reviewedSessionId: msg.reviewedSessionId ?? null,
+          reviewerSessionId: msg.reviewerSessionId ?? null,
+          reviewerAgentId: msg.reviewerAgentId,
+          reviewerAgentName: msg.reviewerAgentName,
+          text: msg.result ?? item.data.agentReview?.text ?? null,
+          error: msg.error ?? null,
+        },
+      });
+      break;
+    }
+
     case 'session_user_message': {
       const sp = msg.sessionPath;
       if (!sp || !msg.message) break;
@@ -769,6 +794,10 @@ export function handleServerMessage(msg: any): void {
         attachments: msg.message.attachments,
         quotedText: msg.message.quotedText,
         skills: msg.message.skills,
+        sessionRefs: msg.message.sessionRefs ?? undefined,
+        agentMentions: msg.message.agentMentions ?? undefined,
+        agentReview: msg.message.agentReview ?? undefined,
+        agentReviewRequest: msg.message.agentReviewRequest ?? undefined,
         deskContext: msg.message.deskContext ?? undefined,
         origin: msg.message.origin ?? undefined,
       };
@@ -1022,6 +1051,16 @@ export function handleServerMessage(msg: any): void {
         // 通知其他窗口（设置窗口等）同步主题
         window.platform?.settingsChanged?.('theme-changed', { theme: msg.value });
       }
+      break;
+    }
+
+    case 'abort_result': {
+      if (msg.status !== 'already_stopped') break;
+      const sp = msg.sessionPath || null;
+      const sid = typeof msg.sessionId === 'string' && msg.sessionId.trim() ? msg.sessionId.trim() : null;
+      const streamId = typeof msg.streamId === 'string' && msg.streamId.trim() ? msg.streamId.trim() : null;
+      const applied = applyStreamingStatus(false, sp, { streamId }, { force: !streamId });
+      if (sp && applied) streamBufferManager.finishTurn(sp, sid);
       break;
     }
 

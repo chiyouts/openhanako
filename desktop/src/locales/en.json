@@ -92,6 +92,12 @@
     "noAvailableMembers": "No agents available",
     "agentActivity": "Agent activity",
     "agentSettings": "Chat settings",
+    "exportTitle": "Save current chat",
+    "exportDescription": "Save the current group chat or direct message as a Markdown file in your Downloads folder.",
+    "exportAction": "Export current chat",
+    "exporting": "Exporting…",
+    "exportSuccess": "Chat history downloaded: {filename}",
+    "exportFailed": "Could not export chat history: {message}",
     "toolPermission": "Tool permission",
     "agentIdle": "Idle",
     "phoneReceivedNewMessages": "Received new channel messages",
@@ -196,6 +202,10 @@
     "pinFailed": "Failed to pin session",
     "unpinFailed": "Failed to unpin session",
     "archive": "Archive",
+    "copyId": "Copy Session ID",
+    "copyIdDone": "Session ID copied",
+    "copyIdFailed": "Failed to copy Session ID",
+    "copyIdUnavailable": "This Session does not have a copyable ID",
     "deletedAgent": {
       "title": "Agent deleted",
       "description": "This chat is kept as read-only history. Continuing will create a new session on your primary Agent and try to compact the old context.",
@@ -430,7 +440,26 @@
     "contextActions": "Context actions",
     "refreshAndCompact": "Update and compact",
     "refreshAndCompactTooltip": "Update to the latest memory and tool set",
-    "compact": "Compact"
+    "compact": "Compact",
+    "mention": {
+      "title": "Mention",
+      "tab": { "files": "Files", "sessions": "Conversations", "agents": "Agents" },
+      "empty": "No matches",
+      "singleAgent": "Only one Agent reviewer can be invited per turn"
+    }
+  },
+  "agentReview": {
+    "running": "Reviewing this Session",
+    "completed": "Review from another Agent",
+    "failed": "Review failed; the main Agent has not replied",
+    "cancelled": "Review cancelled",
+    "openSession": "Open review Session",
+    "sessionUnavailable": "Review Session not found",
+    "requestReceived": "Review request received from another Session",
+    "openReviewedSession": "Open reviewed Session",
+    "reviewedSessionFallback": "Source conversation",
+    "reviewSessionFallback": "{name}'s review conversation",
+    "interjectionUnavailable": "Agent review cannot be sent as an interjection; wait for the current reply to finish"
   },
   "slash": {
     "diary": "Write today's diary",
@@ -913,7 +942,11 @@
       "{name} smelled oranges from an afternoon",
       "Those conversations still carry warmth"
     ],
-    "installing": "{name} is updating to v{version}, please wait…"
+    "installing": "{name} is updating to v{version}, please wait…",
+    "preparing": {
+      "named": "{name} is preparing a new home…",
+      "anonymous": "Your assistant is preparing a new home…"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -1288,16 +1321,35 @@
       "updateAvailable": "New version available: v{version}",
       "updateDownload": "Download",
       "updateChecking": "Checking for updates…",
-      "updateDownloading": "{agentName} is preparing a new home {percent}%",
+      "updateDownloading": "{agentName} is preparing a new home",
       "updateReadyInstall": "v{version} ready to install",
       "updateInstalling": "Installing update. HanaAgent will restart automatically…",
       "updateInstallManualHint": "Install after clicking Restart to update; quitting will not install automatically",
       "updateInstall": "Restart to update",
       "updateInstallNow": "Restart and update now",
+      "updateApply": "Update",
+      "updateApplyAutoHint": "It will still apply automatically at the next launch if you skip this",
+      "trainStickerTitle": "New version available",
+      "trainStickerDownloading": "Downloading {percent}%",
+      "trainStickerApplying": "Applying update…",
+      "shellStickerTitle": "Platform update available, restart needed",
+      "shellStickerTitleBlocking": "This update is required to keep receiving new versions",
+      "fallbackStickerTitle": "Version {fromVersion} failed to start repeatedly and was rolled back to {toVersion}. The problematic version has been quarantined and will not retry automatically.",
+      "fallbackStickerAckLabel": "Got it",
+      "updateHistoryTitle": "Update history",
+      "updateHistorySubtitle": "The 5 most recent published versions",
+      "updateHistoryLoading": "Loading update history…",
+      "updateHistoryOffline": "The release site is unavailable. Showing the version saved with this app.",
+      "updateHistoryPartial": "Only some published versions currently include update notes.",
+      "updateHistoryUnavailable": "Update history is temporarily unavailable. Please try again later.",
       "updateProgress": "{percent}%",
       "updateError": "Update check failed",
       "updateLatest": "You're up to date",
+      "updateLatestCheckedAt": "Up to date (last checked {time})",
+      "updateManifestReleasedAt": "Shelf manifest issued {date}",
+      "updateManifestReleasedAtViaMirror": "Shelf manifest issued {date} (via backup source)",
       "updateCheckBtn": "Check for updates",
+      "updateRetryBtn": "Retry",
       "updateNeedInstall": "Please move HanaAgent to the Applications folder first",
       "updateDiskSpace": "Not enough disk space to download update",
       "updateDigestCta": "What you get in this update",
@@ -2869,7 +2921,8 @@
     "tray": {
       "show": "Show HanaAgent",
       "settings": "Settings",
-      "quit": "Quit"
+      "quit": "Quit",
+      "repairArtifacts": "Repair Components…"
     },
     "dialog": {
       "selectFolder": "Select Working Folder",
@@ -2885,10 +2938,16 @@
       "serverFilesNotReady": "Auto-update just completed; new version files still landing on disk (missing {missing}). Waited {waited}s without success. Please restart HanaAgent shortly.",
       "serverModuleMissing": "Server startup failed: cannot find module {module}.\nThis typically happens right after an auto-update, while new files are still being written to disk.\nRecommendation: wait 1-2 minutes and restart HanaAgent. Report on GitHub if it persists.",
       "installFailedTitle": "HanaAgent Update",
-      "installFailedBody": "Update installation failed:\n{error}\n\nPlease restart HanaAgent and try again, or check for updates manually in Settings."
+      "installFailedBody": "Update installation failed:\n{error}\n\nPlease restart HanaAgent and try again, or check for updates manually in Settings.",
+      "repairArtifactsTitle": "Repair Components",
+      "repairArtifactsBody": "This resets HanaAgent's app components to the originally installed version and restarts the app. Your data (agents, sessions, settings) is not affected.",
+      "repairArtifactsConfirm": "Repair and Restart",
+      "repairArtifactsCancel": "Cancel",
+      "trainUpdateApplyFailedBody": "HanaAgent v{version}\n\nUpdate failed to apply:\n{error}\n\nPlease restart the app."
     },
     "notification": {
-      "ready": "Notifications enabled"
+      "ready": "Notifications enabled",
+      "componentQuarantined": "A component was automatically rolled back to the previous version; functionality is unaffected"
     }
   },
   "devtools": {

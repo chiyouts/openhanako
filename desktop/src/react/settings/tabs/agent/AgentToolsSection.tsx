@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { t, autoSaveConfig } from "../../helpers";
-import { Toggle } from "../../widgets/Toggle";
+import { Toggle } from "@/ui";
 import { SettingsSection } from "../../components/SettingsSection";
 import { SettingsRow } from "../../components/SettingsRow";
 
@@ -13,7 +13,6 @@ const OPTIONAL_TOOL_NAMES = [
   "automation",
   "beautify",
   "browser",
-  "dm",
   "install_skill",
   "office",
   "session",
@@ -35,8 +34,6 @@ interface Props {
 
 export function AgentToolsSection({ availableTools, disabled }: Props) {
   // Only render rows for tools the agent actually has registered.
-  // This naturally hides dm in single-agent environments where the agent
-  // has no channelsDir/agentsDir wiring.
   // If the field is absent (old backend / config still loading), render the
   // built-in optional list. An explicit [] still means "no optional tools".
   const renderable = Array.isArray(availableTools)

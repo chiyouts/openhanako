@@ -96,7 +96,7 @@ import { createWebAuthRoute } from "./routes/web-auth.ts";
 import { createWebSocketAuthRoute } from "./routes/ws-auth.ts";
 import { createMobileWorkbenchRoute } from "./routes/mobile-workbench.ts";
 import { createStudioWorkspacesRoute } from "./routes/studio-workspaces.ts";
-import { createMobileStaticRoute } from "./routes/mobile-static.ts";
+import { createMobileStaticRoute, resolveMobileStaticRouteOptions } from "./routes/mobile-static.ts";
 import { createHtmlPreviewRoute } from "./routes/html-preview.ts";
 import { createAccessRoute } from "./routes/access.ts";
 import { createMediaRoute } from "./routes/media.ts";
@@ -104,6 +104,9 @@ import { createSpeechRecognitionRoute } from "./routes/speech-recognition.ts";
 import { registerTaskRegistryBusHandlers } from "./task-bus-handlers.ts";
 import { registerDeferredResultBusHandlers } from "./deferred-result-bus-handlers.ts";
 import { configureProcessPiSdkEnv, ensureHanaPiSdkDirs, resolveHanakoHome } from "../shared/hana-runtime-paths.ts";
+import { DATA_EPOCH } from "../shared/contract-versions.cjs";
+import { describeForeignServerBlock, isForeignServerBlocking, probeServerInfo } from "../shared/server-info-probe.cjs";
+import { assertAndStampDataEpoch, describeDataEpochBlock } from "../shared/data-epoch.cjs";
 // internal-browser WS is handled directly via raw ws.WebSocketServer in the
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
 import { ConfirmStore } from "../lib/confirm-store.ts";
@@ -266,6 +269,71 @@ try {
   const pkg = JSON.parse(fs.readFileSync(fromRoot("package.json"), "utf-8"));
   appVersion = pkg.version || "?";
 } catch {}
+
+// ── 同宅互斥闸（同一 HANA_HOME 的内核互斥）──
+// 必须在任何端口监听、任何 store 打开之前跑：一台机器上的同一 HANA_HOME
+// 可能被两个内核并发打开（`hana serve` 先起、桌面后启动是最常见的触发
+// 路径），并发读写同一批 SQLite / session 文件会互相覆盖。这里用 token
+// 认证探测（shared/server-info-probe.cjs）确认 server-info.json 记录的
+// 内核是否仍然存活、且确实是同一个家；探测不通（not-hana / dead）视为
+// 残留锁并自清，用户永远不需要手删文件——不信任裸 PID，因为 PID 会被
+// 系统复用。
+// 已接受的残余竞态：两个内核同时冷启动、都还没写下 server-info.json 的
+// 秒级窗口不设防（与 Postgres postmaster.pid 的取舍一致），且默认端口
+// 相同时后到者的 listen() 会天然 EADDRINUSE。
+{
+  const serverInfoPath = path.join(hanakoHome, "server-info.json");
+  let existingServerInfo: any = null;
+  try {
+    existingServerInfo = JSON.parse(fs.readFileSync(serverInfoPath, "utf-8"));
+  } catch {
+    // 文件不存在或无法解析：没有残留锁需要处理
+  }
+
+  if (existingServerInfo) {
+    const probe = await probeServerInfo({ info: existingServerInfo });
+    if (isForeignServerBlocking(probe.status)) {
+      console.error(describeForeignServerBlock({ status: probe.status, info: existingServerInfo }));
+      process.exit(1);
+    }
+    // not-hana / dead：残留锁已确认失效（自清，不需要用户手删）
+    try { fs.unlinkSync(serverInfoPath); } catch {}
+  }
+}
+
+// ── 数据 epoch 单调闸 ──
+// 紧跟在上面的同宅互斥闸之后、任何 store 被打开之前：拒止用旧数据格式理解
+// 能力打开被更高 epoch 内核触碰过的数据目录，避免静默逻辑损坏。见
+// shared/data-epoch.cjs 的模块注释了解完整设计取舍。
+{
+  const allowDataDowngrade = process.env.HANA_ALLOW_DATA_DOWNGRADE === "1";
+  const epochResult = await assertAndStampDataEpoch({
+    homeDir: hanakoHome,
+    ownEpoch: DATA_EPOCH,
+    ownVersion: appVersion,
+    allowDowngrade: allowDataDowngrade,
+    log: { warn: (msg: string) => console.warn(msg) },
+  });
+  if (epochResult.allowed === false) {
+    if (epochResult.reason === "corrupt-stamp") {
+      console.error(
+        `[data-epoch] 数据 epoch 印章文件损坏，无法确认此数据目录的历史状态，已拒绝启动：${epochResult.stampPath}\n`
+        + `请人工检查该文件；确认数据本身完好后可删除该文件以重新建立印章，或从备份恢复。\n`
+        + `[data-epoch] The data-epoch stamp file is corrupt; refusing to start because this home's history `
+        + `cannot be established: ${epochResult.stampPath}\n`
+        + `Inspect the file by hand; once you've confirmed the data itself is intact you may delete it to `
+        + `re-stamp, or restore from backup.`
+      );
+    } else {
+      console.error(describeDataEpochBlock({
+        stampEpoch: epochResult.stampEpoch,
+        ownEpoch: epochResult.ownEpoch,
+        stampLastVersion: epochResult.stampLastVersion,
+      }));
+    }
+    process.exit(1);
+  }
+}
 
 const SERVER_TOKEN = process.env.HANA_TOKEN || crypto.randomBytes(16).toString("hex");
 const envPort = Number.parseInt(process.env.HANA_PORT || "", 10);
@@ -820,8 +888,29 @@ const bridgeManagerRef = {
   }),
 };
 
+/**
+ * `/mobile`、`/desktop` 网页客户端入口的供货模式，启动时决议一次，绝不
+ * 逐请求判断、绝不静默回退：
+ *   1. `HANA_RENDERER_DIST` 注入 → 严格使用；目录缺失或不含 mobile.html
+ *      时不回退源码树——那会把"产物损坏"伪装成"从未安装"，误导排障，
+ *      而是显式落 error 模式（503 + 启动日志）。
+ *   2. 未注入 → 走仓库自带的 desktop/dist-renderer（本地 `npm start` 的
+ *      既有开发形态，逐字节不变）。
+ *   3. 以上都不成立 → guide 模式，"网页前端从未拉取"的正确语义。
+ * 三分支的实际判定逻辑在 mobile-static.ts 的 resolveMobileStaticRouteOptions
+ * ——那个模块没有顶层副作用，可以被测试直接 import；server/index.ts 本身
+ * 在模块顶层就绑定端口、起 engine，没有能安全导入的入口，所以可测的纯决
+ * 策逻辑放在旁边这个兄弟模块，这里只是决议的调用点。
+ */
+function decideMobileStaticRouteOptions() {
+  return resolveMobileStaticRouteOptions({
+    env: process.env,
+    devDistDir: fromRoot("desktop", "dist-renderer"),
+  });
+}
+
 const { restRoute: chatRestRoute, wsRoute: chatWsRoute } = createChatRoute(engine, hub, { upgradeWebSocket });
-app.route("", createMobileStaticRoute({ distDir: fromRoot("desktop", "dist-renderer") }));
+app.route("", createMobileStaticRoute(decideMobileStaticRouteOptions()));
 app.route("", createHtmlPreviewRoute());
 app.route("/api", chatRestRoute);
 app.route("", chatWsRoute);

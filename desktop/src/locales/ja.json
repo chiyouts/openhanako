@@ -91,6 +91,12 @@
     "noAvailableMembers": "追加できる Agent はありません",
     "agentActivity": "Agent の動き",
     "agentSettings": "チャット設定",
+    "exportTitle": "現在のチャットを保存",
+    "exportDescription": "現在のグループチャットまたはダイレクトメッセージを Markdown ファイルとしてダウンロードフォルダへ保存します。",
+    "exportAction": "現在のチャットをエクスポート",
+    "exporting": "エクスポート中…",
+    "exportSuccess": "チャット履歴をダウンロードしました：{filename}",
+    "exportFailed": "チャット履歴をエクスポートできませんでした：{message}",
     "toolPermission": "ツール権限",
     "agentIdle": "待機中",
     "phoneReceivedNewMessages": "新しいグループチャットメッセージを受信",
@@ -196,6 +202,10 @@
     "pinFailed": "セッションのピン留めに失敗しました",
     "unpinFailed": "ピン留め解除に失敗しました",
     "archive": "アーカイブ",
+    "copyId": "Session ID をコピー",
+    "copyIdDone": "Session ID をコピーしました",
+    "copyIdFailed": "Session ID をコピーできませんでした",
+    "copyIdUnavailable": "この Session にはコピー可能な ID がありません",
     "deletedAgent": {
       "title": "Agent は削除済みです",
       "description": "このチャットは読み取り専用の履歴として保持されます。続行すると、主 Agent で新しいセッションを作成し、古いコンテキストの圧縮を試みます。",
@@ -430,7 +440,26 @@
     "confirmMoreOptions": "その他の確認オプション",
     "attachmentDirectory": "[ディレクトリ] {label}",
     "attachmentFile": "[添付] {label}",
-    "referenceDocument": "[参考ドキュメント] {path}"
+    "referenceDocument": "[参考ドキュメント] {path}",
+    "mention": {
+      "title": "メンション",
+      "tab": { "files": "ファイル", "sessions": "会話", "agents": "エージェント" },
+      "empty": "一致する項目はありません",
+      "singleAgent": "1 回のターンで招待できる Agent レビュアーは 1 人です"
+    }
+  },
+  "agentReview": {
+    "running": "この Session をレビュー中",
+    "completed": "別の Agent によるレビュー",
+    "failed": "レビューに失敗しました。メイン Agent はまだ回答していません",
+    "cancelled": "レビューをキャンセルしました",
+    "openSession": "レビュー Session を開く",
+    "sessionUnavailable": "レビュー Session が見つかりません",
+    "requestReceived": "別の Session からレビュー依頼を受け取りました",
+    "openReviewedSession": "レビュー対象 Session を開く",
+    "reviewedSessionFallback": "元の会話",
+    "reviewSessionFallback": "{name} のレビュー会話",
+    "interjectionUnavailable": "Agent レビューは割り込みとして送信できません。現在の返信が終わるまでお待ちください"
   },
   "slash": {
     "diary": "今日の日記を書く",
@@ -913,7 +942,11 @@
       "{name} はある午後のオレンジの香りがしました",
       "あの会話はまだ温もりを残しています"
     ],
-    "installing": "{name} を v{version} に更新しています。少々お待ちください……"
+    "installing": "{name} を v{version} に更新しています。少々お待ちください……",
+    "preparing": {
+      "named": "{name} が新しい住まいを準備しています……",
+      "anonymous": "あなたのアシスタントが新しい住まいを準備しています……"
+    }
   },
   "settings": {
     "title": "設定",
@@ -1222,16 +1255,35 @@
       "updateAvailable": "新しいバージョンがあります：v{version}",
       "updateDownload": "ダウンロード",
       "updateChecking": "アップデートを確認中…",
-      "updateDownloading": "{agentName}が新しいお家を準備中 {percent}%",
+      "updateDownloading": "{agentName}が新しいお家を準備中",
       "updateReadyInstall": "v{version} インストール準備完了",
       "updateInstalling": "アップデートをインストール中です。HanaAgent は自動で再起動します…",
       "updateInstallManualHint": "「再起動して更新」を押すとインストールします。終了だけでは自動インストールしません",
       "updateInstall": "再起動して更新",
       "updateInstallNow": "今すぐ再起動して更新",
+      "updateApply": "更新",
+      "updateApplyAutoHint": "クリックしなくても次回起動時に自動的に適用されます",
+      "trainStickerTitle": "新しいバージョンがあります",
+      "trainStickerDownloading": "ダウンロード中 {percent}%",
+      "trainStickerApplying": "更新を適用中…",
+      "shellStickerTitle": "プラットフォームの更新が利用可能です（再起動が必要）",
+      "shellStickerTitleBlocking": "この更新を完了しないと新しいバージョンを受信できません",
+      "fallbackStickerTitle": "バージョン {fromVersion} が連続して起動に失敗したため、{toVersion} にロールバックしました。問題のあったバージョンは隔離され、自動的に再試行されません。",
+      "fallbackStickerAckLabel": "わかりました",
+      "updateHistoryTitle": "更新履歴",
+      "updateHistorySubtitle": "最近公開された5つのバージョン",
+      "updateHistoryLoading": "更新履歴を読み込んでいます…",
+      "updateHistoryOffline": "リリースサイトに接続できないため、アプリに保存されたバージョンを表示しています。",
+      "updateHistoryPartial": "更新内容がある公開バージョンの一部のみ表示しています。",
+      "updateHistoryUnavailable": "更新履歴を一時的に読み込めません。後でもう一度お試しください。",
       "updateProgress": "{percent}%",
       "updateError": "アップデートの確認に失敗しました",
       "updateLatest": "最新バージョンです",
+      "updateLatestCheckedAt": "最新です（最終確認: {time}）",
+      "updateManifestReleasedAt": "配布マニフェストの発行日: {date}",
+      "updateManifestReleasedAtViaMirror": "配布マニフェストの発行日: {date}（バックアップ経由）",
       "updateCheckBtn": "アップデートを確認",
+      "updateRetryBtn": "再試行",
       "updateNeedInstall": "先に HanaAgent をアプリケーションフォルダに移動してください",
       "updateDiskSpace": "ディスク容量不足のため、アップデートをダウンロードできません",
       "updateDigestCta": "このアップデートで得られるもの",
@@ -2863,7 +2915,8 @@
     "tray": {
       "show": "HanaAgent を表示",
       "settings": "設定",
-      "quit": "終了"
+      "quit": "終了",
+      "repairArtifacts": "コンポーネントを修復…"
     },
     "dialog": {
       "selectFolder": "作業フォルダを選択",
@@ -2879,10 +2932,16 @@
       "serverFilesNotReady": "自動アップデートが完了したばかりで、新バージョンのファイルがまだディスクに書き込まれていません（{missing} が見つかりません）。{waited} 秒待機しましたが完了しませんでした。しばらくしてから HanaAgent を再起動してください。",
       "serverModuleMissing": "Server 起動失敗：モジュール {module} が見つかりません。\n通常、自動アップデート完了直後にファイルがまだディスクに書き込み中の場合に発生します。\n推奨：1〜2 分待ってから HanaAgent を再起動してください。問題が続く場合は GitHub で報告してください。",
       "installFailedTitle": "HanaAgent アップデート",
-      "installFailedBody": "アップデートのインストールに失敗しました：\n{error}\n\nHanaAgent を再起動してからもう一度お試しください。または設定ページで手動でアップデートを確認してください。"
+      "installFailedBody": "アップデートのインストールに失敗しました：\n{error}\n\nHanaAgent を再起動してからもう一度お試しください。または設定ページで手動でアップデートを確認してください。",
+      "repairArtifactsTitle": "コンポーネントの修復",
+      "repairArtifactsBody": "この操作は HanaAgent のアプリコンポーネントをインストール時のバージョンにリセットし、アプリを再起動します。データ（エージェント、セッション、設定）は影響を受けません。",
+      "repairArtifactsConfirm": "修復して再起動",
+      "repairArtifactsCancel": "キャンセル",
+      "trainUpdateApplyFailedBody": "HanaAgent v{version}\n\n更新の適用に失敗しました：\n{error}\n\nアプリを再起動してください。"
     },
     "notification": {
-      "ready": "通知が有効になりました"
+      "ready": "通知が有効になりました",
+      "componentQuarantined": "コンポーネントは自動的に前のバージョンにロールバックされました。機能には影響ありません"
     }
   },
   "devtools": {

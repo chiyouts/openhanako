@@ -52,6 +52,7 @@ const SESSION_DRAG_MIME = 'application/x-hana-session-path';
 const PROJECT_DRAG_MIME = 'application/x-hana-project-id';
 const FOLDER_DRAG_MIME = 'application/x-hana-project-folder-id';
 const PROJECT_SESSION_PREVIEW_LIMIT = 5;
+const SIDEBAR_UI_PREF_RETRY_DELAYS_MS = [300, 600] as const;
 
 type SidebarDragState =
   | { kind: 'session'; sessionPath: string }
@@ -130,6 +131,7 @@ function normalizeSessionSearchResults(data: unknown): SessionSearchResult[] {
     if (typeof item.path !== 'string' || !item.path) return [];
     return [{
       path: item.path,
+      sessionId: typeof item.sessionId === 'string' ? item.sessionId : null,
       title: typeof item.title === 'string' ? item.title : null,
       firstMessage: typeof item.firstMessage === 'string' ? item.firstMessage : '',
       modified: typeof item.modified === 'string' ? item.modified : '',
@@ -216,6 +218,7 @@ function SessionListInner() {
   const browserBySession = useStore(s => s.browserBySession);
   const projectCatalog = useStore(s => s.sessionProjectCatalog);
   const projectCatalogLoaded = useStore(s => s.sessionProjectCatalogLoaded);
+  const activeServerConnection = useStore(s => s.activeServerConnection);
 
   const [browserSessions, setBrowserSessions] = useState<Record<string, BrowserSessionState>>({});
   const [viewMode, setViewModeState] = useState<SessionViewMode>(readInitialSessionViewMode);
@@ -354,18 +357,39 @@ function SessionListInner() {
   }, [viewMode]);
 
   useEffect(() => {
+    if (!activeServerConnection) return;
+
     let cancelled = false;
-    hanaFetch('/api/preferences/sidebar-ui')
-      .then(res => res.json())
-      .then(data => {
+    let retryTimer: number | null = null;
+    let attempt = 0;
+
+    const loadSidebarUiPrefs = async () => {
+      attempt += 1;
+      try {
+        const res = await hanaFetch('/api/preferences/sidebar-ui');
+        const data = await res.json();
         if (cancelled) return;
         applySidebarUiPrefs(data);
-      })
-      .catch(err => console.warn('[sessions] fetch sidebar UI prefs failed:', err));
+      } catch (err) {
+        if (cancelled) return;
+        const retryDelay = SIDEBAR_UI_PREF_RETRY_DELAYS_MS[attempt - 1];
+        if (retryDelay !== undefined) {
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            void loadSidebarUiPrefs();
+          }, retryDelay);
+          return;
+        }
+        console.warn('[sessions] fetch sidebar UI prefs failed:', err);
+      }
+    };
+
+    void loadSidebarUiPrefs();
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [applySidebarUiPrefs]);
+  }, [activeServerConnection, applySidebarUiPrefs]);
 
   useEffect(() => {
     const handleLocalSettings = (event: Event) => {
@@ -1766,6 +1790,23 @@ const SessionContextMenu = memo(function SessionContextMenu({
       label: t('session.summary.open'),
       disabled: session.hasSummary !== true,
       action: () => onShowSummary(position),
+    }, {
+      label: t('session.copyId'),
+      disabled: typeof session.sessionId !== 'string' || !session.sessionId.trim(),
+      action: () => {
+        const sessionId = session.sessionId?.trim();
+        if (!sessionId) {
+          useStore.getState().addToast(t('session.copyIdUnavailable'), 'error', 5000);
+          return;
+        }
+        if (!navigator.clipboard?.writeText) {
+          useStore.getState().addToast(t('session.copyIdFailed'), 'error', 5000);
+          return;
+        }
+        void navigator.clipboard.writeText(sessionId)
+          .then(() => useStore.getState().addToast(t('session.copyIdDone'), 'info', 2500))
+          .catch(() => useStore.getState().addToast(t('session.copyIdFailed'), 'error', 5000));
+      },
     }];
     if (session.agentDeleted === true) {
       if (isPinned) {
@@ -1795,7 +1836,7 @@ const SessionContextMenu = memo(function SessionContextMenu({
       action: () => archiveSession(session.path),
     });
     return menuItems;
-  }, [isPinned, onRename, onShowSummary, position, session.agentDeleted, session.hasSummary, session.path, t]);
+  }, [isPinned, onRename, onShowSummary, position, session.agentDeleted, session.hasSummary, session.path, session.sessionId, t]);
 
   return (
     <ContextMenu

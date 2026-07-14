@@ -724,6 +724,50 @@ describe("chat route model switch guard", () => {
     handlers.onClose({}, phoneWs);
   });
 
+  it("passes @Session references to the Agent as resolvable IDs without linking Session metadata", async () => {
+    let createHandlers;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn(),
+      send: vi.fn<(text: string, opts: Record<string, unknown>) => Promise<void>>(async () => {}),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionIdForPath: vi.fn(() => "sess_parent"),
+      getSessionManifest: vi.fn(() => ({ currentLocator: { path: "/tmp/parent.jsonl" } })),
+      getSessionByPath: vi.fn(() => ({ entries: [] })),
+      isSessionStreaming: vi.fn(() => false),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = { readyState: 1, send: vi.fn() };
+    handlers.onMessage({
+      data: JSON.stringify({
+        type: "prompt",
+        text: "Compare @Earlier plan",
+        sessionId: "sess_parent",
+        sessionPath: "/tmp/parent.jsonl",
+        sessionRefs: [{ sessionId: "sess_context", label: "Earlier plan" }],
+      }),
+    }, ws);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(hub.send).toHaveBeenCalledTimes(1);
+    const [prompt, opts] = hub.send.mock.calls[0];
+    expect(prompt).toContain("sess_context");
+    expect(prompt).toContain("是否读取由你根据任务自行判断");
+    expect(opts).toMatchObject({ sessionId: "sess_parent", sessionPath: "/tmp/parent.jsonl" });
+    expect(prompt).not.toMatch(/parentSessionId|childSessionId|relationId/);
+  });
+
   it("emits file content blocks for deferred result session files", () => {
     let createHandlers;
     let subscriber;
@@ -1792,6 +1836,59 @@ describe("chat route model switch guard", () => {
       aborted: true,
       reason: "user_abort",
     });
+    expect(payloads).toContainEqual(expect.objectContaining({
+      type: "abort_result",
+      status: "already_stopped",
+      sessionPath: "/tmp/user-abort.jsonl",
+      streamId: activeStreamId,
+    }));
+
+    handlers.onClose({}, ws);
+  });
+
+  it("binds Stop without client stream metadata to the current server stream and replies explicitly", async () => {
+    let createHandlers;
+    let subscriber;
+    const upgradeWebSocket = vi.fn((factory) => {
+      createHandlers = factory;
+      return () => new Response(null);
+    });
+    const hub = {
+      subscribe: vi.fn((fn) => { subscriber = fn; }),
+      send: vi.fn(async () => {}),
+      abort: vi.fn(async () => true),
+    };
+    const engine = {
+      agentName: "Hana",
+      abortAllStreaming: vi.fn(async () => {}),
+      getSessionByPath: vi.fn(() => ({ entries: [] })),
+      isSessionStreaming: vi.fn(() => true),
+      isSessionSwitching: vi.fn(() => false),
+      steerSession: vi.fn(() => false),
+      slashDispatcher: null,
+    };
+
+    createChatRoute(engine, hub, { upgradeWebSocket });
+    const handlers = createHandlers({});
+    const ws = { readyState: 1, send: vi.fn() };
+    handlers.onOpen({}, ws);
+    subscriber?.({ type: "session_status", isStreaming: true }, "/tmp/metadata-gap.jsonl");
+    const activeStreamId = ws.send.mock.calls
+      .map(([raw]) => JSON.parse(raw))
+      .find((payload) => payload.type === "status" && payload.isStreaming === true)?.streamId;
+
+    handlers.onMessage({
+      data: JSON.stringify({ type: "abort", sessionPath: "/tmp/metadata-gap.jsonl" }),
+    }, ws);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(hub.abort).toHaveBeenCalledWith("/tmp/metadata-gap.jsonl", { reason: "user_abort" });
+    expect(ws.send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual(expect.objectContaining({
+      type: "abort_result",
+      status: "accepted",
+      sessionPath: "/tmp/metadata-gap.jsonl",
+      streamId: activeStreamId,
+    }));
 
     handlers.onClose({}, ws);
   });
@@ -1836,6 +1933,12 @@ describe("chat route model switch guard", () => {
     }, ws);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hub.abort).not.toHaveBeenCalled();
+    expect(ws.send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual(expect.objectContaining({
+      type: "abort_result",
+      status: "rejected",
+      reason: "stale_stream",
+      streamId: activeStreamId,
+    }));
     expect(ws.send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual(expect.objectContaining({
       type: "abort_rejected",
       reason: "stale_stream",

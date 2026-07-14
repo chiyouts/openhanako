@@ -3,75 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { injectCsp } from './vite.csp-profiles';
 
 interface DevWebClientConfig {
   serverPort: string;
   apiBaseUrl: string;
-}
-
-/**
- * CSP 集中管理：
- * 所有窗口的 CSP 策略统一定义在此，Vite 构建/开发时注入。
- * HTML 源文件中保留 CSP meta tag 作为 fallback（loadFile 回退路径）。
- *
- * 修改 CSP 时只改这里，然后同步更新 HTML 源文件。
- */
-const CSP_PROFILES: Record<string, string> = {
-  // 主窗口：需要 API 连接、图片、字体（KaTeX）、iframe（artifacts）
-  'index.html':
-    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; img-src 'self' data: file: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-src blob: data: file: http://127.0.0.1:* http://localhost:*",
-  // 设置窗口：需要 API 连接、图片、字体
-  'settings.html':
-    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; img-src 'self' data: file: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
-  // Quick Chat：独立小窗，需要 API/WS、附件预览图片
-  'quick-chat.html':
-    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; img-src 'self' data: blob: file: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
-  // Onboarding：需要 API 连接、图片、字体
-  'onboarding.html':
-    "default-src 'self'; connect-src 'self' http: https: ws: wss:; img-src 'self' data: file: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
-  // 以下窗口不加载第三方字体，保持严格策略
-  'splash.html':
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' file:",
-  'browser-viewer.html':
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' file:",
-  'viewer-window.html':
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:",
-  'mobile.html':
-    "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-src 'self' blob:",
-};
-
-function injectCsp(): Plugin {
-  return {
-    name: 'hana-inject-csp',
-    transformIndexHtml: {
-      order: 'pre',
-      handler(html, ctx) {
-        const filename = path.basename(ctx.filename);
-        const profile = CSP_PROFILES[filename];
-        if (!profile) return html;
-
-        let csp = profile;
-        // Dev 模式放宽：React Refresh 需要 unsafe-inline，Vite HMR 需要 ws
-        if (process.env.NODE_ENV !== 'production') {
-          csp = csp.replace(
-            /script-src 'self'/,
-            "script-src 'self' 'unsafe-inline'",
-          );
-          if (csp.includes('connect-src')) {
-            csp = csp.replace(
-              /connect-src 'self'/,
-              "connect-src 'self' ws://localhost:5173",
-            );
-          }
-        }
-
-        return html.replace(
-          /<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*\/?>/,
-          `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
-        );
-      },
-    },
-  };
 }
 
 /**
@@ -184,6 +120,59 @@ function injectDevWebConfig(): Plugin {
   };
 }
 
+/**
+ * Vite dev only: synthesize an ESM `default` export for project-owned
+ * CommonJS `.cjs` files when they get pulled into the browser graph.
+ *
+ * Several shared/*.cjs modules are the single Node-side source of truth (the
+ * desktop shell raw-`require`s them from a plain CommonJS main.cjs, so they
+ * cannot become .ts/.mjs), and thin shared/*.ts wrappers re-export them for the
+ * renderer via `import x from './x.cjs'` (default import + destructure).
+ * Production bundles synthesize the CJS→ESM default export through Rollup, but
+ * Vite's dev server serves source .cjs individually WITHOUT synthesizing one,
+ * so in dev the default import resolves to nothing and the entire static import
+ * graph fails silently — no console error, and the module's top-level code
+ * (including main.tsx) never executes. This closes that dev-only gap.
+ *
+ * Only PURE .cjs (no `require`, no Node builtins) can actually run in a browser.
+ * If a .cjs that reaches the browser graph uses require(), we throw loudly
+ * instead of shipping a broken module: such a file must move its constants to
+ * JSON (see shared/contract-versions.json) or split its Node-only logic out —
+ * silently degrading would just reproduce the invisible-failure this fixes.
+ */
+function browserCjsDefaultInterop(): Plugin {
+  return {
+    name: 'hana-browser-cjs-default-interop',
+    apply: 'serve',
+    enforce: 'pre',
+    transform(code, id, options) {
+      // Real dev-server browser context only. Vitest runs a Node-based module
+      // runner (even under jsdom) that resolves CommonJS natively, so this
+      // interop is both unnecessary and unsafe there — its require()-guard's
+      // premise ("a browser cannot require()") does not hold for the vitest
+      // runner and would spuriously throw on a legitimately CJS-importing test.
+      if (process.env.VITEST) return null;
+      if (options?.ssr) return null;
+      const filePath = id.split('?')[0];
+      if (!filePath.endsWith('.cjs')) return null;
+      if (filePath.includes('/node_modules/')) return null;
+      if (/\brequire\s*\(/.test(code)) {
+        const rel = path.relative(__dirname, filePath);
+        throw new Error(
+          `[hana-browser-cjs-default-interop] ${rel} is imported into the browser graph but uses require(); ` +
+          `browser-graph .cjs must be pure — move constants to JSON or split Node-only logic out.`,
+        );
+      }
+      // Provide CJS `module`/`exports` bindings, run the original body, then
+      // expose the result as the ESM default the .ts wrappers import.
+      return {
+        code: `const module = { exports: {} };\nconst exports = module.exports;\n${code}\nexport default module.exports;`,
+        map: null,
+      };
+    },
+  };
+}
+
 function serveMobilePwaStaticFiles(): Plugin {
   const srcDir = path.resolve(__dirname, 'desktop/src');
   const filesByUrl = new Map<string, { file: string; contentType: string }>([
@@ -197,8 +186,18 @@ function serveMobilePwaStaticFiles(): Plugin {
     apply: 'serve',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const pathname = req.url?.split('?')[0] || '';
-        const asset = filesByUrl.get(pathname);
+        const url = req.url || '';
+        // 带 query string 的请求（如 /icon.png?import）属于 Vite 的资源转换管线：
+        // AboutTab 的 `import appIconUrl from '../../../icon.png'` 需要 Vite 把 icon.png
+        // 转成返回 URL 字符串的 JS 模块（MIME text/javascript）。若在此按裸路径命中并回
+        // image/png，type="module" 脚本的严格 MIME 校验会失败，整个静态 import 图崩掉，
+        // main.tsx 一行都跑不起来。只有裸路径的直接请求（PWA 注册的 sw.js / manifest /
+        // 图标）才由本中间件回原始字节，其余一律放行给 Vite 自己处理。
+        if (url.includes('?')) {
+          next();
+          return;
+        }
+        const asset = filesByUrl.get(url);
         if (!asset) {
           next();
           return;
@@ -298,6 +297,7 @@ export default defineConfig({
   root: 'desktop/src',
   base: './',
   plugins: [
+    browserCjsDefaultInterop(),
     preserveLegacyCss(),
     react(),
     injectCsp(),
@@ -338,7 +338,11 @@ export default defineConfig({
         settings: path.resolve(__dirname, 'desktop/src/settings.html'),
         'quick-chat': path.resolve(__dirname, 'desktop/src/quick-chat.html'),
         onboarding: path.resolve(__dirname, 'desktop/src/onboarding.html'),
-        splash: path.resolve(__dirname, 'desktop/src/splash.html'),
+        // splash 不在这里：启用双 artifact 管线后它是壳自持表面，独立构建进
+        // desktop/dist-splash/（见 vite.config.splash.ts），不随 dist-renderer
+        // 打包进 asar，也不随 renderer artifact 一起走首启解压/OTA 那条路。
+        // dev 模式不受影响——vite dev server 按目录直接服务 splash.html，
+        // 不依赖这份 rollupOptions.input 列表。
         'browser-viewer': path.resolve(__dirname, 'desktop/src/browser-viewer.html'),
         'viewer-window': path.resolve(__dirname, 'desktop/src/viewer-window.html'),
       },

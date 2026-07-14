@@ -43,7 +43,12 @@ import {
   collectSessionCollabDecisions,
   overlaySessionCollabDecision,
 } from "../../core/message-utils.ts";
-import { MESSAGE_ORIGIN_RECORD_TYPE } from "../../core/desktop-session-submit.ts";
+import {
+  AGENT_REVIEW_RECORD_TYPE,
+  MESSAGE_ORIGIN_RECORD_TYPE,
+  MESSAGE_PRESENTATION_RECORD_TYPE,
+} from "../../core/desktop-session-submit.ts";
+import { stripSessionReminderBlocks } from "../../core/session-reminders.ts";
 import { sessionFileRevision } from "../../core/session-list-projection-cache.ts";
 import {
   extractLatestTodos,
@@ -996,9 +1001,12 @@ export function createSessionsRoute(engine, hub = null) {
         entries = cached.entries;
       } else {
         const sourceMessages = await loadSessionHistoryMessages(engine, queryPath);
-        const sanitize = isBridgeSessionPath(queryPath)
-          ? sanitizeBridgeVisibleText
-          : (value) => (typeof value === "string" ? value : "");
+        const sanitize = (value) => {
+          const withoutReminder = stripSessionReminderBlocks(value);
+          return isBridgeSessionPath(queryPath)
+            ? sanitizeBridgeVisibleText(withoutReminder)
+            : withoutReminder;
+        };
         entries = collectFindableHistoryEntries(sourceMessages, sanitize);
         if (revision) {
           findEntriesCache.set(queryPath, { revision, entries });
@@ -1197,7 +1205,11 @@ export function createSessionsRoute(engine, hub = null) {
         let annotatedIdx = 0;
         for (let i = 0; i < sourceMessages.length; i += 1) {
           const original = sourceMessages[i];
-          if (original?.role === "custom" && original.customType === MESSAGE_ORIGIN_RECORD_TYPE) continue;
+          if (original?.role === "custom" && (
+            original.customType === MESSAGE_ORIGIN_RECORD_TYPE
+            || original.customType === AGENT_REVIEW_RECORD_TYPE
+            || original.customType === MESSAGE_PRESENTATION_RECORD_TYPE
+          )) continue;
           const annotated = annotatedMessages[annotatedIdx];
           annotatedIdx += 1;
           if (original?.role === "user" && annotated?.origin) {
@@ -1208,9 +1220,42 @@ export function createSessionsRoute(engine, hub = null) {
           }
         }
       }
-      const sanitizeVisibleContent = isBridgeSessionPath(resolvedSessionPath)
-        ? sanitizeBridgeVisibleText
-        : (value) => (typeof value === "string" ? value : "");
+      const presentationBySourceIndex = new Map();
+      {
+        let pendingPresentation = null;
+        for (let i = 0; i < sourceMessages.length; i += 1) {
+          const message = sourceMessages[i];
+          if (message?.role === "custom" && message.customType === MESSAGE_PRESENTATION_RECORD_TYPE) {
+            pendingPresentation = message.data || null;
+            continue;
+          }
+          if (message?.role === "user") {
+            if (pendingPresentation) presentationBySourceIndex.set(i, pendingPresentation);
+            pendingPresentation = null;
+          }
+        }
+      }
+      const agentReviewBySourceIndex = new Map();
+      {
+        let pendingReview = null;
+        for (let i = 0; i < sourceMessages.length; i += 1) {
+          const message = sourceMessages[i];
+          if (message?.role === "custom" && message.customType === AGENT_REVIEW_RECORD_TYPE) {
+            pendingReview = message.data || null;
+            continue;
+          }
+          if (message?.role === "user") {
+            if (pendingReview?.status === "completed") agentReviewBySourceIndex.set(i, pendingReview);
+            pendingReview = null;
+          }
+        }
+      }
+      const sanitizeVisibleContent = (value) => {
+        const withoutReminder = stripSessionReminderBlocks(value);
+        return isBridgeSessionPath(resolvedSessionPath)
+          ? sanitizeBridgeVisibleText(withoutReminder)
+          : withoutReminder;
+      };
 
       // 分页参数
       const beforeId = c.req.query("before") != null ? Number(c.req.query("before")) : null;
@@ -1342,6 +1387,8 @@ export function createSessionsRoute(engine, hub = null) {
             const visibleImages = filterUnreferencedInlineImages(text, images);
             const content = sanitizeVisibleContent(text);
             const originInfo = originBySourceIndex.get(sourceIndex);
+            const agentReview = agentReviewBySourceIndex.get(sourceIndex);
+            const presentation = presentationBySourceIndex.get(sourceIndex);
             messages.push({
               id: String(currentIndex),
               sourceIndex,
@@ -1352,6 +1399,12 @@ export function createSessionsRoute(engine, hub = null) {
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),
               ...(originInfo?.origin ? { origin: originInfo.origin } : {}),
               ...(typeof originInfo?.displayText === "string" ? { displayText: originInfo.displayText } : {}),
+              ...(agentReview ? { agentReview } : {}),
+              ...(typeof agentReview?.displayText === "string" ? { displayText: agentReview.displayText } : {}),
+              ...(typeof presentation?.displayText === "string" ? { displayText: presentation.displayText } : {}),
+              ...(Array.isArray(presentation?.sessionRefs) ? { sessionRefs: presentation.sessionRefs } : {}),
+              ...(Array.isArray(presentation?.agentMentions) ? { agentMentions: presentation.agentMentions } : {}),
+              ...(presentation?.agentReviewRequest ? { agentReviewRequest: presentation.agentReviewRequest } : {}),
             });
           }
         } else if (m.role === "assistant") {

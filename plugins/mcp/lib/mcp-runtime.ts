@@ -91,14 +91,14 @@ function normalizeConnector(connector, fallbackId = "") {
     authorizationToken,
     oauthClientId: stringOrEmpty(connector.oauthClientId || connector.clientId),
     oauthClientSecret: stringOrEmpty(connector.oauthClientSecret || connector.clientSecret),
-    // Provenance of the OAuth client id (CLAUDE.md #6 read-time migration):
+    // Provenance of the OAuth client id, including read-time compatibility:
     // "manual" = user-entered, "dcr" = obtained via RFC 7591 dynamic client
     // registration. Old connectors predate this field — default to "manual"
     // when a client id is already present, otherwise "" (unknown/unregistered).
     clientIdSource: normalizeClientIdSource(connector),
     oauth,
     autoStart: connector.autoStart === true || connector.isActive === true,
-    // Read-time compat (CLAUDE.md #7): connectors saved before auto-reconnect
+    // Read-time compatibility: connectors saved before auto-reconnect
     // existed have no `autoReconnect` field; default them to true so existing
     // users get keepalive without a migration script. Only an explicit `false`
     // opts out of automatic reconnection.

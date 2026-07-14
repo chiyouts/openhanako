@@ -10,7 +10,7 @@
 import { useStore } from './stores';
 import { hanaFetch } from './hooks/use-hana-fetch';
 import { applyAgentIdentity, loadAgents, loadAvatars } from './stores/agent-actions';
-import { loadPendingNewSessionPermissionDefault, loadSessions, switchSession } from './stores/session-actions';
+import { loadPendingNewSessionPermissionDefault, loadSessions, pendingNewSessionIdentityPatch, switchSession } from './stores/session-actions';
 import { initSessionProjectCatalog } from './stores/session-project-actions';
 import { connectWebSocket, getWebSocket } from './services/websocket';
 import { setStatus, loadModels } from './utils/ui-helpers';
@@ -34,6 +34,7 @@ import {
   readPersistedServerConnectionState,
   refreshLocalServerConnectionState,
   upsertServerConnection,
+  warnIfServerProtocolMismatch,
   type ServerConnection,
 } from './services/server-connection';
 import { persistAppearancePreferences } from './services/appearance-sync';
@@ -231,7 +232,7 @@ export async function initApp(): Promise<void> {
   await loadModels();
 
   // 10. 加载 agents + sessions
-  useStore.setState({ pendingNewSession: true });
+  useStore.setState(pendingNewSessionIdentityPatch());
   await loadPendingNewSessionPermissionDefault();
   await loadAgents();
   await loadSessions();
@@ -309,6 +310,7 @@ export async function initApp(): Promise<void> {
 async function loadIdentityForActiveConnection(connection: ServerConnection): Promise<ServerConnection> {
   const identityRes = await hanaFetch('/api/server/identity');
   const identityData = await identityRes.json();
+  warnIfServerProtocolMismatch(identityData);
   return mergeServerIdentity(connection, identityData);
 }
 

@@ -9,11 +9,13 @@ export default [
     ignores: [
       'node_modules/',
       '**/dist/**',
-      'dist-server/**',
-      'dist-server-bundle/**',
-      'dist-computer-use/**',
-      'dist-sandbox/**',
-      'desktop/dist-renderer/**',
+      // Build scripts emit several sibling directories such as dist-server,
+      // dist-server-artifact, dist-renderer-artifact, and dist-computer-use.
+      // Keep the naming contract here instead of chasing every new output.
+      'dist-*/**',
+      // Desktop Vite builds use the same family for dist-renderer and
+      // dist-splash; both contain bundled JavaScript that must not be linted.
+      'desktop/dist-*/**',
       'desktop/native/**/.build/**',
       '.claude/**',
       '.cache/**',

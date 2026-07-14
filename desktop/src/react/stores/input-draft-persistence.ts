@@ -5,8 +5,8 @@
  * - hydrateInputDrafts()：启动/恢复归档后拉全量，只填内存中不存在的键
  * - initInputDraftPersistence()：注册 input-draft-sync 监听，把 setDraft/clearDraft
  *   变更按 key 独立 debounce 后 PUT 到 /api/input-drafts
- *
- * 设计：.docs/specs/2026-07-09-input-draft-persistence.md
+ * - session 身份始终使用 sessionId；兼容入口收到 sessionPath 时由 server 边界解析
+ * - 服务端是持久真相，hydrate 不覆盖 renderer 内已经更新过的草稿
  */
 import type { JSONContent } from '@tiptap/core';
 import { hanaFetch } from '../hooks/use-hana-fetch';

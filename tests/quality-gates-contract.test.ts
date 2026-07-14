@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { builtinModules } from "node:module";
 import yaml from "js-yaml";
+import eslintConfig from "../eslint.config.js";
 import serverViteConfig from "../vite.config.server.js";
 
 function readJson(relativePath) {
@@ -39,6 +40,16 @@ describe("quality gates", () => {
     const packageJson = readJson("package.json");
 
     expect(packageJson.scripts.lint).toBe("eslint .");
+  });
+
+  it("keeps generated dist families outside the repository-wide lint surface", () => {
+    const globalIgnores = (eslintConfig[0] as { ignores?: string[] }).ignores ?? [];
+
+    expect(globalIgnores).toEqual(expect.arrayContaining([
+      "**/dist/**",
+      "dist-*/**",
+      "desktop/dist-*/**",
+    ]));
   });
 
   it("package builds use the workspace graph instead of a hard-coded package list", () => {

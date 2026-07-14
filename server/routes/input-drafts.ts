@@ -7,8 +7,8 @@
  *       | { surface, sessionId, text, doc? }
  *       | { surface, sessionPath, text, doc? }  // 边界立即解析为 sessionId，失败 400
  *
- * 鉴权与 /api/preferences/* 同级（认证 principal 即可），设计见
- * .docs/specs/2026-07-09-input-draft-persistence.md
+ * 鉴权与 /api/preferences/* 同级（认证 principal 即可）。sessionPath 只作为兼容
+ * 输入，route 必须先解析为 sessionId，持久层不接受 path 作为身份键。
  */
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.ts";

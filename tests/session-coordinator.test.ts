@@ -75,56 +75,6 @@ describe("SessionCoordinator", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("reloads extension runners for idle live sessions and skips active streams", async () => {
-    const idleReload = vi.fn(async () => {});
-    const streamingReload = vi.fn(async () => {});
-    const coordinator = Object.create(SessionCoordinator.prototype);
-    coordinator._sessions = new Map([
-      [path.join(tempDir, "idle.jsonl"), {
-        session: { reload: idleReload, isStreaming: false, isCompacting: false },
-        lastTouchedAt: 1,
-      }],
-      [path.join(tempDir, "streaming.jsonl"), {
-        session: { reload: streamingReload, isStreaming: true, isCompacting: false },
-      }],
-    ]);
-
-    const summary = await coordinator.reloadExtensionRunners("test");
-
-    expect(idleReload).toHaveBeenCalledTimes(1);
-    expect(streamingReload).not.toHaveBeenCalled();
-    expect(summary).toEqual({ reloaded: 1, skipped: 1, failed: 0 });
-    expect(coordinator._sessions.get(path.join(tempDir, "idle.jsonl")).lastTouchedAt).toBeGreaterThan(1);
-    expect(coordinator._sessions.get(path.join(tempDir, "idle.jsonl")).extensionRunnerDirty).toBe(false);
-    expect(coordinator._sessions.get(path.join(tempDir, "streaming.jsonl")).extensionRunnerDirty).toBe(true);
-    expect(coordinator._sessions.get(path.join(tempDir, "streaming.jsonl")).extensionRunnerDirtyReason).toBe("test");
-  });
-
-  it("reloads a dirty extension runner once the session is idle", async () => {
-    const reload = vi.fn(async () => {});
-    const coordinator = Object.create(SessionCoordinator.prototype);
-    const entry = {
-      session: { reload, isStreaming: false, isCompacting: false },
-      extensionRunnerDirty: true,
-      extensionRunnerDirtyReason: "plugin_extension_sync",
-      extensionRunnerDirtyAt: 1,
-      lastTouchedAt: 1,
-    };
-
-    const reloaded = await coordinator._reloadDirtyExtensionRunnerIfPossible(
-      entry,
-      path.join(tempDir, "dirty.jsonl"),
-      "prompt_session",
-    );
-
-    expect(reloaded).toBe(true);
-    expect(reload).toHaveBeenCalledTimes(1);
-    expect(entry.extensionRunnerDirty).toBe(false);
-    expect(entry.extensionRunnerDirtyReason).toBeNull();
-    expect(entry.extensionRunnerDirtyAt).toBeNull();
-    expect(entry.lastTouchedAt).toBeGreaterThan(1);
-  });
-
   it("builds the session prompt with path-scoped memory without mutating the agent session flag", async () => {
     const agent = {
       sessionDir: "/tmp/agent-sessions",
@@ -171,11 +121,14 @@ describe("SessionCoordinator", () => {
     expect(createAgentSessionMock.mock.calls[0][0].resourceLoader.getSystemPrompt()).toBe("MEMORY OFF");
   });
 
-  it("builds a fresh session prompt snapshot with the effective cwd", async () => {
+  it("keeps the base prompt cwd-free and appends the fresh workspace scope and instructions", async () => {
     const newCwd = path.join(tempDir, "new-workspace");
     const oldCwd = path.join(tempDir, "old-workspace");
-    fs.mkdirSync(newCwd, { recursive: true });
+    const externalFolder = path.join(tempDir, "external-reference");
+    fs.mkdirSync(path.join(newCwd, ".git"), { recursive: true });
     fs.mkdirSync(oldCwd, { recursive: true });
+    fs.mkdirSync(externalFolder, { recursive: true });
+    fs.writeFileSync(path.join(newCwd, "AGENTS.md"), "SESSION_INSTRUCTION_BEACON\n", "utf-8");
 
     const agent = {
       id: "hana",
@@ -183,8 +136,12 @@ describe("SessionCoordinator", () => {
       sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
       memoryMasterEnabled: true,
       sessionMemoryEnabled: true,
+      config: {
+        locale: "zh-CN",
+        workspace_context: { inject_agents_md: true },
+      },
       setMemoryEnabled: vi.fn(),
-      buildSystemPrompt: vi.fn(({ cwdOverride }: any = {}) => `prompt cwd=${cwdOverride || "missing"}`),
+      buildSystemPrompt: vi.fn(() => "stable agent base"),
       tools: [],
     };
     fs.mkdirSync(agent.sessionDir, { recursive: true });
@@ -220,12 +177,26 @@ describe("SessionCoordinator", () => {
       listAgents: () => [],
     });
 
-    await coordinator.createSession(null, newCwd, true);
+    await coordinator.createSession(null, newCwd, true, null, {
+      workspaceFolders: [externalFolder],
+    });
 
-    expect(agent.buildSystemPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      cwdOverride: newCwd,
+    expect(agent.buildSystemPrompt).toHaveBeenCalledWith(expect.not.objectContaining({
+      cwdOverride: expect.anything(),
     }));
-    expect(createAgentSessionMock.mock.calls[0][0].resourceLoader.getSystemPrompt()).toBe(`prompt cwd=${newCwd}`);
+    const createArgs = createAgentSessionMock.mock.calls[0][0];
+    expect(createArgs.resourceLoader.getSystemPrompt()).toBe("stable agent base");
+    const append = createArgs.resourceLoader.getAppendSystemPrompt();
+    const joinedAppend = append.join("\n\n");
+    expect(joinedAppend).toContain("## 工作区范围");
+    expect(joinedAppend).toContain(`主工作台：${newCwd}`);
+    expect(joinedAppend).toContain("外部工作区文件夹");
+    expect(joinedAppend).toContain(externalFolder);
+    expect(joinedAppend).toContain("## 工作区说明");
+    expect(joinedAppend).toContain("SESSION_INSTRUCTION_BEACON");
+    expect(joinedAppend.indexOf("## 工作区范围")).toBeLessThan(joinedAppend.indexOf("## 工作区说明"));
+    expect(joinedAppend).not.toContain("当前工作目录");
+    expect(joinedAppend).not.toContain("相对路径");
   });
 
   it("restores the missing default workspace only for fresh sessions using the configured home cwd", async () => {
@@ -2042,7 +2013,7 @@ describe("SessionCoordinator", () => {
       }),
     );
     const appendPrompt = createAgentSessionMock.mock.calls[0][0].resourceLoader.getAppendSystemPrompt();
-    expect(appendPrompt.join("\n")).toContain("额外文件夹");
+    expect(appendPrompt.join("\n")).toContain("外部工作区文件夹");
     expect(appendPrompt.join("\n")).toContain(extra);
 
     const meta = JSON.parse(fs.readFileSync(path.join(agent.sessionDir, "session-meta.json"), "utf-8"));
@@ -3652,6 +3623,96 @@ describe("SessionCoordinator", () => {
     }
   });
 
+  it("cleans session-owned execution even when the main session no longer reports streaming", async () => {
+    const sessionFile = path.join(tempDir, "cancel-detached-execution.jsonl");
+    const abortToolExecutionsForSession = vi.fn(() => ({ matched: 1, aborted: 1 }));
+    const taskRegistry = { abortByParentSession: vi.fn() };
+    const idleSession = {
+      isStreaming: false,
+      sessionManager: { getSessionFile: () => sessionFile },
+      abort: vi.fn(),
+      dispose: vi.fn(),
+      extensionRunner: null,
+    };
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => ({
+        id: "hana",
+        agentDir: tempDir,
+        sessionDir: tempDir,
+        _memoryTicker: { notifySessionEnd: vi.fn(() => Promise.resolve()) },
+      }),
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent: vi.fn(),
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+      getSessionIdForPath: () => "session-1",
+      abortToolExecutionsForSession,
+      taskRegistry,
+    });
+    coordinator.sessions.set(sessionFile, {
+      session: idleSession,
+      agentId: "hana",
+      lastTouchedAt: Date.now(),
+      unsub: vi.fn(),
+    });
+
+    await expect(coordinator.abortSession(sessionFile, { reason: "user_abort" })).resolves.toBe(false);
+    expect(abortToolExecutionsForSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      sessionPath: sessionFile,
+    }, "user_abort");
+    expect(taskRegistry.abortByParentSession).toHaveBeenCalledWith(sessionFile, "user_abort");
+    expect(idleSession.abort).not.toHaveBeenCalled();
+  });
+
+  it("immediately publishes a terminal status when stopping pre-prompt preparation", async () => {
+    const sessionFile = path.join(tempDir, "cancel-pre-prompt.jsonl");
+    const emitEvent = vi.fn();
+    const coordinator = new SessionCoordinator({
+      agentsDir: tempDir,
+      getAgent: () => null,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({ authStorage: {}, modelRegistry: {}, resolveThinkingLevel: () => "medium" }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt" }),
+      getSkills: () => null,
+      buildTools: () => ({ tools: [], customTools: [] }),
+      emitEvent,
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: () => "hana",
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => null,
+      listAgents: () => [],
+    });
+    const pending = new AbortController();
+    coordinator._setRuntimeValueForPath(coordinator._prePromptAbortControllers, sessionFile, pending);
+
+    await expect(coordinator.abortSession(sessionFile, { reason: "user_abort" })).resolves.toBe(true);
+
+    expect(pending.signal.aborted).toBe(true);
+    expect(emitEvent).toHaveBeenCalledWith({
+      type: "session_status",
+      isStreaming: false,
+      aborted: true,
+      reason: "user_abort",
+    }, sessionFile);
+  });
+
   it("executeIsolated builds non-session tools from the master memory switch, not the focused session switch", async () => {
     const sessionFile = path.join(tempDir, "isolated-master-tools.jsonl");
     const builtinTool = { name: "read" };
@@ -4232,7 +4293,7 @@ describe("SessionCoordinator", () => {
     );
   });
 
-  it("executeIsolated builds the subagent prompt against the inherited execution cwd", async () => {
+  it("executeIsolated keeps the subagent base cwd-free and appends its inherited workspace scope", async () => {
     const sessionFile = path.join(tempDir, "isolated-cwd-prompt.jsonl");
     const inheritedCwd = path.join(tempDir, "inherited-session-cwd");
     const agent = {
@@ -4241,9 +4302,9 @@ describe("SessionCoordinator", () => {
       sessionDir: path.join(tempDir, "agents", "hana", "sessions"),
       agentName: "hana",
       memoryMasterEnabled: true,
-      config: { models: { chat: { id: "default-model", provider: "test" } } },
+      config: { locale: "en-US", models: { chat: { id: "default-model", provider: "test" } } },
       tools: [{ name: "write" }],
-      buildSystemPrompt: vi.fn(({ cwdOverride }: any = {}) => `SUBAGENT PROMPT ${cwdOverride || "missing"}`),
+      buildSystemPrompt: vi.fn(() => "SUBAGENT PROMPT"),
     };
 
     sessionManagerCreateMock.mockReturnValue({
@@ -4294,11 +4355,13 @@ describe("SessionCoordinator", () => {
     expect(agent.buildSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         forSubagent: true,
-        cwdOverride: inheritedCwd,
       }),
     );
     expect(createAgentSessionMock.mock.calls[0][0].resourceLoader.getSystemPrompt())
-      .toBe(`SUBAGENT PROMPT ${inheritedCwd}`);
+      .toBe("SUBAGENT PROMPT");
+    const append = createAgentSessionMock.mock.calls[0][0].resourceLoader.getAppendSystemPrompt();
+    expect(append.join("\n\n")).toContain(`Primary workbench: ${inheritedCwd}`);
+    expect(append.join("\n\n")).not.toContain("Current working directory");
   });
 
   it("executeIsolated reports incomplete final assistant stop reasons", async () => {
@@ -4888,11 +4951,11 @@ describe("SessionCoordinator session reminders", () => {
     return agent;
   }
 
-  function makeCoordinator(agent: any, envChangeLedger: EnvChangeLedger) {
+  function makeCoordinator(agent: any, envChangeLedger: EnvChangeLedger, activeAgentId = "hana") {
     return new SessionCoordinator({
       agentsDir: path.join(tempDir, "agents"),
       getAgent: () => agent,
-      getActiveAgentId: () => "hana",
+      getActiveAgentId: () => activeAgentId,
       getModels: () => ({
         currentModel: { id: "m", provider: "test" },
         authStorage: {},
@@ -4943,7 +5006,11 @@ describe("SessionCoordinator session reminders", () => {
 
   it("initializes fresh reminder state at the current ledger baseline and prompt-build time", async () => {
     const ledger = new EnvChangeLedger();
-    ledger.append({ type: "toolset_changed", payload: { pluginId: "before", action: "loaded" } });
+    ledger.append({
+      type: "toolset_changed",
+      scope: { kind: "global" },
+      payload: { pluginId: "before", action: "loaded" },
+    });
     const agent = makeAgent();
     const sessionPath = path.join(agent.sessionDir, "fresh.jsonl");
     mockSessionAt(sessionPath);
@@ -4964,6 +5031,37 @@ describe("SessionCoordinator session reminders", () => {
     expect(coordinator.renderSessionReminderBlock(sessionPath)).toBeNull();
   });
 
+  it("routes memory reminders by the session owner instead of the active agent", async () => {
+    const ledger = new EnvChangeLedger();
+    const agent = makeAgent();
+    const sessionPath = path.join(agent.sessionDir, "owned-by-hana.jsonl");
+    mockSessionAt(sessionPath);
+    const coordinator = makeCoordinator(agent, ledger, "other-agent");
+    await coordinator.createSession(null, "/tmp/workspace", false);
+    ledger.append({
+      type: "memory_facts",
+      scope: { kind: "agent", agentId: "hana" },
+      payload: { addedLines: ["hana-owned fact"] },
+    });
+    ledger.append({
+      type: "memory_facts",
+      scope: { kind: "agent", agentId: "other-agent" },
+      payload: { addedLines: ["active-agent fact"] },
+    });
+    ledger.append({
+      type: "toolset_changed",
+      scope: { kind: "global" },
+      payload: { pluginId: "shared-plugin", action: "loaded" },
+    });
+
+    const rendered = coordinator.renderSessionReminderBlock(sessionPath);
+
+    expect(coordinator._getSessionEntryByPath(sessionPath).agentId).toBe("hana");
+    expect(rendered?.block).toContain("hana-owned fact");
+    expect(rendered?.block).not.toContain("active-agent fact");
+    expect(rendered?.block).toContain("shared-plugin");
+  });
+
   it("uses a receipt without advancing state until explicit consumption", async () => {
     const ledger = new EnvChangeLedger();
     const agent = makeAgent();
@@ -4971,7 +5069,11 @@ describe("SessionCoordinator session reminders", () => {
     mockSessionAt(sessionPath);
     const coordinator = makeCoordinator(agent, ledger);
     await coordinator.createSession(null, "/tmp/workspace", false);
-    ledger.append({ type: "toolset_changed", payload: { pluginId: "demo", action: "loaded" } });
+    ledger.append({
+      type: "toolset_changed",
+      scope: { kind: "global" },
+      payload: { pluginId: "demo", action: "loaded" },
+    });
 
     const rendered = coordinator.renderSessionReminderBlock(sessionPath);
     expect(rendered?.block).toContain("demo");

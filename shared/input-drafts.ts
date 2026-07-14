@@ -1,8 +1,8 @@
 /**
  * 输入框草稿持久化 —— 共享归一化（server 与前端共用）
  *
- * 设计：.docs/specs/2026-07-09-input-draft-persistence.md
- * surface 白名单是唯一扩展点：infinity merge 后新增客户端只改这里。
+ * surface 白名单是唯一扩展点；新增客户端时在这里声明，server 与 renderer
+ * 共用同一套校验，避免各自接受不同的持久化键空间。
  */
 
 export const INPUT_DRAFT_SURFACES = Object.freeze(["electron", "pwa"]);

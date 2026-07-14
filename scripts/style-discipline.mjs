@@ -1,5 +1,5 @@
 /**
- * style-discipline.mjs — 风格纪律扫描（治理③，.docs/2026-07-07-ui-discipline-audit.md）
+ * style-discipline.mjs — 可递减、不可新增的样式债务扫描
  *
  * 三个维度（经用户校准 2026-07-07）：
  *   bare-spacing   padding/margin/gap 族里的裸 px（0 除外；calc 含 var 视为网格补偿豁免）

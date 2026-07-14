@@ -47,7 +47,7 @@ export const FEISHU_MEDIA_CAPABILITIES = createMediaCapabilities({
       document: 30 * 1024 * 1024,
     },
   },
-  source: ".docs/BRIDGE-MEDIA-CAPABILITIES.md#feishu",
+  source: "lib/bridge/feishu-adapter.ts#FEISHU_MEDIA_CAPABILITIES",
 });
 
 export const FEISHU_STREAMING_CAPABILITIES = createStreamingCapabilities({

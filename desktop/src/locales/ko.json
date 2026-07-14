@@ -91,6 +91,12 @@
     "noAvailableMembers": "추가할 수 있는 Agent가 없어요",
     "agentActivity": "Agent 상태",
     "agentSettings": "채팅 설정",
+    "exportTitle": "현재 채팅 저장",
+    "exportDescription": "현재 그룹 채팅 또는 DM을 Markdown 파일로 다운로드 폴더에 저장합니다.",
+    "exportAction": "현재 채팅 내보내기",
+    "exporting": "내보내는 중…",
+    "exportSuccess": "채팅 기록을 다운로드했습니다: {filename}",
+    "exportFailed": "채팅 기록을 내보내지 못했습니다: {message}",
     "toolPermission": "도구 권한",
     "agentIdle": "대기 중",
     "phoneReceivedNewMessages": "새 그룹 채팅 메시지를 받음",
@@ -196,6 +202,10 @@
     "pinFailed": "세션 고정 실패",
     "unpinFailed": "세션 고정 해제 실패",
     "archive": "보관",
+    "copyId": "Session ID 복사",
+    "copyIdDone": "Session ID를 복사했습니다",
+    "copyIdFailed": "Session ID를 복사하지 못했습니다",
+    "copyIdUnavailable": "이 Session에는 복사할 수 있는 ID가 없습니다",
     "deletedAgent": {
       "title": "Agent가 삭제됨",
       "description": "이 대화는 읽기 전용 기록으로 유지됩니다. 계속하면 기본 Agent에서 새 세션을 만들고 이전 컨텍스트 압축을 시도합니다.",
@@ -430,7 +440,26 @@
     "confirmMoreOptions": "추가 확인 옵션",
     "attachmentDirectory": "[디렉터리] {label}",
     "attachmentFile": "[첨부] {label}",
-    "referenceDocument": "[참고 문서] {path}"
+    "referenceDocument": "[참고 문서] {path}",
+    "mention": {
+      "title": "멘션",
+      "tab": { "files": "파일", "sessions": "대화", "agents": "에이전트" },
+      "empty": "일치하는 항목이 없습니다",
+      "singleAgent": "한 턴에는 한 명의 Agent 리뷰어만 초대할 수 있습니다"
+    }
+  },
+  "agentReview": {
+    "running": "이 Session을 검토하는 중",
+    "completed": "다른 Agent의 검토 결과",
+    "failed": "검토에 실패했습니다. 메인 Agent는 아직 답변하지 않았습니다",
+    "cancelled": "검토를 취소했습니다",
+    "openSession": "검토 Session 열기",
+    "sessionUnavailable": "검토 Session을 찾을 수 없습니다",
+    "requestReceived": "다른 Session에서 검토 요청을 받았습니다",
+    "openReviewedSession": "검토 대상 Session 열기",
+    "reviewedSessionFallback": "원본 대화",
+    "reviewSessionFallback": "{name}의 검토 대화",
+    "interjectionUnavailable": "Agent 검토는 끼어들기로 보낼 수 없습니다. 현재 답변이 끝날 때까지 기다려 주세요"
   },
   "slash": {
     "diary": "오늘의 일기 쓰기",
@@ -913,7 +942,11 @@
       "{name}은(는) 어느 오후의 귤 향기를 맡았어요",
       "그 대화들에는 아직 온기가 남아 있어요"
     ],
-    "installing": "{name}을(를) v{version}(으)로 업데이트하고 있어요. 잠시만 기다려 주세요……"
+    "installing": "{name}을(를) v{version}(으)로 업데이트하고 있어요. 잠시만 기다려 주세요……",
+    "preparing": {
+      "named": "{name}은(는) 새로운 보금자리를 준비하고 있어요……",
+      "anonymous": "당신의 어시스턴트가 새로운 보금자리를 준비하고 있어요……"
+    }
   },
   "settings": {
     "title": "설정",
@@ -1222,16 +1255,35 @@
       "updateAvailable": "새 버전 출시: v{version}",
       "updateDownload": "다운로드",
       "updateChecking": "업데이트 확인 중…",
-      "updateDownloading": "{agentName}이(가) 새 집을 준비하는 중 {percent}%",
+      "updateDownloading": "{agentName}이(가) 새 집을 준비하는 중",
       "updateReadyInstall": "v{version} 설치 준비 완료",
       "updateInstalling": "업데이트를 설치하는 중입니다. HanaAgent가 자동으로 다시 시작됩니다…",
       "updateInstallManualHint": "다시 시작하여 업데이트를 누른 뒤 설치합니다. 종료만으로는 자동 설치하지 않습니다",
       "updateInstall": "재시작하여 업데이트",
       "updateInstallNow": "지금 재시작하여 업데이트",
+      "updateApply": "업데이트",
+      "updateApplyAutoHint": "클릭하지 않아도 다음 실행 시 자동으로 적용됩니다",
+      "trainStickerTitle": "새 버전이 있습니다",
+      "trainStickerDownloading": "다운로드 중 {percent}%",
+      "trainStickerApplying": "업데이트 적용 중…",
+      "shellStickerTitle": "플랫폼 업데이트 사용 가능, 재시작 필요",
+      "shellStickerTitleBlocking": "새 버전을 계속 받으려면 이 업데이트를 완료해야 합니다",
+      "fallbackStickerTitle": "버전 {fromVersion}이(가) 연속으로 시작에 실패하여 {toVersion}(으)로 롤백되었습니다. 문제가 있던 버전은 격리되어 자동으로 재시도되지 않습니다.",
+      "fallbackStickerAckLabel": "확인",
+      "updateHistoryTitle": "업데이트 기록",
+      "updateHistorySubtitle": "최근에 게시된 5개 버전",
+      "updateHistoryLoading": "업데이트 기록을 불러오는 중…",
+      "updateHistoryOffline": "릴리스 사이트에 연결할 수 없어 앱에 저장된 버전을 표시합니다.",
+      "updateHistoryPartial": "업데이트 설명이 있는 게시 버전 중 일부만 찾았습니다.",
+      "updateHistoryUnavailable": "업데이트 기록을 일시적으로 불러올 수 없습니다. 나중에 다시 시도해 주세요.",
       "updateProgress": "{percent}%",
       "updateError": "업데이트 확인 실패",
       "updateLatest": "최신 버전입니다",
+      "updateLatestCheckedAt": "최신 상태입니다 (마지막 확인: {time})",
+      "updateManifestReleasedAt": "배포 매니페스트 발행일: {date}",
+      "updateManifestReleasedAtViaMirror": "배포 매니페스트 발행일: {date} (백업 소스 경유)",
       "updateCheckBtn": "업데이트 확인",
+      "updateRetryBtn": "다시 시도",
       "updateNeedInstall": "먼저 HanaAgent를 응용 프로그램 폴더로 이동하세요",
       "updateDiskSpace": "디스크 공간이 부족하여 업데이트를 다운로드할 수 없습니다",
       "updateDigestCta": "이번 업데이트에서 얻는 것",
@@ -2863,7 +2915,8 @@
     "tray": {
       "show": "HanaAgent 표시",
       "settings": "설정",
-      "quit": "종료"
+      "quit": "종료",
+      "repairArtifacts": "구성 요소 복구…"
     },
     "dialog": {
       "selectFolder": "작업 폴더 선택",
@@ -2879,10 +2932,16 @@
       "serverFilesNotReady": "자동 업데이트가 방금 완료되었고, 새 버전 파일이 아직 디스크에 쓰이고 있어요 ({missing} 없음). {waited}초 동안 기다렸지만 준비되지 않았어요. 잠시 후 HanaAgent를 다시 시작해 주세요.",
       "serverModuleMissing": "Server 시작 실패: 모듈 {module}을(를) 찾을 수 없어요.\n자동 업데이트가 완료된 직후 파일이 아직 디스크에 쓰이는 중일 때 자주 발생해요.\n권장: 1-2분 기다린 후 HanaAgent를 다시 시작해 주세요. 반복되면 GitHub에 신고해 주세요.",
       "installFailedTitle": "HanaAgent 업데이트",
-      "installFailedBody": "업데이트 설치에 실패했어요:\n{error}\n\nHanaAgent를 다시 시작한 후 재시도하거나, 설정 페이지에서 수동으로 업데이트를 확인해 주세요."
+      "installFailedBody": "업데이트 설치에 실패했어요:\n{error}\n\nHanaAgent를 다시 시작한 후 재시도하거나, 설정 페이지에서 수동으로 업데이트를 확인해 주세요.",
+      "repairArtifactsTitle": "구성 요소 복구",
+      "repairArtifactsBody": "이 작업은 HanaAgent의 앱 구성 요소를 설치 당시 버전으로 재설정하고 앱을 다시 시작해요. 데이터(에이전트, 세션, 설정)는 영향을 받지 않아요.",
+      "repairArtifactsConfirm": "복구 후 재시작",
+      "repairArtifactsCancel": "취소",
+      "trainUpdateApplyFailedBody": "HanaAgent v{version}\n\n업데이트 적용 실패:\n{error}\n\n앱을 다시 시작해 주세요."
     },
     "notification": {
-      "ready": "알림이 준비되었어요"
+      "ready": "알림이 준비되었어요",
+      "componentQuarantined": "구성 요소가 이전 버전으로 자동 복구되었어요. 기능에는 영향이 없어요"
     }
   },
   "devtools": {

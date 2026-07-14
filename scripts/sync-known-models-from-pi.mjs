@@ -61,8 +61,7 @@ const FIELD_MAP = [
   },
 ];
 
-// 显式排除表：2026-07-08 用户审核口径，理由见
-// .docs/specs/2026-07-08-pi-sdk-0.80.3-upgrade-plan.md Task 9。
+// 显式排除表：记录已经人工审核、必须保留 Hana 现值的上游差异。
 // 键格式与报告行一致（provider/modelId.field）。命中的差异保持 Hana 现值，
 // 报告中单列 excluded 段，不落盘。
 // 大意：anthropic 两条为 1M beta 口径（会拉高压缩阈值致溢出）；
