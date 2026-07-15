@@ -46,10 +46,7 @@ const {
   focusExistingWindow,
 } = require("./src/shared/single-instance-lock.cjs");
 const {
-  configureProcessPiSdkEnv,
-  ensureHanaPiSdkDirs,
   resolveHanakoHome,
-  withHanaPiSdkEnv,
 } = require("../shared/hana-runtime-paths.cjs");
 const {
   buildBrowserSearchExtractionScript,
@@ -80,6 +77,7 @@ const {
   recordGpuChildProcessGone,
   recordGpuInfoUpdate,
   resolveGpuStartupPolicy,
+  settleLegacyGpuPreferenceMigration,
 } = require("./src/shared/gpu-startup-policy.cjs");
 const {
   buildWin32ServerEnv,
@@ -158,8 +156,6 @@ function safeReadJSON(filePath, fallback = null) {
 
 const hanakoHome = resolveHanakoHome(process.env.HANA_HOME);
 process.env.HANA_HOME = hanakoHome;
-ensureHanaPiSdkDirs(hanakoHome);
-configureProcessPiSdkEnv(hanakoHome);
 
 const keepAwakeManager = createKeepAwakeManager({ powerSaveBlocker });
 
@@ -1638,7 +1634,7 @@ async function _spawnServerOnce(serverInfoPath, artifactBootContext) {
   reusedServerOwned = false;
 
   let serverEnv = {
-    ...withHanaPiSdkEnv(process.env, hanakoHome),
+    ...process.env,
     HANA_HOME: hanakoHome,
     HANA_SERVER_OWNER: "desktop",
     HANA_SERVER_OWNER_PID: String(process.pid),
@@ -1646,6 +1642,10 @@ async function _spawnServerOnce(serverInfoPath, artifactBootContext) {
     HANA_DESKTOP_APP_PATH: app.getAppPath(),
     HANA_DESKTOP_IS_PACKAGED: app.isPackaged ? "1" : "0",
   };
+  // The server receives every ordinary desktop environment variable, but it
+  // must not inherit Pi's global agent directory. Hana supplies all SDK paths
+  // explicitly so a host-level Pi installation cannot redirect Hana's data.
+  delete serverEnv.PI_CODING_AGENT_DIR;
   // packaged 模式下 `_distRenderer` 已经被 `resolvePackagedArtifactBoot`
   // （本函数调用前必然跑过一次，见调用点 :1186 附近）重指向 renderer 的
   // 已激活版本目录；把它转交给 server，让 /mobile、/desktop 的远程网页
@@ -1817,6 +1817,47 @@ async function _spawnServerOnce(serverInfoPath, artifactBootContext) {
       log: (msg) => console.warn(redactMainLogText(msg)),
     });
   }
+}
+
+async function settleLegacyGpuPreferenceAfterServerStart() {
+  const intent = gpuStartupPolicy?.legacyPreferenceCleanup;
+  if (process.platform !== "win32" || !intent) return null;
+  if (!serverPort || !serverToken) {
+    throw new Error("Legacy GPU preference migration requires a ready local server");
+  }
+
+  const response = await fetch(
+    `http://127.0.0.1:${serverPort}/api/preferences/legacy-gpu-safe-mode/hardware-acceleration`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serverToken}` },
+      signal: AbortSignal.timeout(5000),
+    },
+  );
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {}
+  if (!response.ok) {
+    throw new Error(
+      `Legacy GPU preference migration failed with HTTP ${response.status}` +
+      (payload?.error ? `: ${payload.error}` : ""),
+    );
+  }
+  if (
+    payload?.ok !== true ||
+    !["deleted", "already-absent", "value-changed"].includes(payload.status)
+  ) {
+    throw new Error("Legacy GPU preference migration returned an invalid response");
+  }
+
+  const result = settleLegacyGpuPreferenceMigration({
+    hanakoHome,
+    intent,
+    preferenceStatus: payload.status,
+  });
+  console.log(`[desktop] Legacy GPU preference migration ${result.status}`);
+  return result;
 }
 
 /**
@@ -5702,6 +5743,7 @@ app.whenReady().then(async () => {
     }
     console.log("[desktop] 启动 HanaAgent Server...");
     await startServer();
+    await settleLegacyGpuPreferenceAfterServerStart();
     if (process.platform === "win32") {
       markGpuStartupPhase({
         hanakoHome,

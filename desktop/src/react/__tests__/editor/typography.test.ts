@@ -307,7 +307,11 @@ describe('editor typography settings', () => {
     expect(theme).toMatch(/'\.cm-line\.cm-markdown-cover-line':\s*\{[\s\S]*maxWidth:\s*'none'/);
     expect(theme).toMatch(/'\.cm-markdown-cover':\s*\{[\s\S]*width:\s*'100%'/);
     expect(theme).toMatch(/'\.cm-markdown-cover':\s*\{[\s\S]*maxWidth:\s*'none'/);
-    expect(theme).toMatch(/padding:\s*'0 var\(--editor-markdown-content-padding-x\)'/);
+    expect(theme).toMatch(/'--editor-markdown-content-inset-x':\s*'max\(var\(--editor-markdown-content-padding-x\), var\(--editor-markdown-block-rail-space, 0px\)\)'/);
+    expect(theme).toMatch(/padding:\s*'0 var\(--editor-markdown-content-inset-x\)'/);
+    expect(theme).toMatch(/'\.cm-markdown-cover\.cm-markdown-cover-bleed-x':\s*\{[\s\S]*marginLeft:\s*'calc\(0px - var\(--editor-markdown-content-inset-x\)\)'/);
+    expect(theme).toMatch(/width:\s*'calc\(100% \+ var\(--editor-markdown-content-inset-x\) \+ var\(--editor-markdown-content-inset-x\)\)'/);
+    expect(previewCss).toMatch(/--editor-markdown-block-rail-space:\s*36px/);
     expect(highlight).toMatch(/tags\.heading1,\s*fontSize:\s*'var\(--editor-markdown-h1-font-size\)'/);
     expect(highlight).toMatch(/tags\.heading6,\s*fontSize:\s*'var\(--editor-markdown-h6-font-size\)'/);
     expect(previewCss).toMatch(/font-size:\s*var\(--editor-markdown-font-size\)/);
@@ -326,5 +330,32 @@ describe('editor typography settings', () => {
     expect(contentRule).not.toMatch(/margin:\s*0 auto/);
     expect(css).not.toMatch(/:global\(\.preview-editor \.cm-scroller\)\s*\{/);
     expect(css).not.toMatch(/:global\(\.preview-editor \.cm-content\)\s*\{/);
+  });
+
+  it('uses the original quote geometry while rounding code block outer edges', () => {
+    const css = readPreviewStyles();
+
+    expect(css).toMatch(/:global\(\.cm-blockquote-line\)\s*\{[^}]*border-left:\s*3px solid var\(--accent\)[^}]*padding-left:\s*1em[^}]*background:\s*var\(--overlay-subtle\)/);
+    expect(css).not.toMatch(/:global\(\.cm-blockquote-line\)::before/);
+    expect(css).not.toMatch(/:global\(\.cm-blockquote-line-(?:first|last)\)::before/);
+    expect(css).toMatch(/:global\(\.cm-blockquote-line-first\)\s*\{[^}]*border-radius:\s*2px 2px 0 0/);
+    expect(css).toMatch(/:global\(\.cm-blockquote-line-last\)\s*\{[^}]*border-radius:\s*0 0 2px 2px/);
+    expect(css).toMatch(/:global\(\.cm-codeblock-line-first\)\s*\{[^}]*border-radius:\s*2px 2px 0 0/);
+    expect(css).toMatch(/:global\(\.cm-codeblock-line-last\)\s*\{[^}]*border-radius:\s*0 0 2px 2px/);
+    expect(css).toMatch(/:global\(\.cm-codeblock-line-first\)\s*\{[^}]*min-height:\s*24px[^}]*line-height:\s*24px[^}]*cursor:\s*default/);
+    expect(css).toMatch(/:global\(\.cm-codeblock-line-last\)\s*\{[^}]*min-height:\s*var\(--space-4\)[^}]*line-height:\s*var\(--space-4\)[^}]*cursor:\s*default/);
+  });
+
+  it('sizes the block drop indicator from the markdown document column', () => {
+    const css = readPreviewStyles();
+
+    expect(css).toMatch(/:global\(\.preview-editor\.mode-markdown \.cm-markdown-block-drop-indicator\)\s*\{[^}]*position:\s*relative[^}]*width:\s*100%[^}]*max-width:\s*var\(--editor-markdown-content-width\)[^}]*height:\s*0[^}]*margin:\s*0 auto/);
+    expect(css).toMatch(/:global\(\.preview-editor\.mode-markdown \.cm-markdown-block-drop-indicator\)::after\s*\{[^}]*left:\s*var\(--space-8\)[^}]*right:\s*var\(--space-8\)[^}]*height:\s*2px/);
+  });
+
+  it('keeps the Markdown block Grabber two pixels clear of the content', () => {
+    const css = readPreviewStyles();
+
+    expect(css).toMatch(/:global\(\.preview-editor\.mode-markdown \.cm-markdown-block-handle\)\s*\{[^}]*left:\s*-2px/);
   });
 });

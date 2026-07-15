@@ -63,6 +63,62 @@ function pickString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+const LEGACY_SCAN_PROVENANCE_FIELDS = new Set([
+  "createdBy",
+  "legacyAgentId",
+  "legacyLifecycle",
+  "legacyTitle",
+  "bridgeSessionKey",
+  "bridgeRole",
+  "platform",
+  "chatType",
+  "conversationId",
+  "conversationType",
+  "activityId",
+  "activityType",
+  "parentSessionId",
+  "legacyParentSessionPath",
+  "parentRunId",
+  "subagentTaskId",
+  "threadId",
+  "threadKind",
+]);
+
+const LEGACY_SCAN_MIGRATION_FIELDS = new Set([
+  "source",
+  "legacySessionPath",
+  "legacySessionFileName",
+  "migratedAt",
+  "legacySources",
+]);
+
+const AUTHORITATIVE_LEGACY_OWNER_SOURCES = new Set([
+  "legacy_subagent_run_store",
+  "legacy_subagent_thread_store",
+]);
+
+function mergeLegacyScanFields(existing, incoming, allowedFields) {
+  const current = existing && typeof existing === "object" && !Array.isArray(existing)
+    ? { ...existing }
+    : {};
+  const candidate = incoming && typeof incoming === "object" && !Array.isArray(incoming)
+    ? incoming
+    : {};
+  for (const [key, value] of Object.entries(candidate)) {
+    if (!allowedFields.has(key) || value == null || value === "") continue;
+    if (Array.isArray(value)) {
+      const merged = new Set([
+        ...(Array.isArray(current[key]) ? current[key] : []),
+        ...value,
+      ].filter((item) => typeof item === "string" && item.trim()));
+      if (merged.size) current[key] = [...merged].sort();
+      continue;
+    }
+    if (current[key] == null || current[key] === "") current[key] = value;
+  }
+  return current;
+}
+
 function normalizeExecutorMetadata(value: any = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const executorAgentId = pickString(source.executorAgentId || source.agentId);
@@ -401,13 +457,16 @@ export class SessionManifestStore {
       updateLocatorLifecycle: this.db.prepare(`
         UPDATE session_manifests
         SET
+          domain = @domain,
+          kind = @kind,
           lifecycle = @lifecycle,
           current_locator_type = @currentLocatorType,
           current_locator_path = @currentLocatorPath,
           current_locator_key = @currentLocatorKey,
           current_locator_reason = @currentLocatorReason,
           locator_updated_at = @locatorUpdatedAt,
-          updated_at = @updatedAt
+          updated_at = @updatedAt,
+          deleted_at = @deletedAt
         WHERE session_id = @sessionId
       `),
       setPinnedAt: this.db.prepare(`
@@ -420,6 +479,17 @@ export class SessionManifestStore {
         SET owner_agent_id = @ownerAgentId, updated_at = @updatedAt
         WHERE session_id = @sessionId
           AND (owner_agent_id IS NULL OR owner_agent_id = '')
+      `),
+      repairLegacyScanMetadata: this.db.prepare(`
+        UPDATE session_manifests
+        SET
+          owner_agent_id = @ownerAgentId,
+          domain = @domain,
+          kind = @kind,
+          provenance_json = @provenanceJson,
+          migration_json = @migrationJson,
+          updated_at = @updatedAt
+        WHERE session_id = @sessionId
       `),
       setPlugin: this.db.prepare(`
         UPDATE session_manifests
@@ -620,7 +690,13 @@ export class SessionManifestStore {
     })();
   }
 
-  updateLocatorLifecycle(sessionId, nextSessionPath, lifecycle, reason = "update") {
+  updateLocatorLifecycle(
+    sessionId,
+    nextSessionPath,
+    lifecycle,
+    reason = "update",
+    classification: { domain?: string; kind?: string } = {},
+  ) {
     const nextLifecycle = pickString(lifecycle);
     if (!nextLifecycle) {
       throw new SessionManifestError(
@@ -640,6 +716,9 @@ export class SessionManifestStore {
         );
       }
 
+      const domain = pickString(classification?.domain) || manifest.domain;
+      const kind = pickString(classification?.kind) || manifest.kind;
+
       if (manifest.currentLocator.key !== nextLocator.key) {
         this._assertLocatorAvailable(nextLocator.key, sessionId);
         const changedAt = this._now();
@@ -654,6 +733,8 @@ export class SessionManifestStore {
         this._stmts.deleteHistoryForLocator.run(sessionId, nextLocator.key);
         this._stmts.updateLocatorLifecycle.run({
           sessionId,
+          domain,
+          kind,
           lifecycle: nextLifecycle,
           currentLocatorType: nextLocator.type,
           currentLocatorPath: nextLocator.path,
@@ -661,6 +742,7 @@ export class SessionManifestStore {
           currentLocatorReason: reason,
           locatorUpdatedAt: changedAt,
           updatedAt: changedAt,
+          deletedAt: nextLifecycle === "deleted" ? (manifest.deletedAt || changedAt) : null,
         });
         return this.getBySessionId(sessionId);
       }
@@ -668,6 +750,8 @@ export class SessionManifestStore {
       const updatedAt = this._now();
       this._stmts.updateLocatorLifecycle.run({
         sessionId,
+        domain,
+        kind,
         lifecycle: nextLifecycle,
         currentLocatorType: nextLocator.type,
         currentLocatorPath: nextLocator.path,
@@ -675,6 +759,7 @@ export class SessionManifestStore {
         currentLocatorReason: reason,
         locatorUpdatedAt: updatedAt,
         updatedAt,
+        deletedAt: nextLifecycle === "deleted" ? (manifest.deletedAt || updatedAt) : null,
       });
       return this.getBySessionId(sessionId);
     })();
@@ -706,6 +791,73 @@ export class SessionManifestStore {
     const next = typeof ownerAgentId === "string" ? ownerAgentId.trim() : "";
     if (!next || manifest.ownerAgentId) return manifest;
     this._stmts.backfillOwnerAgent.run({ sessionId, ownerAgentId: next, updatedAt: this._now() });
+    return this.getBySessionId(sessionId);
+  }
+
+  /**
+   * Repairs metadata written by the legacy scanner before non-desktop sources
+   * had explicit classification. This is intentionally narrower than a
+   * general manifest patch: fresh rows and already-specific classifications
+   * are immutable here, and existing non-empty metadata always wins.
+   */
+  repairLegacyScanMetadata(sessionId, input: any = {}) {
+    const manifest = this.getBySessionId(sessionId);
+    if (!manifest) {
+      throw new SessionManifestError(
+        "session_manifest_not_found",
+        `Session manifest not found: ${sessionId}`,
+        { sessionId },
+      );
+    }
+    const migrationSource = pickString(manifest.migration?.source);
+    const migrationCreator = pickString(manifest.migration?.createdBy);
+    const legacyBoundary = migrationSource === "legacy_scan"
+      || migrationSource === "resolver_on_demand"
+      || migrationCreator === "resolver_on_demand";
+    if (!legacyBoundary) return manifest;
+
+    const expectedDomain = pickString(input.domain);
+    const expectedKind = pickString(input.kind);
+    if (!expectedDomain || !expectedKind) return manifest;
+    const alreadyExpected = manifest.domain === expectedDomain && manifest.kind === expectedKind;
+    const legacyDefault = (manifest.domain === "desktop" || manifest.domain === "home")
+      && manifest.kind === "chat";
+    if (!alreadyExpected && !legacyDefault) return manifest;
+
+    const requestedOwnerAgentId = pickString(input.ownerAgentId);
+    const ownerSource = pickString(input.ownerAgentIdSource);
+    const ownerAgentId = requestedOwnerAgentId && AUTHORITATIVE_LEGACY_OWNER_SOURCES.has(ownerSource)
+      ? requestedOwnerAgentId
+      : (manifest.ownerAgentId || requestedOwnerAgentId);
+    const domain = legacyDefault ? expectedDomain : manifest.domain;
+    const kind = legacyDefault ? expectedKind : manifest.kind;
+    const provenance = mergeLegacyScanFields(
+      manifest.provenance,
+      input.provenance,
+      LEGACY_SCAN_PROVENANCE_FIELDS,
+    );
+    const migration = mergeLegacyScanFields(
+      manifest.migration,
+      input.migration,
+      LEGACY_SCAN_MIGRATION_FIELDS,
+    );
+
+    const changed = ownerAgentId !== manifest.ownerAgentId
+      || domain !== manifest.domain
+      || kind !== manifest.kind
+      || JSON.stringify(provenance) !== JSON.stringify(manifest.provenance)
+      || JSON.stringify(migration) !== JSON.stringify(manifest.migration);
+    if (!changed) return manifest;
+
+    this._stmts.repairLegacyScanMetadata.run({
+      sessionId,
+      ownerAgentId,
+      domain,
+      kind,
+      provenanceJson: JSON.stringify(provenance),
+      migrationJson: JSON.stringify(migration),
+      updatedAt: this._now(),
+    });
     return this.getBySessionId(sessionId);
   }
 

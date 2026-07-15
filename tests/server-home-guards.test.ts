@@ -7,6 +7,11 @@ import { spawn } from "child_process";
 
 const root = process.cwd();
 
+function expectNoPiRuntimeTrees(hanaHome: string) {
+  expect(fs.existsSync(path.join(hanaHome, "runtime", "pi-sdk"))).toBe(false);
+  expect(fs.existsSync(path.join(hanaHome, ".pi"))).toBe(false);
+}
+
 function spawnServerBootstrap(hanaHome: string, extraEnv: Record<string, string> = {}) {
   return spawn(process.execPath, ["server/bootstrap.ts"], {
     cwd: root,
@@ -29,13 +34,17 @@ async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs = 15000) {
   child.stdout?.on("data", (chunk) => { stdout += chunk; });
   child.stderr?.on("data", (chunk) => { stderr += chunk; });
 
-  const result: any = await Promise.race([
-    new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal }))),
-    new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), timeoutMs)),
-  ]);
-  if (result.timeout) {
-    child.kill("SIGKILL");
-  }
+  const result: any = await new Promise((resolve) => {
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.once("close", (code, signal) => {
+      clearTimeout(timeout);
+      resolve(timedOut ? { timeout: true, code, signal } : { code, signal });
+    });
+  });
   return { ...result, stdout, stderr };
 }
 
@@ -56,7 +65,7 @@ describe("server/index.ts source-order contract: home guards run before any stor
 
   it("runs the mutex probe and the data-epoch gate before bindServerTransportOwnership, ensureFirstRun, ensureLocalIdentityRegistries, and HanaEngine construction", () => {
     const probeIndex = source.indexOf("await probeServerInfo({ info: existingServerInfo })");
-    const epochIndex = source.indexOf("await assertAndStampDataEpoch(");
+    const epochIndex = source.indexOf("await coordinateDataEpochStartup(");
     const bindIndex = source.indexOf("await bindServerTransportOwnership");
     const firstRunIndex = source.indexOf("ensureFirstRun(");
     const identityIndex = source.indexOf("ensureLocalIdentityRegistries(");
@@ -73,6 +82,8 @@ describe("server/index.ts source-order contract: home guards run before any stor
     expect(bindIndex).toBeLessThan(firstRunIndex);
     expect(identityIndex).toBeGreaterThan(firstRunIndex);
     expect(identityIndex).toBeLessThan(engineIndex);
+    expect(source).not.toContain("ensureHanaPiSdkDirs");
+    expect(source).not.toContain("configureProcessPiSdkEnv");
   });
 
   it("blocks on alive-same-home / alive-unauthorized and self-cleans on not-hana / dead", () => {
@@ -118,6 +129,7 @@ describe("server home guards — real spawn behavior (fast failure paths, before
       expect(result.stderr).toContain("要接管请先退出它");
       expect(result.stdout + result.stderr).not.toContain("ensureFirstRun");
       expect(result.stdout + result.stderr).not.toContain("HanaEngine");
+      expectNoPiRuntimeTrees(hanaHome);
     } finally {
       await new Promise<void>((resolve) => fakeServer.close(() => resolve()));
       fs.rmSync(hanaHome, { recursive: true, force: true });
@@ -176,6 +188,7 @@ describe("server home guards — real spawn behavior (fast failure paths, before
       expect(result.stderr).toContain("HANA_ALLOW_DATA_DOWNGRADE=1");
       expect(result.stdout + result.stderr).not.toContain("ensureFirstRun");
       expect(result.stdout + result.stderr).not.toContain("HanaEngine");
+      expectNoPiRuntimeTrees(hanaHome);
     } finally {
       fs.rmSync(hanaHome, { recursive: true, force: true });
     }
@@ -192,6 +205,66 @@ describe("server home guards — real spawn behavior (fast failure paths, before
       expect(result).toMatchObject({ code: 1, signal: null });
       expect(result.stderr).toContain("data-epoch");
       expect(result.stderr.toLowerCase()).toContain("corrupt");
+      expectNoPiRuntimeTrees(hanaHome);
+    } finally {
+      fs.rmSync(hanaHome, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it("exits 1 on a corrupt transition journal before binding or seeding any store", async () => {
+    const hanaHome = fs.mkdtempSync(path.join(os.tmpdir(), "hana-epoch-journal-corrupt-test-"));
+    try {
+      fs.writeFileSync(path.join(hanaHome, "data-epoch-transition.json"), "{ not valid json", "utf-8");
+
+      const child = spawnServerBootstrap(hanaHome);
+      const result = await waitForExit(child);
+
+      expect(result).toMatchObject({ code: 1, signal: null });
+      expect(result.stderr).toContain("corrupt-journal");
+      expect(result.stdout + result.stderr).not.toContain("ensureFirstRun");
+      expect(result.stdout + result.stderr).not.toContain("HanaEngine");
+      expectNoPiRuntimeTrees(hanaHome);
+    } finally {
+      fs.rmSync(hanaHome, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it("does not let HANA_ALLOW_DATA_DOWNGRADE bypass an incomplete transition", async () => {
+    const hanaHome = fs.mkdtempSync(path.join(os.tmpdir(), "hana-epoch-journal-incomplete-test-"));
+    try {
+      fs.writeFileSync(path.join(hanaHome, "data-epoch.json"), JSON.stringify({
+        schemaVersion: 2,
+        epoch: 2,
+        minimumReaderEpoch: 2,
+        committedDataEpoch: 1,
+        lastVersion: "2.0.0",
+        updatedAt: new Date().toISOString(),
+      }), "utf-8");
+      fs.writeFileSync(path.join(hanaHome, "data-epoch-transition.json"), JSON.stringify({
+        schemaVersion: 1,
+        transitionId: "transition-1-2",
+        fromEpoch: 1,
+        toEpoch: 2,
+        migrationIds: ["preferences-1-to-2"],
+        recoveryModes: { "preferences-1-to-2": "restore-only" },
+        phase: "migrating",
+        lastVersion: "2.0.0",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        affectedStoreIds: ["user-preferences"],
+        checkpointId: "checkpoint-1-2",
+        checkpointReceipt: { id: "checkpoint-1-2" },
+      }), "utf-8");
+
+      const child = spawnServerBootstrap(hanaHome, { HANA_ALLOW_DATA_DOWNGRADE: "1" });
+      const result = await waitForExit(child);
+
+      expect(result).toMatchObject({ code: 1, signal: null });
+      expect(result.stderr).toContain("incomplete-transition");
+      expect(result.stderr).toContain("migrating");
+      expect(result.stdout + result.stderr).not.toContain("ensureFirstRun");
+      expect(result.stdout + result.stderr).not.toContain("HanaEngine");
+      expectNoPiRuntimeTrees(hanaHome);
     } finally {
       fs.rmSync(hanaHome, { recursive: true, force: true });
     }
@@ -212,29 +285,41 @@ describe("server home guards — real spawn behavior (fast failure paths, before
       // the process continue in the background and killing it once we've
       // observed enough stdout to know it moved past the gate, or timeout.
       const child = spawnServerBootstrap(hanaHome, { HANA_ALLOW_DATA_DOWNGRADE: "1" });
+      const childClosed = new Promise<void>((resolve) => child.once("close", () => resolve()));
       let stdout = "";
       let stderr = "";
       child.stdout?.on("data", (chunk) => { stdout += chunk; });
       child.stderr?.on("data", (chunk) => { stderr += chunk; });
 
-      await Promise.race([
-        new Promise<void>((resolve) => {
-          const check = setInterval(() => {
-            if (stdout.includes("ensureFirstRun") || stderr.includes("epoch=999999")) {
-              clearInterval(check);
-              resolve();
-            }
-          }, 50);
-        }),
+      await new Promise<void>((resolve) => {
+        let check: ReturnType<typeof setInterval>;
+        let timeout: ReturnType<typeof setTimeout>;
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearInterval(check);
+          clearTimeout(timeout);
+          resolve();
+        };
+        check = setInterval(() => {
+          if (stdout.includes("ensureFirstRun")) {
+            finish();
+          }
+        }, 50);
         // Generous window: under full-suite parallel load (hundreds of
         // vitest workers contending for CPU), a real child process reaching
         // ensureFirstRun can take noticeably longer than in an isolated
         // run. This only affects how long the test waits before asserting
         // — it does not affect gate latency in production.
-        new Promise<void>((resolve) => setTimeout(resolve, 25000)),
-      ]);
+        timeout = setTimeout(finish, 25000);
+        void childClosed.then(finish);
+      });
 
-      child.kill("SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      await childClosed;
       // The gate must not have blocked: no rejection instructions, and a
       // loud (but non-blocking) warning is expected instead.
       expect(stderr).not.toContain("HANA_ALLOW_DATA_DOWNGRADE=1"); // that's the *rejection* message's remedy text

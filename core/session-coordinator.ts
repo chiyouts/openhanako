@@ -1014,7 +1014,7 @@ export class SessionCoordinator {
       error.status = 400;
       throw error;
     }
-    if (lifecycle !== "active" && lifecycle !== "archived") {
+    if (lifecycle !== "active" && lifecycle !== "archived" && lifecycle !== "deleted") {
       const error: any = new Error(`moveSessionLifecycle: unsupported lifecycle ${lifecycle || "(empty)"}`);
       error.code = "session_lifecycle_invalid";
       error.status = 400;
@@ -1047,12 +1047,24 @@ export class SessionCoordinator {
       throw error;
     }
 
-    const updated = this._sessionManifestStore.updateLocatorLifecycle(
-      manifest.sessionId,
-      toPath,
-      lifecycle,
-      reason,
-    );
+    const classification = {
+      domain: manifestDefaults?.domain,
+      kind: manifestDefaults?.kind,
+    };
+    const updated = classification.domain || classification.kind
+      ? this._sessionManifestStore.updateLocatorLifecycle(
+        manifest.sessionId,
+        toPath,
+        lifecycle,
+        reason,
+        classification,
+      )
+      : this._sessionManifestStore.updateLocatorLifecycle(
+        manifest.sessionId,
+        toPath,
+        lifecycle,
+        reason,
+      );
     if (!updated?.currentLocator?.path || path.resolve(updated.currentLocator.path) !== path.resolve(toPath) || updated.lifecycle !== lifecycle) {
       const error: any = new Error("moveSessionLifecycle: manifest transition verification failed");
       error.code = "session_lifecycle_transition_failed";
@@ -1757,6 +1769,8 @@ export class SessionCoordinator {
       ...runtimeDisabledToolNames,
     ];
     let snapshotToolNames = null;  // null signals "do not call setActiveToolsByName"
+    let runtimeToolNames = null;
+    let unavailableToolNames: string[] = [];
     let shouldPersistRestoredToolNames = false;
     // #1624：dismissed fingerprint 仍从 session-meta 读出，保留未来手动提示链路。
     let restoredDriftDismissedFingerprint: string | null = null;
@@ -1789,22 +1803,33 @@ export class SessionCoordinator {
           snapshotToolNames = computeToolSnapshot(allToolNames, disabled, {
             extraDisabled: extraDisabledToolNames,
           });
+          runtimeToolNames = snapshotToolNames;
           shouldPersistRestoredToolNames = true;
           restoredDriftDismissedFingerprint = null;
         } else if (restoredCapabilityToolNames) {
-          const gatedRestoredToolNames = computeToolSnapshot(restoredCapabilityToolNames, [], {
-            extraDisabled: stableFeatureDisabledToolNames,
+          const runtimeAvailableToolNames = computeToolSnapshot(allToolNames, [], {
+            extraDisabled: extraDisabledToolNames,
           });
-          const repair = repairRestoredToolSnapshotDetailed(gatedRestoredToolNames, allToolNames);
-          snapshotToolNames = repair.toolNames;
+          const repair = repairRestoredToolSnapshotDetailed(
+            restoredCapabilityToolNames,
+            runtimeAvailableToolNames,
+          );
+          snapshotToolNames = repair.contractToolNames;
+          runtimeToolNames = repair.toolNames;
+          unavailableToolNames = repair.droppedToolNames;
           shouldPersistRestoredToolNames = !sameToolNames(snapshotToolNames, restoredCapabilityToolNames);
         } else if (metaEntry && Array.isArray(metaEntry.toolNames)) {
           const restoredToolNames = uniqueToolNames(metaEntry.toolNames);
-          const gatedRestoredToolNames = computeToolSnapshot(restoredToolNames, [], {
-            extraDisabled: stableFeatureDisabledToolNames,
-          });  // Case A, with current global feature gates enforced
-          const repair = repairRestoredToolSnapshotDetailed(gatedRestoredToolNames, allToolNames);
-          snapshotToolNames = repair.toolNames;
+          const runtimeAvailableToolNames = computeToolSnapshot(allToolNames, [], {
+            extraDisabled: extraDisabledToolNames,
+          });
+          const repair = repairRestoredToolSnapshotDetailed(
+            restoredToolNames,
+            runtimeAvailableToolNames,
+          );
+          snapshotToolNames = repair.contractToolNames;
+          runtimeToolNames = repair.toolNames;
+          unavailableToolNames = repair.droppedToolNames;
           shouldPersistRestoredToolNames = !sameToolNames(snapshotToolNames, metaEntry.toolNames);
         } else {
           // Legacy sessions created before tool snapshots had no stable tool
@@ -1814,6 +1839,7 @@ export class SessionCoordinator {
           snapshotToolNames = computeToolSnapshot(stableRestoreToolNames, disabled, {
             extraDisabled: extraDisabledToolNames,
           });
+          runtimeToolNames = snapshotToolNames;
           shouldPersistRestoredToolNames = true;
         }
       }
@@ -1826,11 +1852,22 @@ export class SessionCoordinator {
       snapshotToolNames = computeToolSnapshot(allToolNames, disabled, {
         extraDisabled: extraDisabledToolNames,
       });
+      runtimeToolNames = snapshotToolNames;
     }
 
-    // #1624 的能力漂移提示模板保留，但 restore 不再主动计算/唤醒。
-    // 这里刻意不构造 live prompt / tool diff，避免切换旧会话时为隐藏提醒付出额外成本。
-    let capabilityDrift = null;
+    // A missing runtime handler is availability state, not permission to
+    // rewrite the frozen contract. Surface the outage while keeping restore
+    // otherwise free of live prompt-diff work.
+    const unavailableDrift = unavailableToolNames.length > 0
+      ? buildSessionCapabilityDrift({
+          frozenToolNames: runtimeToolNames || [],
+          liveToolNames: runtimeToolNames || [],
+          invalidToolNames: unavailableToolNames,
+          frozenSystemPrompt: "",
+          liveSystemPrompt: "",
+        })
+      : null;
+    let capabilityDrift = unavailableDrift?.hasDrift ? unavailableDrift : null;
 
     const reminderBaselineSeq = this._envChangeLedger?.maxSeq?.() ?? 0;
     const hasPreviousReminderState = reminderState && typeof reminderState === "object";
@@ -1871,7 +1908,9 @@ export class SessionCoordinator {
       thinkingLevel: initialThinkingLevel,
       experiments: frozenExperimentFlags,
       toolNames: snapshotToolNames,  // null for legacy sessions (Case B), array otherwise
-      activeToolDefinitions: activeToolDefinitionsFromSnapshot(allToolObjects, snapshotToolNames),
+      runtimeToolNames,
+      unavailableToolNames,
+      activeToolDefinitions: activeToolDefinitionsFromSnapshot(allToolObjects, runtimeToolNames),
       ownerPluginId: pluginSessionMeta?.ownerPluginId || null,
       sessionKind: pluginSessionMeta?.kind || null,
       sessionVisibility: pluginSessionMeta?.visibility || "public",
@@ -1928,8 +1967,8 @@ export class SessionCoordinator {
 
     // Apply tool snapshot (Case A / Case C). Permission mode is a runtime
     // policy and does not change the stable tool schema.
-    if (snapshotToolNames !== null) {
-      session.setActiveToolsByName(snapshotToolNames);
+    if (runtimeToolNames !== null) {
+      session.setActiveToolsByName(runtimeToolNames);
     }
 
     if (restoredPromptSnapshot?.finalSystemPrompt) {
@@ -4014,14 +4053,18 @@ export class SessionCoordinator {
       if (!entry?.sessionPath || !entry?.session) continue;
       if (targetAgentId && entry.agentId !== targetAgentId) continue;
       scanned += 1;
-      const frozenToolNames = Array.isArray(entry.toolNames)
-        ? entry.toolNames
+      const frozenToolNames = Array.isArray(entry.runtimeToolNames)
+        ? entry.runtimeToolNames
         : (entry.activeToolDefinitions || []).map((tool) => tool?.name).filter(Boolean);
       const liveToolNames = this._computeLiveToolSnapshotForEntry(entry, entry.sessionPath);
       if (!liveToolNames) continue;
+      const liveToolNameSet = new Set(liveToolNames);
       const drift = buildSessionCapabilityDrift({
         frozenToolNames,
         liveToolNames,
+        invalidToolNames: Array.isArray(entry.unavailableToolNames)
+          ? entry.unavailableToolNames.filter((name) => !liveToolNameSet.has(name))
+          : [],
         frozenSystemPrompt: "",
         liveSystemPrompt: "",
       });
@@ -4223,6 +4266,14 @@ export class SessionCoordinator {
           const sessKey = path.basename(s.path);
           const metaEntry = meta[sessKey];
           const manifest = this._resolveSessionManifestForPathQuiet(s.path);
+          if (manifest && (
+            manifest.lifecycle !== "active"
+            || manifest.domain !== "desktop"
+            || !manifest.currentLocator?.path
+            || path.resolve(manifest.currentLocator.path) !== path.resolve(s.path)
+          )) {
+            continue;
+          }
           const runtimeEntry = this._sessionFolderEntry(s.path);
           if (hasSessionPermissionModeFields(runtimeEntry)) {
             s.permissionMode = normalizeSessionPermissionMode(runtimeEntry);
@@ -5082,6 +5133,25 @@ export class SessionCoordinator {
     try {
       fs.mkdirSync(agent.sessionDir, { recursive: true });
       fs.renameSync(oldPath, newPath);
+      if (this._sessionManifestStore) {
+        try {
+          await this.moveSessionLifecycle({
+            fromPath: oldPath,
+            toPath: newPath,
+            lifecycle: "active",
+            reason: "activity_session_promoted",
+            manifestDefaults: {
+              ownerAgentId: agent.id,
+              domain: "desktop",
+              kind: "chat",
+              provenance: { createdBy: "activity_session_promoted" },
+            },
+          });
+        } catch (err) {
+          fs.renameSync(newPath, oldPath);
+          throw err;
+        }
+      }
       try {
         await this._ensurePromotedActivitySessionToolMeta(agent, newPath);
       } catch (err) {
@@ -5134,15 +5204,53 @@ export class SessionCoordinator {
     if (this._headlessOps.size === 1) bm.setHeadless(true);
     let tempSessionMgr;
     let childSessionPath = null;
+    let isolatedManifest = null;
+    let isolatedManifestCreated = false;
+    let isolatedIdentityPath = null;
+    let isolatedInitializationReady = false;
     // resume 复用的持久实例 session：cleanup 各路径（含 early_abort 的无条件 cleanupTempSession）
     // 一律不动，否则被 abort 一次实例文件就蒸发（撞底线#3）。
     let isResumedSession = false;
-    const cleanupTempSession = () => {
+    const tombstoneFreshIsolatedManifest = (reason) => {
+      if (
+        isResumedSession
+        || !isolatedManifestCreated
+        || !isolatedManifest?.sessionId
+        || !this._sessionManifestStore?.updateLocatorLifecycle
+      ) return true;
+      const tombstonePath = isolatedManifest.currentLocator?.path || isolatedIdentityPath;
+      if (!tombstonePath || isolatedManifest.lifecycle === "deleted") return true;
+      try {
+        isolatedManifest = this._sessionManifestStore.updateLocatorLifecycle(
+          isolatedManifest.sessionId,
+          tombstonePath,
+          "deleted",
+          reason,
+        );
+        return isolatedManifest?.lifecycle === "deleted";
+      } catch (manifestErr) {
+        log.warn(`isolated manifest cleanup failed: ${manifestErr?.message || manifestErr}`);
+        return false;
+      }
+    };
+    const cleanupTempSession = (reason = "isolated_ephemeral_cleanup") => {
       if (isResumedSession) return;
+      if (!tombstoneFreshIsolatedManifest(reason)) return;
       const sp = tempSessionMgr?.getSessionFile?.();
       if (sp) {
         // 临时 session 文件清理 best-effort：删不掉（如已被删/权限）不应让 isolated 执行失败。
         try { fs.unlinkSync(sp); } catch {}
+      }
+    };
+    const rollbackFreshIsolatedInitialization = () => {
+      if (isResumedSession || isolatedInitializationReady) return;
+      if (!tombstoneFreshIsolatedManifest("isolated_initialization_failed")) return;
+      for (const candidate of new Set([
+        childSessionPath,
+        isolatedIdentityPath,
+        tempSessionMgr?.getSessionFile?.(),
+      ].filter(Boolean))) {
+        try { fs.unlinkSync(candidate); } catch {}
       }
     };
     try {
@@ -5212,6 +5320,48 @@ export class SessionCoordinator {
       const execPermissionMode = normalizeSessionPermissionMode({
         permissionMode: opts.permissionMode || SESSION_PERMISSION_MODES.OPERATE,
       });
+      isolatedIdentityPath = tempSessionMgr?.getSessionFile?.() || null;
+      if (this._sessionManifestStore && !isolatedIdentityPath) {
+        throw new Error("executeIsolated: session locator unavailable before tool assembly");
+      }
+      if (isolatedIdentityPath && this._sessionManifestStore) {
+        const existingManifest = this._resolveSessionManifestForPath(isolatedIdentityPath);
+        isolatedManifest = existingManifest || this._ensureSessionManifestForPath(isolatedIdentityPath, {
+          ownerAgentId: targetAgent.id || null,
+          domain: opts.subagentContext ? "subagent" : "activity",
+          kind: opts.subagentContext ? "subagent_child" : "activity",
+          lifecycle: "active",
+          memoryPolicy: {
+            mode: targetAgent.memoryMasterEnabled !== false ? "enabled" : "disabled",
+            inheritedFrom: "isolated_session_create",
+          },
+          permissionModeSnapshot: {
+            mode: execPermissionMode,
+            source: "isolated_session_create",
+            capturedAt: new Date().toISOString(),
+          },
+          workspaceScope: {
+            primaryCwd: execCwd,
+            workspaceFolders: execWorkspaceScope.workspaceFolders,
+            authorizedFolders: execFolderScope.authorizedFolders,
+          },
+          provenance: {
+            createdBy: opts.subagentContext ? "subagent" : "activity",
+            parentSessionId: typeof opts.parentSessionId === "string" && opts.parentSessionId.trim()
+              ? opts.parentSessionId.trim()
+              : (typeof opts.parentSessionPath === "string" && opts.parentSessionPath.trim()
+                  ? this._sessionIdForPath(opts.parentSessionPath)
+                  : null),
+          },
+          migration: {},
+          locatorReason: isResumedSession ? "isolated_session_resume" : "isolated_session_create",
+        });
+        isolatedManifestCreated = !existingManifest && !!isolatedManifest;
+        if (!isolatedManifest?.sessionId) {
+          throw new Error("executeIsolated: session manifest could not be established before tool assembly");
+        }
+      }
+      const isolatedSessionId = isolatedManifest?.sessionId || null;
       const targetAgentToolsSnapshot = typeof targetAgent.getToolsSnapshot === "function"
         ? targetAgent.getToolsSnapshot({
           forceMemoryEnabled: targetAgent.memoryMasterEnabled !== false,
@@ -5231,6 +5381,9 @@ export class SessionCoordinator {
           authorizedFolders: execFolderScope.authorizedFolders,
           getAuthorizedFolders: () => execFolderScope.authorizedFolders,
           getSessionPath: () => tempSessionMgr?.getSessionFile?.() || null,
+          getSessionId: () => isolatedSessionId,
+          agentId: targetAgent.id || null,
+          getAgentId: () => targetAgent.id || null,
           fileReadSessionPaths,
           getPermissionMode: () => execPermissionMode,
           permissionContext: { isSubagent: !!opts.subagentContext },
@@ -5319,6 +5472,20 @@ export class SessionCoordinator {
       });
 
       childSessionPath = session.sessionManager?.getSessionFile?.() || null;
+      if (
+        isolatedManifest?.sessionId
+        && childSessionPath
+        && isolatedManifest.currentLocator?.path !== childSessionPath
+        && this._sessionManifestStore?.updateLocatorLifecycle
+      ) {
+        isolatedManifest = this._sessionManifestStore.updateLocatorLifecycle(
+          isolatedManifest.sessionId,
+          childSessionPath,
+          isolatedManifest.lifecycle || "active",
+          "isolated_session_ready",
+        );
+      }
+      isolatedInitializationReady = true;
       if (!isResumedSession && childSessionPath && this._isPromotableActivitySession(targetAgent, childSessionPath)) {
         const promotedSessionPath = path.join(targetAgent.sessionDir, path.basename(childSessionPath));
         const isolatedSkillsResult = targetAgent !== agent && skills?.getSkillsForAgent
@@ -5352,7 +5519,8 @@ export class SessionCoordinator {
         });
       }
 
-      const readyChildSessionId = childSessionPath ? this._sessionIdForPath(childSessionPath) : null;
+      const readyChildSessionId = isolatedManifest?.sessionId
+        || (childSessionPath ? this._sessionIdForPath(childSessionPath) : null);
       // 通知调用方 session 已就绪（subagent 用 path 后补 streamKey；workflow 额外消费稳定 sessionId）
       try {
         opts.onSessionReady?.(childSessionPath, {
@@ -5465,7 +5633,7 @@ export class SessionCoordinator {
       if (opts.signal?.aborted) {
         opts.signal.removeEventListener("abort", abortHandler);
         await teardownIsolatedSession("early_abort");
-        cleanupTempSession();
+        cleanupTempSession("isolated_early_abort");
         return { sessionPath: null, replyText: "", error: "aborted" };
       }
 
@@ -5483,7 +5651,7 @@ export class SessionCoordinator {
       if (!opts.persist && !isResumedSession && sessionPath) {
         // 非 persist 的临时 session 文件清理 best-effort：删不掉不影响返回结果。
         // isResumedSession 双保险：resume 复用文件即使调用方漏设 persist 也绝不删。
-        try { fs.unlinkSync(sessionPath); } catch {}
+        cleanupTempSession("isolated_ephemeral_complete");
         return {
           sessionPath: null,
           replyText: finalReplyText,
@@ -5504,7 +5672,9 @@ export class SessionCoordinator {
       };
     } catch (err) {
       log.error(`isolated execution failed: ${err.message}`);
-      if (!opts.persist && tempSessionMgr) {
+      if (!isResumedSession && !isolatedInitializationReady) {
+        rollbackFreshIsolatedInitialization();
+      } else if (!opts.persist && tempSessionMgr) {
         cleanupTempSession();
       }
       return { sessionPath: null, replyText: "", error: err.message };
