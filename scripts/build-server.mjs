@@ -491,20 +491,32 @@ console.log("[build-server] dependencies installed");
 // ── 8. @vercel/nft 追踪：只保留运行时实际需要的文件 ──
 // 从 bundle 入口出发，静态分析所有 import/require 链，
 // 删除 node_modules 里没被追踪到的文件（.d.ts、.map、多余平台二进制等）
-console.log("[build-server] running nft trace...");
-
-// nft 是 ESM，用动态 import
-const { nodeFileTrace } = await import("@vercel/nft");
 let fileList;
-try {
-  ({ fileList } = await nodeFileTrace(
-    [path.join(outDir, "bundle", "index.js")],
-    { base: outDir, conditions: ["node", "import"] },
-  ));
-} catch (e) {
-  // Windows CI 上 nft 可能因用户目录不存在而报错，跳过裁剪
-  console.warn(`[build-server] nft trace failed (${e.message}), skipping prune`);
+const skipNftTrace = process.env.HANA_SKIP_NFT_TRACE === "1"
+  || (isWin && process.env.HANA_ENABLE_WINDOWS_NFT_TRACE !== "1");
+
+if (skipNftTrace) {
+  console.warn(
+    isWin
+      ? "[build-server] nft trace skipped on Windows; set HANA_ENABLE_WINDOWS_NFT_TRACE=1 to enable"
+      : "[build-server] nft trace skipped by HANA_SKIP_NFT_TRACE=1",
+  );
   fileList = null;
+} else {
+  console.log("[build-server] running nft trace...");
+
+  // nft 是 ESM，用动态 import
+  const { nodeFileTrace } = await import("@vercel/nft");
+  try {
+    ({ fileList } = await nodeFileTrace(
+      [path.join(outDir, "bundle", "index.js")],
+      { base: outDir, conditions: ["node", "import"] },
+    ));
+  } catch (e) {
+    // Windows CI 上 nft 可能因用户目录不存在而报错，跳过裁剪
+    console.warn(`[build-server] nft trace failed (${e.message}), skipping prune`);
+    fileList = null;
+  }
 }
 
 const nmDir = path.join(outDir, "node_modules");
