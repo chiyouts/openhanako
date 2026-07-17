@@ -2321,6 +2321,12 @@ export class HanaEngine {
   // ════════════════════════════
 
   buildTools(cwd, customTools, opts: any = {}) {
+    // Executable background runtimes bind one persisted identity snapshot at assembly time.
+    // Desktop chat keeps the callback path until it moves into the same session factory.
+    const runtimeSessionRef = freezeRuntimeSessionRef(
+      opts.runtimeSessionRef,
+      opts.requireSessionIdentity === true,
+    );
     let ct = customTools;
     let agentId;
     let toolAgent;
@@ -2342,21 +2348,30 @@ export class HanaEngine {
       agentId = opts.agentDir ? path.basename(opts.agentDir) : (this.agent?.id || "");
       toolAgent = opts.agentDir ? this.getAgent(agentId) : this.agent;
     }
-    const getSessionPath = typeof opts.getSessionPath === "function"
-      ? opts.getSessionPath
-      : (() => null);
-    const getSessionRef = typeof opts.getSessionRef === "function"
-      ? opts.getSessionRef
-      : (() => null);
-    const getSessionId = typeof opts.getSessionId === "function"
-      ? opts.getSessionId
-      : (() => null);
-    const resolveRuntimeSessionRef = (runtimeCtx) => resolveToolSessionRef(runtimeCtx, {
-      getSessionRef,
-      getSessionId,
-      getSessionPath,
-      getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
-    });
+    const getSessionPath = runtimeSessionRef
+      ? (() => runtimeSessionRef.sessionPath)
+      : typeof opts.getSessionPath === "function"
+        ? opts.getSessionPath
+        : (() => null);
+    const getSessionRef = runtimeSessionRef
+      ? (() => runtimeSessionRef)
+      : typeof opts.getSessionRef === "function"
+        ? opts.getSessionRef
+        : (() => null);
+    const getSessionId = runtimeSessionRef
+      ? (() => runtimeSessionRef.sessionId)
+      : typeof opts.getSessionId === "function"
+        ? opts.getSessionId
+        : (() => null);
+    const resolveRuntimeSessionRef = (runtimeCtx) => {
+      const resolved = resolveToolSessionRef(runtimeCtx, {
+        getSessionRef,
+        getSessionId,
+        getSessionPath,
+        getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
+      });
+      return runtimeSessionRef || resolved;
+    };
     const allowHumanApproval = opts.allowHumanApproval !== false;
     const approvalPolicy = opts.approvalPolicy
       || (allowHumanApproval ? SESSION_APPROVAL_POLICIES.INTERACTIVE : SESSION_APPROVAL_POLICIES.DENY_ON_PROMPT);
@@ -2717,16 +2732,6 @@ export class HanaEngine {
       isSessionMemoryEnabledForPath: (sessionPath) => {
         return agent.isSessionMemoryEnabledFor(sessionPath);
       },
-      getCompactionAuth: async (model) => {
-        const auth = await this._models.modelRegistry.getApiKeyAndHeaders(model);
-        if (!auth.ok) {
-          throw new Error(`Auth failed for model ${model.id}: ${auth.error}`);
-        }
-        if (!auth.apiKey) {
-          throw new Error(`No API key for provider ${model.provider}`);
-        }
-        return { apiKey: auth.apiKey, headers: auth.headers };
-      },
     });
   }
 
@@ -2862,4 +2867,31 @@ export class HanaEngine {
   // ════════════════════════════
 
   static PATROL_TOOLS_DEFAULT = "*";
+}
+
+function runtimeSessionRefError(message) {
+  return Object.assign(new Error(message), { code: "session_manifest_ref_required" });
+}
+
+function freezeRuntimeSessionRef(value, required = false) {
+  if (value == null) {
+    if (required) {
+      throw runtimeSessionRefError(
+        "buildTools: runtime SessionRef is required before tool assembly",
+      );
+    }
+    return null;
+  }
+  const sessionId = typeof value?.sessionId === "string" && value.sessionId.trim()
+    ? value.sessionId.trim()
+    : null;
+  const sessionPath = typeof value?.sessionPath === "string" && value.sessionPath.trim()
+    ? path.resolve(value.sessionPath)
+    : null;
+  if (!sessionId || !sessionPath) {
+    throw runtimeSessionRefError(
+      "buildTools: runtime SessionRef requires both sessionId and sessionPath",
+    );
+  }
+  return Object.freeze({ sessionId, sessionPath });
 }

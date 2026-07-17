@@ -627,7 +627,7 @@
     ],
     "version": 2
   },
-  "payloadFingerprint": "sha256:da7570f49ba60c43195c9987cdf591f83291075b6a7060e20f2b3b593e9481c6",
+  "payloadFingerprint": "sha256:a4aac2ca9a598e1f454f2f416e7730d8cb8b324d2f89f196c04bf77f8f2c1c33",
   "registry": [
     {
       "affectedByEpochMigration": true,
@@ -963,6 +963,80 @@
         "contract": "CronStore job registry and run receipt protocol",
         "kind": "directory-contract",
         "module": "lib/desk/cron-store.ts"
+      }
+    },
+    {
+      "affectedByEpochMigration": false,
+      "bootstrapSafety": null,
+      "checkpointPolicy": "This store holds captured checkpoint bytes for other stores; it is never itself listed as an affected store inside the snapshot it produces.",
+      "epochPolicy": "compatible",
+      "exemption": null,
+      "firstPossibleOpenPhase": "epoch_transition",
+      "firstPossibleWritePhase": "epoch_transition",
+      "format": "mixed-directory",
+      "id": "data-epoch-checkpoints",
+      "identityContract": "transitionId identifies one published or in-progress checkpoint directory for one canonical HANA_HOME; provider-internal .tmp-/.invalid- suffixes on that name are staging, not separate identities.",
+      "migrationEntry": [],
+      "openEntry": [
+        "createDataEpochCheckpointProvider",
+        "pruneDataEpochCheckpoints"
+      ],
+      "ownerModule": "core/data-epoch-checkpoint-provider.ts",
+      "pathExclusions": [],
+      "pathKind": "tree",
+      "pathPattern": "data-epoch-checkpoints/{transitionId}/**",
+      "pathPatterns": [
+        "data-epoch-checkpoints/{transitionId}/**"
+      ],
+      "preCoordinatorReadProjection": null,
+      "protocolModules": [],
+      "restorePolicy": "Read only through the provider's verify contract; a published checkpoint directory is never hand-edited or restored independently of the coordinator's restore path.",
+      "schemaContract": {
+        "compatibility": "The named runtime reader is canonical; this inventory does not imply stricter validation than runtime currently performs.",
+        "kind": "runtime-source",
+        "source": "core/data-epoch-checkpoint-provider.ts"
+      },
+      "schemaSource": {
+        "contract": "checkpoint metadata.json layout, per-store capture strategy, and verify byte/sha256 reconciliation",
+        "kind": "runtime-contract",
+        "module": "core/data-epoch-checkpoint-provider.ts"
+      }
+    },
+    {
+      "affectedByEpochMigration": false,
+      "bootstrapSafety": null,
+      "checkpointPolicy": "Excluded from epoch checkpoints; this store only ever holds the output of an already-completed restore, never an affected store's forward-transition input.",
+      "epochPolicy": "compatible",
+      "exemption": null,
+      "firstPossibleOpenPhase": "epoch_transition",
+      "firstPossibleWritePhase": "epoch_transition",
+      "format": "mixed-directory",
+      "id": "data-epoch-restore-quarantine",
+      "identityContract": "restoreId identifies one restore transaction's quarantined bytes for one canonical HANA_HOME; data-epoch-restores.log is one shared append-only audit trail across every restore for that home.",
+      "migrationEntry": [],
+      "openEntry": [
+        "restoreDataEpochCheckpoint"
+      ],
+      "ownerModule": "core/data-epoch-restore.ts",
+      "pathExclusions": [],
+      "pathKind": "tree",
+      "pathPattern": "data-epoch-restore-quarantine/{restoreId}/**",
+      "pathPatterns": [
+        "data-epoch-restore-quarantine/{restoreId}/**",
+        "data-epoch-restores.log"
+      ],
+      "preCoordinatorReadProjection": null,
+      "protocolModules": [],
+      "restorePolicy": "Never restored; quarantined bytes are historical evidence retained for manual forensic recovery, not replayed automatically by any restore.",
+      "schemaContract": {
+        "compatibility": "The named runtime reader is canonical; this inventory does not imply stricter validation than runtime currently performs.",
+        "kind": "runtime-source",
+        "source": "core/data-epoch-restore.ts"
+      },
+      "schemaSource": {
+        "contract": "restore quarantine layout, restore-receipt.json schema, and append-only data-epoch-restores.log line shape",
+        "kind": "runtime-contract",
+        "module": "core/data-epoch-restore.ts"
       }
     },
     {
@@ -2802,8 +2876,8 @@
   ],
   "review": {
     "classification": "compatible",
-    "compatibilityReason": "Expands legacy session discovery and runtime identity propagation without changing persisted table or file formats.",
-    "payloadFingerprint": "sha256:da7570f49ba60c43195c9987cdf591f83291075b6a7060e20f2b3b593e9481c6"
+    "compatibilityReason": "Receipt refresh only: a models-sync fix shifted one atomic-write call site by five lines; the persistence inventory was rescanned and no store schema, key format, or record format changed.",
+    "payloadFingerprint": "sha256:a4aac2ca9a598e1f454f2f416e7730d8cb8b324d2f89f196c04bf77f8f2c1c33"
   },
   "schemas": [
     {
@@ -2910,10 +2984,24 @@
       "storeId": "cron-automation"
     },
     {
+      "contract": "checkpoint metadata.json layout, per-store capture strategy, and verify byte/sha256 reconciliation",
+      "kind": "runtime-contract",
+      "module": "core/data-epoch-checkpoint-provider.ts",
+      "sourceHash": "sha256:754e20e58253549d9f8d92b125178442bb3c25503b021f99d4a4edf7828764b0",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "contract": "restore quarantine layout, restore-receipt.json schema, and append-only data-epoch-restores.log line shape",
+      "kind": "runtime-contract",
+      "module": "core/data-epoch-restore.ts",
+      "sourceHash": "sha256:399d31b16c09240727c9936059d253cf27e34312d14e96c3ceb24cd3d666fdb0",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
       "contract": "DATA_EPOCH stamp parser and atomic writer",
       "kind": "runtime-contract",
       "module": "shared/data-epoch.cjs",
-      "sourceHash": "sha256:7a5b788e58d5f8ff9a09bd0520c6777b7eb6af1e29ab78d3ec6b0f56012f4614",
+      "sourceHash": "sha256:3b30685f891b9321e68efde0970ec941bb77e5cbe58d4d380c20f23d2b59d916",
       "storeId": "data-epoch-stamp"
     },
     {
@@ -2930,7 +3018,7 @@
           "sourceHash": "sha256:f029751febc9e97a1786dac99390ff409efb0cc8f226085fc396537b66b1d933"
         }
       ],
-      "sourceHash": "sha256:7a5b788e58d5f8ff9a09bd0520c6777b7eb6af1e29ab78d3ec6b0f56012f4614",
+      "sourceHash": "sha256:3b30685f891b9321e68efde0970ec941bb77e5cbe58d4d380c20f23d2b59d916",
       "storeId": "data-epoch-transition-journal"
     },
     {
@@ -2972,7 +3060,7 @@
       "contract": "desktop window bounds, release announcement bookmark, and update cache version marker readers",
       "kind": "directory-contract",
       "module": "desktop/main.cjs",
-      "sourceHash": "sha256:907a85775c3b485cea7f4aa2571f6186f0f2b84c3b5153a3d445cde7ec8dce99",
+      "sourceHash": "sha256:0b939a9ae3ec92576c07b714d2a1a970e67598bd3afe7399a8124181deff3c50",
       "storeId": "desktop-window-version-state"
     },
     {
@@ -3118,7 +3206,7 @@
       "contract": "server-info writer and desktop bootstrap reader",
       "kind": "runtime-contract",
       "module": "server/index.ts",
-      "sourceHash": "sha256:c9c7ad87cc21f439f1e74e261e7692c4c5a23d5e175843958efadde599d22444",
+      "sourceHash": "sha256:b0d13f69449b7cfd88393dadd4da8105e534b8165731cc0c8ea1f5c6a4cd00d0",
       "storeId": "server-runtime-info"
     },
     {
@@ -3140,7 +3228,7 @@
         {
           "contract": "core/session-coordinator.ts Hana metadata extensions",
           "module": "core/session-coordinator.ts",
-          "sourceHash": "sha256:a84f70426d78297f55b64ea711e2dcac715c3d600cfd8d16d77a4707ca00484c"
+          "sourceHash": "sha256:b5e361eb7c24160330dc278fee95cab0349dcca24c4206121cd3256a4b12ef01"
         },
         {
           "contract": "core/session-jsonl-file.ts repair contract",
@@ -3232,7 +3320,7 @@
       "contract": "bridge index, legacy session metadata, title, and vision sidecar readers",
       "kind": "runtime-contract",
       "module": "core/bridge-session-manager.ts",
-      "sourceHash": "sha256:d5e93a0f35511ecddb04a50b65b4956d27d82dddbd1359682f78a1a8c8f30da9",
+      "sourceHash": "sha256:b683c3a4785e0c6cebe525d785a311f4262341a51d26d3ee4635e19efb1a3ce5",
       "storeId": "session-sidecars"
     },
     {
@@ -3560,6 +3648,150 @@
       "reason": "Creates helper/request files in the operating-system temporary directory for one Windows UIA call.",
       "sourceFile": "core/computer-use/providers/windows-uia-provider.ts",
       "storeId": null
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 282,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "copy-file",
+      "line": 283,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 287,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "database-open",
+      "line": 292,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "remove-path",
+      "line": 475,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
+      "line": 518,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 533,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "line": 551,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
+      "line": 552,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "remove-path",
+      "line": 554,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "remove-path",
+      "line": 661,
+      "reason": "Captures, verifies, or prunes data epoch transition checkpoints.",
+      "sourceFile": "core/data-epoch-checkpoint-provider.ts",
+      "storeId": "data-epoch-checkpoints"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 301,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
+      "line": 302,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 309,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
+      "exemptionId": null,
+      "kind": "copy-file",
+      "line": 310,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 544,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
+      "exemptionId": null,
+      "kind": "append-file",
+      "line": 545,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
+    },
+    {
+      "exemptionId": null,
+      "kind": "atomic-write",
+      "line": 546,
+      "reason": "Quarantines pre-restore bytes, copies back checkpointed bytes, and records the restore audit trail.",
+      "sourceFile": "core/data-epoch-restore.ts",
+      "storeId": "data-epoch-restore-quarantine"
     },
     {
       "exemptionId": null,
@@ -4028,7 +4260,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 964,
+      "line": 970,
       "reason": "Writes data within the active pluginId-scoped data directory.",
       "sourceFile": "core/media/universal-media-manager.ts",
       "storeId": "plugin-runtime-data"
@@ -4628,7 +4860,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 467,
+      "line": 480,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/model-sync.ts",
       "storeId": "provider-state"
@@ -4852,7 +5084,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 649,
+      "line": 809,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/provider-registry.ts",
       "storeId": "provider-state"
@@ -5300,7 +5532,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 123,
+      "line": 124,
       "reason": "Writes a session-owned sidecar or bridge index.",
       "sourceFile": "core/vision-bridge.ts",
       "storeId": "session-sidecars"
@@ -5308,7 +5540,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 125,
+      "line": 126,
       "reason": "Writes a session-owned sidecar or bridge index.",
       "sourceFile": "core/vision-bridge.ts",
       "storeId": "session-sidecars"
@@ -5316,7 +5548,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 126,
+      "line": 127,
       "reason": "Writes a session-owned sidecar or bridge index.",
       "sourceFile": "core/vision-bridge.ts",
       "storeId": "session-sidecars"
@@ -5468,7 +5700,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1213,
+      "line": 1219,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5476,7 +5708,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1217,
+      "line": 1223,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5484,7 +5716,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1719,
+      "line": 1729,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5492,7 +5724,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2087,
+      "line": 2215,
       "reason": "Writes desktop crash or browser-command diagnostics.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-diagnostics"
@@ -5500,7 +5732,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2088,
+      "line": 2216,
       "reason": "Writes desktop crash or browser-command diagnostics.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-diagnostics"
@@ -5508,7 +5740,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2149,
+      "line": 2277,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5516,7 +5748,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2150,
+      "line": 2278,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5524,7 +5756,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2218,
+      "line": 2346,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5532,7 +5764,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2317,
+      "line": 2445,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5540,7 +5772,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2318,
+      "line": 2446,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5548,7 +5780,7 @@
     {
       "exemptionId": null,
       "kind": "append-file",
-      "line": 4063,
+      "line": 4191,
       "reason": "Writes desktop crash or browser-command diagnostics.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-diagnostics"
@@ -5556,7 +5788,7 @@
     {
       "exemptionId": "desktop-screenshot-html-temp",
       "kind": "write-file",
-      "line": 4630,
+      "line": 4758,
       "reason": "Writes and removes one request-scoped screenshot HTML file under the operating-system temporary directory.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5564,7 +5796,7 @@
     {
       "exemptionId": "desktop-screenshot-html-temp",
       "kind": "remove-path",
-      "line": 4684,
+      "line": 4812,
       "reason": "Writes and removes one request-scoped screenshot HTML file under the operating-system temporary directory.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5572,7 +5804,7 @@
     {
       "exemptionId": "desktop-skill-preview-temp",
       "kind": "mkdir",
-      "line": 5239,
+      "line": 5367,
       "reason": "Creates a request-scoped skill preview directory under Electron's operating-system temp path.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5580,7 +5812,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "write-file",
-      "line": 5385,
+      "line": 5513,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5588,7 +5820,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "mkdir",
-      "line": 5407,
+      "line": 5535,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5596,7 +5828,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "write-file",
-      "line": 5408,
+      "line": 5536,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5604,7 +5836,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "mkdir",
-      "line": 5419,
+      "line": 5547,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5612,7 +5844,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "copy-file",
-      "line": 5420,
+      "line": 5548,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5620,7 +5852,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "mkdir",
-      "line": 5453,
+      "line": 5581,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5628,7 +5860,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "write-file",
-      "line": 5454,
+      "line": 5582,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5636,7 +5868,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 5976,
+      "line": 6104,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5796,7 +6028,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 1037,
+      "line": 1038,
       "reason": "Opens or repairs the canonical per-agent facts database.",
       "sourceFile": "hub/channel-router.ts",
       "storeId": "agent-facts-sqlite"
@@ -5804,7 +6036,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 200,
+      "line": 216,
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
       "sourceFile": "hub/index.ts",
       "storeId": "session-files"
@@ -5812,7 +6044,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 207,
+      "line": 223,
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
       "sourceFile": "hub/index.ts",
       "storeId": "session-files"
@@ -5820,7 +6052,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 224,
+      "line": 240,
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
       "sourceFile": "hub/index.ts",
       "storeId": "session-files"
@@ -5828,7 +6060,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 231,
+      "line": 247,
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
       "sourceFile": "hub/index.ts",
       "storeId": "session-files"
@@ -6444,7 +6676,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 718,
+      "line": 713,
       "reason": "Writes a user- or agent-authored Markdown record.",
       "sourceFile": "lib/diary/diary-writer.ts",
       "storeId": "agent-authored-records"
@@ -6452,7 +6684,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 720,
+      "line": 715,
       "reason": "Writes a user- or agent-authored Markdown record.",
       "sourceFile": "lib/diary/diary-writer.ts",
       "storeId": "agent-authored-records"
@@ -6532,7 +6764,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 107,
+      "line": 108,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6540,7 +6772,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 312,
+      "line": 313,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6548,7 +6780,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 405,
+      "line": 406,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6556,7 +6788,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 432,
+      "line": 433,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6564,7 +6796,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 458,
+      "line": 459,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6572,7 +6804,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 554,
+      "line": 555,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6580,7 +6812,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 650,
+      "line": 651,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6588,7 +6820,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 682,
+      "line": 683,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6596,7 +6828,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 846,
+      "line": 847,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6604,7 +6836,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 940,
+      "line": 941,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6612,7 +6844,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 947,
+      "line": 948,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6620,7 +6852,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 1113,
+      "line": 1110,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/compile.ts",
       "storeId": "agent-memory"
@@ -6772,7 +7004,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 53,
+      "line": 54,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/session-summary.ts",
       "storeId": "agent-memory"
@@ -6780,14 +7012,6 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 86,
-      "reason": "Writes a named per-agent memory protocol file.",
-      "sourceFile": "lib/memory/session-summary.ts",
-      "storeId": "agent-memory"
-    },
-    {
-      "exemptionId": null,
-      "kind": "atomic-write",
       "line": 87,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/session-summary.ts",
@@ -6795,8 +7019,16 @@
     },
     {
       "exemptionId": null,
+      "kind": "atomic-write",
+      "line": 88,
+      "reason": "Writes a named per-agent memory protocol file.",
+      "sourceFile": "lib/memory/session-summary.ts",
+      "storeId": "agent-memory"
+    },
+    {
+      "exemptionId": null,
       "kind": "mkdir",
-      "line": 182,
+      "line": 183,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/session-summary.ts",
       "storeId": "agent-memory"
@@ -6804,7 +7036,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 184,
+      "line": 185,
       "reason": "Writes a named per-agent memory protocol file.",
       "sourceFile": "lib/memory/session-summary.ts",
       "storeId": "agent-memory"
@@ -7892,7 +8124,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 461,
+      "line": 230,
       "reason": "Writes data within the active pluginId-scoped data directory.",
       "sourceFile": "plugins/jimeng-cli/adapters/dreamina.ts",
       "storeId": "plugin-runtime-data"
@@ -7940,7 +8172,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 296,
+      "line": 272,
       "reason": "Writes or deletes live server discovery state.",
       "sourceFile": "server/index.ts",
       "storeId": "server-runtime-info"
@@ -7948,7 +8180,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 444,
+      "line": 433,
       "reason": "Constructs the deferred result store.",
       "sourceFile": "server/index.ts",
       "storeId": "deferred-result-state"
@@ -7956,7 +8188,7 @@
     {
       "exemptionId": "in-memory-confirm-registry",
       "kind": "persistent-store-constructor",
-      "line": 644,
+      "line": 633,
       "reason": "ConfirmStore is deliberately process-memory-only: pending approvals time out or abort with their session and have no restart replay contract.",
       "sourceFile": "server/index.ts",
       "storeId": null
@@ -7964,7 +8196,15 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 649,
+      "line": 638,
+      "reason": "Constructs subagent stores.",
+      "sourceFile": "server/index.ts",
+      "storeId": "subagent-state"
+    },
+    {
+      "exemptionId": null,
+      "kind": "persistent-store-constructor",
+      "line": 644,
       "reason": "Constructs subagent stores.",
       "sourceFile": "server/index.ts",
       "storeId": "subagent-state"
@@ -7973,14 +8213,6 @@
       "exemptionId": null,
       "kind": "persistent-store-constructor",
       "line": 655,
-      "reason": "Constructs subagent stores.",
-      "sourceFile": "server/index.ts",
-      "storeId": "subagent-state"
-    },
-    {
-      "exemptionId": null,
-      "kind": "persistent-store-constructor",
-      "line": 666,
       "reason": "Constructs the workflow activity store.",
       "sourceFile": "server/index.ts",
       "storeId": "workflow-state"
@@ -7988,7 +8220,7 @@
     {
       "exemptionId": null,
       "kind": "append-file",
-      "line": 1144,
+      "line": 1072,
       "reason": "Appends the browser worker log.",
       "sourceFile": "server/index.ts",
       "storeId": "runtime-diagnostics"
@@ -7996,7 +8228,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 1203,
+      "line": 1131,
       "reason": "Writes or deletes live server discovery state.",
       "sourceFile": "server/index.ts",
       "storeId": "server-runtime-info"
@@ -8004,7 +8236,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1301,
+      "line": 1229,
       "reason": "Writes or deletes live server discovery state.",
       "sourceFile": "server/index.ts",
       "storeId": "server-runtime-info"
@@ -8475,40 +8707,8 @@
     },
     {
       "exemptionId": null,
-      "kind": "rename",
-      "line": 164,
-      "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
-      "sourceFile": "shared/artifact-core/activation.cjs",
-      "storeId": "signed-artifacts"
-    },
-    {
-      "exemptionId": null,
-      "kind": "rename",
-      "line": 169,
-      "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
-      "sourceFile": "shared/artifact-core/activation.cjs",
-      "storeId": "signed-artifacts"
-    },
-    {
-      "exemptionId": null,
-      "kind": "rename",
-      "line": 171,
-      "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
-      "sourceFile": "shared/artifact-core/activation.cjs",
-      "storeId": "signed-artifacts"
-    },
-    {
-      "exemptionId": null,
-      "kind": "rename",
-      "line": 174,
-      "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
-      "sourceFile": "shared/artifact-core/activation.cjs",
-      "storeId": "signed-artifacts"
-    },
-    {
-      "exemptionId": null,
       "kind": "remove-path",
-      "line": 191,
+      "line": 247,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/activation.cjs",
       "storeId": "signed-artifacts"
@@ -8516,7 +8716,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 307,
+      "line": 363,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/activation.cjs",
       "storeId": "signed-artifacts"
@@ -8524,7 +8724,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 324,
+      "line": 380,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/activation.cjs",
       "storeId": "signed-artifacts"
@@ -8532,7 +8732,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 395,
+      "line": 451,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/activation.cjs",
       "storeId": "signed-artifacts"
@@ -8540,7 +8740,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 405,
+      "line": 461,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/activation.cjs",
       "storeId": "signed-artifacts"
@@ -8928,6 +9128,22 @@
       "reason": "Removes only a proven committed transition journal tail.",
       "sourceFile": "shared/data-epoch.cjs",
       "storeId": "data-epoch-transition-journal"
+    },
+    {
+      "exemptionId": null,
+      "kind": "atomic-write",
+      "line": 453,
+      "reason": "Atomically writes the data epoch transition journal.",
+      "sourceFile": "shared/data-epoch.cjs",
+      "storeId": "data-epoch-transition-journal"
+    },
+    {
+      "exemptionId": null,
+      "kind": "atomic-write",
+      "line": 482,
+      "reason": "Atomically writes the DATA_EPOCH coordinator stamp.",
+      "sourceFile": "shared/data-epoch.cjs",
+      "storeId": "data-epoch-stamp"
     },
     {
       "exemptionId": "external-default-workspace",

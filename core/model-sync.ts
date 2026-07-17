@@ -10,6 +10,7 @@ import { getPiModel } from "../lib/pi-sdk/index.ts";
 import { lookupKnown, lookupKnownProvider } from "../shared/known-models.ts";
 import { atomicWriteSync } from "../shared/safe-fs.ts";
 import {
+  getEndpointDefaultReasoningCapability,
   normalizeModelProtocolCompat,
   normalizeToolUseContract,
   normalizeVisionCapabilities,
@@ -23,12 +24,11 @@ import { buildRuntimeApiKeyRef } from "../shared/runtime-api-key-ref.ts";
 import { inferOllamaModelMetadata } from "../shared/ollama-model-metadata.ts";
 import { normalizeProviderBaseUrlForApi } from "../lib/llm/provider-client.ts";
 import { normalizeThinkingLevelForModel } from "./session-thinking-level.ts";
-import { buildXaiOauthCliModelHeaders } from "../lib/providers/xai-oauth-cli-headers.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const PI_BUILTIN_PROVIDER_REUSE = new Set(["kimi-coding", "opencode-go"]);
 const KIMI_CODING_PROVIDER = "kimi-coding";
-const KIMI_CODING_MODEL_ID = "kimi-for-coding";
+const KIMI_CODING_HEADER_MODEL_ID = "kimi-for-coding";
 const KNOWN_OPENAI_COMPAT_PROVIDER_IDS = new Set([
   "openai",
   "deepseek",
@@ -89,7 +89,6 @@ function needsConservativeCompat({ provider, baseUrl, api, isBuiltin }) {
   if (isBuiltin) return false;
   return !KNOWN_OPENAI_COMPAT_PROVIDER_IDS.has(provider);
 }
-
 const CHAT_CREDENTIAL_SOURCES = new Set(["provider-catalog", "auth-storage", "none"]);
 
 /**
@@ -188,33 +187,21 @@ function getKimiCodingEffectiveApi(provider, baseUrl, api) {
   return "openai-completions";
 }
 
-function normalizeKimiCodingModelEntry(modelEntry) {
-  if (typeof modelEntry === "object" && modelEntry !== null) {
-    return { ...modelEntry, id: KIMI_CODING_MODEL_ID };
-  }
-  return KIMI_CODING_MODEL_ID;
+function pickHeader(headers, headerName) {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return {};
+  const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === headerName.toLowerCase());
+  return entry ? { [entry[0]]: entry[1] } : {};
 }
 
-function isObjectModelEntry(modelEntry) {
-  return typeof modelEntry === "object" && modelEntry !== null;
-}
+function getPiRequestHeaders(provider, modelId) {
+  const exactHeaders = getPiBuiltinModel(provider, modelId)?.headers;
+  if (exactHeaders && typeof exactHeaders === "object") return exactHeaders;
+  if (!isKimiCodingProvider(provider)) return {};
 
-function normalizeKimiCodingModelEntries(provider, baseUrl, modelEntries) {
-  if (!isKimiCodingProvider(provider) || !isOfficialKimiCodingBaseUrl(baseUrl)) return modelEntries;
-
-  const byId = new Map();
-  for (const rawEntry of modelEntries) {
-    const entry = normalizeKimiCodingModelEntry(rawEntry);
-    const id = getModelId(entry);
-    const current = byId.get(id);
-    if (!current) {
-      byId.set(id, entry);
-      continue;
-    }
-    if (isObjectModelEntry(current) || !isObjectModelEntry(entry)) continue;
-    byId.set(id, entry);
-  }
-  return Array.from(byId.values());
+  // New Kimi Coding model ids still need the provider's client identity, but
+  // request headers are the only field shared with the Pi default model.
+  const providerHeaders = getPiBuiltinModel(provider, KIMI_CODING_HEADER_MODEL_ID)?.headers;
+  return pickHeader(providerHeaders, "user-agent");
 }
 
 function isZhipuOpenAICompat(provider, baseUrl, api) {
@@ -232,12 +219,14 @@ function isZhipuOpenAICompat(provider, baseUrl, api) {
   );
 }
 
-function buildModelOverride(modelEntry, modelDefaults = {}) {
+function buildModelOverride(modelEntry, modelDefaults = {}, executionHeaders = {}) {
   const modelDefaultThinkingLevel = getProviderModelDefaultThinkingLevel(modelDefaults, getModelId(modelEntry));
   if (typeof modelEntry !== "object" || modelEntry === null) {
-    return modelDefaultThinkingLevel !== undefined
-      ? { defaultThinkingLevel: modelDefaultThinkingLevel }
-      : null;
+    const override: Record<string, any> = {};
+    if (modelDefaultThinkingLevel !== undefined) override.defaultThinkingLevel = modelDefaultThinkingLevel;
+    const headers = normalizeProviderHeaders(executionHeaders);
+    if (Object.keys(headers).length > 0) override.headers = headers;
+    return Object.keys(override).length > 0 ? override : null;
   }
 
   const override: Record<string, any> = {};
@@ -266,6 +255,8 @@ function buildModelOverride(modelEntry, modelDefaults = {}) {
   if (thinkingLevelMap) override.thinkingLevelMap = thinkingLevelMap;
   const compat = normalizeModelProtocolCompat(modelEntry.compat);
   if (compat) override.compat = compat;
+  const headers = normalizeProviderHeaders(executionHeaders);
+  if (Object.keys(headers).length > 0) override.headers = headers;
   const toolUse = normalizeToolUseContract(modelEntry.toolUse);
   if (modelEntry.toolUse !== undefined && !toolUse) {
     throw new Error(`invalid toolUse contract for model "${getModelId(modelEntry) || "unknown"}"`);
@@ -286,17 +277,30 @@ function buildModelOverride(modelEntry, modelDefaults = {}) {
  * @param {string|{id:string, name?:string, context?:number, maxOutput?:number}} modelEntry
  * @param {string} provider - provider 名称（查词典用）
  */
-function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-completions", modelDefaults: Record<string, any> = {}) {
+function buildModelEntry(
+  modelEntry,
+  provider,
+  baseUrl = "",
+  api = "openai-completions",
+  modelDefaults: Record<string, any> = {},
+  executionHeaders = {},
+) {
   const isObj = typeof modelEntry === "object" && modelEntry !== null;
   const id = getModelId(modelEntry);
   const known = lookupKnown(provider, id);
   const providerKnown = lookupKnownProvider(provider, id);
-  const piBuiltin = getPiBuiltinModel(provider, id);
+  const piRequestHeaders = getPiRequestHeaders(provider, id);
   const piProtocolBaseline = getPiProtocolBaseline(provider, id);
   const modelApi = (isObj && modelEntry.api)
     || providerKnown?.api
     || piProtocolBaseline?.api
     || api;
+  const endpointReasoning = getEndpointDefaultReasoningCapability({
+    id,
+    provider,
+    api: modelApi,
+    baseUrl,
+  });
 
   // 输入模态能力：用户设置 > known-models 词典 > 默认 false
   // 兼容读：migration #7 之前的旧数据用 vision 字段；两个版本后移除 vision fallback
@@ -322,7 +326,11 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
       ?? DEFAULT_CONTEXT_WINDOW,
     reasoning: (isObj && modelEntry.reasoning !== undefined)
       ? modelEntry.reasoning
-      : (piProtocolBaseline?.reasoning === true || known?.reasoning === true),
+      : (
+        piProtocolBaseline?.reasoning === true
+        || known?.reasoning === true
+        || endpointReasoning === true
+      ),
   };
   if (xhigh === true) entry.xhigh = true;
 
@@ -356,9 +364,9 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
 
   if (known?.quirks?.length) entry.quirks = known.quirks;
   const modelHeaders = normalizeProviderHeaders({
-    ...(piBuiltin?.headers || {}),
+    ...piRequestHeaders,
     ...(isObj ? (modelEntry.headers || {}) : {}),
-    ...(provider === "xai-oauth" ? buildXaiOauthCliModelHeaders(id) : {}),
+    ...executionHeaders,
   });
   if (Object.keys(modelHeaders).length > 0) entry.headers = modelHeaders;
 
@@ -405,7 +413,7 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
     entry.compat = compat;
   }
 
-  if (needsConservativeCompat({ provider, baseUrl, api, isBuiltin: modelDefaults?.isBuiltin === true })) {
+  if (needsConservativeCompat({ provider, baseUrl, api: modelApi, isBuiltin: modelDefaults?.isBuiltin === true })) {
     entry.compat = {
       ...(entry.compat || {}),
       supportsDeveloperRole: false,
@@ -485,23 +493,27 @@ export function syncModels(providers, opts: Record<string, any> = {}) {
       api: effectiveApi,
     });
     const modelDefaults = { ...(p.model_defaults || {}), isBuiltin: p._isBuiltin === true };
-    const chatModels = normalizeKimiCodingModelEntries(
-      provider,
-      p.base_url,
-      filterChatModelEntries(provider, p.models),
-    );
+    const chatModels = filterChatModelEntries(provider, p.models);
     const customModels = [];
     const modelOverrides = {};
+    const modelExecutionHeaders = plan.modelExecutionHeaders || {};
 
     for (const modelEntry of chatModels) {
       const id = getModelId(modelEntry);
       const modelApi = resolveModelApi(modelEntry, provider, effectiveApi);
       if (shouldReusePiBuiltinModel(provider, id, modelApi)) {
-        const override = buildModelOverride(modelEntry, modelDefaults);
+        const override = buildModelOverride(modelEntry, modelDefaults, modelExecutionHeaders[id]);
         if (override) modelOverrides[id] = override;
         continue;
       }
-      customModels.push(buildModelEntry(modelEntry, provider, effectiveBaseUrl, effectiveApi, modelDefaults));
+      customModels.push(buildModelEntry(
+        modelEntry,
+        provider,
+        effectiveBaseUrl,
+        effectiveApi,
+        modelDefaults,
+        modelExecutionHeaders[id],
+      ));
     }
 
     const providerConfig: Record<string, any> = {

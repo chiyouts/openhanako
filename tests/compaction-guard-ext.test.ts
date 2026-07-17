@@ -171,7 +171,11 @@ describe("CompactionGuardExtension", () => {
     const ctx = {
       model,
       modelRegistry: {
-        getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: "key", headers: { "x-test": "1" } })),
+        getApiKeyAndHeaders: vi.fn(async () => ({
+          ok: true,
+          apiKey: "key",
+          headers: { "x-test": "1" } as Record<string, string>,
+        })),
       },
       getSystemPrompt: vi.fn(() => "system prompt"),
       sessionManager: {
@@ -225,6 +229,29 @@ describe("CompactionGuardExtension", () => {
         messages: preparation.messagesToSummarize,
       }));
       expect(computeHardTruncation).not.toHaveBeenCalled();
+    });
+
+    it("accepts resolver-approved header-only credentials", async () => {
+      ctx.modelRegistry.getApiKeyAndHeaders.mockResolvedValueOnce({
+        ok: true,
+        apiKey: undefined,
+        headers: { Authorization: "Bearer header-owned-token" },
+      });
+      (estimatePreparationTokens as any).mockReturnValue(50_000);
+
+      const res = await pi.trigger(
+        "session_before_compact",
+        { preparation, signal: { aborted: false } },
+        ctx,
+      );
+
+      expect(res?.compaction?.summary).toBe("cache summary");
+      expect(cacheCompactor).toHaveBeenCalledWith(expect.objectContaining({
+        streamOptions: expect.objectContaining({
+          apiKey: undefined,
+          headers: { Authorization: "Bearer header-owned-token" },
+        }),
+      }));
     });
 
     it("lets Pi SDK native compaction run when pi-compatible mode is selected", async () => {
@@ -620,6 +647,50 @@ describe("CompactionGuardExtension", () => {
         }],
       }, glmModel);
       expect(recoveryPayload.thinking).toEqual({ type: "enabled", clear_thinking: true });
+    });
+
+    it("does not clear or retry a Kimi replay contract that requires preserved tool-call reasoning", async () => {
+      pi = createMockPi();
+      const requestStageCompactor = vi.fn()
+        .mockRejectedValueOnce(new Error(
+          "Kimi thinking mode reasoning_content is missing for tool_calls history (assistant tool call). Compact this session or start a new session before continuing with Kimi thinking mode.",
+        ))
+        .mockResolvedValueOnce({
+          summary: "must not be used",
+          firstKeptEntryId: "uuid-42",
+          tokensBefore: 90_000,
+          details: { readFiles: [], modifiedFiles: [] },
+        });
+      createCompactionGuardExtension({
+        cacheCompactor: requestStageCompactor,
+        buildSessionCacheSnapshot,
+        getCompactionMode: () => "auto",
+      })(pi);
+      (estimatePreparationTokens as any).mockReturnValue(50_000);
+      const kimiModel = {
+        id: "k3",
+        provider: "kimi-coding",
+        api: "openai-completions",
+        baseUrl: "https://api.kimi.com/coding/v1",
+        reasoning: true,
+        contextWindow: 1_048_576,
+      };
+
+      const res = await pi.trigger(
+        "session_before_compact",
+        { preparation, signal: { aborted: false } },
+        {
+          ...ctx,
+          model: kimiModel,
+          sessionManager: {
+            ...ctx.sessionManager,
+            buildSessionContext: () => ({ thinkingLevel: "max" }),
+          },
+        },
+      );
+
+      expect(res).toBeUndefined();
+      expect(requestStageCompactor).toHaveBeenCalledTimes(1);
     });
 
     it("returns hard truncation when the full cache-preserving request would exceed the budget", async () => {

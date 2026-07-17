@@ -3,6 +3,355 @@
   "entries": [
     {
       "schemaVersion": 1,
+      "tag": "v0.407.8",
+      "version": "0.407.8",
+      "previousTag": "v0.407.3",
+      "generatedAt": "2026-07-16T19:47:00.000Z",
+      "noUserFacingChanges": false,
+      "summary": {
+        "zh": "本版为 Kimi Coding 接入 Kimi K3；修好 Windows 上首次启动或更新激活时因杀软/索引短暂锁文件导致切换失败的问题；并保留你配置的模型 ID（尤其是 Kimi Coding），让需要推理回放的模型在工具调用与压缩后仍按统一协议续上。",
+        "en": "This release adds Kimi K3 for Kimi Coding; on Windows, artifact activation now retries directory swaps when antivirus or the indexer briefly locks freshly extracted files; configured model IDs (especially Kimi Coding) stay canonical, and reasoning-content replay follows centralized protocol contracts across tool loops and compaction."
+      },
+      "counts": {
+        "feature": 1,
+        "fix": 2,
+        "improvement": 0,
+        "migration": 0
+      },
+      "source": {
+        "owner": "liliMozi",
+        "repo": "openhanako",
+        "commitRange": "v0.407.3..v0.407.8",
+        "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.407.8",
+        "releaseNotes": ""
+      },
+      "items": [
+        {
+          "id": "kimi-k3-model",
+          "kind": "feature",
+          "importance": "high",
+          "title": {
+            "zh": "新增 Kimi K3",
+            "en": "Add Kimi K3"
+          },
+          "summary": {
+            "zh": "Kimi Coding 提供方可选 Kimi K3（约 1M 上下文，支持推理）。",
+            "en": "Kimi Coding can select Kimi K3 (~1M context, reasoning-capable)."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "36c72e2b4",
+              "title": "fix(models): preserve selected ids and reasoning replay"
+            }
+          ]
+        },
+        {
+          "id": "windows-artifact-swap-retry",
+          "kind": "fix",
+          "importance": "high",
+          "title": {
+            "zh": "Windows 产物切换遇锁自动重试",
+            "en": "Retry locked artifact directory swaps on Windows"
+          },
+          "summary": {
+            "zh": "杀软或索引短暂占用刚解压文件时，切换会退避重试约 16 秒，不再一碰 EPERM 就启动失败。",
+            "en": "Transient EPERM/EACCES/EBUSY during the activation rename now backs off up to ~16s on Windows only."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "cd9e71b6e",
+              "title": "fix(desktop): retry artifact directory swap when Windows locks freshly extracted files"
+            }
+          ]
+        },
+        {
+          "id": "model-id-and-reasoning-replay",
+          "kind": "fix",
+          "importance": "high",
+          "title": {
+            "zh": "保留模型 ID 并统一推理回放",
+            "en": "Keep model IDs and centralize reasoning replay"
+          },
+          "summary": {
+            "zh": "Kimi Coding 等配置 ID 不再被改写成别名；推理回放改走集中协议，工具轮与保留缓存的压缩更稳。",
+            "en": "Configured IDs stay canonical; reasoning replay uses shared protocol contracts across tool loops and cache-preserving compaction."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "36c72e2b4",
+              "title": "fix(models): preserve selected ids and reasoning replay"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "tag": "v0.407.3",
+      "version": "0.407.3",
+      "previousTag": "v0.403.0",
+      "generatedAt": "2026-07-16T13:17:00.000Z",
+      "noUserFacingChanges": false,
+      "summary": {
+        "zh": "本版在数据版本门禁拦住启动时，补上专用恢复界面与命令行恢复路径：桌面给出双语说明与恢复点信息，CLI 可诊断、列出恢复点并在确认后还原；同时修掉拦截对话框英文行里混进中文的问题。",
+        "en": "When a data-version gate blocks startup, this release adds dedicated recovery surfaces: bilingual desktop dialogs with recovery-point details, plus CLI diagnose / list / confirmed restore; it also fixes Chinese text leaking into the English line of the BLOCKED dialog."
+      },
+      "counts": {
+        "feature": 1,
+        "fix": 1,
+        "improvement": 0,
+        "migration": 0
+      },
+      "source": {
+        "owner": "liliMozi",
+        "repo": "openhanako",
+        "commitRange": "v0.403.0..v0.407.3",
+        "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.407.3",
+        "releaseNotes": ""
+      },
+      "items": [
+        {
+          "id": "data-version-recovery-surfaces",
+          "kind": "feature",
+          "importance": "high",
+          "title": {
+            "zh": "数据版本恢复界面与 CLI",
+            "en": "Data-version recovery surfaces and CLI"
+          },
+          "summary": {
+            "zh": "启动被数据版本门禁拦住时，桌面显示专用双语对话框（本机/戳记版本、恢复点是否可用、两条明确出路）；CLI 新增 hana data diagnose、checkpoints、restore，还原需重打确认短语。",
+            "en": "Blocked startups get dedicated bilingual desktop dialogs (own/stamped epoch, recovery-point availability, two clear next steps); CLI adds hana data diagnose, checkpoints, and restore with a typed confirmation phrase."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "4272857df",
+              "title": "feat: add dedicated data-version recovery surfaces to desktop and CLI"
+            },
+            {
+              "type": "commit",
+              "ref": "3bfecd1f5",
+              "title": "feat(server): add journaled data-epoch restore with guarded stamp republish"
+            },
+            {
+              "type": "commit",
+              "ref": "6edaf9ba1",
+              "title": "feat(server): capture per-store checkpoints before breaking data migrations"
+            }
+          ]
+        },
+        {
+          "id": "blocked-dialog-checkpoint-line-locale",
+          "kind": "fix",
+          "importance": "medium",
+          "title": {
+            "zh": "拦截对话框英文恢复点行不再串中文",
+            "en": "BLOCKED dialog English checkpoint line no longer mixes Chinese"
+          },
+          "summary": {
+            "zh": "英文 “Recovery point available:” 行不再粘上中文短语。",
+            "en": "The English “Recovery point available:” line no longer prefixes the Chinese phrase."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "59e086c9c",
+              "title": "fix(desktop): stop leaking Chinese text into the BLOCKED dialog's English checkpoint line"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "tag": "v0.403.0",
+      "version": "0.403.0",
+      "previousTag": "v0.401.8",
+      "generatedAt": "2026-07-15T18:18:27.000Z",
+      "noUserFacingChanges": false,
+      "summary": {
+        "zh": "本版让 Dreamina 模型与能力随本机 CLI 自动识别，并把完成提醒收成桌面聊天与计划任务/巡检结果两类；同时修复编辑器标题语法与触控 Grabber，以及非会话模型调用的凭证请求头。",
+        "en": "This release discovers Dreamina models from the installed CLI, narrows completion alerts to desktop chats and scheduled/patrol outcomes, and fixes editor heading syntax, touch Grabbers, and credential headers for non-session model calls."
+      },
+      "counts": {
+        "feature": 2,
+        "fix": 3,
+        "improvement": 0,
+        "migration": 0
+      },
+      "source": {
+        "owner": "liliMozi",
+        "repo": "openhanako",
+        "commitRange": "v0.401.8..v0.403.0",
+        "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.403.0",
+        "releaseNotes": ""
+      },
+      "items": [
+        {
+          "id": "dreamina-cli-capability-discovery",
+          "kind": "feature",
+          "importance": "high",
+          "title": {
+            "zh": "Dreamina CLI 能力发现",
+            "en": "Dreamina CLI capability discovery"
+          },
+          "summary": {
+            "zh": "媒体设置里的 Dreamina 模型与约束改为读取本机 CLI，并在回到设置或开始生成时刷新。",
+            "en": "Dreamina models and constraints now follow the installed CLI and refresh when Media settings regain focus or generation starts."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "284fba7b4",
+              "title": "feat(media): discover Dreamina CLI capabilities at runtime"
+            }
+          ]
+        },
+        {
+          "id": "completion-alert-categories",
+          "kind": "feature",
+          "importance": "high",
+          "title": {
+            "zh": "完成提醒分类收紧",
+            "en": "Narrower completion alert categories"
+          },
+          "summary": {
+            "zh": "成功回合不再一律弹完成提醒；仅桌面聊天，以及计划任务/巡检的汇总结果可以通知。",
+            "en": "Successful turns no longer always fire completion alerts; only desktop chats and aggregate scheduled-task or patrol outcomes can notify."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "403bb2775",
+              "title": "feat(notifications): separate completion alert categories"
+            }
+          ]
+        },
+        {
+          "id": "provider-execution-headers",
+          "kind": "fix",
+          "importance": "medium",
+          "title": {
+            "zh": "非会话模型调用统一请求头",
+            "en": "Unified headers for non-session model calls"
+          },
+          "summary": {
+            "zh": "辅助视觉、记忆、健康检查等非会话模型调用现在共用同一套带凭证的执行配置，避免漏带协议头或误拒仅靠请求头的凭证。",
+            "en": "Auxiliary vision, memory, health checks, and similar non-session calls now share one credential-aware execution config so protocol headers are not omitted and header-only credentials are not rejected."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "5ee661892",
+              "title": "fix(models): unify provider execution headers"
+            }
+          ]
+        },
+        {
+          "id": "bare-heading-hashes-visible",
+          "kind": "fix",
+          "importance": "medium",
+          "title": {
+            "zh": "裸标题井号保持可见",
+            "en": "Keep bare heading hashes visible"
+          },
+          "summary": {
+            "zh": "只有 `#` 到 `######`、后面还没有空格的行，会当作普通正文显示，不再被提前藏成标题样式。",
+            "en": "Bare `#` through `######` lines stay visible as body text until a space confirms a heading."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "889f7ec0f",
+              "title": "fix(editor): keep bare heading hashes visible"
+            }
+          ]
+        },
+        {
+          "id": "touch-grabber-focused-block",
+          "kind": "fix",
+          "importance": "medium",
+          "title": {
+            "zh": "触控 Grabber 只跟焦点块",
+            "en": "Touch Grabbers follow the focused block"
+          },
+          "summary": {
+            "zh": "触控设备上只显示当前焦点块的 Grabber；仅点击打开的块菜单不再替换原先悬停的节点。",
+            "en": "Touch surfaces show only the focused block’s Grabber, and click-only block menus no longer replace the hovered node."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "3862f8482",
+              "title": "fix(editor): scope touch Grabbers to the focused block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "tag": "v0.401.8",
+      "version": "0.401.8",
+      "previousTag": "v0.401.7",
+      "generatedAt": "2026-07-15T05:58:00.000Z",
+      "noUserFacingChanges": false,
+      "summary": {
+        "zh": "本版修复后台会话在缺少持久身份时工具调用失败的问题：计划任务、巡检、子代理、Bridge、Hub 临时会话与手机会话会在执行前先建立并复用稳定会话身份。",
+        "en": "This release fixes tool failures for background sessions that lacked a durable identity. Scheduled activities, patrols, subagents, bridge sessions, Hub temporary sessions, and phone sessions now create and reuse a stable session identity before execution."
+      },
+      "counts": {
+        "feature": 0,
+        "fix": 1,
+        "improvement": 0,
+        "migration": 0
+      },
+      "source": {
+        "owner": "liliMozi",
+        "repo": "openhanako",
+        "commitRange": "v0.401.7..v0.401.8",
+        "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.401.8",
+        "releaseNotes": ""
+      },
+      "items": [
+        {
+          "id": "background-session-identity-backfill",
+          "kind": "fix",
+          "importance": "high",
+          "title": {
+            "zh": "后台会话先补齐身份再装工具",
+            "en": "Backfill session identity before background tools"
+          },
+          "summary": {
+            "zh": "没有 manifest 的后台会话原先会在装工具时失败；现在会先创建并持久化 SessionRef，再绑定到各运行时。",
+            "en": "Background sessions without a manifest used to fail during tool assembly; they now create and persist a SessionRef first, then bind it across runtimes."
+          },
+          "details": [],
+          "sources": [
+            {
+              "type": "commit",
+              "ref": "1eff520c9",
+              "title": "fix(session): backfill identity before background tools"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
       "tag": "v0.401.7",
       "version": "0.401.7",
       "previousTag": "v0.397.15",

@@ -314,6 +314,7 @@ describe('editor typography settings', () => {
     expect(previewCss).toMatch(/--editor-markdown-block-rail-space:\s*36px/);
     expect(highlight).toMatch(/tags\.heading1,\s*fontSize:\s*'var\(--editor-markdown-h1-font-size\)'/);
     expect(highlight).toMatch(/tags\.heading6,\s*fontSize:\s*'var\(--editor-markdown-h6-font-size\)'/);
+    expect(theme).toMatch(/'\.cm-line\.cm-unconfirmed-heading-line \*':\s*\{[\s\S]*fontSize:\s*'var\(--editor-markdown-font-size\)'[\s\S]*fontWeight:\s*'inherit'/);
     expect(previewCss).toMatch(/font-size:\s*var\(--editor-markdown-font-size\)/);
     expect(previewCss).toMatch(/max-width:\s*var\(--editor-markdown-content-width\)/);
     expect(previewCss).toMatch(/margin-left:\s*auto/);
@@ -357,5 +358,15 @@ describe('editor typography settings', () => {
     const css = readPreviewStyles();
 
     expect(css).toMatch(/:global\(\.preview-editor\.mode-markdown \.cm-markdown-block-handle\)\s*\{[^}]*left:\s*-2px/);
+  });
+
+  it('shows only the focused caret block Grabber on coarse touch surfaces', () => {
+    const css = readPreviewStyles();
+
+    expect(css).toContain('@media (hover: none) and (pointer: coarse)');
+    expect(css).toMatch(/\.cm-markdown-block-rail-item\)\s*\{[^}]*pointer-events:\s*none/);
+    expect(css).toMatch(/\.cm-editor\.cm-focused \.cm-markdown-block-rail-item\.is-caret-block\)\s*\{[^}]*pointer-events:\s*auto/);
+    expect(css).toMatch(/\.cm-markdown-block-handle\)\s*\{[^}]*opacity:\s*0[^}]*visibility:\s*hidden/);
+    expect(css).toMatch(/\.cm-markdown-block-rail-item\.is-caret-block \.cm-markdown-block-handle\)\s*\{[^}]*opacity:\s*0\.55[^}]*visibility:\s*visible/);
   });
 });
