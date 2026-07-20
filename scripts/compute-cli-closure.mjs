@@ -968,16 +968,24 @@ export const CLOSED_PRODUCT_PATTERNS = Object.freeze([
     pattern: /^server\/routes\/(avatar|cards|character-cards|desk|diary)\.ts$/,
     note: "Implements the closed-source avatar/card/desk/diary product surface, not generic redistributable host capability.",
   },
-  {
-    pattern: /^core\/current-turn-native-media\.ts$/,
-    note: "Tracks native audio/media attachments for the closed-source desktop UI's current chat turn -- product surface, not generic host capability.",
-  },
-  {
-    pattern: /^core\/desktop-session-submit\.ts$/,
-    note: "The closed-source desktop UI's unified message-submission entry point for local input and bridge takeover -- product surface, not generic host capability.",
-  },
+  // core/desktop-session-submit.ts and core/current-turn-native-media.ts
+  // were reclassified redistributable 2026-07-17 (both listed in
+  // export-manifest.json). The earlier notes here guessed "desktop UI
+  // product surface" from the file names, but the evidence says host
+  // plumbing: the open chat/sessions routes and the open engine import
+  // them unconditionally (an open server could not submit a message
+  // without them), every dependency they pull in is already
+  // redistributable, and "desktop session" names an engine-side session
+  // kind, not the desktop renderer.
   { pattern: /^lib\/character-cards\//, note: "Implements the closed-source character-card content system." },
-  { pattern: /^lib\/desk\//, note: "Implements the closed-source desk product surface (named as closed product experience by the split classification principles)." },
+  // lib/desk/ was reclassified redistributable 2026-07-17 (all files listed
+  // in export-manifest.json). It is the automation machinery -- cron
+  // store/scheduler, heartbeat, automation executors/normalizer, activity
+  // log, permission stub -- which runs headless under the CLI, has long
+  // been published in this repository, and is imported unconditionally by
+  // the redistributable agent/hub code. The desk product EXPERIENCE
+  // (routes and renderer surface) is a separate closed set and stays
+  // closed; only the backend machinery is open.
   { pattern: /^desktop\/src\/react\//, note: "The renderer's React application bundle -- the closed-source desktop UI implementation." },
   { pattern: /^desktop\/(index\.html|src\/main\.tsx)$/, note: "The renderer's own HTML/entry files." },
   {
@@ -994,12 +1002,13 @@ export const CLOSED_PRODUCT_PATTERNS = Object.freeze([
 export const EVIDENCE_NEEDED_PATTERNS = Object.freeze([
   {
     pattern: /^server\/routes\/mobile-workbench\.ts$/,
-    note: "Not yet classified as open host capability or closed product surface; this census supplies the evidence a future decision needs.",
+    note: "Superseded by the mobile-workspace route in ongoing development; this edge is expected to retire with that replacement rather than be re-cut here, so it stays recorded as evidence rather than acted on.",
   },
-  {
-    pattern: /^server\/suggestion-blocks\.ts$/,
-    note: "A chat-UX suggestion-blocks feature; likely closed-product but not yet confirmed.",
-  },
+  // server/suggestion-blocks.ts was resolved 2026-07-17: it is a plain
+  // wire-format builder for automation suggestion blocks with no product
+  // logic of its own, so it is classified redistributable (listed in
+  // export-manifest.json). The desk automation behavior behind those
+  // blocks remains closed.
 ]);
 
 // Reached by the closure but its open/closed boundary has not been drawn
@@ -1008,7 +1017,13 @@ export const EVIDENCE_NEEDED_PATTERNS = Object.freeze([
 // closed-content coupling yet, so not counted as a baseline edge.
 export const PROVISIONAL_PATTERNS = Object.freeze([
   {
-    pattern: /^desktop\/src\/shared\//,
+    // theme-registry.cjs and theme-registry-data.json were resolved
+    // 2026-07-17: the registry is a low-sensitivity manifest of theme ids,
+    // background colors and i18n keys plus its lookup logic, needed by the
+    // redistributable settings tool for validation, so both are classified
+    // redistributable (listed in export-manifest.json). The theme CSS
+    // itself lives under desktop/src/themes/ and stays closed.
+    pattern: /^desktop\/src\/shared\/(?!theme-registry\.cjs$|theme-registry-data\.json$)/,
     note: "Shared desktop-shell code mixing generic startup/update/error/preload plumbing with product-specific behavior; needs a dedicated pass to separate the two before it can be classified.",
   },
 ]);

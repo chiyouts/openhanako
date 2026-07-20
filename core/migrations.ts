@@ -2,8 +2,8 @@
  * 数据迁移 runner
  *
  * 所有用户数据格式变更集中在此文件。
- * preferences.json._dataVersion 记录已执行到的版本号（整数），
- * 启动时只跑 > _dataVersion 的条目。
+ * preferences.json._dataVersion 保留为连续完成的高水位。
+ * 高水位之后的成功条目会单独记录，不会因为前面某条失败而重跑。
  *
  * 添加新迁移：在 migrations 对象末尾加一条，key 为递增整数。
  */
@@ -37,6 +37,10 @@ import {
 } from "./session-permission-mode.ts";
 import { lookupKnown } from "../shared/known-models.ts";
 import { SESSION_PREFIX_MAP } from "../lib/bridge/session-key.ts";
+import {
+  DINGTALK_LEGACY_AUTH_MODE,
+  canonicalizeDingTalkBridgeConfig,
+} from "../lib/bridge/dingtalk-contract.ts";
 import { migrateLegacyApiKeyAuthToProviders } from "./provider-auth-migration.ts";
 import { createModuleLogger } from "../lib/debug-log.ts";
 import { patchAutomationJobForMigration } from "../lib/desk/automation-normalizer.ts";
@@ -44,6 +48,7 @@ import { parseSkillMetadata } from "../lib/skills/skill-metadata.ts";
 import { safeConversationStem } from "../lib/conversations/agent-phone-projection.ts";
 import { DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.ts";
 import { ProviderCatalogStore } from "./provider-catalog.ts";
+import { repairProviderModelMetadata } from "./provider-model-metadata-migration.ts";
 import { sessionIdFromFilename } from "../lib/session-jsonl.ts";
 import {
   filesystemIdentityKeySync,
@@ -148,7 +153,99 @@ const migrations = {
   43: migrateCodexImageGenerationDefaultsToResolutionSchema,
   // OAuth 模型管理收回 Provider Catalog：合并旧 runtime alias、自定义模型偏好并清掉双数据源
   44: migrateOAuthModelsToProviderCatalog,
+  // 保留旧版本已持久化的 Codex OAuth 模型引用，避免固定 allowlist 让旧会话失效
+  45: recoverReferencedCodexOAuthModels,
+  // 清理旧 Provider Catalog 中当前校验器明确拒绝的模型元数据，并先保存可恢复原件
+  46: repairLegacyProviderModelMetadata,
+  // stable 钉钉配置使用旧应用 token 接口；显式标记后继续沿用旧契约
+  47: migrateStableDingTalkCredentialsToLegacyAuthMode,
+  // stable 会加载项目内兼容技能目录；只为缺少新策略字段的旧 Agent 显式保留该行为
+  48: preserveStableCompatibleWorkspaceSkillDiscovery,
+  // 迁移 #45 曾把 model_change / assistant message 事件记录自身的 id 误收为
+  // Codex 模型 id 并写入 Provider Catalog；用闭环证据法清理这批污染条目
+  49: repairPollutedCodexEventIdModels,
 };
+
+const migrationDependencies = {
+  8: [5],
+  21: [16, 20],
+  37: [36],
+  39: [38],
+  44: [42],
+  45: [42, 44],
+  46: [42],
+  49: [42, 45],
+};
+
+const migrationIds = Object.keys(migrations).map(Number).sort((a, b) => a - b);
+const latestMigrationId = migrationIds.at(-1) || 0;
+
+function normalizeMigrationState(preferences) {
+  const highWaterMark = Number.isInteger(preferences?._dataVersion) && preferences._dataVersion > 0
+    ? preferences._dataVersion
+    : 0;
+  const rawState = preferences?._migrationState;
+  const completedIds: number[] = Array.isArray(rawState?.completedIds)
+    ? rawState.completedIds.filter((id) => Number.isInteger(id) && migrationIds.includes(id) && id > highWaterMark)
+    : [];
+  const lastFailedIds: number[] = Array.isArray(rawState?.lastFailedIds)
+    ? rawState.lastFailedIds.filter((id) => Number.isInteger(id) && migrationIds.includes(id) && id > highWaterMark)
+    : [];
+  return {
+    highWaterMark,
+    completedIds: [...new Set(completedIds)].sort((a, b) => a - b),
+    lastFailedIds: [...new Set(lastFailedIds)].sort((a, b) => a - b),
+  };
+}
+
+function completedMigrationIds(state) {
+  const completed = new Set(state.completedIds);
+  for (const id of migrationIds) {
+    if (id <= state.highWaterMark) completed.add(id);
+  }
+  return completed;
+}
+
+function compactMigrationState(state, completed) {
+  let highWaterMark = state.highWaterMark;
+  for (const id of migrationIds) {
+    if (id <= highWaterMark) continue;
+    if (id !== highWaterMark + 1 || !completed.has(id)) break;
+    highWaterMark = id;
+  }
+  return {
+    highWaterMark,
+    completedIds: [...completed].filter((id) => id > highWaterMark).sort((a, b) => a - b),
+    lastFailedIds: state.lastFailedIds.filter((id) => id > highWaterMark).sort((a, b) => a - b),
+  };
+}
+
+function saveMigrationState(prefs, state) {
+  const fresh = prefs.getPreferences();
+  fresh._dataVersion = state.highWaterMark;
+  fresh._migrationState = {
+    completedIds: state.completedIds,
+    lastFailedIds: state.lastFailedIds,
+  };
+  prefs.savePreferences(fresh);
+}
+
+/**
+ * Returns legacy migration readiness without changing preferences or user data.
+ * Accepts either a PreferencesManager-like object or an already-read preferences object.
+ */
+export function getMigrationStatus(prefsOrPreferences) {
+  const preferences = typeof prefsOrPreferences?.getPreferences === "function"
+    ? prefsOrPreferences.getPreferences()
+    : (prefsOrPreferences || {});
+  const state = normalizeMigrationState(preferences);
+  const completed = completedMigrationIds(state);
+  return {
+    registryLatestId: latestMigrationId,
+    pendingIds: migrationIds.filter((id) => !completed.has(id)),
+    lastFailedIds: state.lastFailedIds.filter((id) => !completed.has(id)),
+  };
+}
 
 // ── Runner ──────────────────────────────────────────────────────────────────
 
@@ -163,31 +260,47 @@ const migrations = {
 export function runMigrations(ctx) {
   const { prefs, log } = ctx;
   const preferences = prefs.getPreferences();
-  const currentVersion = preferences._dataVersion || 0;
+  let state = normalizeMigrationState(preferences);
+  const completed = completedMigrationIds(state);
+  const pending = migrationIds.filter((id) => !completed.has(id));
 
-  const pending = Object.keys(migrations)
-    .map(Number)
-    .filter(v => v > currentVersion)
-    .sort((a, b) => a - b);
+  if (!pending.length) return getMigrationStatus(prefs);
 
-  if (!pending.length) return;
-
-  log(`[migrations] _dataVersion=${currentVersion}，待执行 ${pending.length} 条迁移`);
+  log(`[migrations] _dataVersion=${state.highWaterMark}，待执行 ${pending.length} 条迁移`);
 
   for (const v of pending) {
+    const unmetDependencies = (migrationDependencies[v] || []).filter((id) => !completed.has(id));
+    if (unmetDependencies.length > 0) {
+      log(`[migrations] #${v} 等待前置迁移 #${unmetDependencies.join(", #")}`);
+      continue;
+    }
+
     try {
       migrations[v](ctx);
       log(`[migrations] #${v} 完成`);
+      completed.add(v);
+      state.lastFailedIds = state.lastFailedIds.filter((id) => id !== v);
     } catch (err) {
       moduleLog.error(`#${v} 失败: ${err.message}`);
-      // 失败则停在当前版本，不继续后续迁移
-      break;
+      if (!state.lastFailedIds.includes(v)) state.lastFailedIds.push(v);
     }
-    // 每跑完一条就持久化版本号，防止中途崩溃导致重跑已成功的迁移
-    const fresh = prefs.getPreferences();
-    fresh._dataVersion = v;
-    prefs.savePreferences(fresh);
+
+    // 每次尝试后立即持久化收据，防止后续崩溃导致重跑已成功的迁移。
+    state = compactMigrationState(state, completed);
+    try {
+      saveMigrationState(prefs, state);
+    } catch (err) {
+      // The migration's own result and the receipt write are separate
+      // failure domains. A read-only disk or a transient atomic-rename
+      // failure must not turn maintenance bookkeeping into a global startup
+      // failure. Without a durable receipt the successful migration remains
+      // pending and will be retried on the next launch.
+      moduleLog.error(`迁移收据保存失败: ${err.message}`);
+      log(`[migrations] 收据保存失败，应用将继续启动；未落盘的迁移会在下次启动重试`);
+    }
   }
+
+  return getMigrationStatus(prefs);
 }
 
 // ── 迁移实现 ─────────────────────────────────────────────────────────────────
@@ -1475,6 +1588,739 @@ function migrateOAuthModelsToProviderCatalog(ctx) {
     providerRegistry._entries?.clear?.();
   }
   log?.(`[migrations] #44: OAuth models moved to Provider Catalog (providers=${Object.keys(customByProvider).length})`);
+}
+
+const CODEX_OAUTH_PROVIDER_IDS = new Set([
+  CODEX_OAUTH_PROVIDER_ID,
+  CODEX_OAUTH_RUNTIME_ALIAS,
+]);
+
+const MODEL_ID_KEYS_BY_PROVIDER_KEY = new Map([
+  ["provider", ["id", "modelId", "model"]],
+  ["providerId", ["id", "modelId", "model"]],
+  ["modelProvider", ["id", "modelId", "model"]],
+  ["model_provider", ["id", "modelId", "model"]],
+  ["modelOverrideProvider", ["modelOverrideId", "modelId", "model"]],
+  ["model_override_provider", ["model_override_id", "modelId", "model"]],
+  ["agentPhoneModelOverrideProvider", ["agentPhoneModelOverrideId"]],
+]);
+
+// Session event records — `model_change` entries and assistant `message`
+// entries written by the Pi SDK session writer (core/session-manager.js
+// appendModelChange / appendMessage) — always carry the record's OWN event id
+// under `id` (an 8-hex session-tree node id from randomUUID().slice(0, 8)),
+// never a model id. Only `modelId` (model_change) or `model` (assistant
+// message) legitimately hold a Codex model id in these two shapes.
+//
+// This cannot be merged into MODEL_ID_KEYS_BY_PROVIDER_KEY above: both shapes
+// key their provider under the same "provider" property name that legitimate
+// model *descriptor* objects also use (e.g. `{ provider, id }` stored in
+// preferences.utility_model, config.models.chat, entry.model snapshots).
+// Descriptor objects are never event records — their `id` genuinely is the
+// model id — so the key name alone can't distinguish the two shapes. The
+// distinguishing fact is the caller's structural knowledge of which shape it
+// is looking at (an event-record field vs. a standalone descriptor value),
+// which is exactly what routes callers to this table instead of the one
+// above. See collectCodexEventRecordModelReference.
+const EVENT_RECORD_MODEL_ID_KEYS_BY_PROVIDER_KEY = new Map([
+  ["provider", ["modelId", "model"]],
+]);
+
+const PROVIDER_SCOPED_MODEL_VALUE_KEYS = new Set([
+  "chat",
+  "utility",
+  "utility_large",
+  "model",
+  "modelId",
+  "defaultModel",
+  "modelOverrideId",
+  "model_override_id",
+  "agentPhoneModelOverrideId",
+]);
+
+function migrationCodexProviderId(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return CODEX_OAUTH_PROVIDER_IDS.has(normalized) ? normalized : null;
+}
+
+function migrationCodexModelId(value) {
+  if (typeof value !== "string") return null;
+  let normalized = value.trim();
+  if (!normalized) return null;
+  for (const providerId of CODEX_OAUTH_PROVIDER_IDS) {
+    const prefix = `${providerId}/`;
+    if (normalized.startsWith(prefix)) {
+      normalized = normalized.slice(prefix.length).trim();
+      break;
+    }
+  }
+  return normalized || null;
+}
+
+/**
+ * Extracts referenced Codex OAuth model ids from a model *descriptor* value —
+ * e.g. `{ provider, id }` stored in preferences.utility_model, an agent
+ * config.yaml models.chat ref, a DM/channel frontmatter override, or a cron
+ * job's model field. In this shape `id` legitimately identifies the model.
+ */
+function collectCodexModelReference(value, modelIds) {
+  collectCodexModelReferenceWithKeyTable(value, modelIds, MODEL_ID_KEYS_BY_PROVIDER_KEY);
+}
+
+/**
+ * Extracts referenced Codex OAuth model ids from a session *event record* —
+ * a `model_change` entry or an assistant `message` entry. These shapes carry
+ * their own session-tree event id under `id`, which must never be read as a
+ * model id (see EVENT_RECORD_MODEL_ID_KEYS_BY_PROVIDER_KEY above).
+ */
+function collectCodexEventRecordModelReference(value, modelIds) {
+  collectCodexModelReferenceWithKeyTable(value, modelIds, EVENT_RECORD_MODEL_ID_KEYS_BY_PROVIDER_KEY);
+}
+
+function collectCodexModelReferenceWithKeyTable(value, modelIds, keyTable) {
+  if (typeof value === "string") {
+    const modelId = migrationCodexModelIdFromQualifiedRef(value);
+    if (modelId) modelIds.add(modelId);
+    return;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+
+  for (const [providerKey, modelKeys] of keyTable) {
+    if (!migrationCodexProviderId(value[providerKey])) continue;
+    for (const modelKey of modelKeys) {
+      const modelId = migrationCodexModelId(value[modelKey]);
+      if (modelId) modelIds.add(modelId);
+    }
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (PROVIDER_SCOPED_MODEL_VALUE_KEYS.has(key)) {
+      const modelId = typeof entry === "string"
+        ? migrationCodexModelIdFromQualifiedRef(entry)
+        : null;
+      if (modelId) modelIds.add(modelId);
+    }
+  }
+}
+
+function migrationCodexModelIdFromQualifiedRef(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  for (const providerId of CODEX_OAUTH_PROVIDER_IDS) {
+    const prefix = `${providerId}/`;
+    if (normalized.startsWith(prefix)) {
+      return migrationCodexModelId(normalized);
+    }
+  }
+  return null;
+}
+
+function migrationPathIsInsideHome(hanakoHome, candidatePath) {
+  const homeKey = filesystemIdentityKeySync(hanakoHome);
+  const candidateKey = filesystemIdentityKeySync(candidatePath);
+  return candidateKey === homeKey || candidateKey.startsWith(homeKey + path.sep);
+}
+
+function migrationRealDirectory(hanakoHome, directory) {
+  try {
+    return fs.lstatSync(directory).isDirectory()
+      && migrationPathIsInsideHome(hanakoHome, directory);
+  } catch {
+    return false;
+  }
+}
+
+function migrationRealFile(hanakoHome, filePath) {
+  try {
+    return fs.lstatSync(filePath).isFile()
+      && migrationPathIsInsideHome(hanakoHome, filePath);
+  } catch {
+    return false;
+  }
+}
+
+function migrationReadDirectoryEntries(hanakoHome, directory, log) {
+  if (!migrationRealDirectory(hanakoHome, directory)) return [];
+  try {
+    return fs.readdirSync(directory, { withFileTypes: true });
+  } catch (err) {
+    log?.(`[migrations] #45 skipped unreadable directory ${directory} (${err.message})`);
+    return [];
+  }
+}
+
+function migrationWalkRealFiles(hanakoHome, root, accept, log) {
+  const files = [];
+  const walk = (directory) => {
+    for (const entry of migrationReadDirectoryEntries(hanakoHome, directory, log)) {
+      // Never follow directory or file symlinks. A user-managed link may point
+      // outside HANA_HOME, and migration discovery must remain read-only there.
+      if (entry.isSymbolicLink()) continue;
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(entryPath);
+      } else if (entry.isFile() && accept(entryPath)) {
+        files.push(entryPath);
+      }
+    }
+  };
+  if (migrationRealDirectory(hanakoHome, root)) walk(root);
+  return files;
+}
+
+function migrationReadStructuredFile(filePath, parser, modelIds, log, kind) {
+  try {
+    const parsed = parser(fs.readFileSync(filePath, "utf-8"));
+    return parsed;
+  } catch (err) {
+    log?.(`[migrations] #45 skipped invalid ${kind} at ${filePath} (${err.message})`);
+    return null;
+  }
+}
+
+function migrationReadSessionJsonl(filePath, modelIds, log) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    log?.(`[migrations] #45 skipped unreadable session JSONL at ${filePath} (${err.message})`);
+    return;
+  }
+
+  const lines = raw.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    if (!lines[index].trim()) continue;
+    try {
+      const entry = JSON.parse(lines[index]);
+      if (entry?.type === "model_change") collectCodexEventRecordModelReference(entry, modelIds);
+      if (entry?.type === "message" && entry.message?.role === "assistant") {
+        collectCodexEventRecordModelReference(entry.message, modelIds);
+      }
+      // Some older Hana-produced snapshots stored the restored model beside
+      // the entry as a bare `{ provider, id }` descriptor rather than as a
+      // model_change record — that's a descriptor, not an event record, so
+      // its `id` is read through the descriptor-context extractor.
+      collectCodexModelReference(entry?.model, modelIds);
+    } catch (err) {
+      log?.(`[migrations] #45 skipped invalid session JSONL line at ${filePath}:${index + 1} (${err.message})`);
+    }
+  }
+}
+
+function migrationFrontmatter(raw) {
+  const lines = raw.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") throw new Error("missing frontmatter opener");
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (end < 0) throw new Error("missing frontmatter closer");
+  const parsed = YAML.load(lines.slice(1, end).join("\n"));
+  return parsed && typeof parsed === "object" ? parsed : {};
+}
+
+function collectCodexModelsFromLegacyPersistence(ctx) {
+  const { hanakoHome, agentsDir, prefs, log } = ctx;
+  const modelIds = new Set();
+  const preferences = prefs.getPreferences();
+  collectCodexModelReference(preferences.utility_model, modelIds);
+  collectCodexModelReference(preferences.utility_large_model, modelIds);
+
+  const agentEntries = migrationReadDirectoryEntries(hanakoHome, agentsDir, log)
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink());
+  for (const agentEntry of agentEntries) {
+    const agentDir = path.join(agentsDir, agentEntry.name);
+    const configPath = path.join(agentDir, "config.yaml");
+    if (migrationRealFile(hanakoHome, configPath)) {
+      const config = migrationReadStructuredFile(configPath, YAML.load, modelIds, log, "agent config.yaml");
+      for (const role of ["chat", "utility", "utility_large"]) {
+        collectCodexModelReference(config?.models?.[role], modelIds);
+      }
+    }
+
+    const dmDir = path.join(agentDir, "dm");
+    for (const entry of migrationReadDirectoryEntries(hanakoHome, dmDir, log)) {
+      if (entry.isSymbolicLink() || !entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const dmPath = path.join(dmDir, entry.name);
+      const frontmatter = migrationReadStructuredFile(dmPath, migrationFrontmatter, modelIds, log, "DM frontmatter");
+      collectCodexModelReference(frontmatter, modelIds);
+    }
+
+    const cronPath = path.join(agentDir, "desk", "cron-jobs.json");
+    if (migrationRealFile(hanakoHome, cronPath)) {
+      const cron = migrationReadStructuredFile(cronPath, JSON.parse, modelIds, log, "agent cron-jobs.json");
+      collectCodexModelsFromCronJobs(cron, modelIds);
+    }
+  }
+
+  for (const sessionPath of migrationWalkRealFiles(
+    hanakoHome,
+    agentsDir,
+    (filePath) => filePath.endsWith(".jsonl"),
+    log,
+  )) {
+    migrationReadSessionJsonl(sessionPath, modelIds, log);
+  }
+
+  const studiosDir = path.join(hanakoHome, "studios");
+  for (const studioEntry of migrationReadDirectoryEntries(hanakoHome, studiosDir, log)) {
+    if (studioEntry.isSymbolicLink() || !studioEntry.isDirectory()) continue;
+    const cronPath = path.join(studiosDir, studioEntry.name, "desk", "cron-jobs.json");
+    if (migrationRealFile(hanakoHome, cronPath)) {
+      const cron = migrationReadStructuredFile(cronPath, JSON.parse, modelIds, log, "Studio cron-jobs.json");
+      collectCodexModelsFromCronJobs(cron, modelIds);
+    }
+  }
+
+  const channelsDir = path.join(hanakoHome, "channels");
+  for (const entry of migrationReadDirectoryEntries(hanakoHome, channelsDir, log)) {
+    if (entry.isSymbolicLink() || !entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const channelPath = path.join(channelsDir, entry.name);
+    const frontmatter = migrationReadStructuredFile(channelPath, migrationFrontmatter, modelIds, log, "channel frontmatter");
+    collectCodexModelReference(frontmatter, modelIds);
+  }
+
+  return [...modelIds];
+}
+
+function collectCodexModelsFromCronJobs(cron, modelIds) {
+  if (!Array.isArray(cron?.jobs)) return;
+  for (const job of cron.jobs) {
+    collectCodexModelReference(job?.model, modelIds);
+    collectCodexModelReference(job?.executor?.model, modelIds);
+  }
+}
+
+function recoverReferencedCodexOAuthModels(ctx) {
+  const { hanakoHome, providerRegistry, log } = ctx;
+  const referencedModels = collectCodexModelsFromLegacyPersistence(ctx);
+  if (referencedModels.length === 0) {
+    log?.("[migrations] #45: no persisted Codex OAuth model references found");
+    return;
+  }
+
+  const store = providerRegistry?._catalog || new ProviderCatalogStore(hanakoHome);
+  const catalog = store.load();
+  const providers = structuredClone(catalog.providers || {});
+  const current = providers[CODEX_OAUTH_PROVIDER_ID] || {};
+  const hasExplicitModels = Object.prototype.hasOwnProperty.call(current, "models");
+
+  if (hasExplicitModels && Array.isArray(current.models) && current.models.length === 0) {
+    log?.(`[migrations] #45: preserved explicit empty Codex OAuth model allowlist (references=${referencedModels.length})`);
+    return;
+  }
+  if (hasExplicitModels && !Array.isArray(current.models)) {
+    log?.("[migrations] #45: skipped malformed Codex OAuth model allowlist");
+    return;
+  }
+
+  const defaults = providerRegistry?.getDefaultModelEntries?.(CODEX_OAUTH_PROVIDER_ID)
+    || providerRegistry?.getDefaultModels?.(CODEX_OAUTH_PROVIDER_ID)
+    || [];
+  const nextModels = hasExplicitModels
+    ? mergeMigrationModelLists(current.models, referencedModels)
+    : mergeMigrationModelLists(defaults, referencedModels);
+  const next = { ...current, models: nextModels };
+  if (JSON.stringify(next) === JSON.stringify(current)) {
+    log?.(`[migrations] #45: persisted Codex OAuth references already available (references=${referencedModels.length})`);
+    return;
+  }
+
+  providers[CODEX_OAUTH_PROVIDER_ID] = next;
+  store.saveProviders(providers);
+  if (providerRegistry) {
+    providerRegistry._addedModelsCache = null;
+    providerRegistry._addedModelsMtime = 0;
+    providerRegistry._entries?.clear?.();
+  }
+  log?.(`[migrations] #45: recovered persisted Codex OAuth models (references=${referencedModels.length}, models=${nextModels.length})`);
+}
+
+function writeProviderModelMetadataMigrationBackup({ store, hanakoHome, repairs }) {
+  if (!fs.existsSync(store.catalogPath)) {
+    throw new Error("provider catalog source is missing before metadata repair");
+  }
+
+  const backupRoot = path.join(hanakoHome, "migration-backups");
+  fs.mkdirSync(backupRoot, { recursive: true });
+  const backupDir = fs.mkdtempSync(path.join(backupRoot, "provider-model-metadata-v46-"));
+  const backupPath = path.join(backupDir, path.basename(store.catalogPath));
+  fs.copyFileSync(store.catalogPath, backupPath);
+
+  const report = {
+    migration: 46,
+    createdAt: new Date().toISOString(),
+    sourceFile: path.basename(store.catalogPath),
+    repairs,
+  };
+  atomicWriteSync(
+    path.join(backupDir, "migration-report.json"),
+    JSON.stringify(report, null, 2) + "\n",
+  );
+  return backupDir;
+}
+
+function repairLegacyProviderModelMetadata(ctx) {
+  const { hanakoHome, providerRegistry, log } = ctx;
+  const store = providerRegistry?._catalog || new ProviderCatalogStore(hanakoHome);
+  const catalog = store.load();
+  const result = repairProviderModelMetadata(catalog.providers || {});
+  if (!result.changed) {
+    log?.("[migrations] #46: Provider Catalog model metadata already valid");
+    return;
+  }
+
+  const backupDir = writeProviderModelMetadataMigrationBackup({
+    store,
+    hanakoHome,
+    repairs: result.repairs,
+  });
+  store.saveProviders(result.providers);
+  if (providerRegistry) {
+    providerRegistry._addedModelsCache = null;
+    providerRegistry._addedModelsMtime = 0;
+    providerRegistry._entries?.clear?.();
+  }
+
+  for (const repair of result.repairs) {
+    log?.(
+      `[migrations] #46 repaired ${repair.providerId}/${repair.modelId} fields: ${repair.fields.join(", ")}`,
+    );
+  }
+  log?.(
+    `[migrations] #46: repaired Provider Catalog model metadata (models=${result.repairs.length}, backup=${path.basename(backupDir)})`,
+  );
+}
+
+/**
+ * #49 — 清理迁移 #45 误把 session 事件 id 收成 Codex 模型 id 而写入
+ * Provider Catalog 的污染条目。
+ *
+ * 识别标准是闭环证据法，不是模式匹配：重新走一遍 #45 当时扫描的同一批持久化
+ * 面，用修复后的提取器算出 S_correct（真正被引用过的模型 id），再单独重放
+ * model_change / assistant message 两种事件记录形状下"把 id 当模型 id 读"这一
+ * 具体错误算出 S_wrong（旧版提取器会误收的 id 集合）。S_wrong 里但不在
+ * S_correct 里的 id 才是可证伪的污染条目；真实模型 id 即使恰好撞上某个事件
+ * id，只要它同时被 S_correct 收录（换句话说，它在别处也被合法引用过），就
+ * 保留不删。禁止按"八位十六进制"之类的形状特征直接匹配删除。
+ */
+function collectPreFixPollutedCodexEventIds(ctx) {
+  const { hanakoHome, agentsDir, log } = ctx;
+  const wrongIds = new Set();
+
+  for (const sessionPath of migrationWalkRealFiles(
+    hanakoHome,
+    agentsDir,
+    (filePath) => filePath.endsWith(".jsonl"),
+    log,
+  )) {
+    let raw;
+    try {
+      raw = fs.readFileSync(sessionPath, "utf-8");
+    } catch (err) {
+      log?.(`[migrations] #49 skipped unreadable session JSONL at ${sessionPath} (${err.message})`);
+      continue;
+    }
+
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        // #45's own scan already logs malformed lines when it computes
+        // S_correct; skip silently here to avoid duplicate log noise.
+        continue;
+      }
+
+      if (entry?.type === "model_change" && migrationCodexProviderId(entry.provider)) {
+        const wrongId = migrationCodexModelId(entry.id);
+        if (wrongId) wrongIds.add(wrongId);
+      }
+      if (
+        entry?.type === "message"
+        && entry.message?.role === "assistant"
+        && migrationCodexProviderId(entry.message?.provider)
+      ) {
+        const wrongId = migrationCodexModelId(entry.message?.id);
+        if (wrongId) wrongIds.add(wrongId);
+      }
+    }
+  }
+
+  return wrongIds;
+}
+
+function writeCodexEventIdPollutionRepairBackup({ store, hanakoHome, removed }) {
+  if (!fs.existsSync(store.catalogPath)) {
+    throw new Error("provider catalog source is missing before Codex event-id pollution repair");
+  }
+
+  const backupRoot = path.join(hanakoHome, "migration-backups");
+  fs.mkdirSync(backupRoot, { recursive: true });
+  const backupDir = fs.mkdtempSync(path.join(backupRoot, "codex-model-id-pollution-v49-"));
+  const backupPath = path.join(backupDir, path.basename(store.catalogPath));
+  fs.copyFileSync(store.catalogPath, backupPath);
+
+  const report = {
+    migration: 49,
+    createdAt: new Date().toISOString(),
+    sourceFile: path.basename(store.catalogPath),
+    removed,
+  };
+  atomicWriteSync(
+    path.join(backupDir, "migration-report.json"),
+    JSON.stringify(report, null, 2) + "\n",
+  );
+  return backupDir;
+}
+
+function repairPollutedCodexEventIdModels(ctx) {
+  const { hanakoHome, providerRegistry, log } = ctx;
+  const store = providerRegistry?._catalog || new ProviderCatalogStore(hanakoHome);
+
+  let catalog;
+  try {
+    catalog = store.load();
+  } catch (err) {
+    log?.(`[migrations] #49 skipped unreadable provider catalog (${err.message})`);
+    return;
+  }
+
+  const providers = structuredClone(catalog.providers || {});
+  const current = providers[CODEX_OAUTH_PROVIDER_ID];
+  if (!current || !Array.isArray(current.models) || current.models.length === 0) {
+    log?.("[migrations] #49: no Codex OAuth model list to repair");
+    return;
+  }
+
+  const correctIds = new Set(collectCodexModelsFromLegacyPersistence(ctx));
+  const wrongIds = collectPreFixPollutedCodexEventIds(ctx);
+  const wrongOnlyIds = new Set([...wrongIds].filter((id) => !correctIds.has(id)));
+  if (wrongOnlyIds.size === 0) {
+    log?.("[migrations] #49: no polluted Codex OAuth event-id entries found");
+    return;
+  }
+
+  // Extra safety net: a shipped default model is never removed even if one
+  // were to coincidentally collide with a wrongly-collected event id.
+  const defaultIds = new Set(
+    (providerRegistry?.getDefaultModelEntries?.(CODEX_OAUTH_PROVIDER_ID)
+      || providerRegistry?.getDefaultModels?.(CODEX_OAUTH_PROVIDER_ID)
+      || [])
+      .map((model) => migrationModelId(model))
+      .filter((id) => typeof id === "string" && id),
+  );
+
+  const removed = [];
+  const nextModels = current.models.filter((model) => {
+    const id = migrationModelId(model);
+    if (typeof id !== "string" || !wrongOnlyIds.has(id) || defaultIds.has(id)) return true;
+    removed.push(id);
+    return false;
+  });
+
+  if (removed.length === 0) {
+    log?.("[migrations] #49: polluted event ids found but none present in the current Codex OAuth model list");
+    return;
+  }
+
+  const backupDir = writeCodexEventIdPollutionRepairBackup({ store, hanakoHome, removed });
+  providers[CODEX_OAUTH_PROVIDER_ID] = { ...current, models: nextModels };
+  store.saveProviders(providers);
+  if (providerRegistry) {
+    providerRegistry._addedModelsCache = null;
+    providerRegistry._addedModelsMtime = 0;
+    providerRegistry._entries?.clear?.();
+  }
+  log?.(
+    `[migrations] #49: removed ${removed.length} polluted Codex OAuth event-id entries (${removed.join(", ")}, backup=${path.basename(backupDir)})`,
+  );
+}
+
+/**
+ * #47 — stable 钉钉应用凭据继续使用旧 token 契约
+ *
+ * stable 保存的配置没有 corpId，并通过 appKey/appSecret/restBaseUrl 这组旧字段
+ * 或其中的 restBaseUrl 识别。只给这种明确的持久化形态写 compatibility marker；
+ * 当前 canonical 配置缺 corpId 仍由运行时显式报错，不能启发式降级。
+ */
+function migrateStableDingTalkCredentialsToLegacyAuthMode(ctx) {
+  const { agentsDir, log } = ctx;
+  const safeErrorCode = (error, fallback) => {
+    const code = typeof error?.code === "string" ? error.code : "";
+    return /^[A-Z0-9_]+$/.test(code) ? code : fallback;
+  };
+  let agentEntries;
+  try {
+    // Deliberately use native Dirent predicates here. Link-aware traversal is
+    // useful for reads elsewhere, but a migration must never rewrite a linked
+    // Agent directory or config file outside the owned data tree.
+    if (!fs.lstatSync(agentsDir).isDirectory()) {
+      log?.("[migrations] #47: no real agent directory");
+      return;
+    }
+    agentEntries = fs.readdirSync(agentsDir, { withFileTypes: true });
+  } catch {
+    log?.("[migrations] #47: no readable agent configs");
+    return;
+  }
+
+  let migrated = 0;
+  let invalid = 0;
+  for (const entry of agentEntries) {
+    if (!entry.isDirectory()) continue;
+    const configPath = path.join(agentsDir, entry.name, "config.yaml");
+    let stat;
+    try {
+      stat = fs.lstatSync(configPath);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+
+    let config;
+    try {
+      config = YAML.load(fs.readFileSync(configPath, "utf-8"));
+    } catch (error) {
+      invalid += 1;
+      log?.(
+        `[migrations] #47 skipped invalid config for "${entry.name}" ` +
+        `(stage=read_or_parse, code=${safeErrorCode(error, "INVALID_YAML")})`,
+      );
+      continue;
+    }
+    const dingtalk = config?.bridge?.dingtalk;
+    if (!dingtalk || typeof dingtalk !== "object" || Array.isArray(dingtalk)) continue;
+    if (Object.prototype.hasOwnProperty.call(dingtalk, "authMode")) continue;
+    if (typeof dingtalk.corpId === "string" && dingtalk.corpId.trim()) continue;
+    const hasLegacyPersistentKey = ["appKey", "appSecret", "restBaseUrl"]
+      .some((key) => Object.prototype.hasOwnProperty.call(dingtalk, key));
+    if (!hasLegacyPersistentKey) continue;
+
+    let canonical;
+    try {
+      canonical = canonicalizeDingTalkBridgeConfig({
+        ...dingtalk,
+        authMode: DINGTALK_LEGACY_AUTH_MODE,
+      });
+      delete canonical.appKey;
+      delete canonical.appSecret;
+      delete canonical.restBaseUrl;
+      config.bridge.dingtalk = canonical;
+    } catch (error) {
+      invalid += 1;
+      log?.(
+        `[migrations] #47 skipped invalid config for "${entry.name}" ` +
+        `(stage=canonicalize, code=${safeErrorCode(error, "INVALID_DINGTALK_CONFIG")})`,
+      );
+      continue;
+    }
+
+    try {
+      atomicWriteSync(
+        configPath,
+        YAML.dump(config, {
+          indent: 2,
+          lineWidth: -1,
+          sortKeys: false,
+          quotingType: "\"",
+        }),
+      );
+    } catch (error) {
+      const code = safeErrorCode(error, "WRITE_FAILED");
+      log?.(
+        `[migrations] #47 could not persist config for "${entry.name}" ` +
+        `(stage=write, code=${code})`,
+      );
+      throw new Error(`DingTalk config migration write failed for "${entry.name}" (code=${code})`);
+    }
+    migrated += 1;
+    log?.(`[migrations] #47 migrated DingTalk auth contract for "${entry.name}"`);
+  }
+
+  log?.(`[migrations] #47: DingTalk stable credentials migrated (configs=${migrated}, invalid=${invalid})`);
+}
+
+/**
+ * #48 — 为 stable Agent 保留项目内兼容技能发现
+ *
+ * stable 没有 workspace_context 策略字段，会加载 .claude/.codex/.openclaw
+ * 项目技能。新 Agent 模板已显式写 false；因此只补缺失值为 true，就能区分
+ * 升级用户与新建 Agent，并完整尊重用户已经保存的 true / false。
+ */
+function preserveStableCompatibleWorkspaceSkillDiscovery(ctx) {
+  const { agentsDir, log } = ctx;
+  let entries;
+  try {
+    if (!fs.lstatSync(agentsDir).isDirectory()) return;
+    entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+  } catch {
+    log?.("[migrations] #48: no readable agent configs");
+    return;
+  }
+
+  let migrated = 0;
+  let invalid = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const configPath = path.join(agentsDir, entry.name, "config.yaml");
+    try {
+      if (!fs.lstatSync(configPath).isFile()) continue;
+    } catch {
+      continue;
+    }
+
+    let config;
+    try {
+      config = YAML.load(fs.readFileSync(configPath, "utf-8"));
+    } catch {
+      invalid += 1;
+      log?.(`[migrations] #48 skipped invalid config for "${entry.name}" (stage=read_or_parse)`);
+      continue;
+    }
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      invalid += 1;
+      log?.(`[migrations] #48 skipped invalid config for "${entry.name}" (stage=shape)`);
+      continue;
+    }
+
+    const workspaceContext = config.workspace_context;
+    if (workspaceContext !== undefined
+      && (!workspaceContext || typeof workspaceContext !== "object" || Array.isArray(workspaceContext))) {
+      invalid += 1;
+      log?.(`[migrations] #48 skipped invalid config for "${entry.name}" (stage=workspace_context)`);
+      continue;
+    }
+    if (workspaceContext
+      && Object.prototype.hasOwnProperty.call(workspaceContext, "discover_compatible_project_skills")) {
+      continue;
+    }
+
+    config.workspace_context = {
+      ...(workspaceContext || {}),
+      discover_compatible_project_skills: true,
+    };
+    try {
+      atomicWriteSync(
+        configPath,
+        YAML.dump(config, {
+          indent: 2,
+          lineWidth: -1,
+          sortKeys: false,
+          quotingType: "\"",
+        }),
+      );
+    } catch (error) {
+      const code = typeof error?.code === "string" && /^[A-Z0-9_]+$/.test(error.code)
+        ? error.code
+        : "WRITE_FAILED";
+      log?.(`[migrations] #48 could not persist config for "${entry.name}" (stage=write, code=${code})`);
+      throw new Error(`workspace skill policy migration write failed for "${entry.name}" (code=${code})`);
+    }
+    migrated += 1;
+    log?.(`[migrations] #48 preserved compatible project skill discovery for "${entry.name}"`);
+  }
+
+  log?.(`[migrations] #48: compatible project skill policy migrated (configs=${migrated}, invalid=${invalid})`);
 }
 
 function removeCodexImageSizeDefault(providerDefaults) {

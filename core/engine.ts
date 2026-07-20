@@ -193,6 +193,17 @@ const moduleLog = createModuleLogger("engine");
 const toolAvailabilityLog = createModuleLogger("tool-availability");
 const win32SandboxCleanupLog = createModuleLogger("win32-sandbox-cleanup");
 
+export function runBestEffortStartupMigrationStep(label, operation, log: any = () => {}) {
+  try {
+    return { ok: true, value: operation() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    moduleLog.error(`startup migration ${label} failed: ${message}`);
+    log(`[migrations] ${label} 失败，应用继续启动；该步骤将在下次启动重试`);
+    return { ok: false, error };
+  }
+}
+
 function sessionBelongsToProject(projectId) {
   return (session) => {
     const explicitProjectId = normalizeSessionProjectId(session?.projectId);
@@ -280,8 +291,12 @@ export class HanaEngine {
    * @param {string} dirs.productDir
    * @param {string} [dirs.agentId]
    * @param {string} [dirs.appVersion]
+   * @param {any[]} [dirs.builtinMediaAdapters] Closed-content media adapter
+   *   implementations (core/media-adapters/), supplied by the composition
+   *   root. Absent/empty means an open composition: the media runtime
+   *   constructs with zero built-in adapters, never an implicit import.
    */
-  constructor({ hanakoHome, productDir, agentId, appVersion }) {
+  constructor({ hanakoHome, productDir, agentId, appVersion, builtinMediaAdapters }) {
     this.hanakoHome = hanakoHome;
     this.productDir = productDir;
     this.appVersion = appVersion || "0.0.0";
@@ -356,6 +371,7 @@ export class HanaEngine {
       sessionFiles: this._sessionFiles,
       registerSessionFile: (entry) => this.serializeSessionFile(this.registerSessionFile(entry)),
       onProviderChanged: () => this.onProviderChanged(),
+      builtinAdapters: builtinMediaAdapters,
     });
     this._sessionProjects = new SessionProjectCatalogStore({ userDir: this.userDir });
 
@@ -1159,11 +1175,14 @@ export class HanaEngine {
   steer(text) { return this._sessionCoord.steer(text); }
 
   // ── Path 感知 API（Phase 2） ──
-  async promptSession(p, text, opts) { return this._sessionCoord.promptSession(p, text, opts); }
+  async promptSession(p, text, opts, submitOptions) {
+    return this._sessionCoord.promptSession(p, text, opts, submitOptions);
+  }
   steerSession(p, text) { return this._sessionCoord.steerSession(p, text); }
   async abortSession(p, options) { return this._sessionCoord.abortSession(p, options); }
   getEnvChangeLedger() { return this._envChangeLedger; }
   renderSessionReminderBlock(p) { return this._sessionCoord.renderSessionReminderBlock(p); }
+  preflightSessionInput(p) { return this._sessionCoord.preflightSessionInput(p); }
   consumeRenderedSessionReminderBlock(p, receipt) {
     return this._sessionCoord.consumeRenderedSessionReminderBlock(p, receipt);
   }
@@ -1904,30 +1923,63 @@ export class HanaEngine {
     const startupTimer = Date.now();
 
     // 0. Config scope 迁移（全局字段从 agent config → preferences）
-    migrateConfigScope({
-      agentsDir: this.agentsDir,
-      prefs: this._prefs,
-      primaryAgentId: this._prefs.getPrimaryAgent(),
-      log,
-    });
+    const configScopeStep = runBestEffortStartupMigrationStep("config-scope", () => {
+      migrateConfigScope({
+        agentsDir: this.agentsDir,
+        prefs: this._prefs,
+        primaryAgentId: this._prefs.getPrimaryAgent(),
+        log,
+      });
+    }, log);
 
     // 0b. Provider 迁移（旧数据 → added-models.yaml，只跑一次）
-    migrateToProvidersYaml(this.hanakoHome, this.agentsDir, log);
+    const providerSourceStep = runBestEffortStartupMigrationStep("provider-source", () => {
+      migrateToProvidersYaml(this.hanakoHome, this.agentsDir, log);
+    }, log);
 
-    // 0b2. Provider media 迁移（旧 type:image 模型 → media.image_generation）
-    migrateProviderMediaConfig(this.hanakoHome, log);
+    let providerMediaStep = { ok: false };
+    let providerOverridesStep = { ok: false };
+    if (providerSourceStep.ok) {
+      // 0b2. Provider media 迁移（旧 type:image 模型 → media.image_generation）
+      providerMediaStep = runBestEffortStartupMigrationStep("provider-media", () => {
+        migrateProviderMediaConfig(this.hanakoHome, log);
+      }, log);
 
-    // 0c. Model overrides 迁移（config.models.overrides → added-models.yaml，只跑一次）
-    this._models.providerRegistry.migrateOverridesToAddedModels(this.agentsDir, log);
+      if (providerMediaStep.ok) {
+        // 0c. Model overrides 迁移（config.models.overrides → added-models.yaml，只跑一次）
+        providerOverridesStep = runBestEffortStartupMigrationStep("provider-overrides", () => {
+          this._models.providerRegistry.migrateOverridesToAddedModels(this.agentsDir, log);
+        }, log);
+      } else {
+        log("[migrations] provider-overrides 等待 provider-media；应用继续启动");
+      }
+    } else {
+      log("[migrations] provider-media 与 provider-overrides 等待 provider-source；应用继续启动");
+    }
 
     // 0d. 统一数据迁移（版本号驱动，新迁移统一加在 migrations.js）
-    runMigrations({
-      hanakoHome: this.hanakoHome,
-      agentsDir: this.agentsDir,
-      prefs: this._prefs,
-      providerRegistry: this._models.providerRegistry,
-      log,
-    });
+    const legacyPrerequisitesReady = configScopeStep.ok
+      && providerSourceStep.ok
+      && providerMediaStep.ok
+      && providerOverridesStep.ok;
+    if (legacyPrerequisitesReady) {
+      const registryStep = runBestEffortStartupMigrationStep("migration-registry", () => runMigrations({
+        hanakoHome: this.hanakoHome,
+        agentsDir: this.agentsDir,
+        prefs: this._prefs,
+        providerRegistry: this._models.providerRegistry,
+        log,
+      }), log);
+      const migrationStatus = registryStep.ok ? registryStep.value : null;
+      if (migrationStatus?.pendingIds.length > 0) {
+        log(
+          `[migrations] 应用继续启动；仍有 ${migrationStatus.pendingIds.length} 条迁移待重试：`
+          + `#${migrationStatus.pendingIds.join(", #")}`,
+        );
+      }
+    } else {
+      log("[migrations] migration-registry 等待启动迁移前置步骤；应用继续启动，下次启动重试");
+    }
     this._runtimeContext = createServerRuntimeContext({
       hanakoHome: this.hanakoHome,
       appVersion: this.appVersion,
@@ -2236,7 +2288,6 @@ export class HanaEngine {
       lifecycleTimeoutMs: undefined,
       logSink: (entry) => this._pluginDevService?.recordLog(entry),
       runtimeContext: this.getRuntimeContext(),
-      envChangeLedger: this._envChangeLedger,
     });
     const allowedPluginDevSourceRoots = [
       pluginDevSourcesDir,

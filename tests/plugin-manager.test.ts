@@ -100,7 +100,7 @@ describe("scan", () => {
 });
 
 describe("loadAll", () => {
-  it("loads real bundled media, image-gen, jimeng-cli, beautify, mcp, and office plugin contributions", async () => {
+  it("loads real bundled media, jimeng-cli, beautify, mcp, and office plugin contributions", async () => {
     const bus = await makeBus();
     for (const type of [
       "provider:register-runtime-media-capability-source",
@@ -129,7 +129,7 @@ describe("loadAll", () => {
       await pm.loadAll();
 
       const diagnosticsById = new Map(pm.getDiagnostics().map((entry) => [entry.id, entry]));
-      for (const id of ["media", "image-gen", "jimeng-cli", "beautify", "mcp", "office"]) {
+      for (const id of ["media", "jimeng-cli", "beautify", "mcp", "office"]) {
         expect(diagnosticsById.get(id)).toMatchObject({
           id,
           source: "builtin",
@@ -153,16 +153,10 @@ describe("loadAll", () => {
         "office_read-document",
         "office_html-to-pdf",
       ]));
-      expect(toolNames.filter((name) => name.startsWith("image-gen_"))).toEqual([]);
       expect(pm.getSkillPaths()).toEqual(expect.arrayContaining([
         expect.objectContaining({ pluginId: "media", builtin: true }),
       ]));
-      expect(pm.getSkillPaths()).not.toEqual(expect.arrayContaining([
-        expect.objectContaining({ pluginId: "image-gen", builtin: true }),
-      ]));
-      expect(pm.routeRegistry.has("image-gen")).toBe(true);
       expect(pm.routeRegistry.has("mcp")).toBe(true);
-      expect(pm.getConfigSchema("image-gen")?.properties).toHaveProperty("defaultImageModel");
       expect(pm.getConfigSchema("beautify")?.properties).toHaveProperty("coverResolution");
       expect(pm.getSettingsTabs()).toEqual(expect.arrayContaining([
         expect.objectContaining({
@@ -171,7 +165,7 @@ describe("loadAll", () => {
         }),
       ]));
     } finally {
-      for (const id of ["media", "image-gen", "jimeng-cli", "beautify", "mcp", "office"]) {
+      for (const id of ["media", "jimeng-cli", "beautify", "mcp", "office"]) {
         await pm.unloadPlugin(id, { source: "builtin" });
       }
     }
@@ -1518,7 +1512,7 @@ function writeConfigPlugin(root, id, version = "1.0.0") {
 }
 
 describe("hot operations", () => {
-  it("records successful plugin load and unload transitions", async () => {
+  it("does not produce model Reminder ledger entries for plugin lifecycle changes", async () => {
     const dir = path.join(pluginsDir, "ledger-lifecycle");
     fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tools", "echo.js"), "export const name = 'echo';");
@@ -1534,82 +1528,7 @@ describe("hot operations", () => {
     await pm.loadAll();
     await pm.unloadPlugin("ledger-lifecycle");
 
-    expect(append.mock.calls.map(([event]) => event)).toEqual([
-      {
-        type: "toolset_changed",
-        scope: { kind: "global" },
-        payload: { pluginId: "ledger-lifecycle", action: "loaded" },
-      },
-      {
-        type: "toolset_changed",
-        scope: { kind: "global" },
-        payload: { pluginId: "ledger-lifecycle", action: "unloaded" },
-      },
-    ]);
-  });
-
-  it("records unload then final reload state for a successful hot reload", async () => {
-    const dir = path.join(pluginsDir, "ledger-reload");
-    fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
-    fs.writeFileSync(path.join(dir, "tools", "echo.js"), "export const name = 'echo';");
-    const append = vi.fn();
-    const pm = new PluginManager({
-      pluginsDir,
-      dataDir,
-      bus: await makeBus(),
-      envChangeLedger: { append },
-    } as any);
-    pm.scan();
-    await pm.loadAll();
-    append.mockClear();
-
-    const entry = await pm.installPlugin(dir, { source: "builtin" });
-
-    expect(entry.status).toBe("loaded");
-    expect(append.mock.calls.map(([event]) => event)).toEqual([
-      {
-        type: "toolset_changed",
-        scope: { kind: "global" },
-        payload: { pluginId: "ledger-reload", action: "unloaded" },
-      },
-      {
-        type: "toolset_changed",
-        scope: { kind: "global" },
-        payload: { pluginId: "ledger-reload", action: "reloaded" },
-      },
-    ]);
-  });
-
-  it("keeps the real unload transition when a hot reload fails", async () => {
-    const dir = path.join(pluginsDir, "ledger-failed-reload");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "index.js"), `
-      export default class Plugin { async onload() {} }
-    `);
-    const append = vi.fn();
-    const pm = new PluginManager({
-      pluginsDir,
-      dataDir,
-      bus: await makeBus(),
-      envChangeLedger: { append },
-    } as any);
-    pm.scan();
-    await pm.loadAll();
-    append.mockClear();
-    fs.writeFileSync(path.join(dir, "index.js"), `
-      export default class Plugin { async onload() { throw new Error("reload failed"); } }
-    `);
-
-    const entry = await pm.installPlugin(dir, { source: "builtin" });
-
-    expect(entry.status).toBe("failed");
-    expect(append.mock.calls.map(([event]) => event)).toEqual([
-      {
-        type: "toolset_changed",
-        scope: { kind: "global" },
-        payload: { pluginId: "ledger-failed-reload", action: "unloaded" },
-      },
-    ]);
+    expect(append).not.toHaveBeenCalled();
   });
 
   it("installPlugin loads a new plugin at runtime", async () => {

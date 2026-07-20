@@ -627,7 +627,7 @@
     ],
     "version": 2
   },
-  "payloadFingerprint": "sha256:a4aac2ca9a598e1f454f2f416e7730d8cb8b324d2f89f196c04bf77f8f2c1c33",
+  "payloadFingerprint": "sha256:23fd99c92cbba7e570c9f4c4776de78e6e94800f5e2fb7a2f6f4249d47c5a8be",
   "registry": [
     {
       "affectedByEpochMigration": true,
@@ -2679,6 +2679,7 @@
       "id": "user-preferences",
       "identityContract": "One preferences document belongs to the local user in one HANA_HOME.",
       "migrationEntry": [
+        "core/preferences-manager.ts unreadable-source preservation",
         "core/migrations.ts runMigrations"
       ],
       "openEntry": [
@@ -2689,7 +2690,8 @@
       "pathKind": "file",
       "pathPattern": "user/preferences.json",
       "pathPatterns": [
-        "user/preferences.json"
+        "user/preferences.json",
+        "user/preferences.json.corrupt-{timestamp}"
       ],
       "preCoordinatorReadProjection": {
         "compatibility": "additive-only",
@@ -2709,7 +2711,7 @@
       "protocolModules": [],
       "restorePolicy": "Restore only through the owning module after reader compatibility is established.",
       "schemaContract": {
-        "compatibility": "PreferencesManager is intentionally permissive; _dataVersion is the legacy migration cursor, not a strict schema validator.",
+        "compatibility": "PreferencesManager is intentionally permissive; _dataVersion is the legacy migration cursor, not a strict schema validator. Unreadable source bytes are preserved before any replacement document is written.",
         "kind": "runtime-source",
         "source": "core/preferences-manager.ts"
       },
@@ -2876,8 +2878,8 @@
   ],
   "review": {
     "classification": "compatible",
-    "compatibilityReason": "Receipt refresh only: a models-sync fix shifted one atomic-write call site by five lines; the persistence inventory was rescanned and no store schema, key format, or record format changed.",
-    "payloadFingerprint": "sha256:a4aac2ca9a598e1f454f2f416e7730d8cb8b324d2f89f196c04bf77f8f2c1c33"
+    "compatibilityReason": "Preserves unreadable preference bytes before replacement and makes legacy startup migrations copy-first, retryable, and non-blocking without changing live preference or provider schemas.",
+    "payloadFingerprint": "sha256:23fd99c92cbba7e570c9f4c4776de78e6e94800f5e2fb7a2f6f4249d47c5a8be"
   },
   "schemas": [
     {
@@ -3039,7 +3041,7 @@
       "contract": "bounded base64 cover upload temporary-directory lifecycle",
       "kind": "directory-contract",
       "module": "server/routes/desk.ts",
-      "sourceHash": "sha256:164cad0b1a18ea84cd826a1c41ef6609f20bd164fde131bd2b96194c68324038",
+      "sourceHash": "sha256:aef8628965100b5fb18a4314dc1838ae38351d1508080725345ccb105ccea18c",
       "storeId": "desk-cover-upload-staging"
     },
     {
@@ -3060,7 +3062,7 @@
       "contract": "desktop window bounds, release announcement bookmark, and update cache version marker readers",
       "kind": "directory-contract",
       "module": "desktop/main.cjs",
-      "sourceHash": "sha256:0b939a9ae3ec92576c07b714d2a1a970e67598bd3afe7399a8124181deff3c50",
+      "sourceHash": "sha256:553ebce2116e894c9e20e355dc127d64959320c2b80919bcd6f0f043170699f1",
       "storeId": "desktop-window-version-state"
     },
     {
@@ -3081,7 +3083,7 @@
       "contract": "installed manifest, install receipt, backup, and source-package directory protocols",
       "kind": "directory-contract",
       "module": "core/plugin-manager.ts",
-      "sourceHash": "sha256:75faf478433bbe65eb1324b01bd3c17b1ddf7331af6f154148de2521e0e22603",
+      "sourceHash": "sha256:0319235db6dd43a057fd8f475b57bfcecce1beab3749dacea9117406e50d598c",
       "storeId": "installed-plugins"
     },
     {
@@ -3137,7 +3139,7 @@
       "contract": "verified plugin release ZIP naming by pluginId/version and expected sha256",
       "kind": "directory-contract",
       "module": "server/routes/plugins.ts",
-      "sourceHash": "sha256:27bb10cccc968917c7d8a871fdf76a55fba8d19bfd2c10f028cff853dba56810",
+      "sourceHash": "sha256:a5ba3f5d830f1215daaba00b716b9ccd46e4740171d373b1ffea7495a183b1d0",
       "storeId": "plugin-download-cache"
     },
     {
@@ -3206,7 +3208,7 @@
       "contract": "server-info writer and desktop bootstrap reader",
       "kind": "runtime-contract",
       "module": "server/index.ts",
-      "sourceHash": "sha256:b0d13f69449b7cfd88393dadd4da8105e534b8165731cc0c8ea1f5c6a4cd00d0",
+      "sourceHash": "sha256:69b4954aa6871c938f0bd785d9b3b188b9ec4d1b1c3650af6c8c73ec3d5770f8",
       "storeId": "server-runtime-info"
     },
     {
@@ -3228,7 +3230,7 @@
         {
           "contract": "core/session-coordinator.ts Hana metadata extensions",
           "module": "core/session-coordinator.ts",
-          "sourceHash": "sha256:b5e361eb7c24160330dc278fee95cab0349dcca24c4206121cd3256a4b12ef01"
+          "sourceHash": "sha256:037933b743607fe5825738c3bd47a2e889e2423ab148f269d72a45f12074634b"
         },
         {
           "contract": "core/session-jsonl-file.ts repair contract",
@@ -3376,7 +3378,7 @@
       "contract": "PreferencesManager defaults, coercion, and _dataVersion migration driver",
       "kind": "runtime-contract",
       "module": "core/preferences-manager.ts",
-      "sourceHash": "sha256:c0198a12def439b58f3c273ceabad4e3fef1653bbfad4efef5d100a8861ac8e7",
+      "sourceHash": "sha256:a6bcf3042e27d3326e75981cdced18a8bbed59d274d5dd60305e635223434f21",
       "storeId": "user-preferences"
     },
     {
@@ -3844,7 +3846,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 296,
+      "line": 311,
       "reason": "Creates the channel root.",
       "sourceFile": "core/engine.ts",
       "storeId": "channels"
@@ -3852,7 +3854,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 342,
+      "line": 357,
       "reason": "Constructs the preferences owner.",
       "sourceFile": "core/engine.ts",
       "storeId": "user-preferences"
@@ -3860,7 +3862,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 343,
+      "line": 358,
       "reason": "Constructs draft/project stores.",
       "sourceFile": "core/engine.ts",
       "storeId": "session-drafts-and-projects"
@@ -3868,7 +3870,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 360,
+      "line": 376,
       "reason": "Constructs draft/project stores.",
       "sourceFile": "core/engine.ts",
       "storeId": "session-drafts-and-projects"
@@ -3876,7 +3878,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 542,
+      "line": 558,
       "reason": "Constructs the plugin task registry.",
       "sourceFile": "core/engine.ts",
       "storeId": "plugin-task-registry"
@@ -3884,7 +3886,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 1082,
+      "line": 1098,
       "reason": "Constructs the manifest store during engine construction.",
       "sourceFile": "core/engine.ts",
       "storeId": "session-manifest-sqlite"
@@ -3892,7 +3894,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 1103,
+      "line": 1119,
       "reason": "Constructs the manifest store during engine construction.",
       "sourceFile": "core/engine.ts",
       "storeId": "session-manifest-sqlite"
@@ -3900,7 +3902,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 1971,
+      "line": 2023,
       "reason": "Creates the user skill root.",
       "sourceFile": "core/engine.ts",
       "storeId": "skill-state"
@@ -3908,7 +3910,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 2153,
+      "line": 2205,
       "reason": "Deletes an expired legacy ephemeral session JSONL locator.",
       "sourceFile": "core/engine.ts",
       "storeId": "session-jsonl"
@@ -3916,7 +3918,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2207,
+      "line": 2259,
       "reason": "Creates the plugin development source root.",
       "sourceFile": "core/engine.ts",
       "storeId": "plugin-development-state"
@@ -4252,7 +4254,71 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 307,
+      "line": 117,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media-adapters/agnes.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "line": 118,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media-adapters/agnes.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 30,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media/download.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "line": 32,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media/download.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 45,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media/local-cli-wrapper.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 311,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media/task-store.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "line": 313,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media/task-store.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
+      "line": 314,
+      "reason": "Writes data within the active pluginId-scoped data directory.",
+      "sourceFile": "core/media/task-store.ts",
+      "storeId": "plugin-runtime-data"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "line": 318,
       "reason": "Writes data within the active pluginId-scoped data directory.",
       "sourceFile": "core/media/universal-media-manager.ts",
       "storeId": "plugin-runtime-data"
@@ -4260,7 +4326,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 970,
+      "line": 981,
       "reason": "Writes data within the active pluginId-scoped data directory.",
       "sourceFile": "core/media/universal-media-manager.ts",
       "storeId": "plugin-runtime-data"
@@ -4268,7 +4334,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 44,
+      "line": 43,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/migrate-providers.ts",
       "storeId": "provider-state"
@@ -4276,7 +4342,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 45,
+      "line": 44,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/migrate-providers.ts",
       "storeId": "provider-state"
@@ -4284,6 +4350,14 @@
     {
       "exemptionId": null,
       "kind": "write-file",
+      "line": 49,
+      "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
+      "sourceFile": "core/migrate-providers.ts",
+      "storeId": "provider-state"
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
       "line": 50,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/migrate-providers.ts",
@@ -4292,15 +4366,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 51,
-      "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
-      "sourceFile": "core/migrate-providers.ts",
-      "storeId": "provider-state"
-    },
-    {
-      "exemptionId": null,
-      "kind": "rename",
-      "line": 70,
+      "line": 69,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/migrate-providers.ts",
       "storeId": "provider-state"
@@ -4308,7 +4374,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 254,
+      "line": 367,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4316,7 +4382,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 255,
+      "line": 368,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4324,7 +4390,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 507,
+      "line": 620,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4332,7 +4398,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "mkdir",
-      "line": 559,
+      "line": 672,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4340,7 +4406,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 560,
+      "line": 673,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4348,7 +4414,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "mkdir",
-      "line": 582,
+      "line": 695,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4356,7 +4422,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 583,
+      "line": 696,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4364,7 +4430,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 764,
+      "line": 877,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4372,7 +4438,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 765,
+      "line": 878,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4380,7 +4446,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 826,
+      "line": 939,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4388,7 +4454,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 827,
+      "line": 940,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4396,7 +4462,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 1083,
+      "line": 1196,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4404,7 +4470,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 1141,
+      "line": 1254,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4412,7 +4478,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 1142,
+      "line": 1255,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4420,7 +4486,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 1170,
+      "line": 1283,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4428,7 +4494,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 1175,
+      "line": 1288,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4436,7 +4502,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 1276,
+      "line": 1389,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4444,7 +4510,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 1277,
+      "line": 1390,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4452,23 +4518,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 1341,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "atomic-write",
-      "line": 1505,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "atomic-write",
-      "line": 1700,
+      "line": 1454,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4476,15 +4526,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "mkdir",
-      "line": 1797,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "remove-path",
-      "line": 1800,
+      "line": 1943,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4492,31 +4534,15 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "copy-file",
-      "line": 1801,
+      "line": 1946,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
     },
     {
       "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 1802,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 1807,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "remove-path",
-      "line": 1809,
+      "kind": "atomic-write",
+      "line": 1954,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4524,15 +4550,15 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "mkdir",
-      "line": 1843,
+      "line": 2058,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
     },
     {
       "exemptionId": "cross-store-legacy-migrations",
-      "kind": "remove-path",
-      "line": 1893,
+      "kind": "copy-file",
+      "line": 2061,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4540,7 +4566,39 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 1958,
+      "line": 2069,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "atomic-write",
+      "line": 2219,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "atomic-write",
+      "line": 2303,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "atomic-write",
+      "line": 2351,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "atomic-write",
+      "line": 2546,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4548,7 +4606,63 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "mkdir",
-      "line": 1968,
+      "line": 2643,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "remove-path",
+      "line": 2646,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "copy-file",
+      "line": 2647,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 2648,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 2653,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "remove-path",
+      "line": 2655,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "mkdir",
+      "line": 2689,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "remove-path",
+      "line": 2739,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4556,127 +4670,15 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 1991,
+      "line": 2804,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
     },
     {
       "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2049,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2054,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2230,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2231,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2392,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2393,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2444,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2445,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2553,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2558,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2567,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2578,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2674,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "rename",
-      "line": 2675,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2693,
+      "kind": "mkdir",
+      "line": 2814,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4684,7 +4686,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 2743,
+      "line": 2837,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4692,15 +4694,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 2757,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2798,
+      "line": 2895,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4708,7 +4702,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 2799,
+      "line": 2900,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4716,15 +4710,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 2845,
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "sourceFile": "core/migrations.ts",
-      "storeId": null
-    },
-    {
-      "exemptionId": "cross-store-legacy-migrations",
-      "kind": "write-file",
-      "line": 2901,
+      "line": 3076,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4732,7 +4718,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 2912,
+      "line": 3077,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4740,7 +4726,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 2943,
+      "line": 3238,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4748,7 +4734,151 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 2948,
+      "line": 3239,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3290,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3291,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3399,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3404,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3413,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3424,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3520,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3521,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3539,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "atomic-write",
+      "line": 3589,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3603,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3644,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3645,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3691,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3747,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3758,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "write-file",
+      "line": 3789,
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "sourceFile": "core/migrations.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "cross-store-legacy-migrations",
+      "kind": "rename",
+      "line": 3794,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4756,7 +4886,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "persistent-store-constructor",
-      "line": 3188,
+      "line": 4034,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4764,7 +4894,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "persistent-store-constructor",
-      "line": 3281,
+      "line": 4127,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4772,7 +4902,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "persistent-store-constructor",
-      "line": 3282,
+      "line": 4128,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4780,7 +4910,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 3378,
+      "line": 4224,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4788,7 +4918,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "atomic-write",
-      "line": 3393,
+      "line": 4239,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4796,7 +4926,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 3421,
+      "line": 4267,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4804,7 +4934,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 3422,
+      "line": 4268,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4812,7 +4942,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 3439,
+      "line": 4285,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4820,7 +4950,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 3440,
+      "line": 4286,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4828,7 +4958,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 3486,
+      "line": 4332,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4836,7 +4966,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 3487,
+      "line": 4333,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4844,7 +4974,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "write-file",
-      "line": 3510,
+      "line": 4356,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -4852,7 +4982,7 @@
     {
       "exemptionId": "cross-store-legacy-migrations",
       "kind": "rename",
-      "line": 3511,
+      "line": 4357,
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "sourceFile": "core/migrations.ts",
       "storeId": null
@@ -5012,7 +5142,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 130,
+      "line": 144,
       "reason": "Reads and atomically writes user preferences.",
       "sourceFile": "core/preferences-manager.ts",
       "storeId": "user-preferences"
@@ -5020,7 +5150,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 132,
+      "line": 147,
       "reason": "Reads and atomically writes user preferences.",
       "sourceFile": "core/preferences-manager.ts",
       "storeId": "user-preferences"
@@ -5028,7 +5158,15 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 135,
+      "line": 150,
+      "reason": "Reads and atomically writes user preferences.",
+      "sourceFile": "core/preferences-manager.ts",
+      "storeId": "user-preferences"
+    },
+    {
+      "exemptionId": null,
+      "kind": "copy-file",
+      "line": 185,
       "reason": "Reads and atomically writes user preferences.",
       "sourceFile": "core/preferences-manager.ts",
       "storeId": "user-preferences"
@@ -5084,7 +5222,7 @@
     {
       "exemptionId": null,
       "kind": "atomic-write",
-      "line": 809,
+      "line": 836,
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
       "sourceFile": "core/provider-registry.ts",
       "storeId": "provider-state"
@@ -5212,7 +5350,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 2215,
+      "line": 2223,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5220,7 +5358,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 4398,
+      "line": 4492,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5228,7 +5366,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 4506,
+      "line": 4600,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5236,7 +5374,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 4803,
+      "line": 4913,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5244,7 +5382,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 4811,
+      "line": 4921,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5252,7 +5390,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 4859,
+      "line": 4969,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5260,7 +5398,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 4886,
+      "line": 4996,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5268,7 +5406,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 4958,
+      "line": 5068,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5276,7 +5414,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 4959,
+      "line": 5069,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5284,7 +5422,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 5134,
+      "line": 5244,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5292,7 +5430,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 5135,
+      "line": 5245,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5300,7 +5438,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 5151,
+      "line": 5261,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5308,7 +5446,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 5242,
+      "line": 5352,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5316,7 +5454,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 5253,
+      "line": 5363,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5324,7 +5462,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 5258,
+      "line": 5368,
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
       "sourceFile": "core/session-coordinator.ts",
       "storeId": "session-jsonl"
@@ -5636,7 +5774,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 436,
+      "line": 440,
       "reason": "Migrates or writes the current desktop update-cache version marker.",
       "sourceFile": "desktop/auto-updater.cjs",
       "storeId": "desktop-window-version-state"
@@ -5644,7 +5782,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 437,
+      "line": 441,
       "reason": "Migrates or writes the current desktop update-cache version marker.",
       "sourceFile": "desktop/auto-updater.cjs",
       "storeId": "desktop-window-version-state"
@@ -5652,7 +5790,7 @@
     {
       "exemptionId": "desktop-electron-update-cache",
       "kind": "remove-path",
-      "line": 452,
+      "line": 456,
       "reason": "Deletes Electron updater's regenerable pending cache under app.getPath(userData), not Hana application state.",
       "sourceFile": "desktop/auto-updater.cjs",
       "storeId": null
@@ -5700,7 +5838,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1219,
+      "line": 1222,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5708,7 +5846,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1223,
+      "line": 1226,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5716,7 +5854,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1729,
+      "line": 1734,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5724,7 +5862,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2215,
+      "line": 2225,
       "reason": "Writes desktop crash or browser-command diagnostics.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-diagnostics"
@@ -5732,7 +5870,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2216,
+      "line": 2226,
       "reason": "Writes desktop crash or browser-command diagnostics.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-diagnostics"
@@ -5740,7 +5878,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2277,
+      "line": 2287,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5748,7 +5886,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2278,
+      "line": 2288,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5756,7 +5894,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2346,
+      "line": 2356,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5764,7 +5902,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2445,
+      "line": 2455,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5772,7 +5910,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 2446,
+      "line": 2456,
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-window-version-state"
@@ -5780,7 +5918,7 @@
     {
       "exemptionId": null,
       "kind": "append-file",
-      "line": 4191,
+      "line": 4209,
       "reason": "Writes desktop crash or browser-command diagnostics.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "desktop-diagnostics"
@@ -5788,7 +5926,7 @@
     {
       "exemptionId": "desktop-screenshot-html-temp",
       "kind": "write-file",
-      "line": 4758,
+      "line": 4776,
       "reason": "Writes and removes one request-scoped screenshot HTML file under the operating-system temporary directory.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5796,7 +5934,7 @@
     {
       "exemptionId": "desktop-screenshot-html-temp",
       "kind": "remove-path",
-      "line": 4812,
+      "line": 4830,
       "reason": "Writes and removes one request-scoped screenshot HTML file under the operating-system temporary directory.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5804,7 +5942,7 @@
     {
       "exemptionId": "desktop-skill-preview-temp",
       "kind": "mkdir",
-      "line": 5367,
+      "line": 5395,
       "reason": "Creates a request-scoped skill preview directory under Electron's operating-system temp path.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5812,7 +5950,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "write-file",
-      "line": 5513,
+      "line": 5541,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5820,7 +5958,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "mkdir",
-      "line": 5535,
+      "line": 5563,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5828,7 +5966,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "write-file",
-      "line": 5536,
+      "line": 5564,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5836,7 +5974,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "mkdir",
-      "line": 5547,
+      "line": 5575,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5844,7 +5982,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "copy-file",
-      "line": 5548,
+      "line": 5576,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5852,7 +5990,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "mkdir",
-      "line": 5581,
+      "line": 5609,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5860,7 +5998,7 @@
     {
       "exemptionId": "desktop-caller-selected-output",
       "kind": "write-file",
-      "line": 5582,
+      "line": 5610,
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
       "sourceFile": "desktop/main.cjs",
       "storeId": null
@@ -5868,7 +6006,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 6104,
+      "line": 6134,
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
       "sourceFile": "desktop/main.cjs",
       "storeId": "server-runtime-info"
@@ -5972,7 +6110,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 255,
+      "line": 276,
       "reason": "Writes epoch-independent desktop launch diagnostics.",
       "sourceFile": "desktop/src/shared/launch-integrity.cjs",
       "storeId": "desktop-diagnostics"
@@ -5980,7 +6118,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 257,
+      "line": 278,
       "reason": "Writes epoch-independent desktop launch diagnostics.",
       "sourceFile": "desktop/src/shared/launch-integrity.cjs",
       "storeId": "desktop-diagnostics"
@@ -5988,7 +6126,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 267,
+      "line": 288,
       "reason": "Writes epoch-independent desktop launch diagnostics.",
       "sourceFile": "desktop/src/shared/launch-integrity.cjs",
       "storeId": "desktop-diagnostics"
@@ -5996,7 +6134,7 @@
     {
       "exemptionId": null,
       "kind": "append-file",
-      "line": 269,
+      "line": 290,
       "reason": "Writes epoch-independent desktop launch diagnostics.",
       "sourceFile": "desktop/src/shared/launch-integrity.cjs",
       "storeId": "desktop-diagnostics"
@@ -8036,94 +8174,6 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 117,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/adapters/agnes.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "write-file",
-      "line": 118,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/adapters/agnes.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "mkdir",
-      "line": 32,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/index.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "remove-path",
-      "line": 128,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/index.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "remove-path",
-      "line": 139,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/index.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "mkdir",
-      "line": 30,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/lib/download.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "write-file",
-      "line": 32,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/lib/download.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "mkdir",
-      "line": 45,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/lib/local-cli-wrapper.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "mkdir",
-      "line": 311,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/lib/task-store.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "write-file",
-      "line": 313,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/lib/task-store.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "rename",
-      "line": 314,
-      "reason": "Writes data within the active pluginId-scoped data directory.",
-      "sourceFile": "plugins/image-gen/lib/task-store.ts",
-      "storeId": "plugin-runtime-data"
-    },
-    {
-      "exemptionId": null,
-      "kind": "mkdir",
       "line": 230,
       "reason": "Writes data within the active pluginId-scoped data directory.",
       "sourceFile": "plugins/jimeng-cli/adapters/dreamina.ts",
@@ -8132,7 +8182,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 337,
+      "line": 418,
       "reason": "Writes data within the active pluginId-scoped data directory.",
       "sourceFile": "plugins/mcp/lib/mcp-runtime.ts",
       "storeId": "plugin-runtime-data"
@@ -8172,7 +8222,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 272,
+      "line": 273,
       "reason": "Writes or deletes live server discovery state.",
       "sourceFile": "server/index.ts",
       "storeId": "server-runtime-info"
@@ -8180,7 +8230,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 433,
+      "line": 464,
       "reason": "Constructs the deferred result store.",
       "sourceFile": "server/index.ts",
       "storeId": "deferred-result-state"
@@ -8188,7 +8238,7 @@
     {
       "exemptionId": "in-memory-confirm-registry",
       "kind": "persistent-store-constructor",
-      "line": 633,
+      "line": 664,
       "reason": "ConfirmStore is deliberately process-memory-only: pending approvals time out or abort with their session and have no restart replay contract.",
       "sourceFile": "server/index.ts",
       "storeId": null
@@ -8196,7 +8246,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 638,
+      "line": 669,
       "reason": "Constructs subagent stores.",
       "sourceFile": "server/index.ts",
       "storeId": "subagent-state"
@@ -8204,7 +8254,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 644,
+      "line": 675,
       "reason": "Constructs subagent stores.",
       "sourceFile": "server/index.ts",
       "storeId": "subagent-state"
@@ -8212,7 +8262,7 @@
     {
       "exemptionId": null,
       "kind": "persistent-store-constructor",
-      "line": 655,
+      "line": 686,
       "reason": "Constructs the workflow activity store.",
       "sourceFile": "server/index.ts",
       "storeId": "workflow-state"
@@ -8220,7 +8270,7 @@
     {
       "exemptionId": null,
       "kind": "append-file",
-      "line": 1072,
+      "line": 1103,
       "reason": "Appends the browser worker log.",
       "sourceFile": "server/index.ts",
       "storeId": "runtime-diagnostics"
@@ -8228,7 +8278,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 1131,
+      "line": 1162,
       "reason": "Writes or deletes live server discovery state.",
       "sourceFile": "server/index.ts",
       "storeId": "server-runtime-info"
@@ -8236,7 +8286,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1229,
+      "line": 1260,
       "reason": "Writes or deletes live server discovery state.",
       "sourceFile": "server/index.ts",
       "storeId": "server-runtime-info"
@@ -8380,7 +8430,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 543,
+      "line": 516,
       "reason": "Writes or removes a bounded temporary cover upload.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": "desk-cover-upload-staging"
@@ -8388,7 +8438,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 546,
+      "line": 519,
       "reason": "Writes or removes a bounded temporary cover upload.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": "desk-cover-upload-staging"
@@ -8396,7 +8446,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 549,
+      "line": 522,
       "reason": "Writes or removes a bounded temporary cover upload.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": "desk-cover-upload-staging"
@@ -8404,7 +8454,7 @@
     {
       "exemptionId": "external-desk-workspace-roots",
       "kind": "mkdir",
-      "line": 1105,
+      "line": 1078,
       "reason": "Creates an approved external workspace root or its .agents/skills directory; the mount registry owns authorization, not the external content.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": null
@@ -8412,7 +8462,7 @@
     {
       "exemptionId": "workspace-skill-delete",
       "kind": "remove-path",
-      "line": 1155,
+      "line": 1128,
       "reason": "Deletes a skill directory only after the route proves it belongs to the explicitly mounted workspace skill catalog, outside Hana-owned persistence.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": null
@@ -8420,7 +8470,7 @@
     {
       "exemptionId": "external-desk-workspace-roots",
       "kind": "mkdir",
-      "line": 1171,
+      "line": 1144,
       "reason": "Creates an approved external workspace root or its .agents/skills directory; the mount registry owns authorization, not the external content.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": null
@@ -8428,7 +8478,7 @@
     {
       "exemptionId": "external-desk-workspace-roots",
       "kind": "mkdir",
-      "line": 1276,
+      "line": 1249,
       "reason": "Creates an approved external workspace root or its .agents/skills directory; the mount registry owns authorization, not the external content.",
       "sourceFile": "server/routes/desk.ts",
       "storeId": null
@@ -8492,7 +8542,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 706,
+      "line": 668,
       "reason": "Caches a sha256-verified plugin release package.",
       "sourceFile": "server/routes/plugins.ts",
       "storeId": "plugin-download-cache"
@@ -8500,7 +8550,7 @@
     {
       "exemptionId": null,
       "kind": "write-file",
-      "line": 708,
+      "line": 670,
       "reason": "Caches a sha256-verified plugin release package.",
       "sourceFile": "server/routes/plugins.ts",
       "storeId": "plugin-download-cache"
@@ -8508,7 +8558,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1186,
+      "line": 1144,
       "reason": "Creates, promotes, rolls back, or removes an installed plugin directory.",
       "sourceFile": "server/routes/plugins.ts",
       "storeId": "installed-plugins"
@@ -8580,7 +8630,7 @@
     {
       "exemptionId": null,
       "kind": "append-file",
-      "line": 2118,
+      "line": 2121,
       "reason": "Appends switch failure diagnostics.",
       "sourceFile": "server/routes/sessions.ts",
       "storeId": "runtime-diagnostics"
@@ -8588,7 +8638,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2302,
+      "line": 2305,
       "reason": "Archives, restores, or deletes a session JSONL locator.",
       "sourceFile": "server/routes/sessions.ts",
       "storeId": "session-jsonl"
@@ -8596,7 +8646,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 2310,
+      "line": 2313,
       "reason": "Archives, restores, or deletes a session JSONL locator.",
       "sourceFile": "server/routes/sessions.ts",
       "storeId": "session-jsonl"
@@ -8604,7 +8654,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 2376,
+      "line": 2379,
       "reason": "Archives, restores, or deletes a session JSONL locator.",
       "sourceFile": "server/routes/sessions.ts",
       "storeId": "session-jsonl"
@@ -8612,7 +8662,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 2388,
+      "line": 2391,
       "reason": "Archives, restores, or deletes a session JSONL locator.",
       "sourceFile": "server/routes/sessions.ts",
       "storeId": "session-jsonl"
@@ -8620,7 +8670,7 @@
     {
       "exemptionId": null,
       "kind": "rename",
-      "line": 2389,
+      "line": 2392,
       "reason": "Archives, restores, or deletes a session JSONL locator.",
       "sourceFile": "server/routes/sessions.ts",
       "storeId": "session-jsonl"
@@ -8860,7 +8910,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 1388,
+      "line": 1424,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8868,7 +8918,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1456,
+      "line": 1492,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8876,7 +8926,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1457,
+      "line": 1493,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8884,7 +8934,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1458,
+      "line": 1494,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8892,7 +8942,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1459,
+      "line": 1495,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8900,7 +8950,7 @@
     {
       "exemptionId": null,
       "kind": "mkdir",
-      "line": 1670,
+      "line": 1720,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8908,7 +8958,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1712,
+      "line": 1762,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -8916,7 +8966,7 @@
     {
       "exemptionId": null,
       "kind": "remove-path",
-      "line": 1713,
+      "line": 1763,
       "reason": "Writes, deletes, or repairs signed artifact activation and OTA state.",
       "sourceFile": "shared/artifact-core/ota-core.cjs",
       "storeId": "signed-artifacts"
@@ -9164,15 +9214,15 @@
     {
       "exemptionId": "config-scope-migration-helper",
       "kind": "write-file",
-      "line": 135,
+      "line": 149,
       "reason": "Compatibility helper mutates a caller-supplied config file; concrete agent config ownership is registered at callers.",
       "sourceFile": "shared/migrate-config-scope.ts",
       "storeId": null
     },
     {
       "exemptionId": "config-scope-migration-helper",
-      "kind": "write-file",
-      "line": 138,
+      "kind": "atomic-write",
+      "line": 152,
       "reason": "Compatibility helper mutates a caller-supplied config file; concrete agent config ownership is registered at callers.",
       "sourceFile": "shared/migrate-config-scope.ts",
       "storeId": null
