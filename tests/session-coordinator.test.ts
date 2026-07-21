@@ -3471,6 +3471,7 @@ describe("SessionCoordinator", () => {
     coordinator.setSessionPinned = vi.fn(async () => null);
     coordinator.discardSessionRuntime = vi.fn(async () => {});
     coordinator.getSessionWorkspaceFolders = vi.fn(() => []);
+    coordinator.applySessionBranchHead = vi.fn();
 
     const result = await coordinator.continueDeletedAgentSession(sourcePath);
 
@@ -3532,6 +3533,7 @@ describe("SessionCoordinator", () => {
     coordinator.setSessionPinned = vi.fn(async () => null);
     coordinator.discardSessionRuntime = vi.fn(async () => {});
     coordinator.getSessionWorkspaceFolders = vi.fn(() => []);
+    coordinator.applySessionBranchHead = vi.fn();
 
     await coordinator.continueDeletedAgentSession(sourcePath);
 
@@ -3564,6 +3566,7 @@ describe("SessionCoordinator", () => {
       getHomeCwd: vi.fn(() => tempDir),
     };
     coordinator.createSession = vi.fn();
+    coordinator.applySessionBranchHead = vi.fn();
 
     await expect(coordinator.continueDeletedAgentSession(sourcePath)).rejects.toMatchObject({
       code: "SESSION_TRANSCRIPT_EMPTY",
@@ -3607,6 +3610,8 @@ describe("SessionCoordinator", () => {
     const sessionManifestStore = {
       resolveByLocatorPath: vi.fn((candidate) => candidate === resumeFile ? existingManifest : null),
       getBySessionId: vi.fn((sessionId) => sessionId === existingManifest.sessionId ? existingManifest : null),
+      getBranchHead: vi.fn(() => null),
+      setBranchHead: vi.fn(),
       createForPath: vi.fn(),
       updateLocatorLifecycle: vi.fn(),
     };
@@ -3619,7 +3624,12 @@ describe("SessionCoordinator", () => {
       return { tools: [], customTools };
     });
     const piSdk = await import("../lib/pi-sdk/index.ts");
-    (piSdk.SessionManager.open as any).mockReturnValue({ getCwd: () => tempDir, getSessionFile: () => resumeFile });
+    (piSdk.SessionManager.open as any).mockReturnValue({
+      getCwd: () => tempDir,
+      getSessionFile: () => resumeFile,
+      getEntries: () => [],
+      resetLeaf: vi.fn(),
+    });
     createAgentSessionMock.mockResolvedValue({
       session: { sessionManager: { getSessionFile: () => resumeFile }, subscribe: vi.fn(() => vi.fn()), abort: vi.fn() },
     });
@@ -3638,6 +3648,89 @@ describe("SessionCoordinator", () => {
     expect(sessionManifestStore.updateLocatorLifecycle).not.toHaveBeenCalled();
   });
 
+  it("executeIsolated resumes a forked child with shared cache lineage and an independent Pi identity", async () => {
+    const resumeFile = path.join(tempDir, "forked-child.jsonl");
+    fs.writeFileSync(resumeFile, '{"type":"user","content":"hi"}\n');
+    fs.writeFileSync(path.join(tempDir, "session-meta.json"), JSON.stringify({
+      [path.basename(resumeFile)]: {
+        providerCacheAffinityKey: "pi-source-lineage",
+      },
+    }));
+    const existingManifest = {
+      sessionId: "sess_forked_child",
+      ownerAgentId: "hana",
+      domain: "subagent",
+      kind: "subagent_child",
+      lifecycle: "active",
+      currentLocator: { path: resumeFile },
+    };
+    const sessionManifestStore = {
+      resolveByLocatorPath: vi.fn((candidate) => candidate === resumeFile ? existingManifest : null),
+      getBySessionId: vi.fn((sessionId) => sessionId === existingManifest.sessionId ? existingManifest : null),
+      getBranchHead: vi.fn(() => null),
+      setBranchHead: vi.fn(),
+      createForPath: vi.fn(),
+      updateLocatorLifecycle: vi.fn(),
+    };
+    const manager = {
+      getCwd: () => tempDir,
+      getSessionFile: () => resumeFile,
+      getSessionId: () => "pi-child",
+      getBranch: () => [],
+      getEntries: () => [],
+      getLeafId: () => null,
+      resetLeaf: vi.fn(),
+      branch: vi.fn(),
+    };
+    const piSdk = await import("../lib/pi-sdk/index.ts");
+    (piSdk.SessionManager.open as any).mockReturnValue(manager);
+    const codexModel = {
+      id: "gpt-test",
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+    };
+    let capturedOptions: any = null;
+    const originalStreamFn = vi.fn((_model, _context, options) => {
+      capturedOptions = options;
+      return {};
+    });
+    const session: any = {
+      agent: { streamFn: originalStreamFn },
+      sessionManager: manager,
+      subscribe: vi.fn(() => vi.fn()),
+      abort: vi.fn(),
+    };
+    session.prompt = vi.fn(async () => {
+      await session.agent.streamFn(codexModel, { messages: [] }, {
+        sessionId: "pi-child",
+        headers: { "x-test": "1" },
+      });
+    });
+    createAgentSessionMock.mockResolvedValue({ session });
+    const coordinator = new SessionCoordinator({
+      ...isoDeps(),
+      sessionManifestStore,
+    });
+    vi.spyOn(coordinator, "_repairOrphanToolHistory").mockImplementation(() => {});
+
+    await coordinator.executeIsolated("continue task", {
+      resumeSessionPath: resumeFile,
+      persist: tempDir,
+      model: codexModel,
+    });
+
+    expect(originalStreamFn).toHaveBeenCalledOnce();
+    expect(capturedOptions.sessionId).toBe("pi-child");
+    expect(capturedOptions.headers).toEqual({ "x-test": "1" });
+    await expect(capturedOptions.onPayload({
+      prompt_cache_key: "pi-child",
+      input: [],
+    }, codexModel)).resolves.toMatchObject({
+      prompt_cache_key: "pi-source-lineage",
+      input: [],
+    });
+  });
+
   it("executeIsolated backfills a missing legacy identity once and reuses it", async () => {
     const resumeFile = path.join(tempDir, "legacy-without-manifest.jsonl");
     fs.writeFileSync(resumeFile, '{"type":"user","content":"hi"}\n');
@@ -3647,6 +3740,8 @@ describe("SessionCoordinator", () => {
         manifest?.currentLocator?.path === candidate ? manifest : null
       )),
       getBySessionId: vi.fn((sessionId) => manifest?.sessionId === sessionId ? manifest : null),
+      getBranchHead: vi.fn(() => null),
+      setBranchHead: vi.fn(),
       createForPath: vi.fn((input) => {
         manifest = {
           ...input,
@@ -3668,6 +3763,8 @@ describe("SessionCoordinator", () => {
     (piSdk.SessionManager.open as any).mockReturnValue({
       getCwd: () => tempDir,
       getSessionFile: () => resumeFile,
+      getEntries: () => [],
+      resetLeaf: vi.fn(),
     });
     createAgentSessionMock.mockResolvedValue({
       session: {
@@ -4382,9 +4479,9 @@ describe("SessionCoordinator", () => {
 
   it("executeIsolated appends execution-scoped custom tools", async () => {
     const sessionFile = path.join(tempDir, "isolated-extra-tool.jsonl");
-    const buildTools = vi.fn((_cwd, customTools) => ({
+    const buildTools = vi.fn((_cwd, customTools, buildOpts: any = {}) => ({
       tools: [],
-      customTools,
+      customTools: [...customTools, ...(buildOpts.extraCustomTools || [])],
     }));
     const agent = {
       id: "hana",
@@ -4457,12 +4554,13 @@ describe("SessionCoordinator", () => {
     const activityDir = path.join(agentDir, "activity");
     const sessionDir = path.join(agentDir, "sessions");
     const sessionFile = path.join(activityDir, "heartbeat-session.jsonl");
-    const buildTools = vi.fn(() => ({
+    const buildTools = vi.fn((_cwd, _customTools, buildOpts: any = {}) => ({
       tools: [{ name: "read" }],
       customTools: [
         { name: "todo_write" },
         { name: "mcp_github_search", _pluginId: "github" },
         { name: "cron" },
+        ...(buildOpts.extraCustomTools || []),
       ],
     }));
     const agent = {

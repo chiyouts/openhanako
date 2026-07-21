@@ -17,7 +17,7 @@ import { SettingsUpdateCard } from './SettingsUpdateCard';
 import { InteractiveCard } from './InteractiveCard';
 import { SessionCollabDraftCard } from './SessionCollabDraftCard';
 import { useMessageFooterActions } from './MessageActions';
-import { MessageFooterActions, formatMessageTime, type MessageFooterAction } from './MessageFooterActions';
+import { MessageFooterActions, formatMessageTime } from './MessageFooterActions';
 import { ChatResourceCard } from './ChatResourceCard';
 import { FileResourceIcon, SkillResourceIcon } from './ChatResourceIcons';
 import { BLOCK_RENDERERS } from './block-renderers';
@@ -26,6 +26,7 @@ const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeSc
 import type { ChatMessage, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
 import { selectSessionFiles } from '../../stores/selectors/file-refs';
+import { sessionIdForPathFromLocatorState } from '../../stores/session-slice';
 import { hanaFetch } from '../../hooks/use-hana-fetch';
 import { openFilePreview, openSkillPreview } from '../../utils/file-preview';
 import { writeAppFileDragPayload, clearAppFileDragPayload } from '../../utils/app-file-drag';
@@ -35,12 +36,13 @@ import { resolveServerConnection } from '../../services/server-connection';
 import { resolveFileRefUrl } from '../../services/resource-url';
 import type { FileRef } from '../../types/file-ref';
 import { openPreview } from '../../stores/preview-actions';
-import { replayLatestUserMessage } from '../../stores/message-turn-actions';
+import type { ForkedSessionHandler, SessionNodeTarget } from '../../stores/message-turn-actions';
 import { selectSelectedIdsBySession } from '../../stores/session-selectors';
 import { extractSelectedTexts, extractTextBlockPlainText } from '../../utils/message-text';
 import { AgentAvatar, resolveAgentDisplayInfo, type AgentDisplayInfo } from '../../utils/agent-display';
 import { ScheduleEditor } from '../automation/ScheduleEditor';
 import { SelectWidget, type SelectOption } from '@/ui';
+import { useSessionNodeActions } from './SessionNodeActions';
 import {
   scheduleDraftFromStored,
   schedulePreviewFromDraft,
@@ -63,7 +65,9 @@ interface Props {
   isLatestAssistantMessage?: boolean;
   showTurnCompletionTime?: boolean;
   assistantTurnSelectionIds?: readonly string[];
+  turnTarget?: SessionNodeTarget | null;
   retrySourceMessage?: ChatMessage | null;
+  onForkCreated?: ForkedSessionHandler;
   messageRef?: (element: HTMLDivElement | null) => void;
 }
 
@@ -83,11 +87,11 @@ export const AssistantMessage = memo(function AssistantMessage({
   isLatestAssistantMessage = false,
   showTurnCompletionTime = false,
   assistantTurnSelectionIds,
+  turnTarget = null,
   retrySourceMessage = null,
+  onForkCreated,
   messageRef,
 }: Props) {
-  const t = window.t ?? ((p: string) => p);
-
   const displayInfo = agentDisplay;
   const displayName = agentDisplay.displayName;
   const displayYuan = agentDisplay.yuan;
@@ -102,7 +106,6 @@ export const AssistantMessage = memo(function AssistantMessage({
   const hasWideBlock = blocks.some(b => b.type === 'interactive_card');
 
   const [copied, setCopied] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const handleCopy = useCallback(() => {
     const ids = selectSelectedIdsBySession(useStore.getState(), sessionPath);
     let text: string;
@@ -127,17 +130,14 @@ export const AssistantMessage = memo(function AssistantMessage({
     fn(message.id, sessionPath);
   }, [message.id, sessionPath]);
 
-  const handleRegenerate = useCallback(async () => {
-    if (!retrySourceMessage || retrying || isStreaming) return;
-    setRetrying(true);
-    try {
-      await replayLatestUserMessage(sessionPath, retrySourceMessage);
-    } finally {
-      setRetrying(false);
-    }
-  }, [isStreaming, retrying, retrySourceMessage, sessionPath]);
-
-  const canShowRegenerateAction = !readOnly && showTurnCompletionTime && isLatestAssistantMessage && !!retrySourceMessage && !isStreaming;
+  const { actions: nodeActions, busy: nodeActionBusy } = useSessionNodeActions({
+    sessionPath,
+    target: readOnly || !showTurnCompletionTime ? null : turnTarget,
+    retryMessage: retrySourceMessage || undefined,
+    onForkCreated,
+    disabled: isStreaming,
+  });
+  const canShowNodeActions = !readOnly && showTurnCompletionTime && !!turnTarget && !isStreaming;
   const shouldPersistCompletionTime = showTurnCompletionTime && isLatestAssistantMessage && !isStreaming;
   const timeText = showTurnCompletionTime && !isStreaming ? formatMessageTime(message.timestamp) : null;
   const standardMessageActions = useMessageFooterActions({
@@ -147,19 +147,10 @@ export const AssistantMessage = memo(function AssistantMessage({
     onCopy: handleCopy,
     onScreenshot: () => { void handleScreenshot(); },
     copied,
-    isStreaming,
+    isStreaming: isStreaming || nodeActionBusy,
   });
   const messageActions = readOnly || !showTurnCompletionTime || isStreaming ? [] : standardMessageActions;
-  const regenerateActions: MessageFooterAction[] = useMemo(() => [
-    {
-      id: 'regenerate',
-      title: t('common.regenerate'),
-      icon: <RegenerateIcon />,
-      onClick: () => { void handleRegenerate(); },
-      disabled: retrying || isStreaming,
-    },
-  ], [handleRegenerate, isStreaming, retrying, t]);
-  const footerActions = canShowRegenerateAction ? regenerateActions : [];
+  const footerActions = canShowNodeActions ? nodeActions : [];
 
   return (
     <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}${isInterludeOnly ? ` ${styles.messageGroupInterludeOnly}` : ''}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
@@ -210,14 +201,6 @@ export const AssistantMessage = memo(function AssistantMessage({
     </div>
   );
 });
-
-function RegenerateIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 3v5m0 0h-5m5 0-3-2.708A9 9 0 1 0 20.777 14" />
-    </svg>
-  );
-}
 
 class ContentBlockErrorBoundary extends Component<{
   messageId: string;
@@ -849,6 +832,10 @@ function buildAutomationExecutionContext({
   const homeFolder = typeof agent?.homeFolder === 'string' && agent.homeFolder.trim()
     ? agent.homeFolder.trim()
     : null;
+  const baseAgentId = typeof baseContext.createdByAgentId === 'string' && baseContext.createdByAgentId.trim()
+    ? baseContext.createdByAgentId.trim()
+    : null;
+  const crossesAgentBoundary = !!baseAgentId && !!agentId && baseAgentId !== agentId;
   return {
     kind: typeof baseContext.kind === 'string' && baseContext.kind.trim()
       ? baseContext.kind
@@ -859,9 +846,18 @@ function buildAutomationExecutionContext({
       : (Array.isArray(baseContext.workspaceFolders)
         ? baseContext.workspaceFolders.filter((folder: unknown) => typeof folder === 'string' && folder.trim())
         : []),
-    sourceSessionPath: typeof baseContext.sourceSessionPath === 'string' && baseContext.sourceSessionPath.trim()
-      ? baseContext.sourceSessionPath
-      : (sessionPath || null),
+    authorizedFolders: crossesAgentBoundary
+      ? []
+      : (Array.isArray(baseContext.authorizedFolders)
+        ? baseContext.authorizedFolders.filter((folder: unknown) => typeof folder === 'string' && folder.trim())
+        : []),
+    sourceSessionId: crossesAgentBoundary ? null : (baseContext.sourceSessionId || null),
+    sourceBridgeSessionKey: crossesAgentBoundary ? null : (baseContext.sourceBridgeSessionKey || null),
+    sourceSessionPath: crossesAgentBoundary
+      ? null
+      : typeof baseContext.sourceSessionPath === 'string' && baseContext.sourceSessionPath.trim()
+        ? baseContext.sourceSessionPath
+        : (sessionPath || null),
     createdByAgentId: agentId || null,
   };
 }
@@ -879,6 +875,7 @@ const CronConfirmBlock = memo(function CronConfirmBlock({ block, sessionPath }: 
   const initialType = (jobData.type || jobData.scheduleType || 'cron') as string;
   const agents = useStore(s => s.agents);
   const currentAgentId = useStore(s => s.currentAgentId);
+  const sourceSessionId = useStore(state => sessionIdForPathFromLocatorState(state, sessionPath));
   const fallbackAgentName = useStore(s => s.agentName) || 'Hanako';
   const fallbackAgentYuan = useStore(s => s.agentYuan) || 'hanako';
   const initialPrompt = (jobData.prompt as string) || (block.description as string) || '';
@@ -969,15 +966,41 @@ const CronConfirmBlock = memo(function CronConfirmBlock({ block, sessionPath }: 
   };
 
   const submitDraftJob = async (editedJobData: Record<string, unknown>) => {
+    if (isSuggestionCard) {
+      const suggestionId = block.suggestionId || block.detail?.suggestionId;
+      if (typeof suggestionId !== 'string' || !suggestionId.trim() || !sourceSessionId) {
+        throw new Error('automation suggestion identity unavailable');
+      }
+      const response = await hanaFetch('/api/desk/cron', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'apply_suggestion',
+          suggestionId: suggestionId.trim(),
+          sessionId: sourceSessionId,
+          jobData: {
+            type: editedJobData.type,
+            schedule: editedJobData.schedule,
+            label: editedJobData.label,
+            prompt: editedJobData.prompt,
+            model: editedJobData.model,
+            ...(effectiveAgentId ? { targetAgentId: effectiveAgentId } : {}),
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(`automation suggestion apply failed: ${response.status}`);
+      return;
+    }
     const isUpdate = operation === 'update';
     const { id, ...fields } = editedJobData;
-    await hanaFetch('/api/desk/cron', {
+    const response = await hanaFetch('/api/desk/cron', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(isUpdate
         ? { action: 'update', id, ...fields }
         : { action: 'add', ...editedJobData }),
     });
+    if (!response.ok) throw new Error(`automation draft submit failed: ${response.status}`);
   };
 
   const handleApprove = async () => {

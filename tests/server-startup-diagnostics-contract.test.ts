@@ -75,6 +75,19 @@ describe("server startup diagnostics contract", () => {
     expect(mainSource).toContain("serverProcess = spawn(launcherBin, launcherArgs");
   });
 
+  it("passes validated desktop resources and the resolved guardian to the server before spawn", () => {
+    const mainSource = fs.readFileSync(path.join(root, "desktop", "main.cjs"), "utf-8");
+    const resourcesIndex = mainSource.indexOf("serverEnv.HANA_DESKTOP_RESOURCES_PATH = process.resourcesPath;");
+    const guardianIndex = mainSource.indexOf("const guardianBin = resolveWindowsServerGuardian({");
+    const helperContractIndex = mainSource.indexOf("serverEnv.HANA_WIN32_SANDBOX_HELPER = guardianBin;", guardianIndex);
+    const spawnIndex = mainSource.indexOf("serverProcess = spawn(launcherBin, launcherArgs", guardianIndex);
+
+    expect(resourcesIndex).toBeGreaterThan(-1);
+    expect(guardianIndex).toBeGreaterThan(resourcesIndex);
+    expect(helperContractIndex).toBeGreaterThan(guardianIndex);
+    expect(spawnIndex).toBeGreaterThan(helperContractIndex);
+  });
+
   it("owned Windows shutdown uses token-auth grace then the guardian control pipe", () => {
     const mainSource = fs.readFileSync(path.join(root, "desktop", "main.cjs"), "utf-8");
     const shutdown = extractFunctionSource(mainSource, "shutdownServer");
@@ -327,7 +340,7 @@ describe("server startup diagnostics contract", () => {
     let alive = true;
     let checks = 0;
     const context = vm.createContext({
-      SERVER_SHUTDOWN_POLL_MS: 1,
+      SERVER_SHUTDOWN_POLL_MS: 5,
       isPidAliveForDiagnostics: () => {
         checks++;
         return alive;
@@ -337,13 +350,18 @@ describe("server startup diagnostics contract", () => {
     });
 
     vm.runInContext(`${hasChildExitObserved}\n${waitForProcessExit}`, context);
-    const wait = context.waitForProcessExit(null, 12345, 25);
+    // Keep the wait window far above a few poll ticks so a delayed setTimeout
+    // under load cannot race past the deadline before the mid-wait assertion.
+    const wait = context.waitForProcessExit(null, 12345, 500);
     let settled = false;
     wait.then(() => { settled = true; });
 
-    await new Promise(resolve => setTimeout(resolve, 5));
-    expect(settled).toBe(false);
+    const deadline = Date.now() + 200;
+    while (checks === 0 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
     expect(checks).toBeGreaterThan(0);
+    expect(settled).toBe(false);
 
     alive = false;
     await expect(wait).resolves.toBe(true);
@@ -478,10 +496,17 @@ describe("server startup diagnostics contract", () => {
     expect(serverSource).toContain('await import("../lib/bridge/bridge-manager.ts")');
 
     const readyWriteIndex = serverSource.indexOf("fs.writeFileSync(serverInfoPath");
+    const bridgeDeferIndex = serverSource.indexOf("setImmediate(() => {");
     const bridgeStartIndex = serverSource.indexOf("startBridgeManager({ autoStart: true })");
+    const startupTryEndIndex = serverSource.indexOf("\n  } catch (err)", bridgeStartIndex);
     expect(readyWriteIndex).toBeGreaterThan(-1);
+    expect(bridgeDeferIndex).toBeGreaterThan(-1);
     expect(bridgeStartIndex).toBeGreaterThan(-1);
-    expect(readyWriteIndex).toBeLessThan(bridgeStartIndex);
+    expect(startupTryEndIndex).toBeGreaterThan(bridgeStartIndex);
+    expect(readyWriteIndex).toBeLessThan(bridgeDeferIndex);
+    expect(bridgeDeferIndex).toBeLessThan(bridgeStartIndex);
+    expect(serverSource).toMatch(/setImmediate\(\(\) => \{\s*void startBridgeManager\(\{ autoStart: true \}\);\s*\}\);/s);
+    expect(serverSource.slice(bridgeDeferIndex, startupTryEndIndex)).not.toMatch(/\bawait\b/);
 
     expect(bridgeRouteSource).not.toContain('import { getWechatQrcode, pollWechatQrcodeStatus } from "../../lib/bridge/wechat-login.ts";');
     expect(bridgeRouteSource).toContain('await import("../../lib/bridge/wechat-login.ts")');

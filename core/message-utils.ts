@@ -23,6 +23,7 @@ import { repairOversizedSessionEntriesInFile } from "./session-jsonl-file.ts";
 import { isAssistantCommentaryTextBlock } from "../shared/text-signature.ts";
 import { TOOL_ARG_SUMMARY_KEYS, summarizeToolArgs } from "../shared/tool-arg-summary.ts";
 import { projectSessionMessageForDisplay } from "./session-reminders.ts";
+import { isKnownLegacyHanaToolFailure } from "../shared/tool-outcome.ts";
 export { TOOL_ARG_SUMMARY_KEYS };
 
 const SESSION_TAIL_READ_THRESHOLD = 256 * 1024;
@@ -109,14 +110,16 @@ export async function loadSessionHistoryMessages(engine, explicitPath) {
   try {
     if (await looksLikePiSessionFile(sessionPath)) {
       repairOversizedSessionEntriesInFile(sessionPath);
-      const manager = SessionManager.open(sessionPath, path.dirname(sessionPath));
+      const manager = typeof engine?.openSessionManagerAtCurrentBranch === "function"
+        ? engine.openSessionManagerAtCurrentBranch(sessionPath, path.dirname(sessionPath))
+        : SessionManager.open(sessionPath, path.dirname(sessionPath));
       const branch = manager.getBranch();
       const messages = [];
       for (const entry of branch) {
         const message = historyMessageFromEntry(entry);
         if (message) messages.push(message);
       }
-      if (messages.length > 0) return messages.map(projectSessionMessageForDisplay);
+      return messages.map(projectSessionMessageForDisplay);
     }
   } catch {
     // 旧文件或损坏文件继续走兼容读取，不让历史页直接空白。
@@ -147,7 +150,11 @@ export async function loadSessionHistoryMessages(engine, explicitPath) {
 
 function historyMessageFromEntry(entry) {
   if (entry?.type === "message" && entry.message) {
-    const message = { ...entry.message };
+    const message = entry.message.role === "toolResult"
+      && entry.message.isError !== true
+      && isKnownLegacyHanaToolFailure(entry.message)
+      ? { ...entry.message, isError: true }
+      : { ...entry.message };
     if (entry.id) message.id = entry.id;
     if (entry.timestamp) message.timestamp = entry.timestamp;
     return message;

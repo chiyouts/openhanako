@@ -39,7 +39,7 @@ import { PluginManager } from "./plugin-manager.ts";
 import { EnvChangeLedger } from "./env-change-ledger.ts";
 import { PluginDevService } from "./plugin-dev-service.ts";
 import { createPluginDevTools } from "./plugin-dev-tools.ts";
-import { DefaultResourceLoader, SettingsManager } from "../lib/pi-sdk/index.ts";
+import { DefaultResourceLoader, SessionManager, SettingsManager } from "../lib/pi-sdk/index.ts";
 import { compactSessionWithCachePreservationRecoveringRuntime } from "./session-compactor.ts";
 import { getFreshCompactNoopReason } from "../lib/fresh-compact/policy.ts";
 import { DeferredResultCoordinator } from "../lib/deferred-result-coordinator.ts";
@@ -147,12 +147,16 @@ import { externalReadPathsFromSessionFiles } from "../lib/sandbox/win32-policy.t
 import { Win32LegacySandboxCleanupQueue } from "../lib/sandbox/win32-legacy-migration.ts";
 import { t } from "../lib/i18n.ts";
 import { CheckpointStore } from "../lib/checkpoint-store.ts";
-import { assertAllToolsCategorized } from "../shared/tool-categories.ts";
+import {
+  assertAllBuiltInToolsPermissionCovered,
+  assertAllToolsCategorized,
+} from "../shared/tool-categories.ts";
 import { workspaceRootsForSandbox } from "../shared/workspace-scope.ts";
 import { wrapWithCheckpoint } from "../lib/checkpoint-wrapper.ts";
 import { wrapWithSessionPermission } from "../lib/tools/session-permission-wrapper.ts";
 import { filterToolObjectsByAvailability } from "./tool-availability.ts";
 import { TaskRegistry } from "../lib/task-registry.ts";
+import { BrowserManager } from "../lib/browser/browser-manager.ts";
 import { TerminalSessionManager } from "../lib/terminal/terminal-session-manager.ts";
 import {
   SessionExecutionRegistry,
@@ -459,7 +463,52 @@ export class HanaEngine {
       getConfirmStore: () => this._confirmStore,
       getDeferredResultStore: () => this._deferredResultStore,
       getTaskRegistry: () => this._taskRegistry,
+      getSubagentRunStore: () => this._subagentRunStore,
+      getSubagentThreadStore: () => this._subagentThreadStore,
+      getActivityHub: () => this._activityHub,
+      forkSessionDeferredTasks: (options) => this.forkSessionDeferredTasks(options),
+      discardForkedSessionDeferredTasks: (options) => this.discardForkedSessionDeferredTasks(options),
       getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
+      forkSessionFiles: (options) => this.forkSessionFiles(options),
+      discardForkedSessionFiles: (options) => this.discardForkedSessionFiles(options),
+      forkSessionVisionNotes: (options) => this.forkSessionVisionNotes(options),
+      discardForkedSessionVisionNotes: (options) => this.discardForkedSessionVisionNotes(options),
+      forkSessionPluginConfig: (options) => this.forkSessionPluginConfig(options),
+      discardForkedSessionPluginConfig: (options) => this.discardForkedSessionPluginConfig(options),
+      forkSessionBrowserState: (options) => this.forkSessionBrowserState(options),
+      discardForkedSessionBrowserState: (options) => this.discardForkedSessionBrowserState(options),
+      forkSessionMediaTasks: (options) => this.forkSessionMediaTasks(options),
+      discardForkedSessionMediaTasks: (options) => this.discardForkedSessionMediaTasks(options),
+      forkSessionCollabDrafts: (options) => this._sessionCollabDraftStore.forkSessionDrafts(options),
+      discardForkedSessionCollabDrafts: (options) => this._sessionCollabDraftStore.discardForkedSessionDrafts(options),
+      initializeSessionMemoryForkBaseline: (options) => {
+        const agent = this._agentMgr.getAgent(options?.agentId);
+        if (typeof agent?.summaryManager?.initializeForkBaseline !== "function") {
+          throw new Error("session memory fork baseline support is unavailable");
+        }
+        return agent.summaryManager.initializeForkBaseline(options.sessionId, options);
+      },
+      notifySessionMemoryForkCreated: (options) => {
+        const agent = this._agentMgr.getAgent(options?.agentId);
+        if (typeof agent?.memoryTicker?.notifyForkCreated !== "function") {
+          moduleLog.warn(`session fork memory materialization unavailable for ${options?.sessionId || "unknown"}`);
+          return;
+        }
+        void Promise.resolve()
+          .then(() => agent.memoryTicker.notifyForkCreated(options.sessionPath))
+          .catch((error) => {
+            moduleLog.warn(
+              `session fork memory materialization failed for ${options?.sessionId || "unknown"}: ${error?.message || error}`,
+            );
+          });
+      },
+      discardSessionMemoryForkBaseline: (options) => {
+        const agent = this._agentMgr.getAgent(options?.agentId);
+        if (typeof agent?.summaryManager?.invalidateSession !== "function") {
+          throw new Error("session memory fork baseline cleanup is unavailable");
+        }
+        return agent.summaryManager.invalidateSession(options.sessionId);
+      },
       abortToolExecutionsForSession: (sessionRef, reason) => (
         this._sessionExecutions.abortBySession(sessionRef, reason)
       ),
@@ -530,6 +579,12 @@ export class HanaEngine {
       getSessionFileByPath: (filePath, options) => this.getSessionFileByPath(filePath, options),
       getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
       ensureSessionRefForPath: (sessionPath, defaults) => this.ensureSessionRefForPath(sessionPath, defaults),
+      applySessionBranchHead: (sessionPath, manager, defaults) => (
+        this._sessionCoord.applySessionBranchHead(sessionPath, manager, defaults)
+      ),
+      syncSessionBranchHead: (sessionPath, manager, reason) => (
+        this._sessionCoord._syncSessionBranchHeadQuiet(sessionPath, manager, reason)
+      ),
       beginCurrentTurnNativeMedia: (sessionPath, opts) => this.beginCurrentTurnNativeMedia(sessionPath, opts),
       endCurrentTurnNativeMedia: (token) => this.endCurrentTurnNativeMedia(token),
       emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
@@ -819,8 +874,72 @@ export class HanaEngine {
   getSessionFile(fileId, options) { return this._sessionFiles.get(fileId, this._sessionFileOptionsWithLocator(options)); }
   getSessionFileByPath(filePath, options) { return this._sessionFiles.getByFilePath(filePath, this._sessionFileOptionsWithLocator(options)); }
   getSessionFileBySourceKey(sourceKey, options) { return this._sessionFiles.getBySourceKey(sourceKey, this._sessionFileOptionsWithLocator(options)); }
-  listSessionFiles(sessionPath) { return this._sessionFiles.list(sessionPath); }
+  listSessionFiles(sessionPath, options: any = {}) {
+    if (Object.prototype.hasOwnProperty.call(options || {}, "references")) {
+      return this._sessionFiles.listReachable(sessionPath, options.references);
+    }
+    return this._sessionFiles.list(sessionPath);
+  }
+  listActiveSessionFiles(sessionPath, additionalReferences: any[] = []) {
+    let branch = this.getSessionByPath?.(sessionPath)?.sessionManager?.getBranch?.();
+    if (!Array.isArray(branch)) {
+      if (typeof sessionPath !== "string" || !sessionPath.trim()) return [];
+      try {
+        branch = SessionManager.open(sessionPath).getBranch();
+      } catch (error) {
+        moduleLog.warn(
+          `active SessionFile projection could not open ${sessionPath}: ${error?.message || error}`,
+        );
+        return [];
+      }
+    }
+    return this.listSessionFiles(sessionPath, { references: [branch, additionalReferences] });
+  }
+  resolveActiveSessionFile(input: any = {}) {
+    const options = this._sessionFileOptionsWithLocator({
+      sessionId: input?.sessionId || null,
+      sessionPath: input?.sessionPath || null,
+    });
+    const sessionPath = options.sessionPath || null;
+    if (!sessionPath) return null;
+
+    const activeFiles = this.listActiveSessionFiles(sessionPath, input?.additionalReferences || []);
+    if (!Array.isArray(activeFiles) || activeFiles.length === 0) return null;
+
+    let candidate = null;
+    if (input?.fileId) {
+      candidate = this.getSessionFile(input.fileId, options);
+    } else if (input?.filePath) {
+      candidate = this.getSessionFileByPath(input.filePath, options);
+    }
+    if (!candidate) return null;
+    const candidateId = candidate.id || candidate.fileId || null;
+    return activeFiles.find((file) => (
+      file === candidate
+      || (!!candidateId && (file?.id === candidateId || file?.fileId === candidateId))
+    )) || null;
+  }
   updateSessionFileTranscription(fileId, transcription, options) { return this._sessionFiles.updateTranscription(fileId, transcription, this._sessionFileOptionsWithLocator(options)); }
+  forkSessionFiles(options) { return this._sessionFiles.forkSessionFiles(options); }
+  discardForkedSessionFiles(options) { return this._sessionFiles.discardForkedSessionFiles(options); }
+  forkSessionVisionNotes(options) { return this._visionBridge.forkSessionNotes(options); }
+  discardForkedSessionVisionNotes(options) { return this._visionBridge.discardForkedSessionNotes(options); }
+  forkSessionPluginConfig(options) { return this._pluginManager.forkSessionConfig(options); }
+  discardForkedSessionPluginConfig(options) {
+    return this._pluginManager.discardSessionConfig({ sessionId: options?.sessionId });
+  }
+  forkSessionBrowserState(options) { return BrowserManager.instance().forkSessionState(options); }
+  discardForkedSessionBrowserState(options) {
+    return BrowserManager.instance().discardForkedSessionState({ sessionPath: options?.sessionPath });
+  }
+  forkSessionMediaTasks(options) { return this._media.forkSessionTasks(options); }
+  discardForkedSessionMediaTasks(options) { return this._media.discardForkedSessionTasks(options); }
+  forkSessionDeferredTasks(options) {
+    return this._deferredResultStore?.forkTerminalTasks?.(options) || { tasks: 0, taskIds: [] };
+  }
+  discardForkedSessionDeferredTasks(options) {
+    return this._deferredResultStore?.discardForkedTerminalTasks?.(options) || { discarded: 0 };
+  }
   _sessionRefForPath(sessionPath) {
     return {
       sessionId: this.getSessionIdForPath(sessionPath),
@@ -1082,6 +1201,25 @@ export class HanaEngine {
   getSessionManifest(sessionId) {
     return this._sessionManifestStore?.getBySessionId(sessionId) || null;
   }
+  getSessionBranchHead(sessionId) {
+    return this._sessionManifestStore?.getBranchHead?.(sessionId) || null;
+  }
+  getSessionBranchHeadForPath(sessionPath) {
+    const sessionId = this.getSessionIdForPath(sessionPath);
+    return sessionId ? this.getSessionBranchHead(sessionId) : null;
+  }
+  setSessionBranchHead(sessionPath, state) {
+    return this._sessionCoord.setSessionBranchHead(sessionPath, state);
+  }
+  getSessionBranchProjection(sessionPath, opts = {}) {
+    return this._sessionCoord.getSessionBranchProjection(sessionPath, opts);
+  }
+  openSessionManagerAtCurrentBranch(sessionPath, sessionDir) {
+    return this._sessionCoord.openSessionManagerAtCurrentBranch(sessionPath, sessionDir);
+  }
+  syncSessionBranchHead(sessionPath, sessionManager, reason = "append_sync") {
+    return this._sessionCoord._syncSessionBranchHeadQuiet(sessionPath, sessionManager, reason);
+  }
   getSessionIdForPath(sessionPath) {
     if (!this._sessionManifestResolver) return null;
     try {
@@ -1156,8 +1294,14 @@ export class HanaEngine {
   async createDetachedSession( opts: any = {}) {
     return this._sessionCoord.createDetachedSession(opts);
   }
+  async forkSessionAtNode(input: any = {}) {
+    return this._sessionCoord.forkSessionAtNode(input);
+  }
   buildSessionCacheSnapshot(p, opts) {
     return this._sessionCoord.buildSessionCacheSnapshot(p, opts);
+  }
+  getSessionProviderCacheAffinityKey(p) {
+    return this._sessionCoord.getSessionProviderCacheAffinityKey(p);
   }
   getSessionStreamFn(p) {
     return this._sessionCoord.getSessionStreamFn(p);
@@ -1180,6 +1324,9 @@ export class HanaEngine {
   }
   steerSession(p, text) { return this._sessionCoord.steerSession(p, text); }
   async abortSession(p, options) { return this._sessionCoord.abortSession(p, options); }
+  async deliverCustomMessage(p, message, options) {
+    return this._sessionCoord.deliverCustomMessage(p, message, options);
+  }
   getEnvChangeLedger() { return this._envChangeLedger; }
   renderSessionReminderBlock(p) { return this._sessionCoord.renderSessionReminderBlock(p); }
   preflightSessionInput(p) { return this._sessionCoord.preflightSessionInput(p); }
@@ -1254,6 +1401,9 @@ export class HanaEngine {
   async reloadSessionRuntime(p, opts = {}) { return this._sessionCoord.reloadSessionRuntime(p, opts); }
   /** #1624：当前应展示的"工具能力有更新"提示（无漂移 / 已 dismiss → null） */
   getSessionCapabilityDriftNotice(p) { return this._sessionCoord.getSessionCapabilityDriftNotice(p); }
+  getSessionModelAvailability(p = this.currentSessionPath) {
+    return this._sessionCoord.getSessionModelAvailability(p);
+  }
   markCapabilitySnapshotsStale(opts = {}) { return this._sessionCoord.markCapabilitySnapshotsStale(opts); }
   /** #1624：记录当前 fingerprint 已被用户关闭，持久化到 session-meta */
   async dismissSessionCapabilityDrift(p, fingerprint) { return this._sessionCoord.dismissSessionCapabilityDrift(p, fingerprint); }
@@ -2379,6 +2529,9 @@ export class HanaEngine {
       opts.requireSessionIdentity === true,
     );
     let ct = customTools;
+    const extraCustomTools = Array.isArray(opts.extraCustomTools)
+      ? opts.extraCustomTools.filter((tool) => tool && typeof tool.name === "string" && tool.name.trim())
+      : [];
     let agentId;
     let toolAgent;
     if (!ct) {
@@ -2399,6 +2552,8 @@ export class HanaEngine {
       agentId = opts.agentDir ? path.basename(opts.agentDir) : (this.agent?.id || "");
       toolAgent = opts.agentDir ? this.getAgent(agentId) : this.agent;
     }
+    const baseCustomTools = Array.isArray(ct) ? ct : [];
+    ct = [...baseCustomTools, ...extraCustomTools];
     const getSessionPath = runtimeSessionRef
       ? (() => runtimeSessionRef.sessionPath)
       : typeof opts.getSessionPath === "function"
@@ -2493,6 +2648,12 @@ export class HanaEngine {
           getAgentId: () => agentId,
         })
       : [];
+    assertUniqueBuiltToolNames([
+      { source: "custom tools", tools: baseCustomTools },
+      { source: "extra custom tools", tools: extraCustomTools },
+      { source: "plugin tools", tools: pluginTools },
+      { source: "plugin development tools", tools: pluginDevTools },
+    ]);
     const allTools = filterToolObjectsByAvailability(
       [...runtimeCustomTools, ...wrappedPluginTools, ...pluginDevTools],
       toolAgent?.config || {},
@@ -2516,6 +2677,31 @@ export class HanaEngine {
     const fileReadSessionPaths = Array.isArray(opts.fileReadSessionPaths)
       ? opts.fileReadSessionPaths.filter((sp) => typeof sp === "string" && sp.trim())
       : [];
+    const resolveRuntimeSessionFile = (fileId, options: any = {}) => {
+      const activeSessionPath = getSessionPath() || null;
+      if (activeSessionPath) {
+        const activeFile = this.resolveActiveSessionFile({
+          fileId,
+          sessionPath: activeSessionPath,
+        });
+        if (activeFile) return activeFile;
+      }
+
+      const explicitOptions = this._sessionFileOptionsWithLocator(options);
+      const explicitSessionPath = explicitOptions.sessionPath || null;
+      if (
+        explicitSessionPath
+        && explicitSessionPath !== activeSessionPath
+        && fileReadSessionPaths.includes(explicitSessionPath)
+      ) {
+        return this.resolveActiveSessionFile({
+          fileId,
+          sessionId: explicitOptions.sessionId || null,
+          sessionPath: explicitSessionPath,
+        });
+      }
+      return null;
+    };
     const getExternalReadPaths = () => {
       const sessionPaths = [];
       const seenSessionPaths = new Set();
@@ -2527,8 +2713,8 @@ export class HanaEngine {
       addSessionPath(getSessionPath());
       for (const sp of fileReadSessionPaths) addSessionPath(sp);
       if (!sessionPaths.length) return [];
-      const files = typeof this.listSessionFiles === "function"
-        ? sessionPaths.flatMap((sp) => this.listSessionFiles(sp))
+      const files = typeof this.listActiveSessionFiles === "function"
+        ? sessionPaths.flatMap((sp) => this.listActiveSessionFiles(sp))
         : [];
       return externalReadPathsFromSessionFiles(files, {
         workspaceRoots: workspaceRootsForSandbox(effectiveWorkspace, workspaceFolders, getAuthorizedFolders()),
@@ -2549,7 +2735,7 @@ export class HanaEngine {
       getSessionPath,
       emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
       eventBus: this._resourceEvents(),
-      sessionFiles: this._sessionFiles,
+      resolveSessionFile: resolveRuntimeSessionFile,
       resourceService: this._resources || null,
       studioId: this._runtimeContext?.studioId || null,
     });
@@ -2568,10 +2754,7 @@ export class HanaEngine {
       getExternalReadPaths,
       getSessionPath,
       getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
-      resolveSessionFile: (fileId, options: any = {}) => {
-        const lookupSessionPath = options?.sessionPath || getSessionPath() || null;
-        return this.getSessionFile?.(fileId, { sessionPath: lookupSessionPath }) || null;
-      },
+      resolveSessionFile: resolveRuntimeSessionFile,
       recordFileOperation: (entry) => this.recordSessionFileOperation(entry),
       getVisionBridge: () => this.getVisionBridge(),
       isVisionAuxiliaryEnabled: () => this.isVisionAuxiliaryEnabled(),
@@ -2581,6 +2764,10 @@ export class HanaEngine {
       emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
       legacyCleanupQueue: this._win32LegacySandboxCleanupQueue,
     } as any);
+    assertUniqueBuiltToolNames([
+      { source: "Pi built-in tools", tools: result.tools },
+      { source: "runtime custom tools", tools: result.customTools },
+    ]);
 
     // Checkpoint wrapper (outside sandbox layer)
     const backupCfg = this._prefs.getFileBackup();
@@ -2614,6 +2801,8 @@ export class HanaEngine {
         getAuthorizedFolders,
         allowHumanApproval,
         approvalPolicy,
+        getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
+        permissionBoundary: result.permissionBoundary,
         getConfirmStore: () => this._confirmStore,
         getApprovalGateway: () => this._approvalGateway,
         emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
@@ -2629,6 +2818,8 @@ export class HanaEngine {
         getAuthorizedFolders,
         allowHumanApproval,
         approvalPolicy,
+        getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
+        permissionBoundary: result.permissionBoundary,
         getConfirmStore: () => this._confirmStore,
         getApprovalGateway: () => this._approvalGateway,
         emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
@@ -2660,10 +2851,14 @@ export class HanaEngine {
     // Startup assertion: every built-in tool must be categorized in
     // shared/tool-categories.js. All session-creation paths route through
     // this function, so a single check here catches the whole surface.
+    assertAllBuiltInToolsPermissionCovered([
+      ...result.tools,
+      ...result.customTools,
+    ]);
     assertAllToolsCategorized([
       ...result.tools.map((t) => t.name).filter(Boolean),
       ...runtimeCustomTools
-        .filter((t) => !t._pluginId)
+        .filter((t) => !t._pluginId && !extraCustomTools.some((extra) => extra.name === t.name))
         .map((t) => t.name)
         .filter(Boolean),
     ]);
@@ -2783,6 +2978,10 @@ export class HanaEngine {
       isSessionMemoryEnabledForPath: (sessionPath) => {
         return agent.isSessionMemoryEnabledFor(sessionPath);
       },
+      getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath),
+      readSessionBranchForPath: (sessionPath, options) => (
+        this.getSessionBranchProjection(sessionPath, options)
+      ),
     });
   }
 
@@ -2945,4 +3144,23 @@ function freezeRuntimeSessionRef(value, required = false) {
     );
   }
   return Object.freeze({ sessionId, sessionPath });
+}
+
+function assertUniqueBuiltToolNames(groups: Array<{ source: string; tools: any[] }>) {
+  const seen = new Map<string, string>();
+  for (const group of groups) {
+    for (const tool of group.tools || []) {
+      const name = typeof tool?.name === "string" && tool.name.trim()
+        ? tool.name
+        : null;
+      if (!name) continue;
+      const previousSource = seen.get(name);
+      if (previousSource) {
+        throw new Error(
+          `buildTools: duplicate tool name "${name}" across ${previousSource} and ${group.source}`,
+        );
+      }
+      seen.set(name, group.source);
+    }
+  }
 }

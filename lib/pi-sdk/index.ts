@@ -22,6 +22,7 @@ import {
 // 0.80.0 起 pi-ai 老全局 API 移到 /compat 子入口（根入口是 createModels 新 API）
 import {
   getModel as rawGetPiModel,
+  getModels as rawGetPiModels,
   completeSimple as rawCompleteSimple,
 } from "@earendil-works/pi-ai/compat";
 import {
@@ -29,6 +30,7 @@ import {
   PI_BUILTIN_TOOL_NAMES,
 } from "./session-options.ts";
 import { installAssistantStreamGuard } from "./stream-guard.ts";
+import { installToolOutcomeAdapter } from "./tool-outcome-adapter.ts";
 import {
   createFindTool,
   createGrepTool,
@@ -55,6 +57,7 @@ export async function createAgentSession(options) {
     ? { ...options, agentDir: resourceLoaderAgentDir }
     : options;
   const result = await rawCreateAgentSession(normalizeCreateAgentSessionOptions(sessionOptions));
+  installToolOutcomeAdapter(result?.session);
   installAssistantStreamGuard(result?.session);
   return result;
 }
@@ -118,6 +121,10 @@ export { StringEnum } from "@earendil-works/pi-ai";
 
 export function getPiModel(provider, modelId) {
   return rawGetPiModel(provider, modelId);
+}
+
+export function getPiModels(provider) {
+  return rawGetPiModels(provider);
 }
 
 // ── Schema 构造（typebox 的 Type 透过 adapter，避免工具直接依赖第三方包名）──

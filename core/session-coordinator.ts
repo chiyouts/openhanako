@@ -109,6 +109,24 @@ import {
 } from "./session-prompt-snapshot.ts";
 import { buildTurnInputPresentationEvent } from "../lib/turn-input-presentation.ts";
 import { ensureSessionRefForPath } from "./session-manifest/ref.ts";
+import { resolveSessionNodeTarget } from "./session-turn-actions.ts";
+import { acquireSessionOperation } from "./session-operation-lock.ts";
+import { rewriteForkedMediaTaskReferences } from "./media/session-fork.ts";
+import { DEFERRED_RESULT_RECORD_TYPE } from "../lib/deferred-result-notification.ts";
+import {
+  rewriteForkedSubagentRunReferences,
+  rewriteForkedWorkflowRunReferences,
+} from "../lib/subagent-run-store.ts";
+import {
+  normalizeProviderCacheAffinityKey,
+  withProviderCacheAffinity,
+} from "../lib/llm/provider-cache-affinity.ts";
+import {
+  applyStoredSessionBranchHead,
+  persistExplicitSessionBranchHead,
+  readManifestSessionBranch,
+  syncSessionBranchHeadAfterAppend,
+} from "./session-branch-head.ts";
 
 const log = createModuleLogger("session");
 const SESSION_META_PAYLOAD_DIR = "session-meta-payloads";
@@ -116,6 +134,82 @@ const SESSION_META_PAYLOAD_FIELDS = ["promptSnapshot", "memoryReflectionSnapshot
 const SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES = 256 * 1024;
 const SESSION_META_INDEX_MAX_BYTES = 1024 * 1024;
 const REMINDER_HEADER_RE = /^\[hana_reminder at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\]$/;
+const SESSION_MODEL_UNAVAILABLE_API = "hana-unavailable-model";
+
+type SessionModelAvailability = {
+  available: boolean;
+  reason: "model_removed" | "provider_not_configured" | "temporarily_unavailable" | null;
+  modelRef: string;
+};
+
+function modelEntryId(entry: any) {
+  if (typeof entry === "string") return entry;
+  return typeof entry?.id === "string" ? entry.id : null;
+}
+
+function sessionModelRef(provider: any, modelId: any) {
+  return provider && modelId ? `${provider}/${modelId}` : "unknown";
+}
+
+function classifySessionModelAvailability(models: any, provider: string, modelId: string): SessionModelAvailability {
+  const modelRef = sessionModelRef(provider, modelId);
+  const availableModel = Array.isArray(models?.availableModels)
+    ? findModel(models.availableModels, modelId, provider)
+    : null;
+  if (availableModel) return { available: true, reason: null, modelRef };
+
+  const registry = models?.providerRegistry;
+  if (!registry) return { available: false, reason: "temporarily_unavailable", modelRef };
+  const chatProvider = registry.resolveChatProvider?.(provider) || null;
+  if (!chatProvider) return { available: false, reason: "provider_not_configured", modelRef };
+
+  const selection = registry.getChatModelSelection?.(provider) || null;
+  if (selection?.configError) {
+    return { available: false, reason: "provider_not_configured", modelRef };
+  }
+  const credentials = registry.getCredentials?.(provider) || null;
+  const allowsMissingApiKey = registry.allowsMissingApiKey?.(
+    provider,
+    credentials?.baseUrl || chatProvider?.entry?.baseUrl || "",
+  ) === true;
+  const hasCredentialHeaders = credentials?.headers
+    && Object.keys(credentials.headers).length > 0;
+  if (!allowsMissingApiKey && !credentials?.apiKey && !hasCredentialHeaders) {
+    return { available: false, reason: "provider_not_configured", modelRef };
+  }
+
+  const selectedModelIds = Array.isArray(selection?.models)
+    ? selection.models.map(modelEntryId).filter(Boolean)
+    : [];
+  // Both an explicit allowlist and a non-empty provider default catalog are
+  // authoritative enough to say that an absent historical ID was removed.
+  // An empty implicit catalog may still be waiting on runtime discovery, so
+  // keep that case classified as temporarily unavailable.
+  if (
+    !selectedModelIds.includes(modelId)
+    && (selection?.hasExplicitModels === true || selectedModelIds.length > 0)
+  ) {
+    return { available: false, reason: "model_removed", modelRef };
+  }
+  return { available: false, reason: "temporarily_unavailable", modelRef };
+}
+
+function createUnavailableSessionModel(models: any, provider: string, modelId: string) {
+  const registryModel = models?.modelRegistry?.find?.(provider, modelId) || null;
+  return {
+    ...(registryModel || {}),
+    id: modelId,
+    name: registryModel?.name || modelId,
+    provider,
+    api: SESSION_MODEL_UNAVAILABLE_API,
+    baseUrl: "",
+    reasoning: registryModel?.reasoning === true,
+    input: Array.isArray(registryModel?.input) ? registryModel.input : ["text"],
+    cost: registryModel?.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: Number.isFinite(registryModel?.contextWindow) ? registryModel.contextWindow : 0,
+    maxTokens: Number.isFinite(registryModel?.maxTokens) ? registryModel.maxTokens : 0,
+  };
+}
 
 /** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
 export const PATROL_TOOLS_DEFAULT = "*";
@@ -343,8 +437,8 @@ function normalizeDeletedAgentTranscriptMessage(message: any) {
   };
 }
 
-function readSessionBranchMessages(sessionPath: any) {
-  const manager = SessionManager.open(sessionPath, path.dirname(sessionPath));
+function readSessionBranchMessages(sessionManager: any) {
+  const manager = sessionManager;
   const branch = manager.getBranch();
   const messages: any[] = [];
   for (const entry of branch) {
@@ -759,6 +853,110 @@ function normalizeSessionWorkspaceMount(value: any) {
   };
 }
 
+function sessionForkError(message: string, code: string, status = 400) {
+  const error: any = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+function forkedSessionMeta(sourceMeta: any, input: any) {
+  const source = sourceMeta && typeof sourceMeta === "object" && !Array.isArray(sourceMeta)
+    ? sourceMeta
+    : {};
+  return {
+    ...source,
+    pinnedAt: null,
+    providerCacheAffinityKey: input.providerCacheAffinityKey,
+    forkedFrom: {
+      sessionId: input.sourceSessionId,
+      entryId: input.boundaryEntryId,
+      target: input.target,
+      forkedAt: input.forkedAt,
+    },
+    memoryForkBaseline: {
+      sourceSessionId: input.sourceSessionId,
+      throughEntryId: input.boundaryEntryId,
+      messageCount: input.messageCount,
+      forkedAt: input.forkedAt,
+    },
+  };
+}
+
+function countRetainedSessionMessages(entries: any[]) {
+  return Array.isArray(entries)
+    ? entries.filter((entry) => (
+        entry?.type === "message"
+        && (entry.message?.role === "user" || entry.message?.role === "assistant")
+      )).length
+    : 0;
+}
+
+function collectStructuredTaskIds(entries: any[]) {
+  const taskIds: string[] = [];
+  const seenIds = new Set<string>();
+  const seenObjects = new WeakSet<object>();
+  const visit = (value: any) => {
+    if (!value || typeof value !== "object") return;
+    if (seenObjects.has(value)) return;
+    seenObjects.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (typeof value.taskId === "string" && value.taskId.trim() && !seenIds.has(value.taskId.trim())) {
+      seenIds.add(value.taskId.trim());
+      taskIds.push(value.taskId.trim());
+    }
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(entries);
+  return taskIds;
+}
+
+const ACTIVE_FORK_TASK_STATUSES = new Set(["pending", "running", "paused", "blocked", "recovering"]);
+const MEDIA_FORK_TASK_TYPES = new Set(["media-generation", "image-generation", "video-generation"]);
+
+function rewriteForkedSessionDraftValue(value: any, replacements: [string, string][]): any {
+  if (typeof value === "string") {
+    let next = value;
+    for (const [sourceId, targetId] of replacements) {
+      next = next.split(sourceId).join(targetId);
+    }
+    return next;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteForkedSessionDraftValue(item, replacements));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    rewriteForkedSessionDraftValue(child, replacements),
+  ]));
+}
+
+function rewriteForkedSessionDraftReferences(sessionManager: any, suggestionIdMap: any) {
+  const replacements = Object.entries(suggestionIdMap || {})
+    .filter(([sourceId, targetId]) => (
+      typeof sourceId === "string"
+      && sourceId.length > 0
+      && typeof targetId === "string"
+      && targetId.length > 0
+      && sourceId !== targetId
+    )) as [string, string][];
+  if (replacements.length === 0) return false;
+  if (!Array.isArray(sessionManager?.fileEntries)) {
+    throw new Error("forked session entries are unavailable for draft reference rewrite");
+  }
+  sessionManager.fileEntries = sessionManager.fileEntries
+    .map((entry) => rewriteForkedSessionDraftValue(entry, replacements));
+  sessionManager._buildIndex?.();
+  if (!flushSessionManagerSnapshot(sessionManager)) {
+    throw new Error("forked session draft references could not be persisted");
+  }
+  return true;
+}
+
 export class SessionCoordinator {
   declare _d: any;
   declare _pendingModel: any;
@@ -798,6 +996,7 @@ export class SessionCoordinator {
    * @param {() => Map} deps.getAgents
    * @param {(agentId) => object} deps.getActivityStore
    * @param {(agentId) => object|null} deps.getAgentById
+   * @param {(agentId: string, options?: object) => Promise<object>} [deps.ensureAgentRuntime]
    * @param {() => object} deps.listAgents - 列出所有 agent
    * @param {(cwd: string, context: {agent: object, agentId: string}) => Promise<{workspacePaths?: object[]}|void>} [deps.onBeforeSessionCreate]
    * @param {(sessionPath: string, reason: string) => void|Promise<void>} [deps.onSessionRuntimeDiscarded]
@@ -945,6 +1144,109 @@ export class SessionCoordinator {
       return this._resolveSessionManifestForPath(sessionPath)?.sessionId || null;
     } catch (err) {
       log.warn(`session manifest lookup failed for ${path.basename(sessionPath || "")}: ${err?.message || err}`);
+      return null;
+    }
+  }
+
+  _ensureBranchManifestForPath(sessionPath: any, defaults: any = {}) {
+    const manifest = this._resolveSessionManifestForPath(sessionPath)
+      || this._ensureSessionManifestForPath(sessionPath, {
+        ownerAgentId: defaults.ownerAgentId || this._d.agentIdFromSessionPath?.(sessionPath) || null,
+        domain: defaults.domain || "desktop",
+        kind: defaults.kind || "chat",
+        lifecycle: "active",
+        memoryPolicy: defaults.memoryPolicy || { mode: "inherit", inheritedFrom: "session_branch" },
+        permissionModeSnapshot: defaults.permissionModeSnapshot || {
+          mode: this._getDefaultPermissionMode(),
+          source: "session_branch_restore",
+          capturedAt: new Date().toISOString(),
+        },
+        provenance: defaults.provenance || { createdBy: "session_branch_restore" },
+        locatorReason: defaults.locatorReason || "session_branch_restore",
+      });
+    if (!manifest?.sessionId) {
+      const error: any = new Error("Session branch persistence requires a manifest.");
+      error.code = "session_manifest_unavailable";
+      throw error;
+    }
+    return manifest;
+  }
+
+  applySessionBranchHead(sessionPath: any, sessionManager: any, defaults: any = {}) {
+    const manifest = this._ensureBranchManifestForPath(sessionPath, defaults);
+    return applyStoredSessionBranchHead({
+      store: this._sessionManifestStore,
+      sessionId: manifest.sessionId,
+      sessionManager,
+      reason: defaults.reason || "session_restore",
+    });
+  }
+
+  setSessionBranchHead(sessionPath: any, state: any = {}) {
+    if (!sessionPath) throw new Error("setSessionBranchHead: sessionPath is required");
+    const manifest = this._ensureBranchManifestForPath(sessionPath, {
+      locatorReason: state.reason || "explicit_branch",
+    });
+    const entry = this._getSessionEntryByPath(sessionPath);
+    const manager = entry?.session?.sessionManager;
+    if (!manager) throw new Error(`setSessionBranchHead: session is not loaded: ${sessionPath}`);
+    const result = persistExplicitSessionBranchHead({
+      store: this._sessionManifestStore,
+      sessionId: manifest.sessionId,
+      sessionManager: manager,
+      leafId: state.leafId ?? null,
+      reason: state.reason || "explicit_branch",
+    });
+    if (state.reason === "replay_rewind") {
+      entry.memoryBranchReplacementPending = true;
+      const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
+      agent?._memoryTicker?.notifyBranchChanged?.(sessionPath);
+    }
+    return result;
+  }
+
+  getSessionBranchProjection(sessionPath: any, opts: any = {}) {
+    if (!sessionPath) throw new Error("getSessionBranchProjection: sessionPath is required");
+    const manifest = this._ensureBranchManifestForPath(sessionPath, {
+      locatorReason: "branch_projection",
+    });
+    return readManifestSessionBranch({
+      store: this._sessionManifestStore,
+      sessionId: manifest.sessionId,
+      sessionPath,
+      since: opts.since || null,
+      persistRecovery: opts.persistRecovery !== false,
+    });
+  }
+
+  openSessionManagerAtCurrentBranch(sessionPath: any, sessionDir: any = path.dirname(sessionPath)) {
+    const manager = SessionManager.open(sessionPath, sessionDir);
+    this.applySessionBranchHead(sessionPath, manager, { reason: "cold_writer_open" });
+    return manager;
+  }
+
+  _syncSessionBranchHead(sessionPath: any, sessionManager: any, reason: any) {
+    const manifest = this._ensureBranchManifestForPath(sessionPath, {
+      locatorReason: reason || "append_sync",
+    });
+    return syncSessionBranchHeadAfterAppend({
+      store: this._sessionManifestStore,
+      sessionId: manifest.sessionId,
+      sessionManager,
+      reason: reason || "append_sync",
+    });
+  }
+
+  _syncSessionBranchHeadQuiet(sessionPath: any, sessionManager: any, reason: any) {
+    try {
+      return this._syncSessionBranchHead(sessionPath, sessionManager, reason);
+    } catch (err) {
+      log.error(`session branch head sync failed for ${path.basename(sessionPath || "session")}: ${err?.message || err}`);
+      this._d.emitEvent?.({
+        type: "session_branch_persistence_warning",
+        reason: reason || "append_sync",
+        message: err?.message || String(err),
+      }, sessionPath || null);
       return null;
     }
   }
@@ -1257,7 +1559,57 @@ export class SessionCoordinator {
     return entry?.session?.agent?.streamFn || null;
   }
 
+  getSessionProviderCacheAffinityKey(sessionPath: any) {
+    const entry = this._getSessionEntryByPath(sessionPath);
+    return normalizeProviderCacheAffinityKey(
+      entry?.providerCacheAffinityKey,
+      entry?.session?.sessionManager?.getSessionId?.(),
+    );
+  }
+
   // ── Session 创建 / 切换 ──
+
+  async _ensureAgentRuntimeReady(ownerAgentId: any, {
+    agent = null,
+    reason = "session",
+  }: any = {}) {
+    if (!ownerAgentId) {
+      throw new Error(`${reason}: target agent identity unavailable`);
+    }
+    if (agent?.id && agent.id !== ownerAgentId) {
+      throw new Error(
+        `${reason}: Agent runtime identity mismatch (`
+        + `${agent.id} !== ${ownerAgentId})`,
+      );
+    }
+    if (agent?.id === ownerAgentId && agent.runtimeInitialized === true) {
+      return agent;
+    }
+    if (typeof this._d.ensureAgentRuntime !== "function") {
+      if (!agent || agent.runtimeInitialized === false) {
+        throw new Error(t("error.agentNotInitialized", { id: ownerAgentId }));
+      }
+      return agent;
+    }
+
+    const readyAgent = await this._d.ensureAgentRuntime(ownerAgentId, {
+      priority: "foreground",
+      reason,
+    });
+    if (!readyAgent) {
+      throw new Error(t("error.agentNotInitialized", { id: ownerAgentId }));
+    }
+    if (readyAgent.id !== ownerAgentId) {
+      throw new Error(
+        `${reason}: Agent runtime identity mismatch (`
+        + `${readyAgent.id || "(missing)"} !== ${ownerAgentId})`,
+      );
+    }
+    if (readyAgent.runtimeInitialized !== true) {
+      throw new Error(t("error.agentNotInitialized", { id: ownerAgentId }));
+    }
+    return readyAgent;
+  }
 
   async createSession(sessionMgr: any, cwd: any, memoryEnabled = true, model: any = null, {
     restore = false,
@@ -1279,20 +1631,29 @@ export class SessionCoordinator {
     reminderState = null,
   }: any = {}) {
     const t0 = Date.now();
-    const agent = explicitAgent
+    let agent = explicitAgent
       || (explicitAgentId ? this._d.getAgentById?.(explicitAgentId) : null)
       || this._d.getAgent();
     if (!agent) {
       throw new Error("createSession: target agent unavailable");
     }
     const ownerAgentId = explicitAgentId || agent.id || this._d.getActiveAgentId();
+
+    // Session 能力快照只能从已就绪的 Agent runtime 读取。创建栅栏放在所有
+    // workspace hook、SessionManager 和 prompt/tool 快照之前，初始化失败时不会留下半成品 session。
+    agent = await this._ensureAgentRuntimeReady(ownerAgentId, {
+      agent,
+      reason: "createSession",
+    });
+
     const configuredHomeCwd = this._d.getHomeCwd(agent.id);
     const effectiveCwd = cwd || configuredHomeCwd || process.cwd();
     if (!restore && !cwd && isDefaultWorkspacePath(configuredHomeCwd) && isDefaultWorkspacePath(effectiveCwd)) {
       restoreDefaultWorkspaceIfMissing(effectiveCwd);
     }
     const models = this._d.getModels();
-    // restore 模式：不指定 model，让 PI SDK 从 JSONL 恢复（session model 单一数据源）
+    // restore 模式通常由 PI SDK 从 JSONL 恢复模型。唯一例外是历史模型当前不可用：
+    // 下方会传入同 provider/id 的不可执行占位对象，阻止 SDK 静默 fallback。
     const effectiveModel = restore ? null : (model || this._pendingModel || models.currentModel);
     this._pendingModel = null;
     log.log(`createSession cwd=${effectiveCwd} restore=${restore} (传入: ${cwd || "未指定"})`);
@@ -1309,6 +1670,44 @@ export class SessionCoordinator {
       sessionMgr = SessionManager.create(effectiveCwd, agent.sessionDir);
     }
     const sessionPathForMeta = sessionMgr.getSessionFile?.() || null;
+    let restoredProviderCacheAffinityKey = null;
+    if (restore && sessionPathForMeta) {
+      try {
+        const meta = await this._readMetaCached(this._sessionMetaPathFor(sessionPathForMeta));
+        restoredProviderCacheAffinityKey = normalizeProviderCacheAffinityKey(
+          meta?.[path.basename(sessionPathForMeta)]?.providerCacheAffinityKey,
+        );
+      } catch (err) {
+        if (err?.code !== "ENOENT") {
+          log.warn(`session provider cache affinity restore failed: ${err?.message || err}`);
+        }
+      }
+    }
+    let branchManifestCreatedEarly = false;
+    let earlyBranchManifest = null;
+    if (restore && sessionPathForMeta && this._sessionManifestStore) {
+      earlyBranchManifest = this._resolveSessionManifestForPath(sessionPathForMeta);
+      if (!earlyBranchManifest) {
+        branchManifestCreatedEarly = true;
+        earlyBranchManifest = this._ensureBranchManifestForPath(sessionPathForMeta, {
+          ownerAgentId,
+          domain: "desktop",
+          kind: sessionKind || "chat",
+          memoryPolicy: {
+            mode: memoryEnabled ? "enabled" : "disabled",
+            inheritedFrom: "session_restore",
+          },
+          provenance: { createdBy: "session_restore" },
+          locatorReason: "session_restore_branch",
+        });
+      }
+      applyStoredSessionBranchHead({
+        store: this._sessionManifestStore,
+        sessionId: earlyBranchManifest.sessionId,
+        sessionManager: sessionMgr,
+        reason: "session_restore",
+      });
+    }
     let restoredCapabilitySnapshot = restore && sessionPathForMeta
       ? this._readSessionCapabilitySnapshot(sessionPathForMeta)
       : null;
@@ -1336,22 +1735,32 @@ export class SessionCoordinator {
       )
       : null;
     let restoredSessionModelRef = null;
+    let restoredSessionModelAvailability: SessionModelAvailability | null = null;
+    let unavailableSessionModel = null;
     if (restore) {
       try {
         restoredSessionModelRef = sessionMgr?.buildSessionContext?.()?.model || null;
       } catch (err) {
         log.warn(`restore model ref read failed: ${err.message}`);
       }
-      if (restoredSessionModelRef?.provider && restoredSessionModelRef?.modelId
-        && !findModel(models.availableModels, restoredSessionModelRef.modelId, restoredSessionModelRef.provider)) {
-        throw new Error(t("error.modelNotFound", {
-          id: `${restoredSessionModelRef.provider}/${restoredSessionModelRef.modelId}`,
-        }));
+      if (restoredSessionModelRef?.provider && restoredSessionModelRef?.modelId) {
+        restoredSessionModelAvailability = classifySessionModelAvailability(
+          models,
+          restoredSessionModelRef.provider,
+          restoredSessionModelRef.modelId,
+        );
+        if (!restoredSessionModelAvailability.available) {
+          unavailableSessionModel = createUnavailableSessionModel(
+            models,
+            restoredSessionModelRef.provider,
+            restoredSessionModelRef.modelId,
+          );
+        }
       }
     }
     const restoredPromptModel = restore && !restoredPromptSnapshot
       && restoredSessionModelRef?.provider && restoredSessionModelRef?.modelId
-      ? findModel(models.availableModels, restoredSessionModelRef.modelId, restoredSessionModelRef.provider)
+      ? findModel(models.availableModels || [], restoredSessionModelRef.modelId, restoredSessionModelRef.provider)
       : null;
     const promptPatchModel = restoredPromptSnapshot ? null : (effectiveModel || restoredPromptModel);
     // Preserve legacy `auto` until the target model is known. Collapsing it to
@@ -1475,8 +1884,16 @@ export class SessionCoordinator {
       experiments: frozenExperimentFlags,
       visibleInSessionList: visibleInSessionList === true && !restore,
       sessionId: null as string | null,
+      providerCacheAffinityKey: normalizeProviderCacheAffinityKey(
+        restoredProviderCacheAffinityKey,
+        sessionMgr.getSessionId?.(),
+      ),
     }; // pre-populated for resourceLoader proxy
-    const pluginSessionMeta = normalizePluginSessionMeta({ ownerPluginId, sessionKind, sessionVisibility });
+    const pluginSessionMeta = normalizePluginSessionMeta({
+      ownerPluginId: ownerPluginId ?? earlyBranchManifest?.plugin?.ownerPluginId,
+      sessionKind: sessionKind ?? earlyBranchManifest?.plugin?.kind,
+      sessionVisibility: sessionVisibility ?? earlyBranchManifest?.plugin?.visibility,
+    });
 
     // 快照当前 system prompt，per-session 隔离。
     // 后续记忆编译、技能变更只影响新对话，已有对话的 prompt 不变（保护 prefix cache）。
@@ -1523,7 +1940,7 @@ export class SessionCoordinator {
     };
 
     const sessionPathRef = { current: sessionPathForMeta };
-    const targetModelRef = { current: promptPatchModel || effectiveModel || null };
+    const targetModelRef = { current: promptPatchModel || effectiveModel || unavailableSessionModel || null };
     const warnVisionContextInjection = (entry) => {
       if (typeof entry === "string") {
         log.warn(entry);
@@ -1542,12 +1959,15 @@ export class SessionCoordinator {
       targetModelRef,
       getVisionBridge: () => getEngine?.()?.getVisionBridge?.(),
       isVisionAuxiliaryEnabled: () => getEngine?.()?.isVisionAuxiliaryEnabled?.() === true,
-      resolveSessionFile: ({ fileId, filePath, sessionPath }) => {
+      resolveSessionFile: ({ fileId, filePath }) => {
         const engine = getEngine?.();
-        const lookupSessionPath = sessionPath || sessionPathRef.current || null;
-        if (fileId) return engine?.getSessionFile?.(fileId, { sessionPath: lookupSessionPath });
-        if (filePath) return engine?.getSessionFileByPath?.(filePath, { sessionPath: lookupSessionPath });
-        return null;
+        const activeSessionPath = sessionPathRef.current || null;
+        if (!activeSessionPath) return null;
+        return engine?.resolveActiveSessionFile?.({
+          fileId: fileId || null,
+          filePath: fileId ? null : (filePath || null),
+          sessionPath: activeSessionPath,
+        }) || null;
       },
       warn: warnVisionContextInjection,
     });
@@ -1614,8 +2034,12 @@ export class SessionCoordinator {
       tools: sessionTools,
       customTools: sessionCustomTools,
     };
-    // 新建 session 传 model；恢复 session 不传，让 PI SDK 从 JSONL 读取（单一数据源）
-    if (effectiveModel) sessionOpts.model = effectiveModel;
+    // 正常恢复仍让 Pi 从 JSONL 解析模型。历史模型当前不可用时，传入仅承载原
+    // provider/id 的不可执行占位对象，避免 Pi 静默选择其他模型；真正发送由
+    // _assertSessionModelAvailable 拦截，直到用户显式切换模型。
+    if (effectiveModel || unavailableSessionModel) {
+      sessionOpts.model = effectiveModel || unavailableSessionModel;
+    }
     const { session, modelFallbackMessage } = await createAgentSession(sessionOpts);
     if (modelFallbackMessage) {
       if (restore) {
@@ -1631,12 +2055,15 @@ export class SessionCoordinator {
     }
     const runtimeResolvedModel = session.model;
     const catalogResolvedModel = runtimeResolvedModel?.id && runtimeResolvedModel?.provider
-      ? findModel(models.availableModels, runtimeResolvedModel.id, runtimeResolvedModel.provider)
+      ? findModel(models.availableModels || [], runtimeResolvedModel.id, runtimeResolvedModel.provider)
       : null;
     const runtimeResolvedModelHasIdentity = !!(
       runtimeResolvedModel?.id && runtimeResolvedModel?.provider
     );
-    if (restore && runtimeResolvedModelHasIdentity && !catalogResolvedModel) {
+    const restoredUnavailableModelMatches = restoredSessionModelAvailability?.available === false
+      && runtimeResolvedModel?.id === restoredSessionModelRef?.modelId
+      && runtimeResolvedModel?.provider === restoredSessionModelRef?.provider;
+    if (restore && runtimeResolvedModelHasIdentity && !catalogResolvedModel && !restoredUnavailableModelMatches) {
       await teardownSessionResources({
         session,
         unsub: null,
@@ -1756,13 +2183,21 @@ export class SessionCoordinator {
       includePluginTools: false,
     });
     const channelsEnabled = this._d.getPrefs?.()?.getChannelsEnabled?.();
+    const toolAvailabilityContext = {
+      agentId: creatingAgentId,
+      restore,
+      channelsEnabled,
+      ownerPluginId: pluginSessionMeta?.ownerPluginId || null,
+      sessionKind: pluginSessionMeta?.kind || earlyBranchManifest?.kind || "chat",
+      sessionVisibility: pluginSessionMeta?.visibility || "public",
+    };
     const stableFeatureDisabledToolNames = getStableFeatureDisabledToolNames({
       channelsEnabled,
     });
     const runtimeDisabledToolNames = computeRuntimeDisabledToolNames(
       allToolObjects,
       agent.config,
-      { agentId: creatingAgentId, restore, channelsEnabled },
+      toolAvailabilityContext,
       { warn: (msg) => log.warn(msg) },
     );
     const extraDisabledToolNames = [
@@ -1905,6 +2340,14 @@ export class SessionCoordinator {
       experienceEnabled: frozenExperienceEnabled,
       modelId: resolvedModel?.id || effectiveModel?.id || null,
       modelProvider: resolvedModel?.provider || effectiveModel?.provider || null,
+      modelAvailability: restoredSessionModelAvailability || {
+        available: true,
+        reason: null,
+        modelRef: sessionModelRef(
+          resolvedModel?.provider || effectiveModel?.provider,
+          resolvedModel?.id || effectiveModel?.id,
+        ),
+      },
       cwd: effectiveCwd,
       workspaceFolders: workspaceScope.workspaceFolders,
       workspaceMountId: workspaceMount?.mountId || null,
@@ -1963,6 +2406,20 @@ export class SessionCoordinator {
     if (manifest) {
       sessionEntry.sessionId = manifest.sessionId;
     }
+    if (manifest && branchManifestCreatedEarly) {
+      this._sessionManifestStore.setMemoryPolicy(manifest.sessionId, manifestDefaults.memoryPolicy);
+      this._sessionManifestStore.setPermissionModeSnapshot(manifest.sessionId, manifestDefaults.permissionModeSnapshot);
+      this._sessionManifestStore.setThinkingLevel(manifest.sessionId, manifestDefaults.thinkingLevel);
+      this._sessionManifestStore.setWorkspaceScope(manifest.sessionId, manifestDefaults.workspaceScope);
+      if (manifestDefaults.plugin) this._sessionManifestStore.setPlugin(manifest.sessionId, manifestDefaults.plugin);
+    }
+    if (manifest && sessionPath) {
+      this._syncSessionBranchHeadQuiet(
+        sessionPath,
+        session.sessionManager,
+        restore ? "session_restore_ready" : "session_create_ready",
+      );
+    }
     // 存入 map（SessionEntry）— sessionEntry is the same object the resourceLoader proxy references.
     // Runtime ownership is keyed by sessionId when the manifest layer is available;
     // sessionPath remains only a locator resolved at method boundaries.
@@ -2005,6 +2462,7 @@ export class SessionCoordinator {
         planMode: initialPlanMode,
         thinkingLevel: initialThinkingLevel,
         promptSnapshot: promptSnapshotToWrite,
+        providerCacheAffinityKey: sessionEntry.providerCacheAffinityKey,
       };
       if (workspaceMount?.mountId) {
         metaPatch.workspaceMountId = workspaceMount.mountId;
@@ -2024,6 +2482,9 @@ export class SessionCoordinator {
       await this.writeSessionMeta(sessionPath, metaPatch);
     } else if (restore && sessionPath) {
       const metaPatch: any = {};
+      if (restoredProviderCacheAffinityKey !== sessionEntry.providerCacheAffinityKey) {
+        metaPatch.providerCacheAffinityKey = sessionEntry.providerCacheAffinityKey;
+      }
       if (!restoredPromptSnapshot) metaPatch.promptSnapshot = promptSnapshotToWrite;
       if (restoredThinkingLevel !== initialThinkingLevel) {
         metaPatch.thinkingLevel = initialThinkingLevel;
@@ -2127,6 +2588,1497 @@ export class SessionCoordinator {
     }
   }
 
+  async _discardForkedSubagentChildSession(receipt: any, cleanupState: Map<string, any>) {
+    const sessionId = receipt?.targetChildSessionId || receipt?.sessionId || null;
+    const sessionPath = receipt?.targetChildSessionPath || receipt?.sessionPath || null;
+    if (!sessionId || !sessionPath) return;
+    const state = cleanupState.get(sessionId) || {};
+    const threadStore = this._d.getSubagentThreadStore?.() || null;
+    const cleanupErrors: Error[] = [];
+    const attempt = async (label: string, action: () => any) => {
+      try {
+        await action();
+      } catch (error) {
+        cleanupErrors.push(new Error(`${label}: ${error?.message || error}`));
+      }
+    };
+
+    if (state.nestedThreadsForked && typeof threadStore?.discardForkedDirectThreads === "function") {
+      await attempt("nested subagent threads", async () => {
+        const result = await threadStore.discardForkedDirectThreads(
+        { sessionId, sessionPath },
+        {
+          discardChildSession: (childReceipt) => (
+            this._discardForkedSubagentChildSession(childReceipt, cleanupState)
+          ),
+        },
+        );
+        if (Array.isArray(result?.cleanupFailures) && result.cleanupFailures.length > 0) {
+          throw new Error(result.cleanupFailures.map((failure) => failure.message).join("; "));
+        }
+      });
+    }
+    await attempt("runtime", () => (
+      this.discardSessionRuntime(sessionPath, "subagent session fork cleanup", { skipMemory: true })
+    ));
+    if (state.pluginConfigWritten) {
+      await attempt("plugin config", () => this._d.discardForkedSessionPluginConfig?.({ sessionId, sessionPath }));
+    }
+    if (state.browserStateWritten) {
+      await attempt("browser state", () => this._d.discardForkedSessionBrowserState?.({ sessionId, sessionPath }));
+    }
+    if (Array.isArray(state.mediaTaskIds) && state.mediaTaskIds.length > 0) {
+      await attempt("media tasks", () => this._d.discardForkedSessionMediaTasks?.({
+        targetSessionId: sessionId,
+        taskIds: state.mediaTaskIds,
+      }));
+    }
+    if (Array.isArray(state.subagentDeferredTaskIds) && state.subagentDeferredTaskIds.length > 0) {
+      await attempt("subagent deferred tasks", () => this._d.discardForkedSessionDeferredTasks?.({
+        targetSessionId: sessionId,
+        taskIds: state.subagentDeferredTaskIds,
+      }));
+    }
+    if (Array.isArray(state.subagentRunTaskIds) && state.subagentRunTaskIds.length > 0) {
+      await attempt("subagent runs", () => this._d.getSubagentRunStore?.()?.discardForkedSessionRuns?.({
+        targetSessionId: sessionId,
+        targetSessionPath: sessionPath,
+        taskIds: state.subagentRunTaskIds,
+      }));
+    }
+    if (Array.isArray(state.collabSuggestionIds) && state.collabSuggestionIds.length > 0) {
+      await attempt("collaboration drafts", () => this._d.discardForkedSessionCollabDrafts?.({
+        suggestionIds: state.collabSuggestionIds,
+      }));
+    }
+    if (state.visionNotesWritten) {
+      await attempt("vision notes", () => this._d.discardForkedSessionVisionNotes?.({ sessionId, sessionPath }));
+    }
+    if (state.sessionFilesWritten) {
+      await attempt("session files", () => this._d.discardForkedSessionFiles?.({ sessionId, sessionPath }));
+    }
+    if (state.sessionMetaWritten) {
+      await attempt("session metadata", () => this._deleteCoLocatedSessionMetaEntry(sessionPath));
+    }
+
+    const manifest = this._resolveSessionManifestForId(sessionId);
+    if (manifest?.lifecycle !== "deleted") {
+      await attempt("manifest", () => this._sessionManifestStore?.updateLocatorLifecycle?.(
+        sessionId,
+        sessionPath,
+        "deleted",
+        "subagent_session_fork_cleanup",
+      ));
+    }
+    await attempt("session file", () => fsp.rm(sessionPath, { force: true }));
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, `subagent child cleanup failed for ${sessionId}`);
+    }
+    cleanupState.delete(sessionId);
+  }
+
+  _subagentChildBoundaryEntryIds({
+    sourceSessionId,
+    sourceSessionPath,
+    retainedEntries,
+  }: any = {}) {
+    const runStore = this._d.getSubagentRunStore?.() || null;
+    const boundaries: Record<string, string> = {};
+    if (typeof runStore?.query !== "function") return boundaries;
+
+    for (const taskId of collectStructuredTaskIds(retainedEntries || [])) {
+      const run = runStore.query(taskId);
+      if (!run?.threadId || !run?.childLeafEntryId) continue;
+      const sameParent = sourceSessionId && run.parentSessionId
+        ? run.parentSessionId === sourceSessionId
+        : run.parentSessionPath === sourceSessionPath;
+      if (!sameParent) continue;
+      boundaries[run.threadId] = run.childLeafEntryId;
+    }
+    return boundaries;
+  }
+
+  _assertNoSharedActiveForkTasks({
+    sourceSessionId,
+    sourceSessionPath,
+    retainedEntries,
+  }: any = {}) {
+    const taskRegistry = this._d.getTaskRegistry?.() || null;
+    const deferredStore = this._d.getDeferredResultStore?.() || null;
+    const subagentRunStore = this._d.getSubagentRunStore?.() || null;
+
+    for (const taskId of collectStructuredTaskIds(retainedEntries || [])) {
+      const registryTask = taskRegistry?.query?.(taskId) || null;
+      if (registryTask && ACTIVE_FORK_TASK_STATUSES.has(registryTask.status)) {
+        const registryType = registryTask.type || registryTask.meta?.type || null;
+        if (!MEDIA_FORK_TASK_TYPES.has(registryType)) {
+          const error: any = new Error(`active task cannot be shared by a session fork: ${taskId}`);
+          error.code = "session_fork_active_task";
+          error.status = 409;
+          error.taskId = taskId;
+          throw error;
+        }
+      }
+
+      const deferredTask = deferredStore?.query?.(taskId) || null;
+      if (deferredTask?.status === "pending") {
+        const deferredType = deferredTask.meta?.type || null;
+        if (!MEDIA_FORK_TASK_TYPES.has(deferredType)) {
+          const sameOwner = sourceSessionId && deferredTask.sessionId
+            ? deferredTask.sessionId === sourceSessionId
+            : deferredTask.sessionPath === sourceSessionPath;
+          const error: any = new Error(
+            sameOwner
+              ? `pending task cannot be shared by a session fork: ${taskId}`
+              : `retained task belongs to another session: ${taskId}`,
+          );
+          error.code = sameOwner ? "session_fork_active_task" : "session_fork_task_identity_mismatch";
+          error.status = 409;
+          error.taskId = taskId;
+          throw error;
+        }
+      }
+
+      const subagentRun = subagentRunStore?.query?.(taskId) || null;
+      if (subagentRun?.status === "pending") {
+        const error: any = new Error(`active subagent run cannot be shared by a session fork: ${taskId}`);
+        error.code = "session_fork_active_task";
+        error.status = 409;
+        error.taskId = taskId;
+        throw error;
+      }
+    }
+  }
+
+  async _cloneForkedSubagentChildSession(
+    input: any,
+    cleanupState: Map<string, any>,
+    ancestorSessionIds = new Set<string>(),
+  ) {
+    const sourceThread = input?.sourceThread || {};
+    const sourceSessionPath = sourceThread.childSessionPath || null;
+    if (!sourceSessionPath) {
+      throw new Error(`subagent child session path is unavailable for ${sourceThread.threadId || "thread"}`);
+    }
+    const identityError = () => {
+      const error: any = new Error(
+        `subagent child SessionRef mismatch for ${sourceThread.threadId || "thread"}`,
+      );
+      error.code = "subagent_child_session_identity_mismatch";
+      error.status = 409;
+      return error;
+    };
+    let sourceManifest = this._resolveSessionManifestForPath(sourceSessionPath);
+    const recordedSourceSessionId = sourceThread.childSessionId || null;
+    const manifestByRecordedId = recordedSourceSessionId
+      ? this._resolveSessionManifestForId(recordedSourceSessionId)
+      : null;
+    const recordedLocatorPath = manifestByRecordedId?.currentLocator?.path || null;
+    if (recordedLocatorPath && path.resolve(recordedLocatorPath) !== path.resolve(sourceSessionPath)) {
+      throw identityError();
+    }
+    if (sourceManifest && recordedSourceSessionId && sourceManifest.sessionId !== recordedSourceSessionId) {
+      throw identityError();
+    }
+    sourceManifest = sourceManifest || manifestByRecordedId || this._ensureSessionManifestForPath(sourceSessionPath, {
+        ownerAgentId: sourceThread.agentId || null,
+        domain: "subagent",
+        kind: "subagent_child",
+        lifecycle: "active",
+        provenance: {
+          createdBy: "subagent_session_fork_source_bootstrap",
+          parentSessionId: input?.sourceParentSession?.sessionId || null,
+        },
+        locatorReason: "subagent_session_fork_source_bootstrap",
+      });
+    if (!sourceManifest?.sessionId) {
+      throw new Error(`subagent child manifest is unavailable for ${sourceThread.threadId || "thread"}`);
+    }
+    if (
+      sourceManifest.lifecycle !== "active"
+      || sourceManifest.domain !== "subagent"
+      || sourceManifest.kind !== "subagent_child"
+      || (sourceThread.agentId && sourceManifest.ownerAgentId && sourceThread.agentId !== sourceManifest.ownerAgentId)
+    ) {
+      throw identityError();
+    }
+    const sourceSessionId = sourceManifest.sessionId;
+    if (ancestorSessionIds.has(sourceSessionId)) {
+      const error: any = new Error(`subagent session fork cycle detected at ${sourceSessionId}`);
+      error.code = "subagent_session_fork_cycle";
+      error.status = 409;
+      throw error;
+    }
+    const nextAncestorSessionIds = new Set(ancestorSessionIds);
+    nextAncestorSessionIds.add(sourceSessionId);
+
+    let targetSessionPath = null;
+    let targetSessionId = null;
+    try {
+      const targetSessionDir = typeof input?.targetSessionDir === "string" && input.targetSessionDir.trim()
+        ? path.resolve(input.targetSessionDir)
+        : path.dirname(sourceSessionPath);
+      await fsp.mkdir(targetSessionDir, { recursive: true });
+      const sourceManager = SessionManager.open(sourceSessionPath, targetSessionDir);
+      const retainedEntries = sourceManager.getBranch();
+      const requestedBoundaryEntryId = typeof input?.childBoundaryEntryId === "string"
+        ? input.childBoundaryEntryId.trim()
+        : "";
+      const boundaryEntry = requestedBoundaryEntryId
+        ? retainedEntries.find((entry) => entry?.id === requestedBoundaryEntryId)
+        : (input?.allowCurrentChildLeaf === true ? retainedEntries[retainedEntries.length - 1] : null);
+      if (!boundaryEntry?.id) {
+        const error: any = new Error(
+          `subagent child boundary is unavailable for historical fork: ${sourceThread.threadId || "thread"}`,
+        );
+        error.code = "subagent_thread_boundary_unavailable";
+        error.status = 409;
+        throw error;
+      }
+      const childBoundaryIndex = retainedEntries.findIndex((entry) => entry?.id === boundaryEntry.id);
+      const childRetainedEntries = retainedEntries.slice(0, childBoundaryIndex + 1);
+      const sourceMetaPath = path.join(path.dirname(sourceSessionPath), "session-meta.json");
+      const sourceMetaIndex = await this._readMetaCached(sourceMetaPath);
+      const sourceMeta = sourceMetaIndex?.[path.basename(sourceSessionPath)] || {};
+      const sourceProviderCacheAffinityKey = normalizeProviderCacheAffinityKey(
+        sourceMeta.providerCacheAffinityKey,
+        sourceManager.getSessionId?.(),
+      );
+      if (!sourceProviderCacheAffinityKey) {
+        throw new Error(`subagent child provider cache affinity is unavailable for ${sourceThread.threadId || "thread"}`);
+      }
+      targetSessionPath = sourceManager.createBranchedSession(boundaryEntry.id);
+      if (!targetSessionPath) throw new Error("subagent child fork did not create a session path");
+      flushSessionManagerSnapshot(sourceManager);
+      await fsp.access(targetSessionPath);
+
+      const forkedAt = new Date().toISOString();
+      const targetManifest = this._ensureSessionManifestForPath(targetSessionPath, {
+        ownerAgentId: sourceManifest.ownerAgentId || sourceThread.agentId || null,
+        domain: "subagent",
+        kind: "subagent_child",
+        lifecycle: "active",
+        health: "ok",
+        memoryPolicy: {
+          ...(sourceManifest.memoryPolicy || {}),
+          inheritedFrom: "session_fork",
+        },
+        permissionModeSnapshot: {
+          ...(sourceManifest.permissionModeSnapshot || {}),
+          source: "session_fork",
+          capturedAt: forkedAt,
+        },
+        thinkingLevel: sourceManifest.thinkingLevel || null,
+        pinnedAt: null,
+        workspaceScope: sourceManifest.workspaceScope || {},
+        plugin: sourceManifest.plugin || null,
+        provenance: {
+          ...(sourceManifest.provenance || {}),
+          createdBy: "subagent_session_fork",
+          createdFromSessionId: sourceSessionId,
+          parentSessionId: input?.targetParentSession?.sessionId || null,
+          forkedFromEntryId: boundaryEntry.id,
+          forkedFromThreadId: sourceThread.threadId || null,
+          forkedToThreadId: input?.newThreadId || null,
+        },
+        migration: sourceManifest.migration || {},
+        locatorReason: "subagent_session_fork",
+      });
+      targetSessionId = targetManifest?.sessionId || null;
+      if (!targetSessionId || targetSessionId === sourceSessionId) {
+        throw new Error("subagent child fork did not establish an independent session identity");
+      }
+
+      const state: any = {
+        collabSuggestionIds: [],
+        pluginConfigWritten: false,
+        browserStateWritten: false,
+        mediaTaskIds: [],
+        subagentRunTaskIds: [],
+        subagentDeferredTaskIds: [],
+        sessionFilesWritten: false,
+        visionNotesWritten: false,
+        nestedThreadsForked: false,
+        sessionMetaWritten: false,
+      };
+      cleanupState.set(targetSessionId, state);
+
+      const targetMeta = {
+        ...sourceMeta,
+        pinnedAt: null,
+        providerCacheAffinityKey: sourceProviderCacheAffinityKey,
+        forkedFrom: {
+          sessionId: sourceSessionId,
+          entryId: boundaryEntry.id,
+          target: { role: "session_entry", entryId: boundaryEntry.id },
+          forkedAt,
+        },
+      };
+      delete targetMeta.memoryForkBaseline;
+      await this._writeCoLocatedSessionMeta(targetSessionPath, targetMeta);
+      state.sessionMetaWritten = true;
+      const verifiedTargetMetaIndex = await this._readMetaCached(
+        path.join(path.dirname(targetSessionPath), "session-meta.json"),
+      );
+      const verifiedTargetMeta = verifiedTargetMetaIndex?.[path.basename(targetSessionPath)] || null;
+      if (verifiedTargetMeta?.providerCacheAffinityKey !== sourceProviderCacheAffinityKey) {
+        throw new Error(`subagent child provider cache affinity could not be persisted for ${sourceThread.threadId || "thread"}`);
+      }
+
+      const sourceCapabilitySnapshot = this._readSessionCapabilitySnapshot(sourceSessionPath);
+      if (sourceCapabilitySnapshot && typeof this._sessionManifestStore.setCapabilitySnapshot === "function") {
+        this._sessionManifestStore.setCapabilitySnapshot(targetSessionId, {
+          toolNames: sourceCapabilitySnapshot.toolNames,
+          promptSnapshot: sourceCapabilitySnapshot.promptSnapshot,
+          capabilityDriftDismissedFingerprint: sourceCapabilitySnapshot.capabilityDriftDismissedFingerprint,
+        }, { source: "session_fork" });
+      }
+      const sourceExecutorMetadata = this.getSessionExecutorMetadata({
+        sessionId: sourceSessionId,
+        sessionPath: sourceSessionPath,
+      });
+      if (sourceExecutorMetadata && typeof this._sessionManifestStore.setExecutorMetadata === "function") {
+        this._sessionManifestStore.setExecutorMetadata(targetSessionId, sourceExecutorMetadata, {
+          source: "session_fork",
+        });
+      }
+
+      const collabDrafts = this._d.forkSessionCollabDrafts?.({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId,
+        targetSessionPath,
+        retainedEntries: childRetainedEntries,
+      }) || { suggestionIds: [], suggestionIdMap: {} };
+      state.collabSuggestionIds = Array.isArray(collabDrafts.suggestionIds)
+        ? collabDrafts.suggestionIds.filter((id) => typeof id === "string" && id.trim())
+        : [];
+      rewriteForkedSessionDraftReferences(sourceManager, collabDrafts.suggestionIdMap);
+
+      this._d.forkSessionPluginConfig?.({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId,
+        targetSessionPath,
+      });
+      state.pluginConfigWritten = true;
+      const browserState = this._d.forkSessionBrowserState?.({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId,
+        targetSessionPath,
+        includeSourceState: childBoundaryIndex === retainedEntries.length - 1,
+      }) || { copied: false };
+      state.browserStateWritten = browserState.copied === true;
+
+      const forkedSessionFiles = this._d.forkSessionFiles?.({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId,
+        targetSessionPath,
+        retainedEntries: childRetainedEntries,
+      });
+      state.sessionFilesWritten = true;
+      this._d.forkSessionVisionNotes?.({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId,
+        targetSessionPath,
+        retainedEntries: childRetainedEntries,
+      });
+      state.visionNotesWritten = true;
+
+      if (typeof this._d.forkSessionMediaTasks !== "function") {
+        throw new Error("subagent media task fork support is unavailable");
+      }
+      const mediaTasks = this._d.forkSessionMediaTasks({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId,
+        targetSessionPath,
+        retainedEntries: childRetainedEntries,
+        forkedSessionFiles: Array.isArray(forkedSessionFiles?.files)
+          ? forkedSessionFiles.files
+          : [],
+      }) || { taskIds: [], taskIdMap: {}, deferredRecords: [] };
+      state.mediaTaskIds = Array.isArray(mediaTasks.taskIds) ? mediaTasks.taskIds : [];
+      const writableSourceManager: any = sourceManager;
+      writableSourceManager.fileEntries = rewriteForkedMediaTaskReferences(
+        writableSourceManager.fileEntries,
+        mediaTasks.taskIdMap,
+      );
+      writableSourceManager._buildIndex?.();
+      for (const record of Array.isArray(mediaTasks.deferredRecords) ? mediaTasks.deferredRecords : []) {
+        writableSourceManager.appendCustomEntry(DEFERRED_RESULT_RECORD_TYPE, record);
+      }
+      if (!flushSessionManagerSnapshot(sourceManager)) {
+        throw new Error("forked subagent media task references could not be persisted");
+      }
+
+      const threadStore = this._d.getSubagentThreadStore?.() || null;
+      if (typeof threadStore?.forkOpenDirectThreads === "function") {
+        const nested = await threadStore.forkOpenDirectThreads({
+          sourceSessionId,
+          sourceSessionPath,
+          targetSessionId,
+          targetSessionPath,
+          retainedEntries: childRetainedEntries,
+          cloneClosedThreads: true,
+          childBoundaryEntryIds: this._subagentChildBoundaryEntryIds({
+            sourceSessionId,
+            sourceSessionPath,
+            retainedEntries: childRetainedEntries,
+          }),
+          allowCurrentChildLeaf: childBoundaryIndex === retainedEntries.length - 1,
+          cloneChildSession: (childInput) => (
+            this._cloneForkedSubagentChildSession(childInput, cleanupState, nextAncestorSessionIds)
+          ),
+          discardChildSession: (childReceipt) => (
+            this._discardForkedSubagentChildSession(childReceipt, cleanupState)
+          ),
+        });
+        state.nestedThreadsForked = Array.isArray(nested?.clones) && nested.clones.length > 0;
+
+        const runStore = this._d.getSubagentRunStore?.() || null;
+        if (typeof runStore?.forkSessionRuns !== "function") {
+          throw new Error("subagent run fork support is unavailable");
+        }
+        const forkedRuns = runStore.forkSessionRuns({
+          sourceSessionId,
+          sourceSessionPath,
+          targetSessionId,
+          targetSessionPath,
+          retainedEntries: childRetainedEntries,
+          threadClones: nested?.clones || [],
+        });
+        state.subagentRunTaskIds = Array.isArray(forkedRuns?.taskIds) ? forkedRuns.taskIds : [];
+        if (typeof this._d.forkSessionDeferredTasks !== "function") {
+          throw new Error("subagent deferred task fork support is unavailable");
+        }
+        const forkedDeferred = this._d.forkSessionDeferredTasks({
+          sourceSessionId,
+          sourceSessionPath,
+          targetSessionId,
+          targetSessionPath,
+          taskIdMap: forkedRuns?.taskIdMap || {},
+        });
+        state.subagentDeferredTaskIds = Array.isArray(forkedDeferred?.taskIds)
+          ? forkedDeferred.taskIds
+          : [];
+        writableSourceManager.fileEntries = rewriteForkedSubagentRunReferences(
+          writableSourceManager.fileEntries,
+          {
+            taskIdMap: forkedRuns?.taskIdMap || {},
+            threadIdMap: forkedRuns?.threadIdMap || {},
+            threadClones: nested?.clones || [],
+          },
+        );
+        writableSourceManager._buildIndex?.();
+        if (!flushSessionManagerSnapshot(writableSourceManager)) {
+          throw new Error("forked nested subagent run references could not be persisted");
+        }
+      }
+
+      return { sessionId: targetSessionId, sessionPath: targetSessionPath };
+    } catch (error) {
+      if (targetSessionId && targetSessionPath) {
+        try {
+          await this._discardForkedSubagentChildSession({
+            targetChildSessionId: targetSessionId,
+            targetChildSessionPath: targetSessionPath,
+          }, cleanupState);
+        } catch (cleanupError) {
+          (error as any).createdSessionRef = {
+            sessionId: targetSessionId,
+            sessionPath: targetSessionPath,
+          };
+          (error as any).cleanupError = cleanupError;
+        }
+      } else if (targetSessionPath) {
+        try { await fsp.rm(targetSessionPath, { force: true }); } catch {}
+      }
+      throw error;
+    }
+  }
+
+  async _cloneForkedWorkflowTaskState(input: any, cleanupState: Map<string, any>) {
+    const taskIdMap = Object.fromEntries(Object.entries(input?.taskIdMap || {}).filter(([sourceId, targetId]) => (
+      typeof sourceId === "string"
+      && sourceId
+      && typeof targetId === "string"
+      && targetId
+      && sourceId !== targetId
+    ))) as Record<string, string>;
+    const result: any = {
+      targetSessionId: input?.targetSessionId || null,
+      targetSessionPath: input?.targetSessionPath || null,
+      journalPaths: [],
+      targetSessionDirs: [],
+      threadClones: [],
+      threadIdMap: {},
+      childSessionIdMap: {},
+      childSessionPathMap: {},
+    };
+    if (Object.keys(taskIdMap).length === 0) return result;
+
+    const agentDir = typeof input?.agentDir === "string" && input.agentDir.trim()
+      ? path.resolve(input.agentDir)
+      : null;
+    if (!agentDir) throw new Error("workflow Fork requires the owning agent directory");
+    const sourceSessionId = input?.sourceSessionId || null;
+    const sourceSessionPath = input?.sourceSessionPath || null;
+    const targetSessionId = input?.targetSessionId || null;
+    const targetSessionPath = input?.targetSessionPath || null;
+    const threadStore = this._d.getSubagentThreadStore?.() || null;
+    if (typeof threadStore?.list !== "function" || typeof threadStore?.upsert !== "function") {
+      throw new Error("workflow node Session Fork support is unavailable");
+    }
+
+    try {
+      const journalDir = path.join(agentDir, "workflow-journals");
+      for (const [sourceTaskId, targetTaskId] of Object.entries(taskIdMap)) {
+        const sourceJournalPath = path.join(journalDir, `${sourceTaskId}.jsonl`);
+        if (!fs.existsSync(sourceJournalPath)) continue;
+        await fsp.mkdir(journalDir, { recursive: true });
+        const targetJournalPath = path.join(journalDir, `${targetTaskId}.jsonl`);
+        await fsp.copyFile(sourceJournalPath, targetJournalPath, fs.constants.COPYFILE_EXCL);
+        result.journalPaths.push(targetJournalPath);
+      }
+
+      const sourceThreads = threadStore.list().filter((thread) => {
+        if (thread?.kind !== "workflow_node" || !taskIdMap[thread.parentTaskId]) return false;
+        if (sourceSessionId && thread.parentSessionId) return thread.parentSessionId === sourceSessionId;
+        return !!sourceSessionPath && thread.parentSessionPath === sourceSessionPath;
+      });
+      for (let index = 0; index < sourceThreads.length; index += 1) {
+        const sourceThread = sourceThreads[index];
+        if (sourceThread.status !== "closed" || sourceThread.lastRunStatus === "pending") {
+          const error: any = new Error(`workflow node is still active: ${sourceThread.threadId}`);
+          error.code = "workflow_node_busy";
+          error.status = 409;
+          error.threadId = sourceThread.threadId;
+          throw error;
+        }
+        if (!sourceThread.childSessionPath) {
+          throw new Error(`workflow node child Session is unavailable: ${sourceThread.threadId}`);
+        }
+        const targetTaskId = taskIdMap[sourceThread.parentTaskId];
+        const suffix = typeof sourceThread.threadId === "string"
+          && sourceThread.threadId.startsWith(`${sourceThread.parentTaskId}::`)
+          ? sourceThread.threadId.slice(sourceThread.parentTaskId.length)
+          : `::${sourceThread.nodeId || `node-${index + 1}`}`;
+        const newThreadId = `${targetTaskId}${suffix}`;
+        if (threadStore.get?.(newThreadId)) {
+          throw new Error(`workflow node Fork identity already exists: ${newThreadId}`);
+        }
+        const targetSessionDir = path.join(agentDir, "workflow-sessions", targetTaskId);
+        if (!result.targetSessionDirs.includes(targetSessionDir)) result.targetSessionDirs.push(targetSessionDir);
+        const childRef = await this._cloneForkedSubagentChildSession({
+          sourceThread,
+          sourceParentSession: { sessionId: sourceSessionId, sessionPath: sourceSessionPath },
+          targetParentSession: { sessionId: targetSessionId, sessionPath: targetSessionPath },
+          newThreadId,
+          allowCurrentChildLeaf: true,
+          targetSessionDir,
+        }, cleanupState);
+        const forkedAt = new Date().toISOString();
+        threadStore.upsert(newThreadId, {
+          ...sourceThread,
+          threadId: newThreadId,
+          kind: "workflow_node",
+          status: "closed",
+          parentSessionId: targetSessionId,
+          parentSessionPath: targetSessionPath,
+          parentTaskId: targetTaskId,
+          childSessionId: childRef.sessionId,
+          childSessionPath: childRef.sessionPath,
+          forkedFromThreadId: sourceThread.threadId,
+          forkedAt,
+          sourceThreadIds: [
+            sourceThread.threadId,
+            ...(Array.isArray(sourceThread.sourceThreadIds) ? sourceThread.sourceThreadIds : []),
+          ],
+          cleanupPending: false,
+          cleanupError: null,
+        });
+        const receipt = {
+          sourceThreadId: sourceThread.threadId,
+          newThreadId,
+          sourceChildSessionId: sourceThread.childSessionId || null,
+          sourceChildSessionPath: sourceThread.childSessionPath,
+          targetChildSessionId: childRef.sessionId,
+          targetChildSessionPath: childRef.sessionPath,
+          targetSessionDir,
+        };
+        result.threadClones.push(receipt);
+        result.threadIdMap[sourceThread.threadId] = newThreadId;
+        if (sourceThread.childSessionId) {
+          result.childSessionIdMap[sourceThread.childSessionId] = childRef.sessionId;
+        }
+        result.childSessionPathMap[sourceThread.childSessionPath] = childRef.sessionPath;
+      }
+      return result;
+    } catch (error) {
+      try {
+        await this._discardForkedWorkflowTaskState(result, cleanupState);
+      } catch (cleanupError) {
+        (error as any).workflowForkCleanupError = cleanupError;
+      }
+      throw error;
+    }
+  }
+
+  async _discardForkedWorkflowTaskState(state: any, cleanupState: Map<string, any>) {
+    const threadStore = this._d.getSubagentThreadStore?.() || null;
+    const cleanupErrors: Error[] = [];
+    for (const receipt of [...(Array.isArray(state?.threadClones) ? state.threadClones : [])].reverse()) {
+      try {
+        await this._discardForkedSubagentChildSession(receipt, cleanupState);
+        threadStore?.remove?.(receipt.newThreadId);
+      } catch (error) {
+        cleanupErrors.push(error instanceof Error ? error : new Error(String(error)));
+        try {
+          threadStore?.upsert?.(receipt.newThreadId, {
+            kind: "workflow_node",
+            status: "closed",
+            parentSessionId: state?.targetSessionId || null,
+            parentSessionPath: state?.targetSessionPath || null,
+            childSessionId: receipt.targetChildSessionId,
+            childSessionPath: receipt.targetChildSessionPath,
+            forkedFromThreadId: receipt.sourceThreadId,
+            cleanupPending: true,
+            cleanupError: error?.message || String(error),
+          });
+        } catch (recordError) {
+          cleanupErrors.push(recordError instanceof Error ? recordError : new Error(String(recordError)));
+        }
+      }
+    }
+    for (const journalPath of Array.isArray(state?.journalPaths) ? state.journalPaths : []) {
+      try { await fsp.rm(journalPath, { force: true }); } catch (error) {
+        cleanupErrors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    for (const sessionDir of [...(Array.isArray(state?.targetSessionDirs) ? state.targetSessionDirs : [])].reverse()) {
+      try { await fsp.rmdir(sessionDir); } catch (error) {
+        if (error?.code !== "ENOENT" && error?.code !== "ENOTEMPTY") {
+          cleanupErrors.push(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, "workflow Fork cleanup failed");
+    }
+  }
+
+  async forkSessionAtNode(input: any = {}) {
+    const resolvedRef = this._resolveSessionWriteRef(input, "forkSessionAtNode");
+    const releaseOperation = acquireSessionOperation(
+      resolvedRef.sessionId || resolvedRef.sessionPath,
+      "fork",
+    );
+    try {
+      return await this._forkSessionAtNodeUnlocked(input);
+    } finally {
+      releaseOperation();
+    }
+  }
+
+  async _forkSessionAtNodeUnlocked(input: any = {}) {
+    if (!this._sessionManifestStore) {
+      throw sessionForkError("session fork requires the session manifest store", "session_manifest_unavailable", 503);
+    }
+
+    const requested = this._normalizeSessionRef(input);
+    const resolvedRef = this._resolveSessionWriteRef(input, "forkSessionAtNode");
+    if (
+      requested.sessionId
+      && requested.sessionPath
+      && path.resolve(requested.sessionPath) !== path.resolve(resolvedRef.sessionPath)
+    ) {
+      throw sessionForkError(
+        "forkSessionAtNode: supplied path does not match the current session locator",
+        "session_locator_mismatch",
+        409,
+      );
+    }
+    const sourceSessionPath = resolvedRef.sessionPath;
+    this._assertActiveDesktopSessionPath(sourceSessionPath, "forkSessionAtNode");
+    this._assertCurrentActiveSessionLocator(sourceSessionPath, "forkSessionAtNode");
+    if (this._isDeletedAgentSessionPath(sourceSessionPath)) {
+      throw sessionForkError(
+        "forkSessionAtNode: session belongs to a deleted agent",
+        "agent_deleted",
+        409,
+      );
+    }
+    try {
+      await fsp.access(sourceSessionPath);
+    } catch {
+      throw sessionForkError("forkSessionAtNode: source session not found", "session_not_found", 404);
+    }
+
+    let sourceManifest = resolvedRef.manifest;
+    if (!sourceManifest) {
+      const legacyOwnerAgentId = this.resolveSessionOwnership(sourceSessionPath).agentId;
+      sourceManifest = this._ensureSessionManifestForPath(sourceSessionPath, {
+        ownerAgentId: legacyOwnerAgentId,
+        domain: "desktop",
+        kind: "chat",
+        lifecycle: "active",
+        provenance: { createdBy: "session_fork_source_bootstrap" },
+        locatorReason: "session_fork_source_bootstrap",
+      });
+    }
+    if (!sourceManifest?.sessionId) {
+      throw sessionForkError("forkSessionAtNode: source session identity is unavailable", "session_manifest_not_found", 404);
+    }
+    if (sourceManifest.lifecycle && sourceManifest.lifecycle !== "active") {
+      throw sessionForkError(
+        `forkSessionAtNode: source session lifecycle is ${sourceManifest.lifecycle}`,
+        "session_lifecycle_mismatch",
+        409,
+      );
+    }
+    const sourceSessionId = sourceManifest.sessionId;
+    const sourceRuntimeEntry = this._getSessionEntryByPath(sourceSessionPath);
+    const sourceReminderEntry = sourceRuntimeEntry
+      || this._getRuntimeValueForPath(this._hibernatedSessionMeta, sourceSessionPath)
+      || null;
+    const forkReminderState = sourceReminderEntry ? {
+      reminderEnvCursor: sourceReminderEntry.reminderEnvCursor,
+      reminderEnvStartSeq: sourceReminderEntry.reminderEnvStartSeq,
+      lastTimeObservedAt: sourceReminderEntry.lastTimeObservedAt,
+      reminderCompactionRevision: sourceReminderEntry.reminderCompactionRevision,
+      reminderConsumedCompactionRevision: sourceReminderEntry.reminderConsumedCompactionRevision,
+      reminderAcceptedUnavailableToolNames: Array.isArray(sourceReminderEntry.reminderAcceptedUnavailableToolNames)
+        ? [...sourceReminderEntry.reminderAcceptedUnavailableToolNames]
+        : [],
+      reminderUnavailableRevision: sourceReminderEntry.reminderUnavailableRevision,
+    } : null;
+    if (
+      this.isSessionStreaming(sourceSessionPath)
+      || this.isSessionSwitching(sourceSessionPath)
+      || sourceRuntimeEntry?.session?.isCompacting === true
+    ) {
+      throw sessionForkError("session_busy", "session_busy", 409);
+    }
+
+    const ownership = this.resolveSessionOwnership({
+      sessionId: sourceSessionId,
+      sessionPath: sourceSessionPath,
+    });
+    if (!ownership.agentId) {
+      throw sessionForkError("forkSessionAtNode: source agent is unavailable", "session_owner_unavailable", 409);
+    }
+    const sourceAgent = this._d.getAgentById?.(ownership.agentId) || null;
+    if (!sourceAgent) {
+      throw sessionForkError(
+        `forkSessionAtNode: agent "${ownership.agentId}" not found`,
+        "session_owner_unavailable",
+        409,
+      );
+    }
+    const readyAgent = await this._ensureAgentRuntimeReady(ownership.agentId, {
+      agent: sourceAgent,
+      reason: "forkSessionAtNode",
+    });
+
+    let sourceManager;
+    let sourceBranch;
+    try {
+      sourceManager = SessionManager.open(sourceSessionPath, readyAgent.sessionDir);
+      sourceBranch = sourceManager.getBranch();
+    } catch (error) {
+      throw sessionForkError(
+        `forkSessionAtNode: source session could not be opened: ${error?.message || error}`,
+        "session_fork_source_invalid",
+        422,
+      );
+    }
+
+    let resolvedTarget;
+    try {
+      resolvedTarget = resolveSessionNodeTarget(sourceBranch, input?.target, { mode: "fork" });
+    } catch (error) {
+      throw sessionForkError(
+        error?.message || "forkSessionAtNode: invalid target",
+        "session_fork_target_invalid",
+        400,
+      );
+    }
+    const boundaryEntry = resolvedTarget.boundaryEntry;
+    const boundaryIndex = sourceBranch.findIndex((entry) => entry?.id === boundaryEntry?.id);
+    if (!boundaryEntry?.id || boundaryIndex < 0) {
+      throw sessionForkError("forkSessionAtNode: target boundary is unavailable", "session_fork_target_invalid", 400);
+    }
+    const retainedEntries = sourceBranch.slice(0, boundaryIndex + 1);
+    this._assertNoSharedActiveForkTasks({
+      sourceSessionId,
+      sourceSessionPath,
+      retainedEntries,
+    });
+    const retainedMessageCount = countRetainedSessionMessages(retainedEntries);
+    const forkedAt = new Date().toISOString();
+
+    const sourceMetaPath = this._sessionMetaPathFor(sourceSessionPath);
+    const sourceMetaIndex = await this._readMetaCached(sourceMetaPath);
+    const sourceMeta = sourceMetaIndex?.[path.basename(sourceSessionPath)] || {};
+    // createBranchedSession mutates sourceManager into the child manager, so
+    // capture the source cache lineage before that call.
+    const sourceProviderCacheAffinityKey = normalizeProviderCacheAffinityKey(
+      sourceRuntimeEntry?.providerCacheAffinityKey ?? sourceMeta.providerCacheAffinityKey,
+      sourceManager.getSessionId?.(),
+    );
+    if (!sourceProviderCacheAffinityKey) {
+      throw sessionForkError(
+        "forkSessionAtNode: source provider cache affinity is unavailable",
+        "session_cache_affinity_unavailable",
+        409,
+      );
+    }
+    const sourceCapabilitySnapshot = this._readSessionCapabilitySnapshot(sourceSessionPath);
+    const sourceExecutorMetadata = this.getSessionExecutorMetadata({
+      sessionId: sourceSessionId,
+      sessionPath: sourceSessionPath,
+    });
+    const sourceTitles = await this._loadSessionTitlesFor(path.dirname(sourceSessionPath));
+    const sourceTitle = this._sessionTitleFromMap(sourceTitles, sourceSessionPath);
+
+    let childSessionPath = null;
+    let childSessionId = null;
+    let childManifest = null;
+    let childMetaWritten = false;
+    let childTitleWritten = false;
+    let childMemoryBaselineWritten = false;
+    let childPluginConfigWritten = false;
+    let childBrowserStateWritten = false;
+    let childCollabDraftSuggestionIds: string[] = [];
+    let childMediaTaskIds: string[] = [];
+    const subagentChildCleanupState = new Map<string, any>();
+    let childSubagentThreadsForked = false;
+    let childSubagentRunTaskIds: string[] = [];
+    let childSubagentDeferredTaskIds: string[] = [];
+    let childWorkflowRunTaskIds: string[] = [];
+    let childWorkflowDeferredTaskIds: string[] = [];
+    let childWorkflowState: any = null;
+    let childActivityIds: string[] = [];
+    try {
+      childSessionPath = sourceManager.createBranchedSession(boundaryEntry.id);
+      if (!childSessionPath) {
+        throw sessionForkError("forkSessionAtNode: child session path was not created", "session_fork_create_failed", 500);
+      }
+      flushSessionManagerSnapshot(sourceManager);
+      try {
+        await fsp.access(childSessionPath);
+      } catch {
+        throw sessionForkError("forkSessionAtNode: child session file was not persisted", "session_fork_create_failed", 500);
+      }
+      this._assertActiveDesktopSessionPath(childSessionPath, "forkSessionAtNode");
+
+      childManifest = this._ensureSessionManifestForPath(childSessionPath, {
+        ownerAgentId: sourceManifest.ownerAgentId || ownership.agentId,
+        domain: sourceManifest.domain || "desktop",
+        kind: sourceManifest.kind || "chat",
+        lifecycle: "active",
+        health: "ok",
+        memoryPolicy: {
+          ...(sourceManifest.memoryPolicy || {}),
+          inheritedFrom: "session_fork",
+        },
+        permissionModeSnapshot: {
+          ...(sourceManifest.permissionModeSnapshot || {}),
+          source: "session_fork",
+          capturedAt: forkedAt,
+        },
+        thinkingLevel: sourceManifest.thinkingLevel || sourceMeta.thinkingLevel || null,
+        pinnedAt: null,
+        workspaceScope: sourceManifest.workspaceScope || {},
+        plugin: sourceManifest.plugin || sourceMeta.plugin || null,
+        provenance: {
+          ...(sourceManifest.provenance || {}),
+          createdBy: "session_fork",
+          createdFromSessionId: sourceSessionId,
+          forkedFromEntryId: boundaryEntry.id,
+        },
+        migration: sourceManifest.migration || {},
+        locatorReason: "session_fork",
+      });
+      childSessionId = childManifest?.sessionId || null;
+      if (!childSessionId || childSessionId === sourceSessionId) {
+        throw sessionForkError("forkSessionAtNode: child session identity was not created", "session_fork_identity_failed", 500);
+      }
+
+      if (typeof this._d.forkSessionCollabDrafts !== "function") {
+        throw sessionForkError(
+          "session collaboration draft fork support is unavailable",
+          "session_collab_draft_fork_unavailable",
+          503,
+        );
+      }
+      const collabDrafts = this._d.forkSessionCollabDrafts({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        retainedEntries,
+      }) || { drafts: 0, suggestionIds: [], suggestionIdMap: {} };
+      childCollabDraftSuggestionIds = Array.isArray(collabDrafts.suggestionIds)
+        ? collabDrafts.suggestionIds.filter((id) => typeof id === "string" && id.trim())
+        : [];
+      rewriteForkedSessionDraftReferences(sourceManager, collabDrafts.suggestionIdMap);
+
+      if (typeof this._d.initializeSessionMemoryForkBaseline !== "function") {
+        throw sessionForkError(
+          "session memory fork baseline support is unavailable",
+          "session_memory_fork_unavailable",
+          503,
+        );
+      }
+      await this._d.initializeSessionMemoryForkBaseline({
+        agentId: ownership.agentId,
+        sessionId: childSessionId,
+        sourceSessionId,
+        throughEntryId: boundaryEntry.id,
+        messageCount: retainedMessageCount,
+        forkedAt,
+      });
+      childMemoryBaselineWritten = true;
+
+      if (typeof this._d.forkSessionPluginConfig !== "function") {
+        throw sessionForkError(
+          "session plugin config fork support is unavailable",
+          "session_plugin_config_fork_unavailable",
+          503,
+        );
+      }
+      this._d.forkSessionPluginConfig({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+      });
+      childPluginConfigWritten = true;
+
+      if (typeof this._d.forkSessionBrowserState !== "function") {
+        throw sessionForkError(
+          "session browser state fork support is unavailable",
+          "session_browser_state_fork_unavailable",
+          503,
+        );
+      }
+      const browserState = this._d.forkSessionBrowserState({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        includeSourceState: boundaryIndex === sourceBranch.length - 1,
+      }) || { copied: false, tabs: 0, url: null };
+      childBrowserStateWritten = browserState.copied === true;
+
+      const childMeta = forkedSessionMeta(sourceMeta, {
+        sourceSessionId,
+        boundaryEntryId: boundaryEntry.id,
+        target: resolvedTarget.target,
+        forkedAt,
+        messageCount: retainedMessageCount,
+        providerCacheAffinityKey: sourceProviderCacheAffinityKey,
+      });
+      await this.writeSessionMeta(childSessionPath, childMeta);
+      childMetaWritten = true;
+      const verifiedMetaIndex = await this._readMetaCached(this._sessionMetaPathFor(childSessionPath));
+      const verifiedMeta = verifiedMetaIndex?.[path.basename(childSessionPath)] || null;
+      if (
+        verifiedMeta?.forkedFrom?.sessionId !== sourceSessionId
+        || verifiedMeta?.forkedFrom?.entryId !== boundaryEntry.id
+        || verifiedMeta?.providerCacheAffinityKey !== sourceProviderCacheAffinityKey
+      ) {
+        throw sessionForkError("forkSessionAtNode: child metadata verification failed", "session_fork_meta_failed", 500);
+      }
+
+      if (sourceCapabilitySnapshot && typeof this._sessionManifestStore.setCapabilitySnapshot === "function") {
+        this._sessionManifestStore.setCapabilitySnapshot(childSessionId, {
+          toolNames: sourceCapabilitySnapshot.toolNames,
+          promptSnapshot: sourceCapabilitySnapshot.promptSnapshot,
+          capabilityDriftDismissedFingerprint: sourceCapabilitySnapshot.capabilityDriftDismissedFingerprint,
+        }, { source: "session_fork" });
+      }
+      if (sourceExecutorMetadata && typeof this._sessionManifestStore.setExecutorMetadata === "function") {
+        this._sessionManifestStore.setExecutorMetadata(childSessionId, sourceExecutorMetadata, {
+          source: "session_fork",
+        });
+      }
+      if (sourceTitle) {
+        await this.saveSessionTitle(childSessionPath, sourceTitle);
+        childTitleWritten = true;
+      }
+
+      if (typeof this._d.forkSessionFiles !== "function") {
+        throw sessionForkError("session file fork support is unavailable", "session_file_fork_unavailable", 503);
+      }
+      const sessionFiles = this._d.forkSessionFiles({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        retainedEntries,
+      });
+      const visionNotes = typeof this._d.forkSessionVisionNotes === "function"
+        ? this._d.forkSessionVisionNotes({
+            sourceSessionId,
+            sourceSessionPath,
+            targetSessionId: childSessionId,
+            targetSessionPath: childSessionPath,
+            retainedEntries,
+          })
+        : { notes: 0, keys: [] };
+
+      if (typeof this._d.forkSessionMediaTasks !== "function") {
+        throw sessionForkError(
+          "session media task fork support is unavailable",
+          "session_media_task_fork_unavailable",
+          503,
+        );
+      }
+      const mediaTasks = this._d.forkSessionMediaTasks({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        retainedEntries,
+        forkedSessionFiles: Array.isArray(sessionFiles?.files) ? sessionFiles.files : [],
+      }) || { taskIds: [], taskIdMap: {}, deferredRecords: [], skipped: [] };
+      childMediaTaskIds = Array.isArray(mediaTasks.taskIds) ? mediaTasks.taskIds : [];
+      sourceManager.fileEntries = rewriteForkedMediaTaskReferences(
+        sourceManager.fileEntries,
+        mediaTasks.taskIdMap,
+      );
+      sourceManager._buildIndex?.();
+      for (const record of Array.isArray(mediaTasks.deferredRecords) ? mediaTasks.deferredRecords : []) {
+        sourceManager.appendCustomEntry(DEFERRED_RESULT_RECORD_TYPE, record);
+      }
+      if (!flushSessionManagerSnapshot(sourceManager)) {
+        throw sessionForkError(
+          "forked media task references could not be persisted",
+          "session_media_task_rewrite_failed",
+          500,
+        );
+      }
+
+      const subagentThreadStore = this._d.getSubagentThreadStore?.() || null;
+      if (typeof subagentThreadStore?.forkOpenDirectThreads !== "function") {
+        throw sessionForkError(
+          "subagent thread fork support is unavailable",
+          "subagent_thread_fork_unavailable",
+          503,
+        );
+      }
+      const subagentThreads = await subagentThreadStore.forkOpenDirectThreads({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        retainedEntries,
+        cloneClosedThreads: true,
+        childBoundaryEntryIds: this._subagentChildBoundaryEntryIds({
+          sourceSessionId,
+          sourceSessionPath,
+          retainedEntries,
+        }),
+        allowCurrentChildLeaf: boundaryIndex === sourceBranch.length - 1,
+        cloneChildSession: (childInput) => (
+          this._cloneForkedSubagentChildSession(childInput, subagentChildCleanupState)
+        ),
+        discardChildSession: (childReceipt) => (
+          this._discardForkedSubagentChildSession(childReceipt, subagentChildCleanupState)
+        ),
+      });
+      childSubagentThreadsForked = Array.isArray(subagentThreads?.clones)
+        && subagentThreads.clones.length > 0;
+
+      const subagentRunStore = this._d.getSubagentRunStore?.() || null;
+      if (typeof subagentRunStore?.forkSessionRuns !== "function") {
+        throw sessionForkError(
+          "subagent run fork support is unavailable",
+          "subagent_run_fork_unavailable",
+          503,
+        );
+      }
+      const subagentRuns = subagentRunStore.forkSessionRuns({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        retainedEntries,
+        threadClones: subagentThreads?.clones || [],
+      });
+      childSubagentRunTaskIds = Array.isArray(subagentRuns?.taskIds) ? subagentRuns.taskIds : [];
+      if (typeof this._d.forkSessionDeferredTasks !== "function") {
+        throw sessionForkError(
+          "subagent deferred task fork support is unavailable",
+          "subagent_deferred_task_fork_unavailable",
+          503,
+        );
+      }
+      const subagentDeferredTasks = this._d.forkSessionDeferredTasks({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        taskIdMap: subagentRuns?.taskIdMap || {},
+      });
+      childSubagentDeferredTaskIds = Array.isArray(subagentDeferredTasks?.taskIds)
+        ? subagentDeferredTasks.taskIds
+        : [];
+
+      if (typeof subagentRunStore?.forkSessionWorkflowRuns !== "function") {
+        throw sessionForkError(
+          "workflow run fork support is unavailable",
+          "workflow_run_fork_unavailable",
+          503,
+        );
+      }
+      const workflowRuns = subagentRunStore.forkSessionWorkflowRuns({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        retainedEntries,
+      });
+      childWorkflowRunTaskIds = Array.isArray(workflowRuns?.taskIds) ? workflowRuns.taskIds : [];
+      const workflowDeferredTasks = this._d.forkSessionDeferredTasks({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        taskIdMap: workflowRuns?.taskIdMap || {},
+      });
+      childWorkflowDeferredTaskIds = Array.isArray(workflowDeferredTasks?.taskIds)
+        ? workflowDeferredTasks.taskIds
+        : [];
+      childWorkflowState = await this._cloneForkedWorkflowTaskState({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        taskIdMap: workflowRuns?.taskIdMap || {},
+        agentDir: readyAgent.agentDir,
+      }, subagentChildCleanupState);
+      childWorkflowState.targetSessionId = childSessionId;
+      childWorkflowState.targetSessionPath = childSessionPath;
+
+      sourceManager.fileEntries = rewriteForkedSubagentRunReferences(
+        sourceManager.fileEntries,
+        {
+          taskIdMap: subagentRuns?.taskIdMap || {},
+          threadIdMap: subagentRuns?.threadIdMap || {},
+          threadClones: subagentThreads?.clones || [],
+        },
+      );
+      sourceManager.fileEntries = rewriteForkedWorkflowRunReferences(
+        sourceManager.fileEntries,
+        { taskIdMap: workflowRuns?.taskIdMap || {} },
+      );
+      sourceManager._buildIndex?.();
+
+      const activityHub = this._d.getActivityHub?.() || null;
+      if (typeof activityHub?.forkSessionEntries !== "function") {
+        throw sessionForkError(
+          "session activity projection fork support is unavailable",
+          "session_activity_fork_unavailable",
+          503,
+        );
+      }
+      const directThreadClones = Array.isArray(subagentThreads?.clones) ? subagentThreads.clones : [];
+      const directChildSessionIdMap = Object.fromEntries(directThreadClones
+        .filter((receipt) => receipt?.sourceChildSessionId && receipt?.targetChildSessionId)
+        .map((receipt) => [receipt.sourceChildSessionId, receipt.targetChildSessionId]));
+      const directChildSessionPathMap = Object.fromEntries(directThreadClones
+        .filter((receipt) => receipt?.sourceChildSessionPath && receipt?.targetChildSessionPath)
+        .map((receipt) => [receipt.sourceChildSessionPath, receipt.targetChildSessionPath]));
+      const activityState = activityHub.forkSessionEntries({
+        sourceSessionId,
+        sourceSessionPath,
+        targetSessionId: childSessionId,
+        targetSessionPath: childSessionPath,
+        activityIdMap: {
+          ...(subagentRuns?.taskIdMap || {}),
+          ...(workflowRuns?.taskIdMap || {}),
+        },
+        threadIdMap: {
+          ...(subagentRuns?.threadIdMap || {}),
+          ...(childWorkflowState?.threadIdMap || {}),
+        },
+        childSessionIdMap: {
+          ...directChildSessionIdMap,
+          ...(childWorkflowState?.childSessionIdMap || {}),
+        },
+        childSessionPathMap: {
+          ...directChildSessionPathMap,
+          ...(childWorkflowState?.childSessionPathMap || {}),
+        },
+      });
+      childActivityIds = Array.isArray(activityState?.activityIds) ? activityState.activityIds : [];
+      if (!flushSessionManagerSnapshot(sourceManager)) {
+        throw sessionForkError(
+          "forked subagent run references could not be persisted",
+          "subagent_run_rewrite_failed",
+          500,
+        );
+      }
+
+      if (forkReminderState) {
+        this._setRuntimeValueForPath(this._hibernatedSessionMeta, childSessionPath, {
+          sessionId: childSessionId,
+          sessionPath: childSessionPath,
+          agentId: ownership.agentId,
+          ...forkReminderState,
+        });
+      }
+
+      const childSession = await this.ensureSessionLoaded(childSessionPath);
+      const restoredPath = childSession?.sessionManager?.getSessionFile?.() || null;
+      if (!restoredPath || path.resolve(restoredPath) !== path.resolve(childSessionPath)) {
+        throw sessionForkError("forkSessionAtNode: child session restore verification failed", "session_fork_restore_failed", 500);
+      }
+      const folderScope = this.getSessionFolderScope(childSessionPath);
+      const permissionMode = this.getPermissionMode(childSessionPath);
+      const result = {
+        sessionId: childSessionId,
+        sessionPath: childSessionPath,
+        path: childSessionPath,
+        agentId: ownership.agentId,
+        agentName: readyAgent.agentName || readyAgent.name || ownership.agentId,
+        cwd: childSession.sessionManager?.getCwd?.() || folderScope.cwd || null,
+        workspaceFolders: folderScope.workspaceFolders,
+        authorizedFolders: folderScope.authorizedFolders,
+        permissionMode,
+        accessMode: legacyAccessModeFromPermissionMode(permissionMode),
+        planMode: isReadOnlyPermissionMode(permissionMode),
+        thinkingLevel: this.getSessionThinkingLevel(childSessionPath),
+        projectId: childMeta.projectId ?? null,
+        workspaceMountId: childMeta.workspaceMountId || null,
+        workspaceLabel: childMeta.workspaceLabel || null,
+        sourceSessionId,
+        forkedFromEntryId: boundaryEntry.id,
+        target: resolvedTarget.target,
+        sessionFiles,
+        visionNotes,
+        browserState,
+        mediaTasks: {
+          cloned: childMediaTaskIds.length,
+          skipped: Array.isArray(mediaTasks?.skipped) ? mediaTasks.skipped.length : 0,
+        },
+        subagentThreads: {
+          cloned: Array.isArray(subagentThreads?.clones) ? subagentThreads.clones.length : 0,
+          skipped: Array.isArray(subagentThreads?.skipped) ? subagentThreads.skipped.length : 0,
+        },
+        subagentRuns: {
+          cloned: childSubagentRunTaskIds.length,
+          deferred: childSubagentDeferredTaskIds.length,
+        },
+        workflowRuns: {
+          cloned: childWorkflowRunTaskIds.length,
+          deferred: childWorkflowDeferredTaskIds.length,
+          nodes: Array.isArray(childWorkflowState?.threadClones)
+            ? childWorkflowState.threadClones.length
+            : 0,
+        },
+        activities: { cloned: childActivityIds.length },
+      };
+      try {
+        const notification = this._d.notifySessionMemoryForkCreated?.({
+          agentId: ownership.agentId,
+          sessionId: childSessionId,
+          sessionPath: childSessionPath,
+        });
+        if (notification && typeof notification.then === "function") {
+          void Promise.resolve(notification).catch((notificationError) => {
+            log.warn(
+              `fork memory materialization failed for ${childSessionId}: ${notificationError?.message || notificationError}`,
+            );
+          });
+        }
+      } catch (notificationError) {
+        log.warn(
+          `fork memory materialization scheduling failed for ${childSessionId}: ${notificationError?.message || notificationError}`,
+        );
+      }
+      return result;
+    } catch (error) {
+      if (childSessionPath) this._deleteRuntimeValueForPath(this._hibernatedSessionMeta, childSessionPath);
+      if (childSessionPath) {
+        try { await this.discardSessionRuntime(childSessionPath, "session fork failed", { skipMemory: true }); } catch {}
+      }
+      if (childActivityIds.length > 0 && childSessionId && childSessionPath) {
+        try {
+          this._d.getActivityHub?.()?.discardForkedSessionEntries?.({
+            targetSessionId: childSessionId,
+            targetSessionPath: childSessionPath,
+            activityIds: childActivityIds,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork activity projection cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childWorkflowState) {
+        try {
+          await this._discardForkedWorkflowTaskState(childWorkflowState, subagentChildCleanupState);
+        } catch (cleanupError) {
+          log.warn(`fork workflow node cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childWorkflowDeferredTaskIds.length > 0 && childSessionId) {
+        try {
+          await this._d.discardForkedSessionDeferredTasks?.({
+            targetSessionId: childSessionId,
+            taskIds: childWorkflowDeferredTaskIds,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork workflow deferred cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childWorkflowRunTaskIds.length > 0 && childSessionId && childSessionPath) {
+        try {
+          await this._d.getSubagentRunStore?.()?.discardForkedSessionRuns?.({
+            targetSessionId: childSessionId,
+            targetSessionPath: childSessionPath,
+            taskIds: childWorkflowRunTaskIds,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork workflow run cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childSubagentThreadsForked && childSessionId && childSessionPath) {
+        try {
+          const cleanupResult = await this._d.getSubagentThreadStore?.()?.discardForkedDirectThreads?.(
+            { sessionId: childSessionId, sessionPath: childSessionPath },
+            {
+              discardChildSession: (childReceipt) => (
+                this._discardForkedSubagentChildSession(childReceipt, subagentChildCleanupState)
+              ),
+            },
+          );
+          if (Array.isArray(cleanupResult?.cleanupFailures) && cleanupResult.cleanupFailures.length > 0) {
+            throw new Error(cleanupResult.cleanupFailures.map((failure) => failure.message).join("; "));
+          }
+        } catch (cleanupError) {
+          log.warn(`fork subagent thread cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childSubagentDeferredTaskIds.length > 0 && childSessionId) {
+        try {
+          await this._d.discardForkedSessionDeferredTasks?.({
+            targetSessionId: childSessionId,
+            taskIds: childSubagentDeferredTaskIds,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork subagent deferred cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childSubagentRunTaskIds.length > 0 && childSessionId && childSessionPath) {
+        try {
+          await this._d.getSubagentRunStore?.()?.discardForkedSessionRuns?.({
+            targetSessionId: childSessionId,
+            targetSessionPath: childSessionPath,
+            taskIds: childSubagentRunTaskIds,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork subagent run cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childMediaTaskIds.length > 0 && childSessionId) {
+        try {
+          await this._d.discardForkedSessionMediaTasks?.({
+            targetSessionId: childSessionId,
+            taskIds: childMediaTaskIds,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork media task cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childMemoryBaselineWritten && childSessionId) {
+        try {
+          await this._d.discardSessionMemoryForkBaseline?.({
+            agentId: ownership.agentId,
+            sessionId: childSessionId,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork memory baseline cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childPluginConfigWritten && childSessionId) {
+        try {
+          await this._d.discardForkedSessionPluginConfig?.({
+            sessionId: childSessionId,
+            sessionPath: childSessionPath,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork plugin config cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childBrowserStateWritten && childSessionPath) {
+        try {
+          await this._d.discardForkedSessionBrowserState?.({
+            sessionId: childSessionId,
+            sessionPath: childSessionPath,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork browser state cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childSessionId && childSessionPath) {
+        if (childCollabDraftSuggestionIds.length > 0) {
+          try {
+            this._d.discardForkedSessionCollabDrafts?.({
+              suggestionIds: childCollabDraftSuggestionIds,
+            });
+          } catch (cleanupError) {
+            log.warn(`fork session collaboration draft cleanup failed: ${cleanupError?.message || cleanupError}`);
+          }
+        }
+        try {
+          await this._d.discardForkedSessionVisionNotes?.({
+            sessionId: childSessionId,
+            sessionPath: childSessionPath,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork vision note cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+        try {
+          await this._d.discardForkedSessionFiles?.({
+            sessionId: childSessionId,
+            sessionPath: childSessionPath,
+          });
+        } catch (cleanupError) {
+          log.warn(`fork session file cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childTitleWritten && childSessionPath) {
+        try { await this.clearSessionTitle(childSessionPath); } catch {}
+      }
+      if (childMetaWritten && childSessionPath) {
+        try { await this._deleteSessionMetaEntry(childSessionPath); } catch {}
+      }
+      if (childManifest?.sessionId && childSessionPath) {
+        try {
+          this._sessionManifestStore.updateLocatorLifecycle(
+            childManifest.sessionId,
+            childSessionPath,
+            "deleted",
+            "session_fork_failed",
+          );
+        } catch (cleanupError) {
+          log.warn(`fork manifest cleanup failed: ${cleanupError?.message || cleanupError}`);
+        }
+      }
+      if (childSessionPath) {
+        try { await fsp.rm(childSessionPath, { force: true }); } catch {}
+      }
+      throw error;
+    }
+  }
+
   async continueDeletedAgentSession(sourceSessionPath: any) {
     this._assertActiveDesktopSessionPath(sourceSessionPath, "continueDeletedAgentSession");
     const ownership = this.resolveSessionOwnership(sourceSessionPath);
@@ -2153,9 +4105,10 @@ export class SessionCoordinator {
     }
 
     const sourceManager = SessionManager.open(sourceSessionPath, path.dirname(sourceSessionPath));
+    this.applySessionBranchHead(sourceSessionPath, sourceManager, { reason: "deleted_agent_continue" });
     const sourceCwd = sourceManager.getCwd?.() || null;
     const targetCwd = sourceCwd || this._d.getHomeCwd(targetAgent.id) || process.cwd();
-    const sourceMessages = readSessionBranchMessages(sourceSessionPath);
+    const sourceMessages = readSessionBranchMessages(sourceManager);
     const transcriptMessages = sourceMessages
       .map(normalizeDeletedAgentTranscriptMessage)
       .filter(Boolean);
@@ -2184,6 +4137,7 @@ export class SessionCoordinator {
         manager.appendModelChange(session.model.provider, session.model.id);
       }
       (manager as any)._rewriteFile?.();
+      this._syncSessionBranchHeadQuiet(createdSessionPath, manager, "deleted_agent_continue_append");
 
       await this.writeSessionMeta(createdSessionPath, {
         continuedFrom: {
@@ -2581,14 +4535,14 @@ export class SessionCoordinator {
     }
     this._assertCurrentActiveSessionLocator(sessionPath, "switchSession");
 
-    // 切到已有 session 时清空 pendingModel（用户的临时选择不应跟到别的 session）
-    this._pendingModel = null;
-
     const targetAgentId = this.resolveSessionOwnership(sessionPath).agentId;
     if (targetAgentId && targetAgentId !== this._d.getActiveAgentId()) {
       // Phase 1: 跨 agent 切换只切指针，不清旧 session
       await this._d.switchAgentOnly(targetAgentId);
     }
+
+    // 切到已有 session 时清空 pendingModel（用户的临时选择不应跟到别的 session）
+    this._pendingModel = null;
 
     // 从 session-owned state 恢复记忆开关（model 由 PI SDK 从 JSONL 恢复，不在此处读取）
     const memoryEnabled = this.getSessionMemoryEnabled(sessionPath);
@@ -2615,6 +4569,14 @@ export class SessionCoordinator {
       return existing.session;
     }
 
+    const ownerAgentId = targetAgentId || this._d.getActiveAgentId();
+    let targetAgent = this._d.getAgentById?.(ownerAgentId)
+      || (ownerAgentId === this._d.getActiveAgentId() ? this._d.getAgent() : null);
+    targetAgent = await this._ensureAgentRuntimeReady(ownerAgentId, {
+      agent: targetAgent,
+      reason: "switchSession",
+    });
+
     // 不在 map 中，先触发旧 session 的 memory flush（后台跑），再新建
     if (this._session) {
       const oldSp = this._session.sessionManager?.getSessionFile?.();
@@ -2638,12 +4600,12 @@ export class SessionCoordinator {
 
     // 冷启动恢复：model 由 PI SDK 从 session JSONL 恢复（单一数据源），不从 session-meta.json 读
     const reminderState = this._getRuntimeValueForPath(this._hibernatedSessionMeta, sessionPath);
-    const sessionMgr = SessionManager.open(sessionPath, this._d.getAgent().sessionDir);
+    const sessionMgr = SessionManager.open(sessionPath, targetAgent.sessionDir);
     const cwd = sessionMgr.getCwd?.() || undefined;
     const result = await this.createSession(sessionMgr, cwd, memoryEnabled, null, {
       restore: true,
-      agent: this._d.getAgent(),
-      agentId: targetAgentId || this._d.getActiveAgentId(),
+      agent: targetAgent,
+      agentId: ownerAgentId,
       reminderState,
     });
     return result.session;
@@ -2710,10 +4672,13 @@ export class SessionCoordinator {
     try {
       const manager = session?.sessionManager;
       if (!Array.isArray(manager?.fileEntries)) return;
+      const selectedLeafId = manager.getLeafId?.() ?? null;
       const result = repairOversizedSessionEntries(manager.fileEntries);
       if (result.projected === 0) return;
       manager.fileEntries = result.entries;
       manager._buildIndex?.();
+      if (selectedLeafId == null) manager.resetLeaf?.();
+      else if (manager.getEntry?.(selectedLeafId)) manager.branch?.(selectedLeafId);
       manager._rewriteFile?.();
       log.warn(
         `session turn: ${path.basename(sessionPath || manager.getSessionFile?.() || "session")} `
@@ -2747,21 +4712,46 @@ export class SessionCoordinator {
    * When the identity is still allowed, bind the freshly rebuilt Hana model
    * object so api/context/thinking metadata cannot remain stale.
    */
+  getSessionModelAvailability(sessionPath = this.currentSessionPath) {
+    if (!sessionPath) return null;
+    const entry = this._getSessionEntryByPath(sessionPath)
+      || this._getRuntimeValueForPath(this._hibernatedSessionMeta, sessionPath);
+    if (!entry?.modelAvailability) return null;
+    return { ...entry.modelAvailability };
+  }
+
+  _sessionModelUnavailableError(availability: SessionModelAvailability) {
+    const error: any = new Error(t("error.modelNotFound", { id: availability.modelRef }));
+    error.code = "MODEL_NOT_AVAILABLE";
+    error.modelRef = availability.modelRef;
+    error.unavailableReason = availability.reason;
+    return error;
+  }
+
   _assertSessionModelAvailable(session: any) {
     const currentModel = session?.model;
     const modelId = typeof currentModel?.id === "string" ? currentModel.id : "";
     const provider = typeof currentModel?.provider === "string" ? currentModel.provider : "";
     const models = this._d.getModels?.();
+    const sessionPath = session?.sessionManager?.getSessionFile?.() || null;
+    const entry = sessionPath ? this._getSessionEntryByPath(sessionPath) : null;
+    if (entry?.modelAvailability?.available === false) {
+      throw this._sessionModelUnavailableError(entry.modelAvailability);
+    }
     const allowedModel = modelId && provider && Array.isArray(models?.availableModels)
       ? findModel(models.availableModels, modelId, provider)
       : null;
-    const modelRef = provider && modelId ? `${provider}/${modelId}` : "unknown";
+    const modelRef = sessionModelRef(provider, modelId);
 
     if (!allowedModel) {
-      const error: any = new Error(t("error.modelNotFound", { id: modelRef }));
-      error.code = "MODEL_NOT_AVAILABLE";
-      error.modelRef = modelRef;
-      throw error;
+      const availability = modelId && provider
+        ? classifySessionModelAvailability(models, provider, modelId)
+        : { available: false, reason: "temporarily_unavailable", modelRef } as SessionModelAvailability;
+      if (entry) {
+        entry.modelAvailability = availability;
+        this._emitSessionMetadataUpdated(sessionPath, { modelAvailability: { ...availability } });
+      }
+      throw this._sessionModelUnavailableError(availability);
     }
 
     if (currentModel !== allowedModel) {
@@ -2772,6 +4762,9 @@ export class SessionCoordinator {
         error.modelRef = modelRef;
         throw error;
       }
+    }
+    if (entry && entry.modelAvailability?.available !== true) {
+      entry.modelAvailability = { available: true, reason: null, modelRef };
     }
     return allowedModel;
   }
@@ -2815,12 +4808,15 @@ export class SessionCoordinator {
       engine?.endCurrentTurnNativeMedia?.(nativeMediaTurn);
       pruneSessionInlineMediaHistory(this._session);
       this._projectOversizedSessionHistory(this._session, sp);
+      if (sp) this._syncSessionBranchHeadQuiet(sp, this._session.sessionManager, "prompt_finally");
       if (sp) this._scheduleRuntimePressureCheck(sp, "prompt");
     }
     if (sp) {
       const entry = this._getSessionEntryByPath(sp);
       const agent = entry ? this._d.getAgentById(entry.agentId) : this._d.getAgent();
-      agent?._memoryTicker?.notifyTurn(sp);
+      const forceSummary = entry?.memoryBranchReplacementPending === true;
+      if (entry) entry.memoryBranchReplacementPending = false;
+      agent?._memoryTicker?.notifyTurn(sp, { forceSummary });
     }
   }
 
@@ -2911,6 +4907,10 @@ export class SessionCoordinator {
     const nativeMediaTurn = engine?.beginCurrentTurnNativeMedia?.(sessionPath, opts);
     if (turnContext) this._setRuntimeValueForPath(this._turnContextBySession, sessionPath, turnContext);
     try {
+      // Recheck after asynchronous media preparation. A background custom turn
+      // may have started since the route-level guard; no input side effects may
+      // be committed onto a now-streaming Session.
+      if (entry.session.isStreaming) throw new Error("session_busy");
       this.preflightSessionInput(sessionPath);
       if (typeof submitOptions?.afterCachePreflight === "function") {
         const hookResult = submitOptions.afterCachePreflight();
@@ -2924,10 +4924,13 @@ export class SessionCoordinator {
       engine?.endCurrentTurnNativeMedia?.(nativeMediaTurn);
       pruneSessionInlineMediaHistory(entry.session);
       this._projectOversizedSessionHistory(entry.session, sessionPath);
+      this._syncSessionBranchHeadQuiet(sessionPath, entry.session.sessionManager, "prompt_session_finally");
       this._scheduleRuntimePressureCheck(sessionPath, "prompt_session");
     }
     const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
-    agent?._memoryTicker?.notifyTurn(sessionPath);
+    const forceSummary = entry.memoryBranchReplacementPending === true;
+    entry.memoryBranchReplacementPending = false;
+    agent?._memoryTicker?.notifyTurn(sessionPath, { forceSummary });
   }
 
   steerSession(sessionPath: any, text: any) {
@@ -2959,12 +4962,17 @@ export class SessionCoordinator {
     if (typeof entry.session.sendCustomMessage !== "function") {
       throw new Error("deliverCustomMessage: session does not support custom messages");
     }
+    if (typeof options?.shouldDeliver === "function" && options.shouldDeliver() !== true) {
+      return { ok: false, mode: "suppressed" };
+    }
 
     if (entry.session.isStreaming) {
+      if (options?.requireIdle === true) throw new Error("session_busy");
       this._assertSessionModelAvailable(entry.session);
       this.preflightSessionInput(sessionPath);
       entry.lastTouchedAt = Date.now();
       await entry.session.sendCustomMessage(message, { deliverAs: "followUp" });
+      this._syncSessionBranchHeadQuiet(sessionPath, entry.session.sessionManager, "custom_message_followup");
       this._emitTurnInputPresentation(sessionPath, message, "followUp");
       return { ok: true, mode: "followUp" };
     }
@@ -2973,12 +4981,17 @@ export class SessionCoordinator {
     if (triggerTurn) {
       this._assertSessionModelAvailable(entry.session);
       this.preflightSessionInput(sessionPath);
+      const commitResult = options?.beforeInputSideEffects?.();
+      if (commitResult && typeof commitResult.then === "function") {
+        throw new TypeError("deliverCustomMessage: beforeInputSideEffects must be synchronous");
+      }
       entry.lastTouchedAt = Date.now();
       this._emitTurnInputPresentation(sessionPath, message, "triggerTurn");
     } else {
       entry.lastTouchedAt = Date.now();
     }
     await entry.session.sendCustomMessage(message, { triggerTurn });
+    this._syncSessionBranchHeadQuiet(sessionPath, entry.session.sessionManager, "custom_message_delivery");
     return { ok: true, mode: triggerTurn ? "triggerTurn" : "notifyOnly" };
   }
 
@@ -2990,11 +5003,13 @@ export class SessionCoordinator {
     const liveManager = this._getSessionEntryByPath(sessionPath)?.session?.sessionManager;
     if (typeof liveManager?.appendCustomEntry === "function") {
       liveManager.appendCustomEntry(customType, data);
+      this._syncSessionBranchHeadQuiet(sessionPath, liveManager, "custom_entry_live");
       return { ok: true, mode: "live" };
     }
 
-    const manager = SessionManager.open(sessionPath, path.dirname(sessionPath));
+    const manager = this.openSessionManagerAtCurrentBranch(sessionPath, path.dirname(sessionPath));
     manager.appendCustomEntry(customType, data);
+    this._syncSessionBranchHeadQuiet(sessionPath, manager, "custom_entry_file");
     return { ok: true, mode: "file" };
   }
 
@@ -3114,6 +5129,7 @@ export class SessionCoordinator {
     entry._switching = true;
     const adaptations = [];
     const oldModel = session.model;
+    const compactionModel = entry.modelAvailability?.available === false ? newModel : oldModel;
 
     try {
       // 估算当前上下文 token 数
@@ -3139,7 +5155,7 @@ export class SessionCoordinator {
 
         // 尝试压缩
         try {
-          const compactionResult = await this._compactWithModel(sessionPath, session, effectiveWindow, oldModel);
+          const compactionResult = await this._compactWithModel(sessionPath, session, effectiveWindow, compactionModel);
           const hardTruncated = compactionResult?.details?.reason === "cache-preserving-compaction-hard-truncate";
           adaptations.push(hardTruncated ? "truncated" : "compacted");
         } catch (compactErr) {
@@ -3167,6 +5183,11 @@ export class SessionCoordinator {
       await session.setModel(newModel);
       entry.modelId = newModel.id;
       entry.modelProvider = newModel.provider;
+      entry.modelAvailability = {
+        available: true,
+        reason: null,
+        modelRef: sessionModelRef(newModel.provider, newModel.id),
+      };
       const models = this._d.getModels();
       const currentThinkingLevel = this.getSessionThinkingLevel(sessionPath);
       const nextThinkingLevel = normalizeThinkingLevelForModel(currentThinkingLevel, newModel);
@@ -3174,6 +5195,9 @@ export class SessionCoordinator {
       session.setThinkingLevel?.(models?.resolveThinkingLevel?.(nextThinkingLevel) || nextThinkingLevel);
       this.writeSessionMeta(sessionPath, { thinkingLevel: nextThinkingLevel });
       this._renewCachePrefixContract(sessionPath, entry, "model_switch");
+      this._emitSessionMetadataUpdated(sessionPath, {
+        modelAvailability: { ...entry.modelAvailability },
+      });
 
       return { adaptations, thinkingLevel: nextThinkingLevel };
     } finally {
@@ -3646,6 +5670,7 @@ export class SessionCoordinator {
       experienceEnabled: entry.experienceEnabled,
       modelId: entry.modelId,
       modelProvider: entry.modelProvider,
+      modelAvailability: entry.modelAvailability ? { ...entry.modelAvailability } : null,
       cwd: entry.cwd || entry.session?.sessionManager?.getCwd?.() || null,
       workspaceFolders: Array.isArray(entry.workspaceFolders) ? [...entry.workspaceFolders] : [],
       authorizedFolders: Array.isArray(entry.authorizedFolders) ? [...entry.authorizedFolders] : [],
@@ -4081,7 +6106,14 @@ export class SessionCoordinator {
     return {
       agent,
       allToolObjects,
-      context: { agentId: ownerAgentId, restore: false, channelsEnabled },
+      context: {
+        agentId: ownerAgentId,
+        restore: false,
+        channelsEnabled,
+        ownerPluginId: entry?.ownerPluginId || null,
+        sessionKind: entry?.sessionKind || "chat",
+        sessionVisibility: entry?.sessionVisibility || "public",
+      },
     };
   }
 
@@ -4206,12 +6238,19 @@ export class SessionCoordinator {
     }
 
     const oldEntry = this._getSessionEntryByPath(sessionPath);
-    const hibernatedEntry = this._getRuntimeValueForPath(this._hibernatedSessionMeta, sessionPath);
-    const reminderState = oldEntry || hibernatedEntry || null;
     if (oldEntry) {
       if (oldEntry.session?.isStreaming || oldEntry.session?.isCompacting || oldEntry._switching) {
         throw new Error("reloadSessionRuntime: session is busy");
       }
+    }
+    const readyAgent = await this._ensureAgentRuntimeReady(targetAgentId, {
+      agent,
+      reason: "reloadSessionRuntime",
+    });
+
+    const hibernatedEntry = this._getRuntimeValueForPath(this._hibernatedSessionMeta, sessionPath);
+    const reminderState = oldEntry || hibernatedEntry || null;
+    if (oldEntry) {
       await this._teardownSessionEntry(oldEntry, sessionPath, "reload");
       this._deleteRuntimeValueForPath(this._sessions, sessionPath);
     }
@@ -4225,11 +6264,11 @@ export class SessionCoordinator {
     // #1285: 在 open 前修复坏会话的孤儿 toolResult（必须早于 SessionManager.open）
     this._repairOrphanToolHistory(sessionPath);
     this._repairInlineMediaHistory(sessionPath);
-    const sessionMgr = SessionManager.open(sessionPath, agent.sessionDir);
+    const sessionMgr = SessionManager.open(sessionPath, readyAgent.sessionDir);
     const cwd = sessionMgr.getCwd?.() || undefined;
     const result = await this.createSession(sessionMgr, cwd, memoryEnabled, null, {
       restore: true,
-      agent,
+      agent: readyAgent,
       agentId: targetAgentId,
       preserveAgentMemoryState: true,
       refreshCapabilitySnapshots,
@@ -4271,6 +6310,10 @@ export class SessionCoordinator {
     if (!agent) {
       throw new Error(`ensureSessionLoaded: agent "${targetAgentId}" not found`);
     }
+    const readyAgent = await this._ensureAgentRuntimeReady(targetAgentId, {
+      agent,
+      reason: "ensureSessionLoaded",
+    });
 
     // memoryEnabled 从 session-owned state 恢复（跟 switchSession 同一份数据源）
     const memoryEnabled = this.getSessionMemoryEnabled(sessionPath);
@@ -4288,11 +6331,11 @@ export class SessionCoordinator {
       // #1285: 在 open 前修复坏会话的孤儿 toolResult（必须早于 SessionManager.open）
       this._repairOrphanToolHistory(sessionPath);
       this._repairInlineMediaHistory(sessionPath);
-      const sessionMgr = SessionManager.open(sessionPath, agent.sessionDir);
+      const sessionMgr = SessionManager.open(sessionPath, readyAgent.sessionDir);
       const cwd = sessionMgr.getCwd?.() || undefined;
       await this.createSession(sessionMgr, cwd, memoryEnabled, null, {
         restore: true,
-        agent,
+        agent: readyAgent,
         agentId: targetAgentId,
         preserveAgentMemoryState: true,
         reminderState,
@@ -4851,7 +6894,12 @@ export class SessionCoordinator {
       if (entry.session?.isCompacting !== true) {
         this._assertCachePrefixContract(sessionPath, entry, { model, context });
       }
-      return originalStreamFn.call(agent, model, context, options);
+      return originalStreamFn.call(
+        agent,
+        model,
+        context,
+        withProviderCacheAffinity(options, model, entry.providerCacheAffinityKey),
+      );
     };
   }
 
@@ -4894,8 +6942,53 @@ export class SessionCoordinator {
     return this._metaWriteQueue;
   }
 
-  async _doWriteSessionMeta(sessionPath: any, partial: any) {
-    const metaPath = this._sessionMetaPathFor(sessionPath);
+  _writeCoLocatedSessionMeta(sessionPath: any, partial: any) {
+    const metaPath = path.join(path.dirname(sessionPath), "session-meta.json");
+    const next = () => this._doWriteSessionMeta(sessionPath, partial, {
+      metaPath,
+      writeCapabilitySnapshot: false,
+    });
+    this._metaWriteQueue = this._metaWriteQueue.then(next, next);
+    return this._metaWriteQueue;
+  }
+
+  _deleteSessionMetaEntry(sessionPath: any) {
+    const next = () => this._doDeleteSessionMetaEntry(sessionPath);
+    this._metaWriteQueue = this._metaWriteQueue.then(next, next);
+    return this._metaWriteQueue;
+  }
+
+  _deleteCoLocatedSessionMetaEntry(sessionPath: any) {
+    const metaPath = path.join(path.dirname(sessionPath), "session-meta.json");
+    const next = () => this._doDeleteSessionMetaEntry(sessionPath, { metaPath });
+    this._metaWriteQueue = this._metaWriteQueue.then(next, next);
+    return this._metaWriteQueue;
+  }
+
+  async _doDeleteSessionMetaEntry(sessionPath: any, options: any = {}) {
+    const metaPath = options.metaPath || this._sessionMetaPathFor(sessionPath);
+    const sessKey = path.basename(sessionPath);
+    const meta = await this._readSessionMetaIndexForWrite(metaPath);
+    const current = meta?.[sessKey];
+    if (!current) return false;
+    delete meta[sessKey];
+    await fsp.writeFile(metaPath, JSON.stringify(meta, null, 2));
+    this.invalidateMetaCache(metaPath);
+
+    for (const field of SESSION_META_PAYLOAD_FIELDS) {
+      const ref = current?.[field];
+      if (!this._isSessionMetaPayloadRef(ref, field)) continue;
+      const expected = this._sessionMetaPayloadRelativePath(sessKey, field);
+      if (path.normalize(ref.path) !== path.normalize(expected)) continue;
+      try {
+        await fsp.rm(this._sessionMetaPayloadAbsolutePath(metaPath, ref.path), { force: true });
+      } catch {}
+    }
+    return true;
+  }
+
+  async _doWriteSessionMeta(sessionPath: any, partial: any, options: any = {}) {
+    const metaPath = options.metaPath || this._sessionMetaPathFor(sessionPath);
     const sessKey = path.basename(sessionPath);
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -4912,7 +7005,9 @@ export class SessionCoordinator {
         const compactedMeta = await this._externalizeSessionMetaForIndexBudget(metaPath, meta);
         await fsp.writeFile(metaPath, JSON.stringify(compactedMeta, null, 2));
         this.invalidateMetaCache(metaPath);
-        this._writeSessionCapabilitySnapshot(sessionPath, partial);
+        if (options.writeCapabilitySnapshot !== false) {
+          this._writeSessionCapabilitySnapshot(sessionPath, partial);
+        }
         return;
       } catch (err) {
         if (attempt === 0) {
@@ -5318,6 +7413,7 @@ export class SessionCoordinator {
     let isolatedManifestCreated = false;
     let isolatedIdentityPath = null;
     let isolatedInitializationReady = false;
+    let isolatedProviderCacheAffinityKey: string | null = null;
     // resume 复用的持久实例 session：cleanup 各路径（含 early_abort 的无条件 cleanupTempSession）
     // 一律不动，否则被 abort 一次实例文件就蒸发（撞底线#3）。
     let isResumedSession = false;
@@ -5476,6 +7572,34 @@ export class SessionCoordinator {
           { code: "session_manifest_not_established" },
         );
       }
+      const isolatedMetaIndex = await this._readMetaCached(
+        path.join(path.dirname(isolatedIdentityPath), "session-meta.json"),
+      );
+      const isolatedMeta = isolatedMetaIndex?.[path.basename(isolatedIdentityPath)] || {};
+      isolatedProviderCacheAffinityKey = normalizeProviderCacheAffinityKey(
+        isolatedMeta.providerCacheAffinityKey,
+        tempSessionMgr.getSessionId?.(),
+      );
+      if (
+        isResumedSession
+        && isolatedProviderCacheAffinityKey
+        && isolatedMeta.providerCacheAffinityKey !== isolatedProviderCacheAffinityKey
+      ) {
+        await this._writeCoLocatedSessionMeta(isolatedIdentityPath, {
+          ...isolatedMeta,
+          providerCacheAffinityKey: isolatedProviderCacheAffinityKey,
+        });
+      }
+      if (isResumedSession) {
+        applyStoredSessionBranchHead({
+          store: this._sessionManifestStore,
+          sessionId: isolatedManifest.sessionId,
+          sessionManager: tempSessionMgr,
+          reason: "isolated_session_resume",
+        });
+      } else {
+        this._syncSessionBranchHeadQuiet(isolatedIdentityPath, tempSessionMgr, "isolated_session_create");
+      }
       const targetAgentToolsSnapshot = typeof targetAgent.getToolsSnapshot === "function"
         ? targetAgent.getToolsSnapshot({
           forceMemoryEnabled: targetAgent.memoryMasterEnabled !== false,
@@ -5485,6 +7609,10 @@ export class SessionCoordinator {
             : {}),
         })
         : targetAgent.tools;
+      const requestedExtraCustomTools = Array.isArray(opts.extraCustomTools)
+        ? opts.extraCustomTools.filter(t => t && typeof t.name === "string" && t.name.trim())
+        : [];
+      const extraCustomToolNames = new Set(requestedExtraCustomTools.map(t => t.name));
       const { tools: allBuiltinTools, customTools: allCustomTools } = this._d.buildTools(
         execCwd,
         targetAgentToolsSnapshot,
@@ -5500,11 +7628,17 @@ export class SessionCoordinator {
           getAgentId: () => targetAgent.id || null,
           fileReadSessionPaths,
           getPermissionMode: () => execPermissionMode,
-          permissionContext: { isSubagent: !!opts.subagentContext },
+          permissionContext: {
+            ...(opts.permissionContext && typeof opts.permissionContext === "object"
+              ? opts.permissionContext
+              : {}),
+            isSubagent: !!opts.subagentContext,
+          },
           allowHumanApproval: opts.allowHumanApproval !== false,
           ...(opts.approvalPolicy ? { approvalPolicy: opts.approvalPolicy } : {}),
           ...(opts.bridgeContext ? { bridgeContext: opts.bridgeContext } : {}),
           ...(opts.notificationContext ? { notificationContext: opts.notificationContext } : {}),
+          extraCustomTools: requestedExtraCustomTools,
         },
       );
 
@@ -5515,12 +7649,11 @@ export class SessionCoordinator {
       // 会让该任务持续触发后续巡检/活动，看起来像「巡检间隔被破坏」(#398)
       const isHeartbeat = opts.activityType === "heartbeat";
       const heartbeatBlocked = new Set(isHeartbeat ? ["automation", "cron"] : []);
+      const wrappedExtraCustomTools = allCustomTools.filter(t => extraCustomToolNames.has(t.name));
+      const baseCustomTools = allCustomTools.filter(t => !extraCustomToolNames.has(t.name));
       const actCustomTools = patrolAllowed === "*"
-        ? allCustomTools.filter(t => !heartbeatBlocked.has(t.name))
-        : allCustomTools.filter(t => new Set(patrolAllowed).has(t.name) && !heartbeatBlocked.has(t.name));
-      const extraCustomTools = Array.isArray(opts.extraCustomTools)
-        ? opts.extraCustomTools.filter(t => t && typeof t.name === "string" && t.name.trim())
-        : [];
+        ? baseCustomTools.filter(t => !heartbeatBlocked.has(t.name))
+        : baseCustomTools.filter(t => new Set(patrolAllowed).has(t.name) && !heartbeatBlocked.has(t.name));
 
       const actTools = opts.builtinFilter
         ? allBuiltinTools.filter(t => opts.builtinFilter.includes(t.name))
@@ -5582,8 +7715,20 @@ export class SessionCoordinator {
         thinkingLevel: execThinkingLevel,
         resourceLoader: execResourceLoader,
         tools: actTools,
-        customTools: [...actCustomTools, ...extraCustomTools],
+        customTools: [...actCustomTools, ...wrappedExtraCustomTools],
       });
+
+      if (isolatedProviderCacheAffinityKey && typeof session?.agent?.streamFn === "function") {
+        const originalStreamFn = session.agent.streamFn;
+        session.agent.streamFn = function providerCacheAffinityStream(model, context, options) {
+          return originalStreamFn.call(
+            this,
+            model,
+            context,
+            withProviderCacheAffinity(options, model, isolatedProviderCacheAffinityKey),
+          );
+        };
+      }
 
       childSessionPath = session.sessionManager?.getSessionFile?.() || null;
       if (
@@ -5634,7 +7779,7 @@ export class SessionCoordinator {
           toolNames: uniqueToolNames(toolNamesFromObjects([
             ...(actTools || []),
             ...(actCustomTools || []),
-            ...(extraCustomTools || []),
+            ...(wrappedExtraCustomTools || []),
           ])),
         });
       }
@@ -5760,11 +7905,15 @@ export class SessionCoordinator {
       try {
         await session.prompt(prompt);
       } finally {
+        if (childSessionPath) {
+          this._syncSessionBranchHeadQuiet(childSessionPath, session.sessionManager, "isolated_prompt_finally");
+        }
         opts.signal?.removeEventListener("abort", abortHandler);
         await teardownIsolatedSession("finally");
       }
 
       const sessionPath = session.sessionManager?.getSessionFile?.() || null;
+      const leafEntryId = session.sessionManager?.getBranch?.()?.at?.(-1)?.id || null;
       const finalReplyText = stripClosedInternalNarrationBlocks(replyText || finalAssistantText);
       const completionError = isolatedCompletionError(finalStopReason, finalErrorMessage);
 
@@ -5779,6 +7928,7 @@ export class SessionCoordinator {
           stopReason: finalStopReason,
           sessionFiles,
           toolErrors,
+          leafEntryId,
         };
       }
 
@@ -5789,6 +7939,7 @@ export class SessionCoordinator {
         stopReason: finalStopReason,
         sessionFiles,
         toolErrors,
+        leafEntryId,
       };
     } catch (err) {
       log.error(`isolated execution failed: ${err.message}`);

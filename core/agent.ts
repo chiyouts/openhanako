@@ -421,6 +421,12 @@ export class Agent {
         getSessionIdForPath: (sessionPath) => (
           this._cb?.getEngine?.()?.getSessionIdForPath?.(sessionPath)
         ),
+        getSessionBranchHeadForPath: (sessionPath) => (
+          this._cb?.getEngine?.()?.getSessionBranchHeadForPath?.(sessionPath)
+        ),
+        readSessionBranchForPath: (sessionPath, options) => (
+          this._cb?.getEngine?.()?.getSessionBranchProjection?.(sessionPath, options)
+        ),
         envChangeLedger: this._cb?.getEngine?.()?.getEnvChangeLedger?.() || null,
         onCompiled: () => {
           // _systemPrompt 是非 session 路径（巡检/cron/频道/DM/bridge owner 新建）
@@ -479,11 +485,20 @@ export class Agent {
       getAgentId: () => this.id,
       getSessionCwd: (sp) => this._cb?.getSessionCwd?.(sp),
       getSessionWorkspaceFolders: (sp) => this._cb?.getSessionWorkspaceFolders?.(sp) || [],
+      getSessionAuthorizedFolders: (sp) => this._cb?.getSessionAuthorizedFolders?.(sp) || [],
       getHomeCwd: (agentId) => this._cb?.getHomeCwd?.(agentId),
     });
+    const resolveActiveSessionFile = (fileId, options: any = {}) => {
+      const engine = this._cb?.getEngine?.();
+      return engine?.resolveActiveSessionFile?.({
+        fileId,
+        sessionId: options?.sessionId || null,
+        sessionPath: options?.sessionPath || null,
+      }) || null;
+    };
     this._stageFilesTool = createStageFilesTool({
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
-      resolveSessionFile: (fileId, options = {}) => this._cb?.getEngine?.()?.getSessionFile?.(fileId, options) || null,
+      resolveSessionFile: resolveActiveSessionFile,
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
     this._fileTool = createFileTool({
@@ -493,7 +508,7 @@ export class Agent {
         const effectiveSessionPath = sessionPath || this._cb?.getCurrentSessionPath?.();
         return this._cb?.getEngine?.()?.getSessionAuthorizedFolders?.(effectiveSessionPath) || [];
       },
-      resolveSessionFile: (fileId, options = {}) => this._cb?.getEngine?.()?.getSessionFile?.(fileId, options) || null,
+      resolveSessionFile: resolveActiveSessionFile,
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
     });
     this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.(), {
@@ -512,6 +527,7 @@ export class Agent {
     });
     this._stopTaskTool = createStopTaskTool({
       getTaskRegistry: () => this._cb?.getTaskRegistry?.(),
+      getSessionIdForPath: (sessionPath) => this._cb?.getEngine?.()?.getSessionIdForPath?.(sessionPath) || null,
     });
 
     this._checkDeferredTool = createCheckDeferredTool({
@@ -525,7 +541,7 @@ export class Agent {
       getSessionModel: (sessionPath) => this._cb?.getEngine?.()?.getSessionByPath?.(sessionPath)?.model || null,
       getCurrentModel: () => this._cb?.getEngine?.()?.currentModel || null,
       getUiContext: (sessionPath) => this._cb?.getEngine?.()?.getUiContext?.(sessionPath) || null,
-      listSessionFiles: (sessionPath) => this._cb?.getEngine?.()?.listSessionFiles?.(sessionPath) || [],
+      listSessionFiles: (sessionPath) => this._cb?.getEngine?.()?.listActiveSessionFiles?.(sessionPath) || [],
       getSessionFolderScope: (sessionPath) => this._cb?.getEngine?.()?.getSessionFolderScope?.(sessionPath) || null,
       getBridgeContext: (sessionPath) => this._cb?.getEngine?.()?.getBridgeContextForSessionPath?.(sessionPath, { agentId: this.id }) || null,
       listOpenSubagentThreads: (sessionPath) => this._cb?.getSubagentThreadStore?.()?.listOpenDirectBySession?.(sessionPath) || [],
@@ -587,7 +603,7 @@ export class Agent {
         await this._onInstallCallback?.(skillName);
       },
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
-      resolveSessionFile: (fileId, options = {}) => this._cb?.getEngine?.()?.getSessionFile?.(fileId, options) || null,
+      resolveSessionFile: resolveActiveSessionFile,
     });
 
     // 11. subagent 工具

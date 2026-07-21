@@ -233,6 +233,20 @@ jobs:
         shell: pwsh
         run: node scripts/build-windows-sandbox-helper.mjs ${{ matrix.arch }}
 
+      # 独立 Server 下载包与桌面 seed/OTA 是两个发布边界。直接使用本次
+      # build-windows-sandbox-helper 的输出，不依赖 electron-builder、
+      # win-unpacked 或 Windows 代码签名。验证步骤从解包结果实际运行
+      # MinGit、根 hana-server.cmd 和 restricted-token sandbox 链。
+      - name: Build Windows standalone server archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/build-standalone-server-artifact.mjs ${{ matrix.arch }}
+
+      - name: Verify Windows standalone server archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/verify-standalone-server-artifact.mjs ${{ matrix.arch }} --smoke
+
       # 装箱前 fail-closed 复核：electron-builder 是直调（不经过 package.json
       # 的 pack/dist/dist:win/dist:linux 脚本链），scripts/verify-seed-kit.mjs
       # 挂在那条脚本链里、这里不会自动生效，必须单独接线，否则一份陈旧/串
@@ -324,6 +338,8 @@ jobs:
             dist-server-artifact/*/seed-train-*.json
             dist-server-artifact/*/seed-train-*.json.sig
             dist-renderer-artifact/renderer-*.tar.gz
+            dist-standalone/HanaCore-*-Windows-x64.tar.gz
+            dist-standalone/HanaCore-*-Windows-x64.manifest.json
           if-no-files-found: error
 
   release:
@@ -399,6 +415,16 @@ jobs:
               gh release upload "${{ github.ref_name }}" "$f" --clobber
             done
 
+          echo "=== Uploading self-contained Windows standalone server assets ==="
+          find artifacts -type f \( \
+              -path '*/dist-standalone/HanaCore-*-Windows-x64.tar.gz' -o \
+              -path '*/dist-standalone/HanaCore-*-Windows-x64.manifest.json' \
+            \) -print0 |
+            while IFS= read -r -d '' f; do
+              echo "  $f"
+              gh release upload "${{ github.ref_name }}" "$f" --clobber
+            done
+
           # Renderer archive is platform-independent AND now byte-identical across all four
           # matrix jobs: it is built once by the renderer-box job and downloaded/reused by
           # every platform (see scripts/pack-renderer-box.mjs and packDualKindSeed's
@@ -468,6 +494,13 @@ jobs:
           echo "$ASSETS" | grep -qE '^server-.*-win32-x64\.tar\.gz$' || MISSING+=("server win32-x64 hot-update archive")
           echo "$ASSETS" | grep -qE '^server-.*-linux-x64\.tar\.gz$' || MISSING+=("server linux-x64 hot-update archive")
           echo "$ASSETS" | grep -qE '^renderer-.*\.tar\.gz$' || MISSING+=("renderer hot-update archive")
+          echo "$ASSETS" | grep -qE '^HanaCore-.*-Windows-x64\.tar\.gz$' || MISSING+=("Windows x64 standalone server archive")
+          echo "$ASSETS" | grep -qE '^HanaCore-.*-Windows-x64\.manifest\.json$' || MISSING+=("Windows x64 standalone server manifest")
+
+          if echo "$ASSETS" | grep -qE '^HanaCore-.*-Windows-x64\.manifest\.json\.sig$'; then
+            echo "::error::Obsolete standalone manifest signature leaked into the release"
+            exit 1
+          fi
 
           # 清洁性检查：不应该有 blockmap 漏进来
           if echo "$ASSETS" | grep -qE '\.blockmap$'; then
@@ -524,11 +557,28 @@ jobs:
           printf '%s\n' "$HANA_SIGN_KEY_PEM" > "$RUNNER_TEMP/hana-train-sign-key.pem"
           echo "HANA_SIGN_KEY=$RUNNER_TEMP/hana-train-sign-key.pem" >> "$GITHUB_ENV"
 
-      # Stable is the primary channel for every tagged release. Beta has no separate
-      # pre-release track yet, so it always follows stable's every publish with the SAME
-      # archives (see scripts/publish-train.mjs's file header) so beta users never go
-      # without an update path.
+      # The automatic publisher classifies the source installer Release before choosing
+      # channels. A prerelease advances beta only; stable requires a non-prerelease source
+      # here, or an explicit operator choice in the dedicated manual Publish Train workflow.
+      # publish-train.mjs independently enforces the same boundary before any remote write.
+      - name: Inspect source release
+        id: source_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          IS_PRERELEASE="$(gh release view "${{ github.ref_name }}" --json isPrerelease --jq '.isPrerelease')"
+          case "$IS_PRERELEASE" in
+            true|false) ;;
+            *)
+              echo "::error::Unexpected isPrerelease value for ${{ github.ref_name }}: $IS_PRERELEASE"
+              exit 1
+              ;;
+          esac
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
       - name: Publish stable train
+        if: steps.source_release.outputs.is_prerelease == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/publish-train.mjs --tag "${{ github.ref_name }}" --channel stable
@@ -545,14 +595,18 @@ jobs:
             echo "### Hot-update train publish — ${{ github.ref_name }}"
             echo ""
             if [ "${{ job.status }}" = "success" ]; then
-              echo "Both the stable and beta channel pointers were updated."
+              if [ "${{ steps.source_release.outputs.is_prerelease }}" = "true" ]; then
+                echo "The beta channel pointer was updated; stable was intentionally left unchanged because the source Release is a prerelease."
+              else
+                echo "Both the stable and beta channel pointers were updated from a non-prerelease source Release."
+              fi
             else
               echo "This job did not finish. The installer release for ${{ github.ref_name }} is unaffected"
               echo "(published by the separate, already-completed \`release\` job)."
               echo ""
               echo "To retry: re-run this job — the publish script detects and safely resumes a partially"
-              echo "created train release — or trigger the **Publish Train** workflow manually with"
-              echo "\`tag=${{ github.ref_name }}\` and \`channel=stable\`, then again with \`channel=beta\`."
+              echo "created train release — or trigger the **Publish Train** workflow manually for the"
+              echo "intended channel. A prerelease-to-stable publish also requires its explicit confirmation checkbox."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

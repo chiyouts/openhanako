@@ -45,7 +45,7 @@ import {
 import { processDirtySessions } from "./deep-memory.ts";
 import { getLogicalDay, shiftLogicalDate } from "../time-utils.ts";
 import { readCompiledResetAt } from "./compiled-memory-state.ts";
-import { listSessionFiles, readSessionMessages, sessionIdFromFilename } from "../session-jsonl.ts";
+import { listSessionFiles, readCurrentSessionBranch, sessionIdFromFilename } from "../session-jsonl.ts";
 import { isAgentPhoneSessionPath } from "../conversations/agent-phone-session.ts";
 import { buildSourceTimeRange } from "./time-context.ts";
 import { writeCacheSnapshotObservation } from "./cache-snapshot-observation.ts";
@@ -53,6 +53,7 @@ import { runMemoryReflection as defaultRunMemoryReflection } from "./memory-refl
 import { validateRollingSummaryFormat } from "./rolling-summary-format.ts";
 import { CACHE_STRATEGIES } from "../llm/cache-strategy-contract.ts";
 import { atomicWriteSync } from "../../shared/safe-fs.ts";
+import { invalidateSessionDerivedStateSync } from "./session-derived-state.ts";
 
 const log = createModuleLogger("memory-ticker");
 
@@ -90,6 +91,8 @@ const DAILY_STEP_KEYS = ["compileDaily", "compileToday", "rollDailyWindow", "com
  * @param {function} [opts.getMemoryMasterEnabled] - 返回 agent 级别记忆总开关状态
  * @param {(sessionPath: string) => boolean} [opts.isSessionMemoryEnabled] - 返回指定 session 的记忆状态
  * @param {function} [opts.getTimezone] - 返回用户配置时区
+ * @param {(sessionPath: string) => object|null} [opts.getSessionBranchHeadForPath] - 读取持久化 branch head 元数据
+ * @param {(sessionPath: string, options?: object) => object} [opts.readSessionBranchForPath] - 读取 manifest 选中的当前 branch
  * @param {function} [opts.getCacheSnapshotReflectionMode] - retired; runtime is hard-gated to off
  * @param {(sessionPath: string) => object|null} [opts.readMemoryReflectionSnapshot] - 返回 session 创建时冻结的记忆反思快照
  * @param {string} [opts.agentId] - 当前 agent id；启用 envChangeLedger 时也是 reminder 归属的必填项
@@ -119,10 +122,13 @@ export function createMemoryTicker(opts) {
     ensureSessionLoaded,
     getSessionStreamFn,
     getSessionIdForPath,
+    getSessionBranchHeadForPath,
+    readSessionBranchForPath,
     envChangeLedger,
     memoryDir = path.dirname(memoryMdPath),
   } = opts;
   const _memoryReflectionRunner = memoryReflectionRunner || { runMemoryReflection: defaultRunMemoryReflection };
+  let _aggregateCompileInFlight = 0;
 
   // 一次性、幂等的读时迁移：把 alpha 阶段遗留的 editable-facts.md 并入 facts.md。
   // 必须早于 assemble/compileEditableFacts 首次读取 facts.md 之前跑完。
@@ -147,6 +153,21 @@ export function createMemoryTicker(opts) {
       if (typeof sessionId === "string" && sessionId.trim()) return sessionId.trim();
     } catch {}
     return sessionIdFromFilename(path.basename(sessionPath));
+  };
+  const _readSessionBranch = (sessionPath, options: any = {}) => {
+    if (typeof readSessionBranchForPath === "function") {
+      const projection = readSessionBranchForPath(sessionPath, options);
+      if (projection) return projection;
+    }
+    return readCurrentSessionBranch(sessionPath, options);
+  };
+  const _summaryCursorBelongsToProjection = (summary, projection) => {
+    const cursor = summary?.cursor;
+    if (!cursor || typeof cursor.lineageHash !== "string" || !projection) return false;
+    const lineageHash = cursor.coveredLeafId == null
+      ? projection.rootLineageHash
+      : projection.prefixHashes?.[cursor.coveredLeafId];
+    return lineageHash === cursor.lineageHash;
   };
   const _getCacheSnapshotReflectionMode = () => {
     return "off";
@@ -197,8 +218,17 @@ export function createMemoryTicker(opts) {
     return (sessionId) => {
       const filePath = filesById.get(sessionId);
       if (!filePath) return null;
-      const { messages } = readSessionMessages(filePath);
+      const { messages } = _readSessionBranch(filePath);
       return buildSourceTimeRange(messages, { timeZone: _getTimezone() });
+    };
+  };
+  const _createSessionBranchProjectionResolver = () => {
+    const filesById = new Map(
+      listSessionFiles(sessionDir).map((entry) => [_sessionIdentityForPath(entry.filePath), entry.filePath]),
+    );
+    return (sessionId) => {
+      const filePath = filesById.get(sessionId);
+      return filePath ? _readSessionBranch(filePath) : null;
     };
   };
   const _readMemoryReflectionSnapshot = (sessionPath) => {
@@ -228,6 +258,15 @@ export function createMemoryTicker(opts) {
   const _dailyStepCompletedAt = new Map();   // stepName → ISO timestamp
   const _turnCounts = new Map();             // stable session identity → turn count
   const _summaryInProgress = new Set();      // 正在跑滚动摘要的 session
+  const _branchReplacementPending = new Set(); // sessionId → replacement 未完整落到 facts.db
+  const _branchReplacementEpoch = new Map(); // sessionId → force generation，防止运行中的摘要吞掉新 force
+
+  const _markBranchReplacementPending = (sessionId) => {
+    _branchReplacementPending.add(sessionId);
+    const nextEpoch = (_branchReplacementEpoch.get(sessionId) || 0) + 1;
+    _branchReplacementEpoch.set(sessionId, nextEpoch);
+    return nextEpoch;
+  };
 
   // ── 错误 dedup：相同根因（如凭证持续无效）只在 console 打一次，避免每轮对话都刷屏 ──
   let _lastErrorSig = null;
@@ -658,15 +697,19 @@ export function createMemoryTicker(opts) {
   async function _doRollingSummary(sessionPath, trigger = "threshold") {
     const sessionId = _sessionIdentityForPath(sessionPath);
     if (_summaryInProgress.has(sessionId)) return; // 并发保护
+    const replacementEpochAtStart = _branchReplacementEpoch.get(sessionId) || 0;
     _summaryInProgress.add(sessionId);
     try {
       const resetAt = _getCompiledResetAt();
-      const { messages } = readSessionMessages(sessionPath, { since: resetAt });
-      if (messages.length === 0) return;
+      const projection = _readSessionBranch(sessionPath, { since: resetAt });
+      const { messages } = projection;
 
-      const rollingOptions: { resetAt: any; timeZone: string; memoryReflectionSnapshot?: any } = {
+      const rollingOptions: any = {
         resetAt,
         timeZone: _getTimezone(),
+        projection,
+        returnResult: true,
+        revalidateProjection: () => _readSessionBranch(sessionPath, { since: resetAt }),
       };
       const memoryReflectionSnapshot = _readMemoryReflectionSnapshot(sessionPath);
       if (memoryReflectionSnapshot) {
@@ -674,6 +717,7 @@ export function createMemoryTicker(opts) {
       }
       const resolvedModel = await getResolvedMemoryModel();
       const cacheSnapshotMode = _getCacheSnapshotReflectionMode();
+      let summaryResult = null;
       if (cacheSnapshotMode === "write") {
         try {
           await _runSessionSnapshotMemoryReflection({
@@ -691,10 +735,33 @@ export function createMemoryTicker(opts) {
             "memory",
             `cache snapshot unavailable for ${path.basename(sessionPath)}; falling back to rolling summary`,
           );
-          await summaryManager.rollingSummary(sessionId, messages, resolvedModel, rollingOptions);
+          summaryResult = await summaryManager.rollingSummary(sessionId, messages, resolvedModel, rollingOptions);
         }
       } else {
-        await summaryManager.rollingSummary(sessionId, messages, resolvedModel, rollingOptions);
+        summaryResult = await summaryManager.rollingSummary(
+          sessionId,
+          messages,
+          resolvedModel,
+          rollingOptions,
+        );
+        if (summaryResult?.reason === "branch_changed") {
+          throw new Error("session branch changed while rebuilding its memory summary");
+        }
+        if (summaryResult?.mode === "replace" && !summaryResult?.data) {
+          throw new Error(`branch memory replacement was not committed (${summaryResult?.reason || "unknown"})`);
+        }
+        if (summaryManager.getSummary(sessionId)?.factReplacementRequired === true) {
+          await processDirtySessions(summaryManager, factStore, resolvedModel, {
+            since: resetAt,
+            timeZone: _getTimezone(),
+            getSourceTimeRange: _createSourceTimeRangeResolver(),
+            getCurrentBranchProjection: () => _readSessionBranch(sessionPath),
+            sessionIds: [sessionId],
+          });
+          if (summaryManager.getSummary(sessionId)?.factReplacementRequired === true) {
+            throw new Error("branch fact replacement remains pending");
+          }
+        }
         if (cacheSnapshotMode === "shadow") {
           await _runSessionSnapshotMemoryReflection({
             sessionPath,
@@ -710,20 +777,34 @@ export function createMemoryTicker(opts) {
       debugLog()?.log("memory", `rolling summary updated: ${sessionId.slice(0, 8)}...`);
       _markSuccess("rollingSummary");
       _markStepRecovered("滚动摘要");
+      const newerReplacementPending = (_branchReplacementEpoch.get(sessionId) || 0) > replacementEpochAtStart;
+      if (!newerReplacementPending) {
+        _branchReplacementPending.delete(sessionId);
+        _branchReplacementEpoch.delete(sessionId);
+      }
+      return { ok: true, summary: summaryManager.getSummary(sessionId) };
     } catch (err) {
       _markFailure("rollingSummary", err);
       _logStepError(`滚动摘要 (${path.basename(sessionPath)})`, err);
       if (trigger === "manual" && _getCacheSnapshotReflectionMode() === "write") {
         throw err;
       }
+      return { ok: false, error: err };
     } finally {
       _summaryInProgress.delete(sessionId);
+      const newerReplacementPending = (_branchReplacementEpoch.get(sessionId) || 0) > replacementEpochAtStart;
+      if (!_stopped && newerReplacementPending) {
+        _trackJob(_doRollingSummary(sessionPath, "branch_change_rerun")
+          .then((outcome) => outcome?.ok ? _doCompileTodayAndAssemble() : undefined)
+          .catch(() => {}));
+      }
     }
   }
 
   // ── 内部：今天编译 + 组装 ──
 
   async function _doCompileTodayAndAssemble() {
+    _aggregateCompileInFlight += 1;
     try {
       const resetAt = _getCompiledResetAt();
       await compileToday(summaryManager, todayMdPath, await getResolvedMemoryModel(), { since: resetAt });
@@ -735,6 +816,8 @@ export function createMemoryTicker(opts) {
     } catch (err) {
       _markFailure("compileToday", err);
       _logStepError("compileToday", err);
+    } finally {
+      _aggregateCompileInFlight = Math.max(0, _aggregateCompileInFlight - 1);
     }
   }
 
@@ -853,8 +936,16 @@ export function createMemoryTicker(opts) {
               since: resetAt,
               timeZone: _getTimezone(),
               getSourceTimeRange: _createSourceTimeRangeResolver(),
+              getCurrentBranchProjection: _createSessionBranchProjectionResolver(),
             },
           );
+          const replacementStillPending = typeof summaryManager.getDirtySessions === "function"
+            && summaryManager
+              .getDirtySessions({ since: resetAt })
+              .some((session) => session.factReplacementRequired === true);
+          if (replacementStillPending) {
+            throw new Error("branch fact replacement remains pending after deep-memory pass");
+          }
           _markDailyStepCompleted("deepMemory", context);
           if (processed > 0) {
             log.log(`deep-memory: ${processed} session, ${factsAdded} 条新事实`);
@@ -890,6 +981,7 @@ export function createMemoryTicker(opts) {
   function _checkDailyJob() {
     if (_stopped) return;
     if (!_isMemoryMasterOn()) return;
+    if (_branchReplacementPending.size > 0) return;
     const context = _restoreDailyProgress();
     if (_lastDailyJobDate !== context.logicalDate) {
       _trackJob(_doDaily()); // 后台，不 await
@@ -902,21 +994,39 @@ export function createMemoryTicker(opts) {
    * 每轮对话结束后调用（由 engine.js 在 prompt() 返回后调用）
    * @param {string} sessionPath - 当前 session 的 .jsonl 文件路径
    */
-  function notifyTurn(sessionPath) {
+  function notifyTurn(sessionPath, options: any = {}) {
     if (_stopped) return;
     const sessionKey = _sessionIdentityForPath(sessionPath);
+    if (options.forceSummary === true) _markBranchReplacementPending(sessionKey);
     const count = (_turnCounts.get(sessionKey) || 0) + 1;
     _turnCounts.set(sessionKey, count);
 
     const memoryOn = _isSessionMemoryOn(sessionPath);
 
-    if (count % TURNS_PER_SUMMARY === 0 && memoryOn) {
-      _trackJob(_doRollingSummary(sessionPath, "threshold")
-        .then(() => _doCompileTodayAndAssemble())
+    let job = null;
+    if ((_branchReplacementPending.has(sessionKey) || count % TURNS_PER_SUMMARY === 0) && memoryOn) {
+      job = _trackJob(_doRollingSummary(sessionPath, "threshold")
+        .then((outcome) => outcome?.ok ? _doCompileTodayAndAssemble() : undefined)
         .catch(() => {}));
     }
 
-    if (memoryOn) _checkDailyJob();
+    if (memoryOn && !_branchReplacementPending.has(sessionKey)) _checkDailyJob();
+    return job;
+  }
+
+  /**
+   * A replay rewind changes the semantic branch before a replacement reply is
+   * guaranteed to reach JSONL. Mark and start the replacement immediately so
+   * a rejected submit cannot leave the discarded sibling in derived memory.
+   */
+  function notifyBranchChanged(sessionPath) {
+    if (_stopped || !sessionPath) return null;
+    const sessionKey = _sessionIdentityForPath(sessionPath);
+    _markBranchReplacementPending(sessionKey);
+    if (!_isSessionMemoryOn(sessionPath)) return null;
+    return _trackJob(_doRollingSummary(sessionPath, "branch_change")
+      .then((outcome) => outcome?.ok ? _doCompileTodayAndAssemble() : undefined)
+      .catch(() => {}));
   }
 
   /**
@@ -948,10 +1058,42 @@ export function createMemoryTicker(opts) {
     if (count === 0) return Promise.resolve();
     if (!_isSessionMemoryOn(sessionPath)) return Promise.resolve();
     return _trackJob(_doRollingSummary(sessionPath, "session_end")
-      .then(() => _doCompileTodayAndAssemble())
+      .then((outcome) => outcome?.ok ? _doCompileTodayAndAssemble() : undefined)
       .catch((err) => {
         log.error(`notifySessionEnd 后台失败: ${err.message}`);
       }));
+  }
+
+  /**
+   * Retry 改写 active branch 前，作废只属于该 session 的摘要与深度事实。
+   *
+   * 聚合产物（today.md / facts.md / memory.md）是 Retry 发生前已经沉淀的历史记忆，
+   * 不做追溯改写。这里只清掉会继续参与后续编译的 per-session 摘要与深度事实，
+   * 从下一次 rolling pass 开始只消费新的 active branch。
+   */
+  function invalidateSessionDerivedState(ref) {
+    const explicitSessionId = typeof ref?.sessionId === "string" ? ref.sessionId.trim() : "";
+    const sessionPath = typeof ref?.sessionPath === "string" ? ref.sessionPath : "";
+    const sessionId = explicitSessionId || (sessionPath ? _sessionIdentityForPath(sessionPath) : "");
+    if (!sessionId) throw new Error("memory invalidation requires sessionId");
+    if (_summaryInProgress.has(sessionId) || _dailyRunning || _aggregateCompileInFlight > 0) {
+      const error: any = new Error("session_memory_busy");
+      error.code = "session_memory_busy";
+      error.status = 409;
+      throw error;
+    }
+    const result = invalidateSessionDerivedStateSync({
+      sessionId,
+      retainedMessageCount: ref?.retainedMessageCount,
+      summaryManager,
+      factStore,
+    });
+    _turnCounts.delete(sessionId);
+    debugLog()?.warn?.(
+      "memory",
+      `session-derived memory invalidated for ${sessionId}; existing aggregate history preserved`,
+    );
+    return result;
   }
 
   /**
@@ -989,16 +1131,31 @@ export function createMemoryTicker(opts) {
     const sessions = listSessionFiles(sessionDir);
     let recovered = 0;
     for (const { filePath, mtime } of sessions) {
-      if (mtime.getTime() < cutoff) continue;
-      if (resetMs && mtime.getTime() <= resetMs) continue;
       if (!_isSessionMemoryOn(filePath)) continue;
       const sessionId = _sessionIdentityForPath(filePath);
       const existing = summaryManager.getSummary(sessionId);
+      const replacementPending = existing?.factReplacementRequired === true;
       const existingSummaryAt = existing?.updated_at ? new Date(existing.updated_at).getTime() : 0;
       const summaryAt = resetMs ? Math.max(existingSummaryAt, resetMs) : existingSummaryAt;
-      if (mtime.getTime() > summaryAt + 5000) { // 5s 宽限，避免极近时间戳误判
-        await _doRollingSummary(filePath, "recovery");
-        recovered += 1;
+      const pendingForkBaseline = !!existing?.fork_baseline
+        && !String(existing?.summary || "").trim()
+        && Number(existing?.messageCount) === 0;
+      const branchHead = typeof getSessionBranchHeadForPath === "function"
+        ? getSessionBranchHeadForPath(filePath)
+        : null;
+      const branchHeadAt = branchHead?.updatedAt ? Date.parse(branchHead.updatedAt) : NaN;
+      const branchHeadMayBeNewer = Number.isFinite(branchHeadAt) && branchHeadAt >= existingSummaryAt;
+      let branchCursorMismatch = false;
+      if (replacementPending || branchHeadMayBeNewer) {
+        const projection = _readSessionBranch(filePath);
+        branchCursorMismatch = !_summaryCursorBelongsToProjection(existing, projection);
+      }
+      if (!pendingForkBaseline && !replacementPending && !branchCursorMismatch && mtime.getTime() < cutoff) continue;
+      if (!pendingForkBaseline && !replacementPending && !branchCursorMismatch && resetMs && mtime.getTime() <= resetMs) continue;
+      if (replacementPending || branchCursorMismatch) _markBranchReplacementPending(sessionId);
+      if (pendingForkBaseline || replacementPending || branchCursorMismatch || mtime.getTime() > summaryAt + 5000) {
+        const outcome = await _doRollingSummary(filePath, "recovery");
+        if (outcome?.ok) recovered += 1;
       }
     }
     return recovered;
@@ -1018,6 +1175,7 @@ export function createMemoryTicker(opts) {
   async function _tickCore() {
     if (!_isMemoryMasterOn()) return;
     const recovered = await _recoverUnsummarized(); // 补偿崩溃/重启前未收尾的 session
+    if (_branchReplacementPending.size > 0) return;
     let context = _restoreDailyProgress();
     if (recovered > 0) {
       _clearPersistedDailyProgress(context, "summary recovery");
@@ -1047,7 +1205,8 @@ export function createMemoryTicker(opts) {
     if (!sessionPath) return;
     if (!_isSessionMemoryOn(sessionPath)) return;
     try {
-      await _doRollingSummary(sessionPath, "promoted");
+      const outcome = await _doRollingSummary(sessionPath, "promoted");
+      if (!outcome?.ok) throw outcome?.error || new Error("rolling summary failed");
       await _doCompileTodayAndAssemble();
       debugLog()?.log("memory", `promoted session summarized: ${path.basename(sessionPath).slice(0, 20)}...`);
     } catch (err) {
@@ -1058,6 +1217,26 @@ export function createMemoryTicker(opts) {
   }
 
   /**
+   * A fork already contains a durable shared prefix even before the user sends
+   * a new turn. Materialize that prefix under the child Session ID immediately
+   * so the source and child memory lineages are independently durable.
+   */
+  function notifyForkCreated(sessionPath) {
+    if (_stopped || !sessionPath || !_isSessionMemoryOn(sessionPath)) return Promise.resolve();
+    const sessionId = _sessionIdentityForPath(sessionPath);
+    _turnCounts.set(sessionId, Math.max(1, _turnCounts.get(sessionId) || 0));
+    return _trackJob((async () => {
+      try {
+        await _doRollingSummary(sessionPath, "fork_created");
+        await _doCompileTodayAndAssemble();
+        debugLog()?.log("memory", `forked session summarized: ${sessionId.slice(0, 8)}...`);
+      } catch (err) {
+        log.error(`notifyForkCreated 失败: ${err.message}`);
+      }
+    })());
+  }
+
+  /**
    * 强制刷新指定 session 的摘要（日记等功能调用前确保摘要最新）
    * @param {string} sessionPath
    */
@@ -1065,7 +1244,8 @@ export function createMemoryTicker(opts) {
     if (_stopped) return;
     if (!sessionPath) return;
     if (!_isSessionMemoryOn(sessionPath)) return;
-    await _doRollingSummary(sessionPath, "manual");
+    const outcome = await _doRollingSummary(sessionPath, "manual");
+    if (!outcome?.ok) throw outcome?.error || new Error("rolling summary failed");
   }
 
   /**
@@ -1079,7 +1259,8 @@ export function createMemoryTicker(opts) {
     if (_stopped) return;
     if (!sessionPath) return;
     if (!_isSessionMemoryOn(sessionPath)) return;
-    await _doRollingSummary(sessionPath, "manual");
+    const outcome = await _doRollingSummary(sessionPath, "manual");
+    if (!outcome?.ok) throw outcome?.error || new Error("rolling summary failed");
     await _doCompileTodayAndAssemble();
     _turnCounts.delete(_sessionIdentityForPath(sessionPath));
   }
@@ -1094,5 +1275,19 @@ export function createMemoryTicker(opts) {
     return snapshot;
   }
 
-  return { start, stop, tick, triggerNow, notifyTurn, notifySessionEnd, notifyPromoted, flushSession, flushSessionAndCompile, getHealthStatus };
+  return {
+    start,
+    stop,
+    tick,
+    triggerNow,
+    notifyTurn,
+    notifyBranchChanged,
+    notifySessionEnd,
+    notifyPromoted,
+    notifyForkCreated,
+    flushSession,
+    flushSessionAndCompile,
+    invalidateSessionDerivedState,
+    getHealthStatus,
+  };
 }

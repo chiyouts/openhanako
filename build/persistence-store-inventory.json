@@ -2476,7 +2476,7 @@
     },
     {
       "sourceFile": "core/agent.ts",
-      "line": 468,
+      "line": 474,
       "kind": "persistent-store-constructor",
       "excerpt": "new CronStore( path.join(this.deskDir, \"cron-jobs.json\"), path.join(this.deskDir, \"cron-runs\"), )",
       "reason": "Constructs an agent or studio CronStore.",
@@ -2485,7 +2485,7 @@
     },
     {
       "sourceFile": "core/bridge-session-manager.ts",
-      "line": 593,
+      "line": 606,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(dir, { recursive: true })",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -2494,7 +2494,7 @@
     },
     {
       "sourceFile": "core/bridge-session-manager.ts",
-      "line": 594,
+      "line": 607,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(this._indexPath(agent), JSON.stringify(index, null, 2) + \"\\n\")",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -2503,7 +2503,7 @@
     },
     {
       "sourceFile": "core/bridge-session-manager.ts",
-      "line": 956,
+      "line": 972,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(sessionDir, { recursive: true })",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -2512,7 +2512,7 @@
     },
     {
       "sourceFile": "core/bridge-session-manager.ts",
-      "line": 1304,
+      "line": 1328,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(sessionDir, { recursive: true })",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -2782,7 +2782,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 311,
+      "line": 315,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(this.channelsDir, { recursive: true })",
       "reason": "Creates the channel root.",
@@ -2791,7 +2791,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 357,
+      "line": 361,
       "kind": "persistent-store-constructor",
       "excerpt": "new PreferencesManager({ userDir: this.userDir, agentsDir: this.agentsDir })",
       "reason": "Constructs the preferences owner.",
@@ -2800,7 +2800,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 358,
+      "line": 362,
       "kind": "persistent-store-constructor",
       "excerpt": "new InputDraftsStore({ hanakoHome: this.hanakoHome })",
       "reason": "Constructs draft/project stores.",
@@ -2809,7 +2809,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 376,
+      "line": 380,
       "kind": "persistent-store-constructor",
       "excerpt": "new SessionProjectCatalogStore({ userDir: this.userDir })",
       "reason": "Constructs draft/project stores.",
@@ -2818,7 +2818,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 558,
+      "line": 613,
       "kind": "persistent-store-constructor",
       "excerpt": "new TaskRegistry({ persistencePath: path.join(this.hanakoHome, \".ephemeral\", \"plugin-tasks.json\"), getSessionIdForPath: (sessionPath) => this.getSessionIdForPath(sessionPath), })",
       "reason": "Constructs the plugin task registry.",
@@ -2827,7 +2827,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 1098,
+      "line": 1236,
       "kind": "persistent-store-constructor",
       "excerpt": "new SessionManifestStore({ dbPath })",
       "reason": "Constructs the manifest store during engine construction.",
@@ -2836,7 +2836,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 1119,
+      "line": 1257,
       "kind": "persistent-store-constructor",
       "excerpt": "new SessionManifestStore({ dbPath })",
       "reason": "Constructs the manifest store during engine construction.",
@@ -2845,7 +2845,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 2023,
+      "line": 2173,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(skillsDir, { recursive: true })",
       "reason": "Creates the user skill root.",
@@ -2854,7 +2854,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 2205,
+      "line": 2355,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(filePath)",
       "reason": "Deletes an expired legacy ephemeral session JSONL locator.",
@@ -2863,7 +2863,7 @@
     },
     {
       "sourceFile": "core/engine.ts",
-      "line": 2259,
+      "line": 2409,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(pluginDevSourcesDir, { recursive: true })",
       "reason": "Creates the plugin development source root.",
@@ -3286,7 +3286,7 @@
     },
     {
       "sourceFile": "core/media/task-store.ts",
-      "line": 311,
+      "line": 677,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(this._dataDir, { recursive: true })",
       "reason": "Writes data within the active pluginId-scoped data directory.",
@@ -3295,7 +3295,7 @@
     },
     {
       "sourceFile": "core/media/task-store.ts",
-      "line": 313,
+      "line": 679,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify([...this._tasks.values()]), \"utf8\")",
       "reason": "Writes data within the active pluginId-scoped data directory.",
@@ -3304,7 +3304,7 @@
     },
     {
       "sourceFile": "core/media/task-store.ts",
-      "line": 314,
+      "line": 680,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, this._filePath)",
       "reason": "Writes data within the active pluginId-scoped data directory.",
@@ -3322,7 +3322,7 @@
     },
     {
       "sourceFile": "core/media/universal-media-manager.ts",
-      "line": 981,
+      "line": 989,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(path.join(this._generatedDir, filename))",
       "reason": "Writes data within the active pluginId-scoped data directory.",
@@ -3376,7 +3376,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 367,
+      "line": 370,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '\"' }), \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3385,7 +3385,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 368,
+      "line": 371,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3394,7 +3394,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 620,
+      "line": 623,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(sessionFile, outputLines.join(\"\\n\") + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3403,7 +3403,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 672,
+      "line": 675,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(metaPath), { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3412,7 +3412,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 673,
+      "line": 676,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3421,7 +3421,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 695,
+      "line": 698,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(deferredTasksPath), { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3430,7 +3430,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 696,
+      "line": 699,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(deferredTasksPath, JSON.stringify(deferredTasks, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3439,7 +3439,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 877,
+      "line": 880,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '\"' }), \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3448,7 +3448,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 878,
+      "line": 881,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3457,7 +3457,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 939,
+      "line": 942,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '\"' }), \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3466,7 +3466,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 940,
+      "line": 943,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3475,7 +3475,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1196,
+      "line": 1199,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(ymlPath, yamlStr)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3484,7 +3484,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1254,
+      "line": 1257,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, yamlStr, \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3493,7 +3493,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1255,
+      "line": 1258,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, ymlPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3502,7 +3502,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1283,
+      "line": 1286,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( tmp, YAML.dump(cfg, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\" }), \"utf-8\" )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3511,7 +3511,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1288,
+      "line": 1291,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3520,7 +3520,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1389,
+      "line": 1392,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3529,7 +3529,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1390,
+      "line": 1393,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, jobsPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3538,7 +3538,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1454,
+      "line": 1457,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(jobsPath, JSON.stringify({ ...data, jobs }, null, 2) + \"\\n\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3547,7 +3547,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1943,
+      "line": 1946,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(backupRoot, { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3556,7 +3556,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1946,
+      "line": 1949,
       "kind": "copy-file",
       "excerpt": "fs.copyFileSync(store.catalogPath, backupPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3565,18 +3565,9 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 1954,
+      "line": 1957,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync( path.join(backupDir, \"migration-report.json\"), JSON.stringify(report, null, 2) + \"\\n\", )",
-      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
-      "storeId": null,
-      "exemptionId": "cross-store-legacy-migrations"
-    },
-    {
-      "sourceFile": "core/migrations.ts",
-      "line": 2058,
-      "kind": "mkdir",
-      "excerpt": "fs.mkdirSync(backupRoot, { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
       "storeId": null,
       "exemptionId": "cross-store-legacy-migrations"
@@ -3584,6 +3575,15 @@
     {
       "sourceFile": "core/migrations.ts",
       "line": 2061,
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(backupRoot, { recursive: true })",
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "storeId": null,
+      "exemptionId": "cross-store-legacy-migrations"
+    },
+    {
+      "sourceFile": "core/migrations.ts",
+      "line": 2064,
       "kind": "copy-file",
       "excerpt": "fs.copyFileSync(store.catalogPath, backupPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3592,7 +3592,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2069,
+      "line": 2072,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync( path.join(backupDir, \"migration-report.json\"), JSON.stringify(report, null, 2) + \"\\n\", )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3601,7 +3601,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2219,
+      "line": 2222,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync( configPath, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\", }), )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3610,7 +3610,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2303,
+      "line": 2306,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync( configPath, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\", }), )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3619,7 +3619,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2351,
+      "line": 2354,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(configPath, JSON.stringify(config, null, 2) + \"\\n\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3628,7 +3628,25 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2546,
+      "line": 2500,
+      "kind": "atomic-write",
+      "excerpt": "atomicWriteSync(tasksPath, JSON.stringify(tasks, null, 2) + \"\\n\")",
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "storeId": null,
+      "exemptionId": "cross-store-legacy-migrations"
+    },
+    {
+      "sourceFile": "core/migrations.ts",
+      "line": 2516,
+      "kind": "atomic-write",
+      "excerpt": "atomicWriteSync(configPath, JSON.stringify(config, null, 2) + \"\\n\")",
+      "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
+      "storeId": null,
+      "exemptionId": "cross-store-legacy-migrations"
+    },
+    {
+      "sourceFile": "core/migrations.ts",
+      "line": 2740,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(jobsPath, JSON.stringify({ ...data, jobs }, null, 2) + \"\\n\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3637,7 +3655,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2643,
+      "line": 2837,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(dstDir), { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3646,7 +3664,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2646,
+      "line": 2840,
       "kind": "remove-path",
       "excerpt": "fs.rmSync(tmpDir, { recursive: true, force: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3655,7 +3673,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2647,
+      "line": 2841,
       "kind": "copy-file",
       "excerpt": "fs.cpSync(srcDir, tmpDir, { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3664,7 +3682,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2648,
+      "line": 2842,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( path.join(tmpDir, \"SKILL.md\"), rewriteSkillContentForGlobalPool(content, skillName), \"utf-8\", )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3673,7 +3691,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2653,
+      "line": 2847,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmpDir, dstDir)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3682,7 +3700,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2655,
+      "line": 2849,
       "kind": "remove-path",
       "excerpt": "fs.rmSync(tmpDir, { recursive: true, force: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3691,7 +3709,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2689,
+      "line": 2883,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(skillsDir, { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3700,7 +3718,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2739,
+      "line": 2933,
       "kind": "remove-path",
       "excerpt": "fs.rmSync(learnedDir, { recursive: true, force: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3709,7 +3727,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2804,
+      "line": 2998,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(projectionPath, nextProjection)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3718,7 +3736,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2814,
+      "line": 3008,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(runtimeDir, { recursive: true })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3727,7 +3745,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2837,
+      "line": 3031,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(runtimePath, JSON.stringify(nextRuntime, null, 2) + \"\\n\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3736,7 +3754,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2895,
+      "line": 3089,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( tmp, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\" }), \"utf-8\" )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3745,7 +3763,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 2900,
+      "line": 3094,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3754,7 +3772,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3076,
+      "line": 3270,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, yamlStr, \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3763,7 +3781,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3077,
+      "line": 3271,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, ymlPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3772,7 +3790,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3238,
+      "line": 3432,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify(index, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3781,7 +3799,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3239,
+      "line": 3433,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, indexPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3790,7 +3808,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3290,
+      "line": 3484,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify(raw, null, 4) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3799,7 +3817,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3291,
+      "line": 3485,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, modelsJsonPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3808,7 +3826,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3399,
+      "line": 3593,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( tmp, YAML.dump(cfg, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\" }), \"utf-8\", )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3817,7 +3835,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3404,
+      "line": 3598,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3826,7 +3844,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3413,
+      "line": 3607,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( tmp, header + YAML.dump(raw, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\", forceQuotes: false, }), \"utf-8\", )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3835,7 +3853,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3424,
+      "line": 3618,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, ymlPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3844,7 +3862,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3520,
+      "line": 3714,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify(meta, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3853,7 +3871,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3521,
+      "line": 3715,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, metaPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3862,7 +3880,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3539,
+      "line": 3733,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(backupPath, raw, { encoding: \"utf-8\", flag: \"wx\" })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3871,7 +3889,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3589,
+      "line": 3783,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(identityPath, repaired)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3880,7 +3898,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3603,
+      "line": 3797,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(backupPath, raw, { encoding: \"utf-8\", flag: \"wx\" })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3889,7 +3907,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3644,
+      "line": 3838,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify(meta, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3898,7 +3916,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3645,
+      "line": 3839,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, metaPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3907,7 +3925,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3691,
+      "line": 3885,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(backupPath, raw, { encoding: \"utf-8\", flag: \"wx\" })",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3916,7 +3934,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3747,
+      "line": 3941,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( tmp, header + YAML.dump(raw, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\", forceQuotes: false, }), \"utf-8\", )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3925,7 +3943,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3758,
+      "line": 3952,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, ymlPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3934,7 +3952,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3789,
+      "line": 3983,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync( tmp, YAML.dump(cfg, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: \"\\\"\" }), \"utf-8\", )",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3943,7 +3961,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 3794,
+      "line": 3988,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, cfgPath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3952,7 +3970,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4034,
+      "line": 4228,
       "kind": "persistent-store-constructor",
       "excerpt": "new SubagentRunStore(path.join(hanakoHome, \"subagent-runs.json\"))",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3961,7 +3979,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4127,
+      "line": 4321,
       "kind": "persistent-store-constructor",
       "excerpt": "new SubagentThreadStore(path.join(hanakoHome, \"subagent-threads.json\"))",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3970,7 +3988,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4128,
+      "line": 4322,
       "kind": "persistent-store-constructor",
       "excerpt": "new SubagentRunStore(path.join(hanakoHome, \"subagent-runs.json\"))",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3979,7 +3997,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4224,
+      "line": 4418,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(threadsPath, JSON.stringify(rawThreads, null, 2) + \"\\n\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3988,7 +4006,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4239,
+      "line": 4433,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(runsPath, JSON.stringify(rawRuns, null, 2) + \"\\n\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -3997,7 +4015,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4267,
+      "line": 4461,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, next, \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4006,7 +4024,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4268,
+      "line": 4462,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, filePath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4015,7 +4033,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4285,
+      "line": 4479,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, next, \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4024,7 +4042,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4286,
+      "line": 4480,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, filePath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4033,7 +4051,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4332,
+      "line": 4526,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, next, \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4042,7 +4060,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4333,
+      "line": 4527,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, filePath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4051,7 +4069,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4356,
+      "line": 4550,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, next, \"utf-8\")",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4060,7 +4078,7 @@
     },
     {
       "sourceFile": "core/migrations.ts",
-      "line": 4357,
+      "line": 4551,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, filePath)",
       "reason": "The legacy migration orchestrator mutates many registered targets. Each target is inventoried, while exact-site flow attribution remains prerequisite work for the coordinator.",
@@ -4069,7 +4087,7 @@
     },
     {
       "sourceFile": "core/model-sync.ts",
-      "line": 480,
+      "line": 493,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(modelsJsonPath, newStr)",
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
@@ -4330,7 +4348,7 @@
     },
     {
       "sourceFile": "core/provider-registry.ts",
-      "line": 836,
+      "line": 838,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(cfgPath, yamlStr)",
       "reason": "Owns provider catalog, authentication, model compatibility, or local provider plugin state.",
@@ -4474,7 +4492,79 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 2223,
+      "line": 2673,
+      "kind": "remove-path",
+      "excerpt": "fsp.rm(sessionPath, { force: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 2821,
+      "kind": "mkdir",
+      "excerpt": "fsp.mkdir(targetSessionDir, { recursive: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 3098,
+      "kind": "remove-path",
+      "excerpt": "fsp.rm(targetSessionPath, { force: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 3142,
+      "kind": "mkdir",
+      "excerpt": "fsp.mkdir(journalDir, { recursive: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 3144,
+      "kind": "copy-file",
+      "excerpt": "fsp.copyFile(sourceJournalPath, targetJournalPath, fs.constants.COPYFILE_EXCL)",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 3258,
+      "kind": "remove-path",
+      "excerpt": "fsp.rm(journalPath, { force: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 3263,
+      "kind": "remove-path",
+      "excerpt": "fsp.rmdir(sessionDir)",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 4076,
+      "kind": "remove-path",
+      "excerpt": "fsp.rm(childSessionPath, { force: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 4177,
       "kind": "remove-path",
       "excerpt": "fsp.rm(createdSessionPath, { force: true })",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4483,7 +4573,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 4492,
+      "line": 6535,
       "kind": "write-file",
       "excerpt": "fsp.writeFile(titlePath, JSON.stringify(titles, null, 2), \"utf-8\")",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4492,7 +4582,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 4600,
+      "line": 6643,
       "kind": "write-file",
       "excerpt": "fsp.writeFile(titlePath, JSON.stringify(titles, null, 2), \"utf-8\")",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4501,7 +4591,25 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 4913,
+      "line": 6975,
+      "kind": "write-file",
+      "excerpt": "fsp.writeFile(metaPath, JSON.stringify(meta, null, 2))",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 6984,
+      "kind": "remove-path",
+      "excerpt": "fsp.rm(this._sessionMetaPayloadAbsolutePath(metaPath, ref.path), { force: true })",
+      "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "core/session-coordinator.ts",
+      "line": 7006,
       "kind": "write-file",
       "excerpt": "fsp.writeFile(metaPath, JSON.stringify(compactedMeta, null, 2))",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4510,7 +4618,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 4921,
+      "line": 7016,
       "kind": "mkdir",
       "excerpt": "fsp.mkdir(path.dirname(metaPath), { recursive: true })",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4519,7 +4627,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 4969,
+      "line": 7064,
       "kind": "rename",
       "excerpt": "fsp.rename(metaPath, backupPath)",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4528,7 +4636,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 4996,
+      "line": 7091,
       "kind": "write-file",
       "excerpt": "fsp.writeFile(metaPath, JSON.stringify(budgeted, null, 2))",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4537,7 +4645,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5068,
+      "line": 7163,
       "kind": "mkdir",
       "excerpt": "fsp.mkdir(path.dirname(absPath), { recursive: true })",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4546,7 +4654,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5069,
+      "line": 7164,
       "kind": "write-file",
       "excerpt": "fsp.writeFile(absPath, encoded, \"utf-8\")",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4555,7 +4663,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5244,
+      "line": 7339,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(agent.sessionDir, { recursive: true })",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4564,7 +4672,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5245,
+      "line": 7340,
       "kind": "rename",
       "excerpt": "fs.renameSync(oldPath, newPath)",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4573,7 +4681,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5261,
+      "line": 7356,
       "kind": "rename",
       "excerpt": "fs.renameSync(newPath, oldPath)",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4582,7 +4690,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5352,
+      "line": 7448,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(sp)",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4591,7 +4699,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5363,
+      "line": 7459,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(candidate)",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4600,7 +4708,7 @@
     },
     {
       "sourceFile": "core/session-coordinator.ts",
-      "line": 5368,
+      "line": 7464,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(sessionDir, { recursive: true })",
       "reason": "Creates, repairs, archives, restores, or appends session JSONL locators.",
@@ -4699,7 +4807,7 @@
     },
     {
       "sourceFile": "core/session-manifest/store.ts",
-      "line": 235,
+      "line": 247,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true })",
       "reason": "Opens, migrates, or manages files for session-manifest.db.",
@@ -4708,7 +4816,7 @@
     },
     {
       "sourceFile": "core/session-manifest/store.ts",
-      "line": 237,
+      "line": 249,
       "kind": "database-open",
       "excerpt": "new Database(opts.dbPath)",
       "reason": "Opens, migrates, or manages files for session-manifest.db.",
@@ -4753,7 +4861,7 @@
     },
     {
       "sourceFile": "core/studio-cron-service.ts",
-      "line": 77,
+      "line": 60,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(jobsPath, JSON.stringify(next, null, 2) + \"\\n\")",
       "reason": "Writes cron jobs or execution receipts.",
@@ -4762,16 +4870,16 @@
     },
     {
       "sourceFile": "core/studio-cron-service.ts",
-      "line": 156,
+      "line": 210,
       "kind": "persistent-store-constructor",
-      "excerpt": "new CronStore( path.join(deskDir, \"cron-jobs.json\"), path.join(deskDir, \"cron-runs\"), { idPrefix: \"studio_job\" }, )",
+      "excerpt": "new CronStore( path.join(deskDir, \"cron-jobs.json\"), path.join(deskDir, \"cron-runs\"), { idPrefix: \"studio_job\", studioId: normalizedStudioId }, )",
       "reason": "Writes cron jobs or execution receipts.",
       "storeId": "cron-automation",
       "exemptionId": null
     },
     {
       "sourceFile": "core/studio-cron-service.ts",
-      "line": 223,
+      "line": 280,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(studioRunsDir, { recursive: true })",
       "reason": "Writes cron jobs or execution receipts.",
@@ -4780,7 +4888,7 @@
     },
     {
       "sourceFile": "core/studio-cron-service.ts",
-      "line": 224,
+      "line": 281,
       "kind": "copy-file",
       "excerpt": "fs.copyFileSync(source, target)",
       "reason": "Writes cron jobs or execution receipts.",
@@ -4834,7 +4942,7 @@
     },
     {
       "sourceFile": "core/vision-bridge.ts",
-      "line": 124,
+      "line": 153,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(filePath), { recursive: true })",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -4843,7 +4951,7 @@
     },
     {
       "sourceFile": "core/vision-bridge.ts",
-      "line": 126,
+      "line": 155,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + \"\\n\", \"utf-8\")",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -4852,7 +4960,7 @@
     },
     {
       "sourceFile": "core/vision-bridge.ts",
-      "line": 127,
+      "line": 156,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmp, filePath)",
       "reason": "Writes a session-owned sidecar or bridge index.",
@@ -5041,7 +5149,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 1734,
+      "line": 1741,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(serverInfoPath)",
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
@@ -5050,7 +5158,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2225,
+      "line": 2233,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(hanakoHome, { recursive: true })",
       "reason": "Writes desktop crash or browser-command diagnostics.",
@@ -5059,7 +5167,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2226,
+      "line": 2234,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(crashLogPath, content, \"utf-8\")",
       "reason": "Writes desktop crash or browser-command diagnostics.",
@@ -5068,7 +5176,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2287,
+      "line": 2295,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(lastSeenVersionPath), { recursive: true })",
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
@@ -5077,7 +5185,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2288,
+      "line": 2296,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(lastSeenVersionPath, JSON.stringify({ version }))",
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
@@ -5086,7 +5194,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2356,
+      "line": 2364,
       "kind": "write-file",
       "excerpt": "fs.promises.writeFile(windowStatePath, JSON.stringify(state, null, 2) + \"\\n\")",
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
@@ -5095,7 +5203,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2455,
+      "line": 2463,
       "kind": "mkdir",
       "excerpt": "fs.promises.mkdir(path.dirname(quickChatWindowStatePath), { recursive: true })",
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
@@ -5104,7 +5212,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 2456,
+      "line": 2464,
       "kind": "write-file",
       "excerpt": "fs.promises.writeFile(quickChatWindowStatePath, JSON.stringify(state, null, 2) + \"\\n\")",
       "reason": "Writes desktop window bounds or the release-announcement version bookmark.",
@@ -5113,7 +5221,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 4209,
+      "line": 4217,
       "kind": "append-file",
       "excerpt": "require(\"fs\").appendFileSync(require(\"path\").join(hanakoHome, \"browser-cmd.log\"), `${new Date().toISOString()} ${redactMainLogText(line)}\\n`)",
       "reason": "Writes desktop crash or browser-command diagnostics.",
@@ -5122,7 +5230,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 4776,
+      "line": 4784,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmpHtml, htmlContent, \"utf-8\")",
       "reason": "Writes and removes one request-scoped screenshot HTML file under the operating-system temporary directory.",
@@ -5131,7 +5239,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 4830,
+      "line": 4838,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(tmpHtml)",
       "reason": "Writes and removes one request-scoped screenshot HTML file under the operating-system temporary directory.",
@@ -5140,7 +5248,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5395,
+      "line": 5403,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(tmpDir, { recursive: true })",
       "reason": "Creates a request-scoped skill preview directory under Electron's operating-system temp path.",
@@ -5149,7 +5257,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5541,
+      "line": 5549,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(filePath, content, \"utf-8\")",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5158,7 +5266,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5563,
+      "line": 5571,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(resolved), { recursive: true })",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5167,7 +5275,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5564,
+      "line": 5572,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(resolved, Buffer.from(base64Data, \"base64\"))",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5176,7 +5284,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5575,
+      "line": 5583,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(destinationPath), { recursive: true })",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5185,7 +5293,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5576,
+      "line": 5584,
       "kind": "copy-file",
       "excerpt": "fs.copyFileSync(sourcePath, destinationPath)",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5194,7 +5302,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5609,
+      "line": 5617,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(dir, { recursive: true })",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5203,7 +5311,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 5610,
+      "line": 5618,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(filePath, pngBuffer)",
       "reason": "Writes an absolute path selected by the renderer or a screenshot directory selected by the user; no HANA_HOME store is implied.",
@@ -5212,7 +5320,7 @@
     },
     {
       "sourceFile": "desktop/main.cjs",
-      "line": 6134,
+      "line": 6142,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(path.join(hanakoHome, \"server-info.json\"))",
       "reason": "Deletes stale desktop server discovery state before or after a server lifecycle.",
@@ -5392,7 +5500,7 @@
     },
     {
       "sourceFile": "hub/channel-router.ts",
-      "line": 1038,
+      "line": 1066,
       "kind": "persistent-store-constructor",
       "excerpt": "new FactStore(dbPath)",
       "reason": "Opens or repairs the canonical per-agent facts database.",
@@ -5950,7 +6058,7 @@
     },
     {
       "sourceFile": "lib/deferred-result-store.ts",
-      "line": 375,
+      "line": 522,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(this._persistPath), { recursive: true })",
       "reason": "Persists deferred task/result delivery state.",
@@ -5959,7 +6067,7 @@
     },
     {
       "sourceFile": "lib/deferred-result-store.ts",
-      "line": 376,
+      "line": 523,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(this._persistPath, JSON.stringify(obj, null, 2) + \"\\n\")",
       "reason": "Persists deferred task/result delivery state.",
@@ -5995,7 +6103,7 @@
     },
     {
       "sourceFile": "lib/desk/cron-store.ts",
-      "line": 208,
+      "line": 257,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(this._jobsPath), { recursive: true })",
       "reason": "Writes cron jobs or execution receipts.",
@@ -6004,7 +6112,7 @@
     },
     {
       "sourceFile": "lib/desk/cron-store.ts",
-      "line": 214,
+      "line": 264,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(this._jobsPath, data)",
       "reason": "Writes cron jobs or execution receipts.",
@@ -6013,7 +6121,7 @@
     },
     {
       "sourceFile": "lib/desk/cron-store.ts",
-      "line": 572,
+      "line": 722,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(this._runsDir, { recursive: true })",
       "reason": "Writes cron jobs or execution receipts.",
@@ -6022,7 +6130,7 @@
     },
     {
       "sourceFile": "lib/desk/cron-store.ts",
-      "line": 573,
+      "line": 723,
       "kind": "append-file",
       "excerpt": "fs.appendFileSync(filePath, line, \"utf-8\")",
       "reason": "Writes cron jobs or execution receipts.",
@@ -6031,7 +6139,7 @@
     },
     {
       "sourceFile": "lib/desk/cron-store.ts",
-      "line": 580,
+      "line": 730,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(filePath, lines.slice(-300).join(\"\\n\") + \"\\n\")",
       "reason": "Writes cron jobs or execution receipts.",
@@ -6058,7 +6166,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 271,
+      "line": 278,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(jianPath), { recursive: true })",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6067,7 +6175,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 272,
+      "line": 279,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(jianPath, composeJianContent(instructions, execLog))",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6076,7 +6184,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 443,
+      "line": 450,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(filePath, kept.join(\"\\n\") + \"\\n\")",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6085,7 +6193,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 477,
+      "line": 491,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(patrolLogPath), { recursive: true })",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6094,7 +6202,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 478,
+      "line": 492,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(patrolLogPath, `${existing}${prefix}${line}`)",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6103,7 +6211,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 623,
+      "line": 637,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(registryPath), { recursive: true })",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6112,7 +6220,7 @@
     },
     {
       "sourceFile": "lib/desk/heartbeat.ts",
-      "line": 624,
+      "line": 638,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(registryPath, JSON.stringify(reg, null, 2))",
       "reason": "Writes heartbeat/task files inside an explicitly mounted workspace, not a Hana-owned persistence root.",
@@ -6121,7 +6229,7 @@
     },
     {
       "sourceFile": "lib/diary/diary-writer.ts",
-      "line": 713,
+      "line": 766,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(diaryDir, { recursive: true })",
       "reason": "Writes a user- or agent-authored Markdown record.",
@@ -6130,7 +6238,7 @@
     },
     {
       "sourceFile": "lib/diary/diary-writer.ts",
-      "line": 715,
+      "line": 768,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(filePath, finalContent + \"\\n\", \"utf-8\")",
       "reason": "Writes a user- or agent-authored Markdown record.",
@@ -6445,7 +6553,7 @@
     },
     {
       "sourceFile": "lib/memory/memory-ticker.ts",
-      "line": 394,
+      "line": 433,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(memoryDir, { recursive: true })",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -6454,7 +6562,7 @@
     },
     {
       "sourceFile": "lib/memory/memory-ticker.ts",
-      "line": 395,
+      "line": 434,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(_dailyStatePath(), JSON.stringify(state, null, 2) + \"\\n\")",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -6490,7 +6598,7 @@
     },
     {
       "sourceFile": "lib/memory/session-summary.ts",
-      "line": 54,
+      "line": 66,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(summariesDir, { recursive: true })",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -6499,7 +6607,7 @@
     },
     {
       "sourceFile": "lib/memory/session-summary.ts",
-      "line": 87,
+      "line": 99,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(fp), { recursive: true })",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -6508,7 +6616,7 @@
     },
     {
       "sourceFile": "lib/memory/session-summary.ts",
-      "line": 88,
+      "line": 100,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(fp, JSON.stringify(data, null, 2) + \"\\n\")",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -6517,7 +6625,16 @@
     },
     {
       "sourceFile": "lib/memory/session-summary.ts",
-      "line": 183,
+      "line": 189,
+      "kind": "remove-path",
+      "excerpt": "fs.unlinkSync(this._filePath(normalized))",
+      "reason": "Writes a named per-agent memory protocol file.",
+      "storeId": "agent-memory",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/memory/session-summary.ts",
+      "line": 304,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(this.summariesDir, { recursive: true })",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -6526,7 +6643,7 @@
     },
     {
       "sourceFile": "lib/memory/session-summary.ts",
-      "line": 185,
+      "line": 306,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(file)",
       "reason": "Writes a named per-agent memory protocol file.",
@@ -7120,7 +7237,88 @@
     },
     {
       "sourceFile": "lib/session-files/session-file-registry.ts",
-      "line": 307,
+      "line": 313,
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(stagedCacheDir, { recursive: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 326,
+      "kind": "copy-file",
+      "excerpt": "fs.cpSync(sourceBytesPath, path.join(stagedCacheDir, managedName), { recursive: !!sourceFile.isDirectory, force: false, errorOnExist: true, })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 378,
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(path.dirname(targetCacheDir), { recursive: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 379,
+      "kind": "rename",
+      "excerpt": "fs.renameSync(stagedCacheDir, targetCacheDir)",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 398,
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(targetSidecarPath, { force: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 403,
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(stagedCacheDir, { recursive: true, force: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 406,
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(targetCacheDir, { recursive: true, force: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 449,
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(sidecarPath, { force: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 451,
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(targetCacheDir, { recursive: true, force: true })",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 536,
       "kind": "remove-path",
       "excerpt": "fs.rmSync(target, { recursive: true, force: true })",
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
@@ -7129,7 +7327,7 @@
     },
     {
       "sourceFile": "lib/session-files/session-file-registry.ts",
-      "line": 433,
+      "line": 673,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(sidecarPath), { recursive: true })",
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
@@ -7138,7 +7336,7 @@
     },
     {
       "sourceFile": "lib/session-files/session-file-registry.ts",
-      "line": 435,
+      "line": 676,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(tmpPath, `${JSON.stringify(sidecar, null, 2)}\\n`, \"utf-8\")",
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
@@ -7147,9 +7345,18 @@
     },
     {
       "sourceFile": "lib/session-files/session-file-registry.ts",
-      "line": 436,
+      "line": 677,
       "kind": "rename",
       "excerpt": "fs.renameSync(tmpPath, sidecarPath)",
+      "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
+      "storeId": "session-files",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "lib/session-files/session-file-registry.ts",
+      "line": 679,
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(tmpPath, { force: true })",
       "reason": "Stages payload bytes or updates SessionFile sidecars under the managed cache.",
       "storeId": "session-files",
       "exemptionId": null
@@ -7354,7 +7561,7 @@
     },
     {
       "sourceFile": "lib/subagent-run-store.ts",
-      "line": 201,
+      "line": 881,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(this._persistPath), { recursive: true })",
       "reason": "Writes subagent run, thread, or executor metadata.",
@@ -7363,7 +7570,7 @@
     },
     {
       "sourceFile": "lib/subagent-run-store.ts",
-      "line": 202,
+      "line": 882,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(this._persistPath, JSON.stringify(data, null, 2) + \"\\n\")",
       "reason": "Writes subagent run, thread, or executor metadata.",
@@ -7372,7 +7579,7 @@
     },
     {
       "sourceFile": "lib/subagent-thread-store.ts",
-      "line": 293,
+      "line": 707,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(this._persistPath), { recursive: true })",
       "reason": "Writes subagent run, thread, or executor metadata.",
@@ -7381,7 +7588,7 @@
     },
     {
       "sourceFile": "lib/subagent-thread-store.ts",
-      "line": 294,
+      "line": 708,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(this._persistPath, JSON.stringify(data, null, 2) + \"\\n\")",
       "reason": "Writes subagent run, thread, or executor metadata.",
@@ -7561,7 +7768,7 @@
     },
     {
       "sourceFile": "lib/workflow-activity-store.ts",
-      "line": 122,
+      "line": 169,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(this._persistPath), { recursive: true })",
       "reason": "Writes workflow journal, session, or activity state.",
@@ -7570,7 +7777,7 @@
     },
     {
       "sourceFile": "lib/workflow-activity-store.ts",
-      "line": 123,
+      "line": 170,
       "kind": "atomic-write",
       "excerpt": "atomicWriteSync(this._persistPath, JSON.stringify(data, null, 2) + \"\\n\")",
       "reason": "Writes workflow journal, session, or activity state.",
@@ -7660,7 +7867,7 @@
     },
     {
       "sourceFile": "plugins/mcp/lib/mcp-runtime.ts",
-      "line": 418,
+      "line": 432,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(this.ctx.dataDir, { recursive: true })",
       "reason": "Writes data within the active pluginId-scoped data directory.",
@@ -7723,7 +7930,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 664,
+      "line": 667,
       "kind": "persistent-store-constructor",
       "excerpt": "new ConfirmStore({ getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null, })",
       "reason": "ConfirmStore is deliberately process-memory-only: pending approvals time out or abort with their session and have no restart replay contract.",
@@ -7732,7 +7939,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 669,
+      "line": 672,
       "kind": "persistent-store-constructor",
       "excerpt": "new SubagentRunStore( path.join(hanakoHome, \"subagent-runs.json\"), { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null }, )",
       "reason": "Constructs subagent stores.",
@@ -7741,7 +7948,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 675,
+      "line": 678,
       "kind": "persistent-store-constructor",
       "excerpt": "new SubagentThreadStore( path.join(hanakoHome, \"subagent-threads.json\"), { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null }, )",
       "reason": "Constructs subagent stores.",
@@ -7750,7 +7957,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 686,
+      "line": 689,
       "kind": "persistent-store-constructor",
       "excerpt": "new WorkflowActivityStore( path.join(hanakoHome, \"workflow-activity.json\"), )",
       "reason": "Constructs the workflow activity store.",
@@ -7759,7 +7966,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 1103,
+      "line": 1106,
       "kind": "append-file",
       "excerpt": "fs.promises.appendFile(_bwsLogPath, chunk)",
       "reason": "Appends the browser worker log.",
@@ -7768,7 +7975,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 1162,
+      "line": 1165,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(serverInfoPath, JSON.stringify({ pid: process.pid, port: actualPort, host, configuredHost: serverRuntimeState.listenHost, networkMode: serverRuntimeState.mode, configuredMode: serverRuntimeState.configuredMode, configuredLi",
       "reason": "Writes or deletes live server discovery state.",
@@ -7777,7 +7984,7 @@
     },
     {
       "sourceFile": "server/index.ts",
-      "line": 1260,
+      "line": 1266,
       "kind": "remove-path",
       "excerpt": "fs.unlinkSync(path.join(hanakoHome, \"server-info.json\"))",
       "reason": "Writes or deletes live server discovery state.",
@@ -7939,7 +8146,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 516,
+      "line": 683,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(uploadRoot, { recursive: true })",
       "reason": "Writes or removes a bounded temporary cover upload.",
@@ -7948,7 +8155,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 519,
+      "line": 686,
       "kind": "write-file",
       "excerpt": "fs.writeFileSync(filePath, buffer)",
       "reason": "Writes or removes a bounded temporary cover upload.",
@@ -7957,7 +8164,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 522,
+      "line": 689,
       "kind": "remove-path",
       "excerpt": "fs.rmSync(tempDir, { recursive: true, force: true })",
       "reason": "Writes or removes a bounded temporary cover upload.",
@@ -7966,7 +8173,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 1078,
+      "line": 1312,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(skillsDir, { recursive: true })",
       "reason": "Creates an approved external workspace root or its .agents/skills directory; the mount registry owns authorization, not the external content.",
@@ -7975,7 +8182,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 1128,
+      "line": 1362,
       "kind": "remove-path",
       "excerpt": "fs.rmSync(skillDir, { recursive: true, force: true })",
       "reason": "Deletes a skill directory only after the route proves it belongs to the explicitly mounted workspace skill catalog, outside Hana-owned persistence.",
@@ -7984,7 +8191,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 1144,
+      "line": 1378,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(dir, { recursive: true })",
       "reason": "Creates an approved external workspace root or its .agents/skills directory; the mount registry owns authorization, not the external content.",
@@ -7993,7 +8200,7 @@
     },
     {
       "sourceFile": "server/routes/desk.ts",
-      "line": 1249,
+      "line": 1483,
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(baseDir, { recursive: true })",
       "reason": "Creates an approved external workspace root or its .agents/skills directory; the mount registry owns authorization, not the external content.",
@@ -8110,7 +8317,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 632,
+      "line": 637,
       "kind": "rename",
       "excerpt": "fs.rename(sessionPath, stagedPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8119,16 +8326,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 636,
-      "kind": "rename",
-      "excerpt": "fs.rename(stagedPath, sessionPath)",
-      "reason": "Archives, restores, or deletes a session JSONL locator.",
-      "storeId": "session-jsonl",
-      "exemptionId": null
-    },
-    {
-      "sourceFile": "server/routes/sessions.ts",
-      "line": 650,
+      "line": 641,
       "kind": "rename",
       "excerpt": "fs.rename(stagedPath, sessionPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8138,15 +8336,6 @@
     {
       "sourceFile": "server/routes/sessions.ts",
       "line": 655,
-      "kind": "remove-path",
-      "excerpt": "fs.unlink(stagedPath)",
-      "reason": "Archives, restores, or deletes a session JSONL locator.",
-      "storeId": "session-jsonl",
-      "exemptionId": null
-    },
-    {
-      "sourceFile": "server/routes/sessions.ts",
-      "line": 665,
       "kind": "rename",
       "excerpt": "fs.rename(stagedPath, sessionPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8155,7 +8344,25 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 695,
+      "line": 660,
+      "kind": "remove-path",
+      "excerpt": "fs.unlink(stagedPath)",
+      "reason": "Archives, restores, or deletes a session JSONL locator.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "server/routes/sessions.ts",
+      "line": 670,
+      "kind": "rename",
+      "excerpt": "fs.rename(stagedPath, sessionPath)",
+      "reason": "Archives, restores, or deletes a session JSONL locator.",
+      "storeId": "session-jsonl",
+      "exemptionId": null
+    },
+    {
+      "sourceFile": "server/routes/sessions.ts",
+      "line": 700,
       "kind": "remove-path",
       "excerpt": "fs.unlink(destPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8164,7 +8371,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 2121,
+      "line": 2313,
       "kind": "append-file",
       "excerpt": "appendFileSync(path.join(engine.hanakoHome, \"switch-error.log\"), `${new Date().toISOString()}\\n${errDetail}\\n---\\n`)",
       "reason": "Appends switch failure diagnostics.",
@@ -8173,7 +8380,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 2305,
+      "line": 2497,
       "kind": "mkdir",
       "excerpt": "fs.mkdir(archiveDir, { recursive: true })",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8182,7 +8389,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 2313,
+      "line": 2505,
       "kind": "rename",
       "excerpt": "fs.rename(sessionPath, destPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8191,7 +8398,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 2379,
+      "line": 2571,
       "kind": "rename",
       "excerpt": "fs.rename(sessionPath, destPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8200,7 +8407,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 2391,
+      "line": 2583,
       "kind": "mkdir",
       "excerpt": "fs.mkdir(archDir, { recursive: true })",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
@@ -8209,7 +8416,7 @@
     },
     {
       "sourceFile": "server/routes/sessions.ts",
-      "line": 2392,
+      "line": 2584,
       "kind": "rename",
       "excerpt": "fs.rename(destPath, sessionPath)",
       "reason": "Archives, restores, or deletes a session JSONL locator.",
