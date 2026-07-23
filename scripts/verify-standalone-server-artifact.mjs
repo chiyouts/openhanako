@@ -75,37 +75,114 @@ function assertExtractedLayout(layoutRoot) {
   );
 }
 
-export function standaloneRestrictedTokenSmokeSpec({ layoutRoot, workDir, hanaHome, env = process.env }) {
-  const helperPath = path.win32.join(layoutRoot, "sandbox", "windows", "hana-win-sandbox.exe");
-  const shPath = path.win32.join(layoutRoot, "git", "usr", "bin", "sh.exe");
-  const smokeEnv = createHermeticMinGitSmokeEnv({
-    runtimeRoot: path.win32.join(layoutRoot, "git"),
-    workRoot: hanaHome,
-    env,
-  });
-  Object.assign(smokeEnv, {
+function envValue(env, name) {
+  const match = Object.entries(env || {}).find(([key]) => key.toLowerCase() === name.toLowerCase());
+  return match?.[1] ? String(match[1]) : "";
+}
+
+/**
+ * Build the helper-child environment for the restricted-token release smoke.
+ * Production win32-exec materializes TEMP/LOCALAPPDATA/APPDATA under a writable
+ * ephemeral root and starts from a near-complete process env. This smoke keeps
+ * Path native-only (no MinGit/MSYS) so it proves helper + writable/deny-write
+ * without borrowing host Git or forcing MSYS DLLs into the child.
+ */
+export function createRestrictedTokenSmokeRuntimeEnv({
+  workDir,
+  hanaHome,
+  helperPath,
+  layoutRoot,
+  env = process.env,
+} = {}) {
+  if (!workDir) throw new Error("workDir is required");
+  if (!hanaHome) throw new Error("hanaHome is required");
+  if (!helperPath) throw new Error("helperPath is required");
+  if (!layoutRoot) throw new Error("layoutRoot is required");
+
+  const systemRoot = envValue(env, "SystemRoot") || envValue(env, "WINDIR") || "C:\\Windows";
+  const runtimeEnvRoot = path.win32.join(workDir, ".ephemeral", "win32-sandbox-env");
+  const tempDir = path.win32.join(runtimeEnvRoot, "Temp");
+  const localAppDataDir = path.win32.join(runtimeEnvRoot, "LocalAppData");
+  const appDataDir = path.win32.join(runtimeEnvRoot, "AppData", "Roaming");
+  const profileDir = path.win32.join(workDir, "Profile");
+  const smokeEnv = {
+    SystemRoot: systemRoot,
+    WINDIR: systemRoot,
+    ComSpec: envValue(env, "ComSpec") || path.win32.join(systemRoot, "System32", "cmd.exe"),
+    PATHEXT: envValue(env, "PATHEXT") || ".COM;.EXE;.BAT;.CMD",
+    Path: path.win32.join(systemRoot, "System32"),
+    TEMP: tempDir,
+    TMP: tempDir,
+    LOCALAPPDATA: localAppDataDir,
+    APPDATA: appDataDir,
+    USERPROFILE: profileDir,
+    HOME: profileDir,
     HANA_HOME: hanaHome,
     HANA_ROOT: path.win32.join(layoutRoot, "server"),
     HANA_SERVER_ENTRY: path.win32.join(layoutRoot, "server", "bundle", "index.js"),
     HANA_WIN32_SANDBOX_HELPER: helperPath,
+    HANA_WIN32_SANDBOX_DEBUG: "1",
+  };
+
+  // Carry the small set of host identity/system keys production inherits, but
+  // never host PATH/NODE_OPTIONS (those are how CI Git and injectors leak in).
+  for (const key of [
+    "SystemDrive",
+    "USERNAME",
+    "USERDOMAIN",
+    "USERDOMAIN_ROAMINGPROFILE",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_IDENTIFIER",
+    "OS",
+    "COMPUTERNAME",
+    "PUBLIC",
+    "ProgramData",
+  ]) {
+    const value = envValue(env, key);
+    if (value) smokeEnv[key] = value;
+  }
+
+  return {
+    env: smokeEnv,
+    runtimeDirs: [tempDir, localAppDataDir, appDataDir, profileDir],
+  };
+}
+
+export function standaloneRestrictedTokenSmokeSpec({
+  layoutRoot,
+  workDir,
+  hanaHome,
+  helperPath = path.win32.join(layoutRoot, "sandbox", "windows", "hana-win-sandbox.exe"),
+  env = process.env,
+}) {
+  const { env: smokeEnv, runtimeDirs } = createRestrictedTokenSmokeRuntimeEnv({
+    workDir,
+    hanaHome,
+    helperPath,
+    layoutRoot,
+    env,
   });
   const markerFileName = "hana-restricted-token-smoke.txt";
-  const gitFileName = "hana-restricted-token-git.txt";
   const blockedDirName = "blocked";
   const deniedFileName = "hana-deny-write-smoke.txt";
-  const shellCommand = [
-    `printf '%s\\n' HANA_RESTRICTED_TOKEN_OK > ${markerFileName}`,
-    `cat ${markerFileName}`,
-    `git --version > ${gitFileName}`,
-    `if printf '%s\\n' SHOULD_NOT_WRITE > ${blockedDirName}/${deniedFileName} 2>/dev/null; `
-      + "then exit 73; else printf '%s\\n' HANA_DENY_WRITE_OK; fi",
-  ].join(" && ");
+  // The child must be a native PE binary: MSYS/Cygwin programs such as
+  // usr/bin/sh.exe fail to initialize (STATUS_DLL_INIT_FAILED) under a
+  // restricted token, so cmd.exe carries the writable-root and deny-write
+  // proof. Sandboxed Git startup is covered by the exec_command smoke below,
+  // which reaches it through the production exec chain.
+  const shellCommand =
+    `echo HANA_RESTRICTED_TOKEN_OK>${markerFileName}`
+    + ` && type ${markerFileName}`
+    + ` && (echo SHOULD_NOT_WRITE>${blockedDirName}\\${deniedFileName})`
+    + " && exit 73"
+    + " || echo HANA_DENY_WRITE_OK";
   return {
     helperPath,
     markerPath: path.win32.join(workDir, markerFileName),
-    gitVersionPath: path.win32.join(workDir, gitFileName),
     blockedDir: path.win32.join(workDir, blockedDirName),
     deniedMarkerPath: path.win32.join(workDir, blockedDirName, deniedFileName),
+    runtimeDirs,
     env: smokeEnv,
     args: [
       "--cwd", workDir,
@@ -113,10 +190,75 @@ export function standaloneRestrictedTokenSmokeSpec({ layoutRoot, workDir, hanaHo
       "--deny-write", path.win32.join(workDir, blockedDirName),
       "--timeout-ms", "30000",
       "--",
-      shPath,
-      "-c",
+      smokeEnv.ComSpec,
+      "/d", "/s", "/c",
       shellCommand,
     ],
+  };
+}
+
+export function runRestrictedTokenHelperSmoke({
+  layoutRoot,
+  workDir,
+  hanaHome,
+  helperPath,
+  env = process.env,
+  spawnSyncImpl = spawnSync,
+}) {
+  const spec = standaloneRestrictedTokenSmokeSpec({ layoutRoot, workDir, hanaHome, helperPath, env });
+  fs.mkdirSync(spec.blockedDir, { recursive: true });
+  for (const dir of spec.runtimeDirs || []) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const sandboxResult = spawnSyncImpl(
+    spec.helperPath,
+    spec.args,
+    restrictedTokenSmokeSpawnOptions({ cwd: workDir, env: spec.env, timeout: 45_000 }),
+  );
+  if (sandboxResult.error || sandboxResult.status !== 0) {
+    throw new Error(
+      "[verify-standalone] restricted-token sandbox smoke failed"
+        + ` (status=${String(sandboxResult.status)}, signal=${String(sandboxResult.signal)})`
+        + (sandboxResult.error ? `: ${sandboxResult.error.message}` : "")
+        + (sandboxResult.stderr ? `\nstderr: ${sandboxResult.stderr.trim()}` : ""),
+    );
+  }
+  const smokeStdout = String(sandboxResult.stdout || "");
+  const smokeStderr = String(sandboxResult.stderr || "");
+  if (!smokeStdout.includes("HANA_RESTRICTED_TOKEN_OK")) {
+    throw new Error("[verify-standalone] restricted-token sandbox smoke did not emit its success marker");
+  }
+  if (!smokeStdout.includes("HANA_DENY_WRITE_OK")) {
+    throw new Error("[verify-standalone] restricted-token sandbox smoke did not prove deny-write enforcement");
+  }
+  const terminalRecord = 'hana-win-sandbox: terminal-v1 status="exited" exitCode="0" timeoutMs="30000" win32Error="0"';
+  if (!smokeStderr.includes(terminalRecord)) {
+    throw new Error(
+      `[verify-standalone] restricted-token sandbox smoke emitted no successful terminal record\nstderr: ${smokeStderr.trim()}`,
+    );
+  }
+  expectEqual(
+    fs.readFileSync(spec.markerPath, "utf8").trim(),
+    "HANA_RESTRICTED_TOKEN_OK",
+    "restricted-token writable-root marker",
+  );
+  if (fs.existsSync(spec.deniedMarkerPath)) {
+    throw new Error("[verify-standalone] restricted-token sandbox wrote inside an explicit deny-write path");
+  }
+
+  return spec;
+}
+
+export function restrictedTokenSmokeSpawnOptions({ cwd, env, timeout }) {
+  return {
+    cwd,
+    env,
+    encoding: "utf8",
+    windowsHide: true,
+    // Production one-shot execution gives the helper a closed stdin. Keep the
+    // smoke on the same process contract.
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout,
   };
 }
 
@@ -131,6 +273,12 @@ export function standaloneExecCommandSmokeSpec({ layoutRoot, workDir, hanaHome, 
   return {
     command: baseEnv.ComSpec,
     args: ["/d", "/s", "/c", `call "${path.win32.join(layoutRoot, "hana-server.cmd")}"`],
+    // cmd.exe parses its raw command line instead of CommandLineToArgvW output.
+    // Letting libuv quote the final /c argument turns the inner batch-file
+    // quotes into literal \" characters, so cmd tries to execute a filename
+    // that includes quotes. The command is fully generated here; preserve it
+    // verbatim so `call "...\\hana-server.cmd"` reaches cmd.exe unchanged.
+    windowsVerbatimArguments: true,
     env: {
       ...baseEnv,
       HANA_HOME: hanaHome,
@@ -165,48 +313,7 @@ function smokeExtractedRuntime({ rootDir, layoutRoot }) {
   fs.mkdirSync(workDir, { recursive: true });
   fs.mkdirSync(path.join(smokeHome, "agents", "standalone-smoke"), { recursive: true });
   try {
-    const spec = standaloneRestrictedTokenSmokeSpec({ layoutRoot, workDir, hanaHome: smokeHome });
-    fs.mkdirSync(spec.blockedDir, { recursive: true });
-    const sandboxResult = spawnSync(spec.helperPath, spec.args, {
-      cwd: workDir,
-      env: spec.env,
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 45_000,
-    });
-    if (sandboxResult.error || sandboxResult.status !== 0) {
-      throw new Error(
-        "[verify-standalone] restricted-token sandbox smoke failed"
-          + ` (status=${String(sandboxResult.status)}, signal=${String(sandboxResult.signal)})`
-          + (sandboxResult.error ? `: ${sandboxResult.error.message}` : "")
-          + (sandboxResult.stderr ? `\nstderr: ${sandboxResult.stderr.trim()}` : ""),
-      );
-    }
-    const smokeStdout = String(sandboxResult.stdout || "");
-    const smokeStderr = String(sandboxResult.stderr || "");
-    if (!smokeStdout.includes("HANA_RESTRICTED_TOKEN_OK")) {
-      throw new Error("[verify-standalone] restricted-token sandbox smoke did not emit its success marker");
-    }
-    if (!smokeStdout.includes("HANA_DENY_WRITE_OK")) {
-      throw new Error("[verify-standalone] restricted-token sandbox smoke did not prove deny-write enforcement");
-    }
-    const terminalRecord = 'hana-win-sandbox: terminal-v1 status="exited" exitCode="0" timeoutMs="30000" win32Error="0"';
-    if (!smokeStderr.includes(terminalRecord)) {
-      throw new Error(
-        `[verify-standalone] restricted-token sandbox smoke emitted no successful terminal record\nstderr: ${smokeStderr.trim()}`,
-      );
-    }
-    expectEqual(
-      fs.readFileSync(spec.markerPath, "utf8").trim(),
-      "HANA_RESTRICTED_TOKEN_OK",
-      "restricted-token writable-root marker",
-    );
-    if (!fs.readFileSync(spec.gitVersionPath, "utf8").trim().startsWith("git version ")) {
-      throw new Error("[verify-standalone] restricted-token sandbox could not run the packaged Git runtime");
-    }
-    if (fs.existsSync(spec.deniedMarkerPath)) {
-      throw new Error("[verify-standalone] restricted-token sandbox wrote inside an explicit deny-write path");
-    }
+    runRestrictedTokenHelperSmoke({ layoutRoot, workDir, hanaHome: smokeHome });
 
     const execSpec = standaloneExecCommandSmokeSpec({
       layoutRoot,
@@ -218,6 +325,7 @@ function smokeExtractedRuntime({ rootDir, layoutRoot }) {
       env: execSpec.env,
       encoding: "utf8",
       windowsHide: true,
+      windowsVerbatimArguments: execSpec.windowsVerbatimArguments,
       timeout: 90_000,
     });
     if (execResult.error || execResult.status !== 0) {

@@ -1,297 +1,176 @@
 {
   "schemaVersion": 1,
-  "tag": "v0.415.15",
-  "version": "0.415.15",
-  "previousTag": "v0.412.7",
-  "generatedAt": "2026-07-20T18:39:33.000Z",
+  "tag": "v0.416.43",
+  "version": "0.416.43",
+  "previousTag": "v0.416.26",
+  "generatedAt": "2026-07-22T21:57:00.000Z",
   "noUserFacingChanges": false,
   "summary": {
-    "zh": "本版带来会话节点重试与独立分叉、OpenCode Zen 供应商，以及角色创建技能；并收紧 Auto 审核边界、拆开稳定/测试版更新通道。Windows 安装包原生资源与沙箱已修通，工具执行与审批失败更可靠。微信 Bridge 状态、技能插入不丢正文、提及菜单与若干历史 issue 修复也一并合入。",
-    "en": "This release adds per-node retry and independent session fork, an OpenCode Zen provider, and a character-creator skill. Auto review is limited to boundary actions, and stable vs beta update trains are separated. Packaged Windows native/sandbox resources are restored, and tool execution plus reviewer failures are more reliable. WeChat Bridge status, skill insertion that keeps composer text, mention-menu polish, and a batch of deferred issue fixes are included."
+    "zh": "Windows 沙箱恢复以 PowerShell 为默认一次性命令，审查通过后的提权可真正离开受限环境执行；并修复会话并发加载导致切换失败、带引号/多行命令，以及经验回忆工具装配等问题。",
+    "en": "Windows sandbox again defaults one-shot commands to PowerShell, and reviewed escalation can leave the restricted environment; also fixes session-switch failures from concurrent loads, quoted/multiline commands, and experience-recall tool assembly."
   },
   "counts": {
-    "feature": 3,
-    "fix": 8,
+    "feature": 2,
+    "fix": 3,
     "improvement": 1,
     "migration": 0
   },
   "source": {
     "owner": "liliMozi",
     "repo": "openhanako",
-    "commitRange": "v0.412.7..v0.415.15",
-    "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.415.15",
+    "commitRange": "v0.416.26..v0.416.43",
+    "releaseUrl": "https://github.com/liliMozi/openhanako/releases/tag/v0.416.43",
     "releaseNotes": ""
   },
   "items": [
     {
-      "id": "node-retry-and-session-fork",
+      "id": "windows-powershell-sandbox-default",
       "kind": "feature",
       "importance": "high",
       "title": {
-        "zh": "任意节点可重试与独立分叉",
-        "en": "Retry any node or fork an independent session"
+        "zh": "Windows 沙箱恢复 PowerShell 默认",
+        "en": "Windows sandbox restores PowerShell as default"
       },
       "summary": {
-        "zh": "稳定的用户消息与已完成 Agent 节点都可重试，或分出互不影响的独立会话。",
-        "en": "Stable user messages and completed Agent nodes can retry, or fork into an independent session."
+        "zh": "一次性命令默认回到 PowerShell（优先 pwsh）；沙箱会把 TEMP 指到可写根并先做启动探测，通过后正常运行，探测失败则快速报错，不再静默改走 cmd。",
+        "en": "One-shot commands default to PowerShell again (pwsh preferred); the sandbox redirects TEMP into its write root and probes startup first—pass and run, fail fast if every PowerShell candidate fails, with no silent cmd fallback."
       },
       "details": [],
       "sources": [
         {
           "type": "commit",
-          "ref": "0f310af45",
-          "title": "feat: add node retry and independent session fork"
-        }
-      ]
-    },
-    {
-      "id": "opencode-zen-provider",
-      "kind": "feature",
-      "importance": "high",
-      "title": {
-        "zh": "新增 OpenCode Zen 供应商",
-        "en": "Add OpenCode Zen provider"
-      },
-      "summary": {
-        "zh": "设置里可接入 OpenCode Zen；完整端点 URL 不再重复拼协议，连通探测仅在 2xx 时通过。",
-        "en": "OpenCode Zen is available in provider setup; complete endpoint URLs keep a single protocol suffix, and only 2xx probes succeed."
-      },
-      "details": [],
-      "sources": [
-        {
-          "type": "commit",
-          "ref": "6af26a01b",
-          "title": "feat: add OpenCode Zen provider and harden endpoint handling"
-        }
-      ]
-    },
-    {
-      "id": "character-creator-skill",
-      "kind": "feature",
-      "importance": "medium",
-      "title": {
-        "zh": "内置角色创建技能",
-        "en": "Bundled character-creator skill"
-      },
-      "summary": {
-        "zh": "技能目录新增角色创建技能，首次同步会带上。",
-        "en": "A character-creator skill is added to the bundled catalog and synced on first run."
-      },
-      "details": [],
-      "sources": [
-        {
-          "type": "commit",
-          "ref": "ed243a808",
-          "title": "feat(skills): add character creator"
-        }
-      ]
-    },
-    {
-      "id": "auto-review-boundary-only",
-      "kind": "fix",
-      "importance": "high",
-      "title": {
-        "zh": "Auto 只自动审核边界动作",
-        "en": "Auto reviews only boundary actions"
-      },
-      "summary": {
-        "zh": "常规受控动作直接执行；审核通道失败会分类、可恢复时重试，并失败即停。",
-        "en": "Contained routine actions run directly; reviewer transport failures are classified, retried when recoverable, and fail closed."
-      },
-      "details": [],
-      "sources": [
-        {
-          "type": "commit",
-          "ref": "d6aaec361",
-          "title": "fix(permission): isolate Auto review to boundary actions (#2177)"
+          "ref": "bfc4311da",
+          "title": "feat(windows): restore PowerShell as the sandboxed one-shot default with a startup probe"
         },
         {
           "type": "commit",
-          "ref": "a06d4c75e",
-          "title": "fix(permission): preserve approval reviewer failures (#2177)"
-        }
-      ]
-    },
-    {
-      "id": "stable-beta-update-trains",
-      "kind": "fix",
-      "importance": "high",
-      "title": {
-        "zh": "稳定版与测试版更新通道分离",
-        "en": "Separate stable and beta update trains"
-      },
-      "summary": {
-        "zh": "预发布版本只推进测试通道；稳定通道需显式提升。",
-        "en": "Automatic prereleases advance beta only; stable promotion requires an explicit override."
-      },
-      "details": [],
-      "sources": [
-        {
-          "type": "commit",
-          "ref": "e2e30f8be",
-          "title": "fix(updater): separate stable and beta trains (#2186)"
-        }
-      ]
-    },
-    {
-      "id": "windows-packaged-runtime-resources",
-      "kind": "fix",
-      "importance": "high",
-      "title": {
-        "zh": "修复 Windows 安装包沙箱与原生资源",
-        "en": "Restore packaged Windows sandbox and native resources"
-      },
-      "summary": {
-        "zh": "打包后的命令执行、子代理与沙箱 Git 等可从明确安装路径找到原生与字体资源。",
-        "en": "Packaged commands, subagents, and sandboxed Git resolve native and font resources from explicit install roots."
-      },
-      "details": [],
-      "sources": [
-        {
-          "type": "commit",
-          "ref": "1f0fcaff3",
-          "title": "fix(windows): restore packaged sandbox resources"
+          "ref": "9d52387b9",
+          "title": "fix(windows): redirect TEMP/TMP into the sandbox write root for every helper launch"
         },
         {
           "type": "commit",
-          "ref": "74bb3ad34",
-          "title": "fix(packaging): make native runtime resources self-contained"
+          "ref": "b75e8ee0c",
+          "title": "fix(windows): promote the sandbox scratch root to a required writable-root for TEMP redirect"
         }
       ]
     },
     {
-      "id": "reliable-tool-execution",
-      "kind": "fix",
+      "id": "windows-escalation-outside-sandbox",
+      "kind": "feature",
       "importance": "high",
       "title": {
-        "zh": "恢复可靠的工具执行结果",
-        "en": "Restore reliable tool execution outcomes"
+        "zh": "审查通过的提权可真正离开沙箱",
+        "en": "Reviewed escalation can leave the sandbox"
       },
       "summary": {
-        "zh": "被拒绝或失败的工具调用会明确失败，不再被当成成功；部分禁网一次性命令不再误走 Auto 审核。",
-        "en": "Rejected or failed tool calls stay explicit failures, and some network-blocked one-shot commands no longer auto-review in Auto mode."
+        "zh": "require_escalated 在 Windows 上经审查后会在受限令牌外执行；同时必须附上一句理由。破坏性命令模式在任何模式下仍被拦住。",
+        "en": "On Windows, reviewed require_escalated runs outside the restricted token, and a one-sentence justification is required. Destructive command patterns stay blocked in every mode."
       },
       "details": [],
       "sources": [
         {
           "type": "commit",
-          "ref": "310451cc2",
-          "title": "fix: restore reliable tool execution"
-        }
-      ]
-    },
-    {
-      "id": "deferred-issue-repairs",
-      "kind": "fix",
-      "importance": "high",
-      "title": {
-        "zh": "合入积压 issue 修复",
-        "en": "Land deferred issue repairs"
-      },
-      "summary": {
-        "zh": "覆盖 OTA 启动提示、飞书投递错误、Gemini 生图、不可用模型会话恢复，以及分支感知记忆等。",
-        "en": "Covers OTA boot notices, Feishu delivery errors, Gemini image generation, unavailable-model session restore, and branch-aware memory."
-      },
-      "details": [],
-      "sources": [
+          "ref": "1a3e37fac",
+          "title": "feat(windows): make require_escalated run outside the restricted-token sandbox after review"
+        },
         {
           "type": "commit",
-          "ref": "1ff479df5",
-          "title": "fix: integrate deferred issue repairs"
+          "ref": "ce7bac5ef",
+          "title": "feat(exec): require a one-sentence justification for require_escalated"
         }
       ]
     },
     {
-      "id": "composer-preserve-skill-text",
+      "id": "windows-quoted-multiline-commands",
       "kind": "fix",
       "importance": "medium",
       "title": {
-        "zh": "选择技能时保留输入正文",
-        "en": "Keep composer text when selecting skills"
+        "zh": "带引号与多行命令不再误伤",
+        "en": "Quoted and multiline commands no longer break"
       },
       "summary": {
-        "zh": "选择技能只替换斜杠触发段，或插入到当前选区，不再清空整个输入框。",
-        "en": "Selecting a skill replaces only the slash trigger or inserts at the selection, instead of clearing the composer."
+        "zh": "含双引号的 cmd 命令会原样到达；多行命令的权限描述也能正常通过校验。",
+        "en": "cmd payloads with embedded quotes reach cmd.exe intact, and multiline side-effect descriptors pass permission validation."
       },
       "details": [],
       "sources": [
         {
           "type": "commit",
-          "ref": "0b9b02983",
-          "title": "fix(composer): preserve text when selecting skills (#2170)"
+          "ref": "83440cdf3",
+          "title": "fix(windows): pass cmd payloads verbatim through both spawn paths"
+        },
+        {
+          "type": "commit",
+          "ref": "ebad1959a",
+          "title": "fix(permission): accept bounded whitespace in invocation sideEffect strings"
         }
       ]
     },
     {
-      "id": "wechat-bridge-status-reconcile",
+      "id": "session-concurrent-load-dedupe",
       "kind": "fix",
       "importance": "medium",
       "title": {
-        "zh": "微信 Bridge 连接状态对齐",
-        "en": "Reconcile WeChat Bridge connection status"
+        "zh": "会话并发加载不再导致切换失败",
+        "en": "Concurrent session loads no longer break switching"
       },
       "summary": {
-        "zh": "授权后短暂陈旧状态会继续对齐，直到微信已连接或到达终态。",
-        "en": "A brief stale status after authorization keeps reconciling until WeChat connects or reaches a terminal state."
+        "zh": "同一会话被同时加载时只建一份实例，避免孤儿写入破坏历史，切换时也不再因此 HTTP 500。",
+        "en": "Concurrent loads of the same session share one in-flight create path, so orphaned writers no longer corrupt history and session switches stop failing with HTTP 500."
       },
       "details": [],
       "sources": [
         {
           "type": "commit",
-          "ref": "d002e0527",
-          "title": "fix(bridge): reconcile WeChat connection state (#2178)"
+          "ref": "2e006323f",
+          "title": "fix(session): dedupe concurrent ensureSessionLoaded calls for the same session path"
         }
       ]
     },
     {
-      "id": "wait-agent-runtime-before-session",
+      "id": "recall-experience-permission",
       "kind": "fix",
       "importance": "medium",
       "title": {
-        "zh": "创建会话前先等待 Agent 就绪",
-        "en": "Wait for agent runtime before session creation"
+        "zh": "经验回忆工具可正常装配",
+        "en": "Experience recall tools assemble correctly"
       },
       "summary": {
-        "zh": "新建或恢复会话会先等待所属 Agent 运行时；激活失败则中止，避免半成品会话。",
-        "en": "New and restored sessions wait for the owning Agent runtime, and abort without partial state when activation fails."
+        "zh": "开启经验能力时，recall_experience 已声明只读权限，会话工具装配不再因此中断。",
+        "en": "With experience enabled, recall_experience declares read permission so session tool assembly no longer throws."
       },
       "details": [],
       "sources": [
         {
           "type": "commit",
-          "ref": "b75888809",
-          "title": "fix: wait for agent runtime before session creation"
+          "ref": "2f60b4e79",
+          "title": "fix(tools): declare read permission for recall_experience and add built-in coverage regression"
         }
       ]
     },
     {
-      "id": "composer-editor-polish",
+      "id": "escalation-guidance-i18n",
       "kind": "improvement",
-      "importance": "medium",
+      "importance": "low",
       "title": {
-        "zh": "输入框与编辑器体验打磨",
-        "en": "Polish composer and editor surfaces"
+        "zh": "提权提示文案更清楚",
+        "en": "Clearer escalation guidance copy"
       },
       "summary": {
-        "zh": "提及菜单隐藏原始会话 ID；分叉操作图标更新；块选高亮贴合实际渲染行。",
-        "en": "Mention menus hide raw session IDs, the fork action uses the new glyph, and block highlights follow rendered line bounds."
+        "zh": "模型侧与错误提示统一说明：沙箱拦住且任务需要时，可带理由重试提权；日文/韩文文案也已补齐。",
+        "en": "Model guidance and error text now share one escalation contract—retry with justification when the sandbox blocks something needed—and Japanese/Korean copy is filled in."
       },
       "details": [],
       "sources": [
         {
           "type": "commit",
-          "ref": "a3ce0a243",
-          "title": "fix: polish composer mention menu"
+          "ref": "192ccf13a",
+          "title": "fix(exec): rewrite escalation guidance to match Codex on_request phrasing"
         },
         {
           "type": "commit",
-          "ref": "6e10f1ab7",
-          "title": "fix: replace the session fork action icon"
-        },
-        {
-          "type": "commit",
-          "ref": "68c987258",
-          "title": "fix(editor): align block highlights to rendered lines"
+          "ref": "28e2b957b",
+          "title": "fix(i18n): add the escalation-hint locale key to ja and ko too"
         }
       ]
     }

@@ -23,6 +23,21 @@ function resolveDescriptor(tool: Record<string, unknown>, input: unknown) {
   return result;
 }
 
+function resolveInvocationForTest({ sideEffect }: { sideEffect: Record<string, unknown> }) {
+  const tool = {
+    name: "side_effect_probe",
+    sessionPermission: {
+      resolveInvocation: () => ({
+        action: "run",
+        kind: "review",
+        capability: "side_effect_probe.run",
+        sideEffect,
+      }),
+    },
+  };
+  return resolveToolInvocationPermission(tool, {});
+}
+
 describe("tool invocation permission contract", () => {
   it("snapshots bounded plain JSON without evaluating accessors", () => {
     const getter = vi.fn(() => "secret");
@@ -272,6 +287,20 @@ describe("tool invocation permission contract", () => {
     expect(resolveDescriptor(tool, {}).descriptor.capability).toBe("send.deliver");
   });
 
+  it("accepts sideEffect strings containing newlines and tabs", () => {
+    const result = resolveInvocationForTest({
+      sideEffect: { kind: "command", command: "python - <<'EOF'\nprint(1)\nEOF\t# done" },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("still rejects sideEffect strings containing ESC and other control characters", () => {
+    const result = resolveInvocationForTest({
+      sideEffect: { kind: "command", command: "echo \x1b[31mred" },
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it("does not expose resolver exceptions and rejects control characters in targets", () => {
     const thrown = resolveToolInvocationPermission({
       name: "channel",
@@ -397,6 +426,39 @@ describe("action-level tool descriptors", () => {
       action: "record",
       capability: "record_experience.record",
       target: { type: "experience_category", label: "Tool usage" },
+    });
+  });
+
+  it("describes experience read targets", () => {
+    const [recall] = createExperienceTools("/tmp/agent", { isEnabled: () => true });
+
+    const overview = resolveDescriptor(recall, {}).descriptor;
+    expect(overview).toMatchObject({
+      action: "read",
+      kind: "read",
+      capability: "recall_experience.read",
+    });
+    expect(overview.target).toBeUndefined();
+
+    expect(resolveDescriptor(recall, { category: "Tool usage" }).descriptor).toMatchObject({
+      action: "read",
+      kind: "read",
+      capability: "recall_experience.read",
+      target: { type: "experience_category", label: "Tool usage" },
+    });
+
+    const invalidCategory = resolveDescriptor(recall, { category: "bad/../name" }).descriptor;
+    expect(invalidCategory).toMatchObject({
+      action: "read",
+      kind: "read",
+      capability: "recall_experience.read",
+    });
+    expect(invalidCategory.target).toBeUndefined();
+
+    expect(resolveToolInvocationPermission(recall, { category: 42 })).toMatchObject({
+      ok: false,
+      source: "resolver",
+      error: { reason: "resolver_rejected" },
     });
   });
 

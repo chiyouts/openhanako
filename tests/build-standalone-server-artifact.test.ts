@@ -259,36 +259,59 @@ describe("Windows standalone server artifact", () => {
     }
   });
 
-  it("builds a restricted-token smoke spec from only the extracted HanaCore paths", () => {
+  it("builds a restricted-token smoke spec that proves write and deny-write through a native child", () => {
+    const workDir = "C:\\Temp\\hana smoke";
+    const runtimeEnvRoot = `${workDir}\\.ephemeral\\win32-sandbox-env`;
     const spec = standaloneRestrictedTokenSmokeSpec({
       layoutRoot: "C:\\downloads\\HanaCore",
-      workDir: "C:\\Temp\\hana smoke",
+      workDir,
       hanaHome: "C:\\Temp\\hana home",
-      env: { SystemRoot: "C:\\Windows", PATH: "C:\\Windows\\System32", Path: "stale-duplicate" },
+      env: {
+        SystemRoot: "C:\\Windows",
+        PATH: "C:\\Program Files\\Git\\cmd;C:\\Windows\\System32",
+        Path: "stale-duplicate",
+        USERNAME: "runner",
+        SystemDrive: "C:",
+      },
     });
 
     expect(spec.helperPath).toBe("C:\\downloads\\HanaCore\\sandbox\\windows\\hana-win-sandbox.exe");
     expect(spec.args).toEqual([
-      "--cwd", "C:\\Temp\\hana smoke",
-      "--writable-root", "C:\\Temp\\hana smoke",
-      "--deny-write", "C:\\Temp\\hana smoke\\blocked",
+      "--cwd", workDir,
+      "--writable-root", workDir,
+      "--deny-write", `${workDir}\\blocked`,
       "--timeout-ms", "30000",
       "--",
-      "C:\\downloads\\HanaCore\\git\\usr\\bin\\sh.exe",
-      "-c",
+      "C:\\Windows\\System32\\cmd.exe",
+      "/d", "/s", "/c",
       expect.stringContaining("HANA_RESTRICTED_TOKEN_OK"),
     ]);
     expect(Object.keys(spec.env).filter((key) => key.toLowerCase() === "path")).toEqual(["Path"]);
-    expect(spec.env.Path).toBe([
-      "C:\\downloads\\HanaCore\\git\\cmd",
-      "C:\\downloads\\HanaCore\\git\\usr\\bin",
-      "C:\\downloads\\HanaCore\\git\\mingw64\\bin",
-      "C:\\Windows\\System32",
-    ].join(";"));
+    // Native cmd smoke must not put MinGit/MSYS ahead of System32: this step only
+    // proves the helper + writable/deny-write contract, and Path must stay native.
+    expect(spec.env.Path).toBe("C:\\Windows\\System32");
+    expect(spec.env.Path).not.toMatch(/git|usr\\bin|mingw/i);
+    // Match production win32-exec: TEMP/LOCALAPPDATA/APPDATA/HOME all live inside
+    // the writable root the helper grants, not beside it under hanaHome.
+    expect(spec.env.TEMP).toBe(`${runtimeEnvRoot}\\Temp`);
+    expect(spec.env.TMP).toBe(`${runtimeEnvRoot}\\Temp`);
+    expect(spec.env.LOCALAPPDATA).toBe(`${runtimeEnvRoot}\\LocalAppData`);
+    expect(spec.env.APPDATA).toBe(`${runtimeEnvRoot}\\AppData\\Roaming`);
+    expect(spec.env.USERPROFILE).toBe(`${workDir}\\Profile`);
+    expect(spec.env.HOME).toBe(`${workDir}\\Profile`);
+    expect(spec.runtimeDirs).toEqual([
+      `${runtimeEnvRoot}\\Temp`,
+      `${runtimeEnvRoot}\\LocalAppData`,
+      `${runtimeEnvRoot}\\AppData\\Roaming`,
+      `${workDir}\\Profile`,
+    ]);
     expect(spec.args.at(-1)).toContain("HANA_DENY_WRITE_OK");
-    expect(spec.deniedMarkerPath).toBe("C:\\Temp\\hana smoke\\blocked\\hana-deny-write-smoke.txt");
+    expect(spec.args.at(-1)).toContain("exit 73");
+    expect(spec.deniedMarkerPath).toBe(`${workDir}\\blocked\\hana-deny-write-smoke.txt`);
     expect(spec.env).toMatchObject({
       SystemRoot: "C:\\Windows",
+      USERNAME: "runner",
+      SystemDrive: "C:",
       HANA_HOME: "C:\\Temp\\hana home",
       HANA_ROOT: "C:\\downloads\\HanaCore\\server",
       HANA_SERVER_ENTRY: "C:\\downloads\\HanaCore\\server\\bundle\\index.js",
@@ -310,6 +333,7 @@ describe("Windows standalone server artifact", () => {
 
     expect(spec.command).toBe("C:\\Windows\\System32\\cmd.exe");
     expect(spec.args.join(" ")).toContain('call "C:\\downloads\\HanaCore\\hana-server.cmd"');
+    expect(spec.windowsVerbatimArguments).toBe(true);
     expect(spec.env.Path).not.toContain("Program Files\\Git");
     expect(spec.env.HANA_ROOT).toBe("Z:\\hana-poison\\server");
     expect(spec.env.HANA_STANDALONE_EXPECTED_ROOT).toBe("C:\\downloads\\HanaCore\\server");

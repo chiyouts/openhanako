@@ -121,23 +121,35 @@ export function resolveWin32SandboxHelper({
 export function buildWin32SandboxHelperArgs({
   cwd,
   timeoutMs = 0,
+  desktopMode = "private",
+  verbatimLastArg = false,
   grants = {},
   executable,
   args = [],
 }: {
   cwd?: string;
   timeoutMs?: number;
+  desktopMode?: "private" | "current";
+  verbatimLastArg?: boolean;
   grants?: Record<string, any>;
   executable?: string;
   args?: string[];
 } = {}) {
   if (!cwd) throw new Error("win32 sandbox helper requires cwd");
   if (!executable) throw new Error("win32 sandbox helper requires executable");
+  if (desktopMode !== "private" && desktopMode !== "current") {
+    throw new Error('win32 sandbox helper desktopMode must be "private" or "current"');
+  }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > WIN32_SANDBOX_MAX_TIMEOUT_MS) {
     throw new Error(`win32 sandbox helper timeoutMs must be an integer between 0 and ${WIN32_SANDBOX_MAX_TIMEOUT_MS}`);
   }
 
   const out = ["--cwd", cwd];
+  if (desktopMode === "current") out.push("--current-desktop");
+  if (verbatimLastArg) {
+    if (!args.length) throw new Error("win32 sandbox helper verbatimLastArg requires at least one child argument");
+    out.push("--verbatim-last-arg");
+  }
   for (const p of grants.writePaths || []) out.push("--writable-root", p);
   for (const p of grants.optionalWritePaths || []) out.push("--writable-root-optional", p);
   for (const p of grants.denyWritePaths || []) out.push("--deny-write", p);

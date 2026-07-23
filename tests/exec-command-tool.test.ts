@@ -1,7 +1,9 @@
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { renderCommandWithWorkdir, resolveExecShell } from "../lib/exec-command/shell.ts";
+import { WIN32_DEFAULT_ONE_SHOT_SHELL, renderCommandWithWorkdir, resolveExecShell } from "../lib/exec-command/shell.ts";
+import { execCommandDescription } from "../lib/exec-command/guidance.ts";
 import { createExecCommandTools } from "../lib/exec-command/tool.ts";
+import { resolveToolInvocationPermission } from "../lib/permission/tool-invocation-permission.ts";
 
 const DEFAULT_TEST_CWD = "/tmp/work";
 
@@ -164,7 +166,11 @@ describe("exec_command tools", () => {
     );
     const escalatedResult: any = await execCommand.execute(
       "call-escalated",
-      { cmd: "npm view vitest version", sandbox_permissions: "require_escalated" },
+      {
+        cmd: "npm view vitest version",
+        sandbox_permissions: "require_escalated",
+        justification: "Check the latest published vitest version?",
+      },
       null,
       null,
       makeCtx(),
@@ -258,5 +264,103 @@ describe("exec_command tools", () => {
       errorCode: "EXEC_COMMAND_POSIX_SYNTAX_ON_WINDOWS",
       execCommand: { ok: false },
     });
+  });
+
+  it("resolves invocation for multiline cmd strings", () => {
+    const [execCommandTool] = createExecCommandTools({
+      bashTool: { execute: vi.fn() },
+      getCwd: () => DEFAULT_TEST_CWD,
+      isOneShotSandboxEnforced: () => true,
+      platform: "linux",
+    });
+
+    const invocation = execCommandTool.sessionPermission.resolveInvocation({
+      cmd: "python -c \"import sys\nprint(sys.version)\"",
+    });
+
+    expect(invocation).not.toBeNull();
+    expect(resolveToolInvocationPermission(execCommandTool, {
+      cmd: "python -c \"import sys\nprint(sys.version)\"",
+    })).toMatchObject({ ok: true, source: "descriptor" });
+  });
+
+  it("rejects require_escalated without a justification", async () => {
+    const bashTool = { execute: vi.fn() };
+    const [execCommand] = createExecCommandTools({
+      bashTool,
+      getCwd: () => DEFAULT_TEST_CWD,
+      platform: "win32",
+    });
+
+    const result: any = await execCommand.execute("t1", {
+      cmd: "wmic path Win32_VideoController get Name",
+      sandbox_permissions: "require_escalated",
+    }, undefined, undefined, makeCtx());
+
+    expect(bashTool.execute).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("justification");
+  });
+
+  it("threads justification into the invocation sideEffect", () => {
+    const [execCommandTool] = createExecCommandTools({
+      bashTool: { execute: vi.fn() },
+      getCwd: () => DEFAULT_TEST_CWD,
+      platform: "win32",
+    });
+
+    const invocation: any = execCommandTool.sessionPermission.resolveInvocation({
+      cmd: "pnputil /enum-devices",
+      sandbox_permissions: "require_escalated",
+      justification: "Read display device inventory to debug color management?",
+    });
+
+    expect(invocation.sideEffect.justification).toContain("display device inventory");
+  });
+
+  it("truncates an overlong justification to 300 characters in the invocation sideEffect", () => {
+    const [execCommandTool] = createExecCommandTools({
+      bashTool: { execute: vi.fn() },
+      getCwd: () => DEFAULT_TEST_CWD,
+      platform: "win32",
+    });
+
+    const overlong = "x".repeat(400);
+    const invocation: any = execCommandTool.sessionPermission.resolveInvocation({
+      cmd: "pnputil /enum-devices",
+      sandbox_permissions: "require_escalated",
+      justification: overlong,
+    });
+
+    expect(invocation.sideEffect.justification).toHaveLength(300);
+  });
+
+  it("describes the same default shell that resolveExecShell actually uses on win32", () => {
+    const [execCommandTool] = createExecCommandTools({
+      bashTool: { execute: vi.fn() },
+      getCwd: () => DEFAULT_TEST_CWD,
+      platform: "win32",
+    });
+
+    const resolved = resolveExecShell({ platform: "win32" });
+    const description = execCommandDescription({ platform: "win32" });
+    const cmdParamDescription = (execCommandTool.parameters.properties as any).cmd.description;
+
+    expect(description).toContain(`default one-shot shell is ${WIN32_DEFAULT_ONE_SHOT_SHELL.display}`);
+    // Parameter description must be platform-neutral: no per-platform shell claim here,
+    // otherwise it becomes a second source of truth alongside the tool description.
+    expect(cmdParamDescription).not.toMatch(/PowerShell|cmd\.exe/);
+    expect(resolved.family).toBe(WIN32_DEFAULT_ONE_SHOT_SHELL.family);
+  });
+
+  it("guides the model to retry sandbox-blocked commands with require_escalated and a justification", () => {
+    const description = execCommandDescription({ platform: "win32" });
+
+    expect(description).toContain(
+      "rerun it with sandbox_permissions=\"require_escalated\" and a one-sentence justification",
+    );
+    expect(description).not.toContain(
+      "only when the command genuinely needs reviewed network-capable execution",
+    );
   });
 });
