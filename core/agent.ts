@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import { loadConfig, saveConfig } from "../lib/memory/config-loader.ts";
 import { safeReadFile, safeReadJSON } from "../shared/safe-fs.ts";
+import { resolvePersonaSource } from "./persona-source.ts";
 import { FactStore } from "../lib/memory/fact-store.ts";
 import { SessionSummaryManager } from "../lib/memory/session-summary.ts";
 import { createMemoryTicker } from "../lib/memory/memory-ticker.ts";
@@ -261,6 +262,41 @@ export class Agent {
    * @param {(bareId: string, agentConfig: object) => object} [resolveModel] - 统一模型解析回调
    */
   /**
+   * 解析这个 agent 的 prompt 语言：config.locale（显式手工覆盖）→ 全局 prefs
+   * 的 locale → "en"。agent 的 config.yaml 没有任何代码会写 locale 字段，缺失
+   * 是常态而非异常；不写回 config，否则会把用户日后在设置里切换的全局语言
+   * 锁死在这个 agent 身上。两级都缺时落 "en"：没有任何信号时给更保守的默认，
+   * 而不是猜中文。
+   *
+   * 返回原始 locale 字符串（如 "zh-CN"、"ja"），不做归一化——各读点仍用
+   * `.startsWith("zh")` 做模板二分：locale 以 "zh" 开头（zh-CN/zh-TW/zh-HK 等
+   * 简繁体）→ zh 模板，其余一切语言（ja、ko、en……）→ en 模板。第三语言 UI
+   * 用户拿到英文 prompt 模板是有意的设计取舍，不是 bug。
+   */
+  resolveLocale() {
+    const explicit = typeof this._config?.locale === "string" ? this._config.locale.trim() : "";
+    if (explicit) return explicit;
+    const global_ = typeof this._cb?.getLocale === "function" ? String(this._cb.getLocale() || "").trim() : "";
+    if (global_) return global_;
+    return "en";
+  }
+
+  /**
+   * 解析用户的名字：全局 prefs 的 userName → 按语言兜底（中文 "用户"，其余
+   * "User"）。
+   *
+   * 名字描述的是使用者本人，不是某个 agent 的属性：一个用户就一个名字。用户在
+   * 设置里改一次称呼，所有 agent 都得跟着改口，不能出现 A 叫得对、B 还用旧称呼
+   * 的情况，所以唯一正源是全局 preferences，这里不读 agent config。曾经存在的
+   * agent 级 user.name 覆盖层已经取消，残留字段由迁移清掉。
+   */
+  resolveUserName() {
+    const global_ = typeof this._cb?.getUserName === "function" ? String(this._cb.getUserName() || "").trim() : "";
+    if (global_) return global_;
+    return String(this.resolveLocale()).startsWith("zh") ? "用户" : "User";
+  }
+
+  /**
    * 仅加载 config + 身份字段，不碰 FactStore/memoryTicker/tools/runCompatChecks。
    * 供 init() 失败时的 fallback 使用，保证即使完整初始化失败，
    * agent.config.models.chat 仍能被下游正确读取（模型解析 / session 创建）。
@@ -268,8 +304,7 @@ export class Agent {
    */
   loadConfigOnly() {
     this._config = loadConfig(this.configPath);
-    const isZh = String(this._config.locale || "").startsWith("zh");
-    this.userName = this._config.user?.name || (isZh ? "用户" : "User");
+    this.userName = this.resolveUserName();
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
     this._experienceEnabled = this._config.experience?.enabled === true;
@@ -297,8 +332,7 @@ export class Agent {
     log(`  [agent] 1. loadConfig 完成`);
 
     // 2. 身份 + 记忆总开关
-    const isZh = String(this._config.locale || "").startsWith("zh");
-    this.userName = this._config.user?.name || (isZh ? "用户" : "User");
+    this.userName = this.resolveUserName();
     this.agentName = this._config.agent?.name || "Hanako";
     this._memoryMasterEnabled = this._config.memory?.enabled !== false;
     this._experienceEnabled = this._config.experience?.enabled === true;
@@ -883,6 +917,13 @@ export class Agent {
     const computerUseTools = this._isComputerUseCandidateForThisAgent()
       ? [this._getComputerUseTool()]
       : [];
+    const channelTools = (this._cb?.isChannelsEnabled?.() ?? false)
+      ? [this._channelTool]
+      : [];
+    const learnCfg = this._cb?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
+    const installSkillTools = learnCfg.enabled === true
+      ? [this._installSkillTool]
+      : [];
     return [
       ...memTools,
       ...experienceTools,
@@ -892,10 +933,10 @@ export class Agent {
       this._automationTool,
       this._stageFilesTool,
       this._fileTool,
-      this._channelTool,
+      ...channelTools,
       this._browserTool,
       ...computerUseTools,
-      this._installSkillTool,
+      ...installSkillTools,
       this._notifyTool,
       this._stopTaskTool,
       this._updateSettingsTool,
@@ -1010,10 +1051,9 @@ export class Agent {
       throw new Error(`Agent config needs repair: ${this._repairState.message}`);
     }
 
-    // 更新身份
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    // 更新身份。用户的名字不在这里刷新：它只存在于全局 preferences，写它走
+    // 全局那条路，agent config 的改动影响不到它。
     if (partial.agent?.name) this.agentName = this._config.agent?.name || "Hanako";
-    if (partial.user?.name) this.userName = this._config.user?.name || (isZh ? "用户" : "User");
 
     // yuan 切换只需更新 config，buildSystemPrompt 会实时读模板
     if (partial.agent?.yuan) {
@@ -1053,53 +1093,61 @@ export class Agent {
   //  System Prompt 组装
   // ════════════════════════════
 
+  /**
+   * 读取 identity.md 的实际生效内容：agentDir 落盘文件（用户定制）优先，
+   * 缺失时按当前 yuan + locale 回落到 lib 模板。identity.md 不再在创建
+   * agent 时播种落盘，这是唯一的解析入口——personality getter、
+   * descriptionSource getter、以及 server 路由都必须消费它，不许各自复制
+   * 回落顺序。
+   */
+  readIdentitySource() {
+    return resolvePersonaSource({
+      agentDir: this.agentDir,
+      productDir: this.productDir,
+      yuanType: this._config?.agent?.yuan || "hanako",
+      locale: this.resolveLocale(),
+      kind: "identity",
+    });
+  }
+
+  /** 读取 ishiki.md 的实际生效内容，回落规则同 readIdentitySource()。 */
+  readIshikiSource() {
+    return resolvePersonaSource({
+      agentDir: this.agentDir,
+      productDir: this.productDir,
+      yuanType: this._config?.agent?.yuan || "hanako",
+      locale: this.resolveLocale(),
+      kind: "ishiki",
+    });
+  }
+
   /** 返回纯人格 prompt（identity + yuan + ishiki），不含记忆、用户档案等 */
   get personality() {
-    const isZh = String(this._config.locale || "").startsWith("zh");
     const fill = (text) => text
       .replace(/\{\{userName\}\}/g, this.userName)
       .replace(/\{\{agentName\}\}/g, this.agentName)
       .replace(/\{\{agentId\}\}/g, this.id);
-    const readFile = (p) => safeReadFile(p, "");
-    const langDir = isZh ? "" : "en/";
-    const yuanType = this._config?.agent?.yuan || "hanako";
-    const identityMd = readFile(path.join(this.agentDir, "identity.md"))
-      || readFile(path.join(this.productDir, "identity-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity.example.md"));
+    const identityMd = this.readIdentitySource().content;
     const yuanMd = this._readYuan();
-    const ishikiMd = readFile(path.join(this.agentDir, "ishiki.md"))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki.example.md"));
+    const ishikiMd = this.readIshikiSource().content;
     return fill(identityMd) + "\n\n" + fill(yuanMd || "") + "\n\n" + fill(ishikiMd);
   }
 
   /** 返回花名册描述生成用的人格来源，不包含 yuan 输出协议。 */
   get descriptionSource() {
-    const isZh = String(this._config.locale || "").startsWith("zh");
     const fill = (text) => text
       .replace(/\{\{userName\}\}/g, this.userName)
       .replace(/\{\{agentName\}\}/g, this.agentName)
       .replace(/\{\{agentId\}\}/g, this.id);
-    const readFile = (p) => safeReadFile(p, "");
-    const langDir = isZh ? "" : "en/";
-    const yuanType = this._config?.agent?.yuan || "hanako";
-    const identityMd = readFile(path.join(this.agentDir, "identity.md"))
-      || readFile(path.join(this.productDir, "identity-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity.example.md"));
-    const ishikiMd = readFile(path.join(this.agentDir, "ishiki.md"))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki.example.md"));
+    const identityMd = this.readIdentitySource().content;
+    const ishikiMd = this.readIshikiSource().content;
     return fill(identityMd) + "\n\n" + fill(ishikiMd);
   }
 
   /** 读取 yuan 模板（能力定义） */
   _readYuan() {
     const yuanType = this._config?.agent?.yuan || "hanako";
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = String(this.resolveLocale()).startsWith("zh");
     const langDir = isZh ? "" : "en/";
     return safeReadFile(path.join(this.productDir, "yuan", `${langDir}${yuanType}.md`), "")
       || safeReadFile(path.join(this.productDir, "yuan", `${yuanType}.md`), "");
@@ -1113,7 +1161,7 @@ export class Agent {
       .replace(/\{\{agentName\}\}/g, this.agentName)
       .replace(/\{\{agentId\}\}/g, this.id);
     const yuanType = this._config?.agent?.yuan || "hanako";
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = String(this.resolveLocale()).startsWith("zh");
     const langDir = isZh ? "" : "en/";
     const raw = readFile(path.join(this.agentDir, "public-ishiki.md"))
       || readFile(path.join(this.productDir, "public-ishiki-templates", `${langDir}${yuanType}.md`))
@@ -1145,7 +1193,7 @@ export class Agent {
     const memoryEnabled = typeof forceMemoryEnabled === "boolean"
       ? forceMemoryEnabled
       : this.memoryEnabled;
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = String(this.resolveLocale()).startsWith("zh");
     const readFile = (filePath) => safeReadFile(filePath, "");
 
     const pinnedMd = readFile(path.join(this.agentDir, "pinned.md")).trim();
@@ -1164,7 +1212,7 @@ export class Agent {
 
     return {
       version: 1,
-      locale: this._config.locale || "",
+      locale: this.resolveLocale(),
       agentId: this.id,
       agentName: this.agentName,
       userName: this.userName,
@@ -1194,7 +1242,7 @@ export class Agent {
     const memoryEnabled = typeof forceMemoryEnabled === "boolean"
       ? forceMemoryEnabled
       : this.memoryEnabled;
-    const isZh = String(this._config.locale || "").startsWith("zh");
+    const isZh = String(this.resolveLocale()).startsWith("zh");
 
     const readFile = (filePath) => safeReadFile(filePath, "");
 
@@ -1213,9 +1261,15 @@ export class Agent {
 
     // Prompt 拼接遵循「静态前缀在前、动态尾部在后」原则，最大化跨 session 的 prefix
     // cache 命中率（KV cache / Anthropic prompt cache 都按严格前缀匹配）。
-    // 顺序：平台 → 环境 → 行为指南（任务/经验/工具/安全/网页/设置/技能/团队）
+    // 顺序：平台 → 环境 → 用户档案 → ishiki（依赖 userName）→ 样貌
+    //      → 行为指南（任务/经验/工具/安全/网页/设置/技能/团队）
     //      ── cache 分界线 ──
-    //      用户档案 → ishiki（依赖 userName）→ 记忆规则/置顶/记忆 → 当前时间
+    //      记忆规则/置顶/记忆 → 当前时间
+    //
+    // 用户档案和人格段放进静态前缀：userName 已统一走「显式覆盖 → 全局 preferences →
+    // 语言兜底」解析，人格文件也改成惰性物化，这两段只在用户自己改档案或换人格时才变，
+    // 属于事件驱动的稳定段，放在尾部只会白白撑大动态区。记忆会被后台 compile 推动、
+    // 时间每次构建都在走，这两段才是真正的自动漂移源，继续留在 cache 分界线之后。
     //
     // ishiki 放在用户档案之后：模板里有「你和{userName}是认识很久的人」这类引用，
     // 叙事顺序上先告诉模型"用户是谁"，再告诉它"你是谁、你和用户什么关系"。
@@ -1231,6 +1285,40 @@ export class Agent {
         platformPrompt
       ));
     }
+
+    // 用户档案（user.md）
+    // 名字走 resolveUserName()：全局 preferences → 语言兜底。
+    // 因为末端有兜底值，这一行现在总会出现；没配过名字时给出的是"用户"/"User"
+    // 这种中性称呼，与 prompt 其它位置对用户的称呼保持一致。
+    const resolvedUserName = this.resolveUserName();
+    const userProfileLines = [
+      isZh
+        ? "以下是用户的自我描述。"
+        : "The following is the user's self-description.",
+      isZh
+        ? `用户的名字叫：${resolvedUserName}`
+        : `The user's name is: ${resolvedUserName}`,
+    ];
+    if (userMd) {
+      userProfileLines.push("", userMd);
+    }
+    parts.push(...section(
+      isZh ? "# 用户档案" : "# User Profile",
+      userProfileLines.join("\n")
+    ));
+
+    // ishiki（identity + yuan + ishiki 模板，含 {{userName}} 等替换）
+    // 放在用户档案之后：先建立"用户是谁"的语境，再讲"你是谁、你和用户什么关系"。
+    parts.push(ishiki);
+
+    if (!forSubagent && this._canInjectAppearancePrompt(targetModel)) {
+      const appearance = readAgentAppearanceProfileResource(this.agentDir);
+      const appearancePrompt = appearance
+        ? formatAgentAppearancePrompt(appearance.summary, this.resolveLocale())
+        : "";
+      if (appearancePrompt) parts.push(appearancePrompt);
+    }
+
     parts.push(isZh
       ? "\n你的所有文本输出都会直接展示给用户。每次回复都必须包含面向用户的正文内容，不允许只产生内部思考就结束回复。"
       : "\nAll your text output is displayed directly to the user. Every response must contain user-facing content; do not end a response with only internal thinking."
@@ -1245,20 +1333,20 @@ export class Agent {
         "",
         "## 记忆使用规则",
         "",
-        "记忆和用户档案是你内化的背景知识。你和" + this.userName + "是认识很久的人，这些事你本来就知道。你对" + this.userName + "的了解应该像空气一样，在场但不可见。记忆的存在感应该是零，它的作用应该是满的。",
+        "记忆和用户档案是你内化的背景知识。你和" + this.userName + "是认识很久的人，这些事你本来就知道。",
         "",
-        "- **只有当" + this.userName + "提到了相关内容，记忆才参与进来。** " + this.userName + "没有提起的话题，你不要主动从记忆里翻出来讲。不要因为记忆里有某条信息就觉得\"我应该提一下\"。记忆参与的方式是无声的：影响你的角度、语气、判断，但不出现在文字里。",
-        "- **永远不要让" + this.userName + "感觉到\"记忆\"这个东西的存在。** 禁止使用\"我记得\"\"你之前说过\"\"根据记忆\"这类表述。除非" + this.userName + "主动问\"你还记得 xxx 吗\"。",
+        "- **只有当" + this.userName + "提到相关内容，记忆才参与**，而且方式是无声的：影响你的角度、语气、判断，不出现在文字里。" + this.userName + "没提起的话题，不要主动从记忆里翻出来讲。",
+        "- **永远不要让" + this.userName + "感觉到\"记忆\"这个东西的存在。** 禁止\"我记得\"\"你之前说过\"\"根据记忆\"这类表述，除非" + this.userName + "主动问\"你还记得 xxx 吗\"。",
         "- **记忆可能过时，当前对话永远优先。** 信息冲突时以对话为准，不要用旧记忆纠正" + this.userName + "。",
       ].join("\n") : [
         "",
         "## Memory Rules",
         "",
-        "Memories and the user profile are internalized background knowledge. You and " + this.userName + " have known each other for a long time — you already know these things. Your knowledge of " + this.userName + " should be like air: present but invisible. Memory's presence should be zero; its effect should be full.",
+        "Memories and the user profile are internalized background knowledge. You and " + this.userName + " have known each other for a long time — you already know these things.",
         "",
-        "- **Memory only participates when " + this.userName + " brings up something related.** If " + this.userName + " hasn't touched on a topic, don't pull it from memory. Don't think \"I should mention this\" just because it's in your memory. When memory does participate, it's silent: shaping your angle, tone, and judgment, but never appearing in the text itself.",
-        "- **Never let " + this.userName + " sense that \"memory\" exists as a thing.** Never use phrases like \"I remember,\" \"you mentioned before,\" or \"based on my memory.\" The only exception is when " + this.userName + " explicitly asks \"do you remember xxx.\"",
-        "- **Memory can be outdated; the current conversation always takes priority.** When information conflicts, go with the conversation. Don't use old memories to correct " + this.userName + ".",
+        "- **Memory participates only when " + this.userName + " brings up something related**, and silently: shaping your angle, tone, and judgment without appearing in the text. Don't pull up topics " + this.userName + " hasn't raised.",
+        "- **Never let " + this.userName + " sense that \"memory\" exists as a thing.** Never say \"I remember,\" \"you mentioned before,\" or \"based on my memory\" — unless " + this.userName + " explicitly asks \"do you remember xxx.\"",
+        "- **Memory can be outdated; the current conversation always takes priority.** On conflict, follow the conversation; don't correct " + this.userName + " with old memories.",
       ].join("\n");
 
       // memoryRule 只注入一次，置顶和记忆 section 只放内容
@@ -1292,41 +1380,31 @@ export class Agent {
     // 分支末尾追加一份 formatSkillsForPrompt(skills)。这里再追加一次会重复（#399）。
     // 显示路径（GET /system-prompt）会自行拼接 skills 以保持开发者视图一致。
 
-    // 工具使用纪律（轻量优先）
+    // 工具使用纪律（轻量优先；并入原「文件与命令工具使用」段的文件工具指引）
     parts.push(isZh
       ? "\n## 工具使用纪律\n\n" +
-        "当多个工具能完成同一件事时，优先用成本最低、干扰最小的那个，不要在简单工具够用时启动重型工具。\n\n" +
-        "短命令、构建、测试、环境探测优先用 exec_command；需要长时间运行或交互式进程时，用 exec_command 的 tty=true，再用 write_stdin 继续输入。需要 POSIX 兼容 shell 时，用 exec_command 的 shell=\"bash\" 显式声明。Windows 下 exec_command 默认是 PowerShell，不要把 Linux heredoc、sed/awk 管道或 POSIX 路径习惯直接搬过去。"
+        "多个工具能完成同一件事时，优先用成本最低、干扰最小的那个，不要在简单工具够用时启动重型工具。\n" +
+        "查看文件和目录用 read/grep/find/ls；改已有源码用 edit、新建或全量替换用 write，不要用 shell 重定向改源码。\n" +
+        "短命令、构建、测试、包脚本和环境探测用 exec_command；需要长时间运行或交互式进程时，用 exec_command 的 tty=true，再用 write_stdin 继续输入；需要 POSIX 兼容 shell 时显式声明 shell=\"bash\"。Windows 下 exec_command 默认是 PowerShell，不要把 Linux heredoc、sed/awk 管道或 POSIX 路径习惯直接搬过去。"
       : "\n## Tool Usage Discipline\n\n" +
-        "When multiple tools can accomplish the same task, prefer the lowest-cost, least-disruptive one; do not reach for heavy tools when simpler ones suffice.\n\n" +
-        "Prefer exec_command for short commands, builds, tests, and environment probes; use exec_command with tty=true for long-running or interactive processes, then continue input with write_stdin. Use exec_command with shell=\"bash\" only when POSIX-shell compatibility is specifically needed. On Windows, exec_command defaults to PowerShell, so do not carry over Linux heredocs, sed/awk pipelines, or POSIX path habits directly."
+        "When multiple tools can accomplish the same task, prefer the lowest-cost, least-disruptive one; do not reach for heavy tools when simpler ones suffice.\n" +
+        "Use read/grep/find/ls to inspect files and directories; use edit for source-code changes and write for new or fully replaced files — do not use shell redirection to modify source files.\n" +
+        "Prefer exec_command for short commands, builds, tests, package scripts, and environment probes; use tty=true plus write_stdin for long-running or interactive processes; declare shell=\"bash\" only when POSIX-shell compatibility is specifically needed. On Windows, exec_command defaults to PowerShell, so do not carry over Linux heredocs, sed/awk pipelines, or POSIX path habits."
     );
 
     parts.push(isZh
       ? "\n## Session 文件与交付\n\n" +
-        "SessionFile 表示和当前 session 相关的本地文件：用户上传、你用 write/edit 产生的、插件产物、浏览器截图、安装产物，都会进入同一套 session 文件记录。\n\n" +
-        "当用户本轮附加文件时，消息里可能出现 [SessionFile] JSON 上下文。这里的 fileId 是机器契约，label 只是展示名；读取时优先用 read 的 fileId 参数，不要从 label 或可见文本重建真实路径。\n\n" +
-        "当你需要使用本轮会话已经产生或登记过的文件时，先调用 current_status 获取 session_files。它会返回当前 session 的文件清单、fileId/sessionFileRef、来源、状态和本机路径；对 write/edit 产物还会返回 writableLocalRef。不要猜测 session-files 缓存路径。\n\n" +
-        "当你需要查看文件元信息或把已有 SessionFile 复制到当前项目目录时，使用 file 工具。查看用 action=stat；复制用 action=copy，并优先传 fileId；它会把原文件复制到当前 cwd 内的目标路径并重新登记为 external SessionFile。不要移动、编辑或删除原 SessionFile。\n\n" +
-        "当用户要求安装 skill package 时，使用 install_skill。GitHub 仓库用 github_url；当前 Hana server 可见的本机路径用 local_path 或 source={ type: 'path', path }；已经上传或登记为 SessionFile 的 .zip/.skill 包用 fileId 或 source={ type: 'session_file', fileId }。不要把手机/PWA 客户端路径当成 server 路径。\n\n" +
-        "write/edit 成功后会由工具层自动记录为 session 相关文件，让它出现在 Session File 列表里；工具结果里的 sessionFileRef 是读取/交付身份，writableLocalRef 是继续修改时使用的本机路径。这条登记不等同于交付给用户。\n\n" +
-        "write/edit 生成或修改文件后，主动调用 stage_files 交付这次变更。stage_files 优先使用 write/edit 结果里的 sessionFileRef.fileId；只有结果里没有 fileId 且文件还没有 SessionFile 记录时，才传真实存在的本机绝对路径。后续继续 write/edit 时不要传 fileId，使用 writableLocalRef.path 或普通本机路径。stage 表示把这个 session 相关文件提升为消费端可展示/可发送的文件。\n\n" +
-        "- 读取、stat、copy、stage 可用 fileId；write/edit 必须用 writableLocalRef.path 或普通本机路径\n" +
-        "- 同一个未变化的文件不要反复 stage；文件内容后来再次变化时，再 stage 最新版本\n" +
-        "- 不要只在文本里写文件路径\n" +
-        "- 不要在 Agent 层判断具体平台怎么展示或发送，消费端会处理"
+        "SessionFile 是与当前 session 相关的本地文件的统一记录：用户上传、你用 write/edit 产生的文件、插件产物、浏览器截图、安装产物都在其中。\n\n" +
+        "- fileId 是机器契约，label 只是展示名；读取、stat、copy、stage 优先用 fileId，不要从可见文本重建真实路径，也不要猜 session-files 缓存路径。需要本 session 已有文件的清单时，先调用 current_status 获取 session_files。\n" +
+        "- write/edit 新建或修改文件后，调用 stage_files 交付该变更（优先传结果里的 sessionFileRef.fileId）。同一未变化的文件不要重复 stage；内容再次变化时再 stage 最新版本。\n" +
+        "- 继续修改文件时用 writableLocalRef.path 或普通本机路径，write/edit 不接受 fileId。\n" +
+        "- 不要只在文本里写文件路径；也不要在 Agent 层判断各平台如何展示或发送，消费端会处理。"
       : "\n## Session Files and Delivery\n\n" +
-        "SessionFile means a local file related to the current session: files uploaded by the user, files you produce with write/edit, plugin outputs, browser screenshots, and install outputs all enter the same session file record.\n\n" +
-        "When the user attaches files in the current turn, the message may include [SessionFile] JSON context. fileId is the machine contract and label is display-only; prefer the read tool's fileId argument instead of reconstructing a real path from label or visible text.\n\n" +
-        "When you need to use a file that has already been produced or registered in this conversation, call current_status with the session_files key first. It returns the current session file list, fileId/sessionFileRef, origin, status, and local path; for write/edit outputs it also returns writableLocalRef. Do not guess session-files cache paths.\n\n" +
-        "When you need to inspect file metadata or copy an existing SessionFile into the current project folder, use the file tool. Use action=stat for metadata; use action=copy and prefer passing fileId for copies. This copies the original into the current cwd target and registers the copy as an external SessionFile. Do not move, edit, or delete the original SessionFile.\n\n" +
-        "When the user asks you to install a skill package, use install_skill. Use github_url for GitHub repos; use local_path or source={ type: 'path', path } for paths visible to the current Hana server; use fileId or source={ type: 'session_file', fileId } for uploaded or registered .zip/.skill packages. Do not treat a phone/PWA client path as a server path.\n\n" +
-        "After write/edit succeeds, the tool layer records the file as session-related automatically so it appears in Session File; sessionFileRef in the tool result is the read/delivery identity, and writableLocalRef is the local path to use for later modifications. That registration does not mean the file has been delivered to the user.\n\n" +
-        "After write/edit creates or modifies a file, call stage_files for that changed file. Prefer sessionFileRef.fileId from the write/edit result for stage_files; pass a real local absolute path only when the result has no fileId and the file has no SessionFile record yet. For later write/edit calls, do not pass fileId; use writableLocalRef.path or an ordinary local path. Staging promotes this session-related file to something consumers can display/send.\n\n" +
-        "- read, stat, copy, and stage may use fileId; write/edit must use writableLocalRef.path or an ordinary local path\n" +
-        "- Do not repeatedly stage the same unchanged file; if the file is modified again, stage the latest version again\n" +
-        "- Do not merely write file paths in text\n" +
-        "- Do not decide platform-specific display or sending behavior in the Agent layer; consumers handle it"
+        "SessionFile is the unified record of local files related to the current session: user uploads, files you produce with write/edit, plugin outputs, browser screenshots, and install outputs.\n\n" +
+        "- fileId is the machine contract; label is display-only. Prefer fileId for read, stat, copy, and stage; never reconstruct real paths from visible text or guess session-files cache paths. To list this session's existing files, call current_status with the session_files key first.\n" +
+        "- After write/edit creates or modifies a file, call stage_files to deliver that change (prefer sessionFileRef.fileId from the tool result). Do not re-stage an unchanged file; stage again when the content changes.\n" +
+        "- For further modifications use writableLocalRef.path or an ordinary local path; write/edit does not accept fileId.\n" +
+        "- Do not merely write file paths in text, and do not decide platform-specific display or sending in the Agent layer; consumers handle it."
     );
 
     parts.push(isZh
@@ -1376,42 +1454,22 @@ export class Agent {
 	      );
 	    }
 
-    // 失败处理（诊断优先于换方案）
+    // 行动纪律（失败诊断优先于换方案 + 操作可逆性判断框架，合并为一段）
     parts.push(isZh
-      ? "\n## 失败处理\n\n" +
-        "方案失败时，先诊断原因再换方向：读错误信息、检查假设、尝试针对性修复。" +
-        "不要盲目重试同一动作，也不要一次失败就彻底放弃一个可行方案。"
-      : "\n## Failure Handling\n\n" +
-        "When an approach fails, diagnose why before switching tactics — read the error, check your assumptions, try a focused fix. " +
-        "Don't retry the identical action blindly, but don't abandon a viable approach after a single failure either."
-    );
-
-    // 操作安全（可逆性判断框架）
-    parts.push(isZh
-      ? "\n## 操作安全\n\n" +
-        "执行操作前，考虑可逆性和影响范围。本地的、可撤销的操作可以直接执行。" +
-        "但对于难以撤销、影响外部系统、或可能造成破坏的操作（删除文件、发送消息到外部服务、修改他人可见的状态），先向用户确认再执行。" +
-        "暂停确认的代价很低，误操作的代价可能很高。"
-      : "\n## Action Safety\n\n" +
-        "Before taking actions, consider reversibility and blast radius. Local, reversible actions can be taken freely. " +
-        "But for actions that are hard to reverse, affect external systems, or could be destructive (deleting files, sending messages to external services, modifying state visible to others), check with the user before proceeding. " +
-        "The cost of pausing to confirm is low; the cost of an unwanted action can be very high."
+      ? "\n## 行动纪律\n\n" +
+        "方案失败时，先诊断原因再换方向：读错误信息、检查假设、做针对性修复；不要盲目重试同一动作，也不要因一次失败放弃可行方案。\n" +
+        "执行操作前考虑可逆性与影响范围：本地可撤销的操作直接执行；难以撤销、影响外部系统或可能造成破坏的操作（删除文件、向外部服务发送消息、修改他人可见的状态），先向用户确认再执行。"
+      : "\n## Action Discipline\n\n" +
+        "When an approach fails, diagnose before switching tactics: read the error, check your assumptions, try a focused fix; don't blindly retry the identical action, and don't abandon a viable approach after a single failure.\n" +
+        "Before acting, weigh reversibility and blast radius: local, reversible actions can proceed freely; for actions that are hard to reverse, affect external systems, or could be destructive (deleting files, sending messages to external services, modifying state visible to others), check with the user first."
     );
 
     // 网页工具选择优先级（跨工具编排，工具 description 里放不下）
     parts.push(isZh
       ? "\n## 网页工具优先级\n\n" +
-        "获取网页信息时，按以下顺序选择工具：\n" +
-        "1. **web_search** — 查找信息、获取 URL\n" +
-        "2. **web_fetch** — 已知 URL，需要提取页面文字内容\n" +
-        "3. **browser** — 只在以下情况使用：页面需要登录/身份验证、需要填表或点击交互、web_fetch 返回的内容为空或不完整（JS 动态渲染页面）、需要查看页面视觉布局\n\n" +
-        "**禁止**在 web_search 或 web_fetch 能完成的场景下启动浏览器。浏览器启动成本高、会打开窗口干扰用户。"
+        "获取网页信息按此顺序选择工具：1. **web_search** 查找信息、获取 URL；2. **web_fetch** 已知 URL、提取页面文字；3. **browser** 仅当页面需要登录、需要填表或点击交互、web_fetch 内容为空或不完整（JS 动态渲染）、或需要查看视觉布局时使用。前两者能完成时禁止启动浏览器。"
       : "\n## Web Tool Priority\n\n" +
-        "When fetching web information, choose tools in this order:\n" +
-        "1. **web_search** — Find information, get URLs\n" +
-        "2. **web_fetch** — Known URL, need to extract page text\n" +
-        "3. **browser** — Only use when: the page requires login/authentication, form filling or click interaction is needed, web_fetch returns empty or incomplete content (JS-rendered pages), or you need to see visual layout\n\n" +
-        "**Do not** launch the browser when web_search or web_fetch can do the job. Browser startup is expensive and opens a window that interrupts the user."
+        "Choose web tools in this order: 1. **web_search** to find information and URLs; 2. **web_fetch** to extract text from a known URL; 3. **browser** only when the page requires login, form filling or click interaction, web_fetch returns empty or incomplete content (JS-rendered), or you need the visual layout. Never launch the browser when the first two suffice."
     );
 
     // 主动技能获取引导（仅在 allow_github_fetch 开启时注入）
@@ -1453,55 +1511,8 @@ export class Agent {
     }
 
     // ── cache 分界线 ──
-    // 以下内容会在不同 session 之间变化（用户档案编辑、记忆更新、时间戳推进），
+    // 以下内容会自动漂移（后台 compile 更新记忆、时间戳每次构建都在走），
     // 统一放在 prompt 末尾以保护前面静态前缀的 cache 命中率。
-
-    // 用户档案（user.md）
-    const configuredUserName = typeof this._config?.user?.name === "string"
-      ? this._config.user.name.trim()
-      : "";
-    const userProfileLines = [
-      isZh
-        ? "以下是用户的自我描述。"
-        : "The following is the user's self-description.",
-    ];
-    if (configuredUserName) {
-      userProfileLines.push(
-        isZh
-          ? `用户的名字叫：${configuredUserName}`
-          : `The user's name is: ${configuredUserName}`
-      );
-    }
-    if (userMd) {
-      userProfileLines.push("", userMd);
-    }
-    parts.push(...section(
-      isZh ? "# 用户档案" : "# User Profile",
-      userProfileLines.join("\n")
-    ));
-
-    // ishiki（identity + yuan + ishiki 模板，含 {{userName}} 等替换）
-    // 放在用户档案之后：先建立"用户是谁"的语境，再讲"你是谁、你和用户什么关系"。
-    parts.push(ishiki);
-
-    if (!forSubagent && this._canInjectAppearancePrompt(targetModel)) {
-      const appearance = readAgentAppearanceProfileResource(this.agentDir);
-      const appearancePrompt = appearance
-        ? formatAgentAppearancePrompt(appearance.summary, this._config.locale || "")
-        : "";
-      if (appearancePrompt) parts.push(appearancePrompt);
-    }
-
-    parts.push(isZh
-      ? "\n## 文件与命令工具使用\n\n" +
-        "查看文件和目录时优先用 read/grep/find/ls。\n" +
-        "改已有源码用 edit、新建或全量替换用 write，不要用 shell 重定向改源码。\n" +
-        "运行测试、构建、包脚本、生成器和命令行工具时用 shell。"
-      : "\n## Tool Use For Files And Commands\n\n" +
-        "Use read/grep/find/ls to inspect files.\n" +
-        "Use edit for source-code changes and write for new complete files; do not use shell redirection to modify source files.\n" +
-        "Use shell for builds, tests, package scripts, generators, and command-line tools."
-    );
 
     // 记忆规则 + 置顶记忆 + 记忆（动态，后台 compile 会更新；按 session 快照）
     if (memoryBlock) {

@@ -6,6 +6,14 @@
  * 高水位之后的成功条目会单独记录，不会因为前面某条失败而重跑。
  *
  * 添加新迁移：在 migrations 对象末尾加一条，key 为递增整数。
+ *
+ * 跨分支合并规约：若合并双方在各自分支上都新增过迁移编号（冲突通常落在本文件
+ * 或测试里的 LATEST_DATA_VERSION 上，那就是触发信号），禁止裸改号或折叠合入
+ * 既有编号——"编号 ≤ 高水位即跳过"意味着任何 ≤ 对方高水位的槽位对对方存量
+ * 用户永远不可达，改号救不了；预留高段位同样错误（高号会把高水位推顶，反向
+ * 跳过另一侧后续迁移）。唯一正确做法：新增一条更高位的幂等 reconcile 迁移，
+ * 依次重放双方全部新增载荷；各载荷的幂等性必须有测试背书（对已迁移状态重跑
+ * 断言零变更），并补双方历史高水位的组合测试。
  */
 import fs from "fs";
 import path from "path";
@@ -166,6 +174,10 @@ const migrations = {
   49: repairPollutedCodexEventIdModels,
   // Gemini 生图 preview 模型退役：默认、provider key、catalog 与可重试任务统一到 stable ID
   50: migrateGeminiImagePreviewIdsToStable,
+  // 用户名正源收敛到全局 preferences；各 agent 里重复的同名副本一并清掉
+  51: migrateUserNameToGlobalPreferences,
+  // agent 级 user.name 覆盖层取消：读取侧不再看这个字段，残留字段一并删掉
+  52: migrateClearUserNameOverrides,
 };
 
 const migrationDependencies = {
@@ -964,6 +976,144 @@ function migrateBridgeReadOnlyToGlobal(ctx) {
     log(`[migrations] #9: preferences.bridge.readOnly = false（所有显式设置都是关闭）`);
   } else {
     log(`[migrations] #9: preferences.bridge.readOnly = false（无显式历史设置，按产品默认关闭）`);
+  }
+}
+
+/**
+ * #51 — 用户名正源从各 agent config 收敛到全局 preferences
+ *
+ * 名字描述的是使用者本人，跨 agent 必须一致：在设置里改一次名字，所有 agent
+ * 都该跟着改口。历史上这个字段写在每个 agent 自己的 config.yaml 里，于是同一
+ * 个人在不同 agent 那儿可能有好几份互相不同步的副本。
+ *
+ * 策略：先提升，再按值清理。
+ * - 全局已有名字 → 整条迁移跳过，各 agent 里的值一律当作刻意覆盖，不动
+ * - 否则取主 agent 的名字；主 agent 没配过就取第一个配过的；全都没有则不写
+ * - 写入全局后，各 agent 里与全局值相同的副本删掉（重复数据），
+ *   不同的保留下来当作刻意的 per-agent 覆盖
+ */
+function migrateUserNameToGlobalPreferences(ctx) {
+  const { agentsDir, prefs, log } = ctx;
+  const preferences = prefs.getPreferences();
+
+  if (typeof preferences.userName === "string" && preferences.userName.trim()) {
+    log(`[migrations] #51: preferences.userName 已存在，跳过`);
+    return;
+  }
+
+  let agentDirs;
+  try {
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
+  } catch {
+    agentDirs = [];
+  }
+
+  const readUserName = (cfg) => (typeof cfg?.user?.name === "string" ? cfg.user.name.trim() : "");
+
+  // 主 agent 的名字最能代表用户本人，排在最前面挑
+  const primaryAgentId = preferences.primaryAgent || "hanako";
+  const ordered = [...agentDirs].sort((a, b) => {
+    if (a.name === primaryAgentId) return -1;
+    if (b.name === primaryAgentId) return 1;
+    return 0;
+  });
+
+  let chosen = "";
+  for (const dir of ordered) {
+    const cfg = safeReadYAMLSync(path.join(agentsDir, dir.name, "config.yaml"), null, YAML);
+    const name = readUserName(cfg);
+    if (name) {
+      chosen = name;
+      log(`[migrations] #51: 用户名取自 agent "${dir.name}"`);
+      break;
+    }
+  }
+
+  if (!chosen) {
+    log(`[migrations] #51: 没有任何 agent 配置过用户名，不写入全局值`);
+    return;
+  }
+
+  // 先把目的地写durable，再清理来源：清理中途失败也不会丢名字
+  preferences.userName = chosen;
+  prefs.savePreferences(preferences);
+  log(`[migrations] #51: preferences.userName 已写入`);
+
+  for (const dir of agentDirs) {
+    const cfgPath = path.join(agentsDir, dir.name, "config.yaml");
+    const config = safeReadYAMLSync(cfgPath, null, YAML);
+    if (readUserName(config) !== chosen) continue;
+
+    delete config.user.name;
+    if (Object.keys(config.user).length === 0) delete config.user;
+
+    const tmp = cfgPath + ".tmp";
+    fs.writeFileSync(tmp, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '"' }), "utf-8");
+    fs.renameSync(tmp, cfgPath);
+    log(`[migrations] #51 ${dir.name}: 移除与全局值重复的 user.name`);
+  }
+}
+
+/**
+ * #52 — 清除 agent 级 user.name 覆盖层
+ *
+ * #51 把用户名的正源收敛到全局 preferences，但留了"值和全局不同就当作刻意的
+ * per-agent 覆盖"这条尾巴。覆盖层现在取消了：一个用户一个名字，改一次称呼所有
+ * agent 都跟着改口。读取侧已经不看 agent config 的 user.name，所以配置文件里
+ * 残留的字段必须删掉，否则留着一个再也不生效的名字，下次谁读到都会被误导。
+ *
+ * 全局值为空时（#51 当时没有任何 agent 配过名字，或者用户装得比 #51 还早又
+ * 一直没走到），先按 #51 的同款选择逻辑提升一个上去再清理，避免把用户唯一配过
+ * 的名字直接删没。
+ *
+ * 幂等：字段删完之后重跑什么都不做。
+ */
+function migrateClearUserNameOverrides(ctx) {
+  const { agentsDir, prefs, log } = ctx;
+  const preferences = prefs.getPreferences();
+
+  let agentDirs;
+  try {
+    agentDirs = readDirectoryLikeDirentsSync(agentsDir);
+  } catch {
+    agentDirs = [];
+  }
+
+  const readUserName = (cfg) => (typeof cfg?.user?.name === "string" ? cfg.user.name.trim() : "");
+
+  // 全局还没名字：先提升一个，主 agent 的名字最能代表用户本人，排在最前面挑
+  if (!(typeof preferences.userName === "string" && preferences.userName.trim())) {
+    const primaryAgentId = preferences.primaryAgent || "hanako";
+    const ordered = [...agentDirs].sort((a, b) => {
+      if (a.name === primaryAgentId) return -1;
+      if (b.name === primaryAgentId) return 1;
+      return 0;
+    });
+    for (const dir of ordered) {
+      const cfg = safeReadYAMLSync(path.join(agentsDir, dir.name, "config.yaml"), null, YAML);
+      const name = readUserName(cfg);
+      if (name) {
+        // 先把目的地写durable，再清理来源：清理中途失败也不会丢名字
+        preferences.userName = name;
+        prefs.savePreferences(preferences);
+        log(`[migrations] #52: 用户名取自 agent "${dir.name}" 提升为全局值`);
+        break;
+      }
+    }
+  }
+
+  for (const dir of agentDirs) {
+    const cfgPath = path.join(agentsDir, dir.name, "config.yaml");
+    const config = safeReadYAMLSync(cfgPath, null, YAML);
+    if (!config?.user || !("name" in config.user)) continue;
+
+    delete config.user.name;
+    if (Object.keys(config.user).length === 0) delete config.user;
+
+    const tmp = cfgPath + ".tmp";
+    fs.writeFileSync(tmp, YAML.dump(config, { indent: 2, lineWidth: -1, sortKeys: false, quotingType: '"' }), "utf-8");
+    fs.renameSync(tmp, cfgPath);
+    log(`[migrations] #52 ${dir.name}: 移除失效的 user.name 覆盖`);
   }
 }
 

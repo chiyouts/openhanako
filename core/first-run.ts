@@ -51,8 +51,9 @@ export interface FirstRunReport {
  */
 export function ensureFirstRun(hanakoHome, productDir): FirstRunReport {
   // 1. 确保目录结构存在
+  const userDir = path.join(hanakoHome, "user");
   fs.mkdirSync(path.join(hanakoHome, "agents"), { recursive: true });
-  fs.mkdirSync(path.join(hanakoHome, "user"), { recursive: true });
+  fs.mkdirSync(userDir, { recursive: true });
 
   // 2. 分类每个 agent 目录；没有任何可用 agent → 播种默认 agent
   const agentsDir = path.join(hanakoHome, "agents");
@@ -96,7 +97,7 @@ export function ensureFirstRun(hanakoHome, productDir): FirstRunReport {
       log.warn(`默认助手 config.yaml 无法解析，已备份到 ${defaultConfigBackupPath}`);
     }
     log.log(needsDefaultAgentRepair ? "默认助手数据不完整，正在补齐..." : "首次启动，正在创建默认助手...");
-    seedDefaultAgent(agentsDir, productDir);
+    seedDefaultAgent(agentsDir, productDir, userDir);
     repairedDefaultAgent = true;
     validAgentIds.add(DEFAULT_AGENT_ID);
   }
@@ -164,7 +165,7 @@ function backupUnreadableDefaultConfig(agentsDir): string {
 /**
  * 从模板播种默认 agent（与 engine.createAgent 相同逻辑，但纯同步、无依赖）
  */
-function seedDefaultAgent(agentsDir, productDir) {
+function seedDefaultAgent(agentsDir, productDir, userDir) {
   const agentId = "hanako";
   const agentDir = path.join(agentsDir, agentId);
 
@@ -198,41 +199,39 @@ function seedDefaultAgent(agentsDir, productDir) {
 
 
   // 与 createAgent 同策略：按 yuan（= agentId）+ locale 优先，通用 example 兜底。
-  // 首次播种读刚写入的 config.yaml 拿 locale。
-  let isZh = true;
+  // 与 Agent.resolveLocale() 同一条链条：先读刚写入的 config.yaml 的 locale，
+  // 缺失时落全局 prefs 的 locale（修复损坏默认 agent 时 preferences.json 往往
+  // 已存在；全新安装时它还没被第 5 步创建，读不到属于正常情况），两级都缺才落
+  // "en"。
+  let locale = "";
   try {
     if (fs.existsSync(cfgDest)) {
       const raw = YAML.load(fs.readFileSync(cfgDest, "utf-8")) || {};
-      isZh = String(raw.locale || "zh").startsWith("zh");
+      locale = typeof raw.locale === "string" ? raw.locale : "";
     }
   } catch {}
+  if (!locale) {
+    try {
+      const prefsPath = path.join(userDir, "preferences.json");
+      if (fs.existsSync(prefsPath)) {
+        const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf-8"));
+        locale = typeof prefs?.locale === "string" ? prefs.locale : "";
+      }
+    } catch {}
+  }
+  const isZh = String(locale || "en").startsWith("zh");
   const langDir = isZh ? "" : "en/";
   const firstExisting = (paths) => paths.find((p) => fs.existsSync(p));
 
-  // identity.md 保留动态占位符，在 system prompt 组装时按当前 config 渲染。
-  const identitySrc = firstExisting([
-    path.join(productDir, "identity-templates", `${langDir}${agentId}.md`),
-    path.join(productDir, "identity-templates", `${agentId}.md`),
-    path.join(productDir, "identity.example.md"),
-  ]);
-  if (identitySrc) {
-    const tmpl = fs.readFileSync(identitySrc, "utf-8");
-    fs.writeFileSync(path.join(agentDir, "identity.md"), tmpl, "utf-8");
-  }
+  // identity.md / ishiki.md 不再在首启播种时落盘（惰性材料化）：缺失时运行时
+  // 按 agent.resolveLocale() 现选 lib 模板（core/persona-source.ts 的
+  // resolvePersonaSource，与 core/agent.ts personality getter 同一条回落
+  // 链），用户日后改语言，未定制人格自动跟着换。文件只在用户于设置页编辑
+  // 保存时才落盘。yuan 由 buildSystemPrompt 实时从 lib/yuan/ 读取，同样无需
+  // 复制。
 
-  // yuan 由 buildSystemPrompt 实时从 lib/yuan/ 读取，无需复制
-
-  // ishiki.md
-  const ishikiSrc = firstExisting([
-    path.join(productDir, "ishiki-templates", `${langDir}${agentId}.md`),
-    path.join(productDir, "ishiki-templates", `${agentId}.md`),
-    path.join(productDir, "ishiki.example.md"),
-  ]);
-  if (ishikiSrc) {
-    fs.copyFileSync(ishikiSrc, path.join(agentDir, "ishiki.md"));
-  }
-
-  // public-ishiki.md（对外意识模板）
+  // public-ishiki.md（对外意识模板）：消费侧 Agent._readPublicIshiki 本来就
+  // 有独立回落链，不受此改动影响，这里继续按原策略播种。
   const publicIshikiSrc = firstExisting([
     path.join(productDir, "public-ishiki-templates", `${langDir}${agentId}.md`),
     path.join(productDir, "public-ishiki-templates", `${agentId}.md`),

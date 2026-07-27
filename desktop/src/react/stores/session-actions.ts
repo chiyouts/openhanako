@@ -23,7 +23,8 @@ import { snapshotStreamBuffer, type StreamBufferSnapshot } from './stream-invali
 import { renderMarkdown } from '../utils/markdown';
 import type { ChatMessage, ContentBlock } from './chat-types';
 import { readMessageLiveVersion } from './message-live-version';
-import type { SessionPermissionMode } from '../types';
+import type { SessionMetaRecoveryStatus, SessionPermissionMode } from '../types';
+import { findPrimaryAgent, resolveAgentWorkspace } from '../utils/agent-workspace';
 
 // ── 防竞争计数器 ──
 
@@ -343,6 +344,10 @@ export async function loadMessages(forPath?: string): Promise<void> {
   // messages 维度的竞态护栏：rapid switch 或并发 load 时，只有最新一次调用
   // 的响应允许 apply initSession，stale 响应直接丢弃。
   const myVersion = useStore.getState().bumpLoadMessagesVersion(targetPath);
+  // SessionFile flight 记录（issue #2188）：hydrate 期间到达的 upsert / branch
+  // reset 会被下面的 HTTP 快照整表覆盖。开一条 flight 记录桥接两者，hydrate
+  // 通过后按 flight 结果决定是丢弃快照还是应用快照 + 重放 flight 期间的 upsert。
+  useStore.getState().beginSessionFilesFlight(targetPath, myVersion);
   try {
     const res = await hanaFetch(sessionMessagesUrl(targetPath));
     const data = await res.json();
@@ -352,6 +357,24 @@ export async function loadMessages(forPath?: string): Promise<void> {
       // 已经有更新的 loadMessages 在途，stale 响应不应覆盖新状态。
       // todos 与 messages 必须作为同一份 hydrate 快照一起生效或一起丢弃。
       return;
+    }
+    // SessionFile hydrate（issue #2188）：必须放在 stale 检查之后、
+    // messages/todos 的 live-version 早退检查之前——文件 registry 不受这两个
+    // 护栏保护范围约束，否则 mid-flight 收到 live message/todo 更新时整次
+    // hydrate 被放弃，registry 就会像 bugfix 前那样永远写不进去。
+    // 只有 flight 期间没出现过 branch reset 才应用 HTTP 快照——reset 是全量权威
+    // 替换，出现过就说明 registry 已经是权威状态（含 reset 后的 upsert），旧
+    // 快照绝不能覆盖它。没有 reset 时应用快照后，重放 flight 期间记录的 upsert
+    // （upsert 是逐文件权威最新，必须后写生效，恢复被整表快照覆盖掉的增量）。
+    const flight = useStore.getState().consumeSessionFilesFlight(targetPath, myVersion);
+    if (!flight || !flight.resetSeen) {
+      useStore.getState().setSessionRegistryFiles(
+        targetPath,
+        Array.isArray(data.sessionFiles) ? data.sessionFiles : [],
+      );
+      for (const f of flight?.upserts ?? []) {
+        useStore.getState().upsertSessionRegistryFile(targetPath, f);
+      }
     }
     const messageLiveVersionNow = readMessageLiveVersion(targetPath);
     if (messageLiveVersionNow !== messageLiveVersionBefore) {
@@ -376,10 +399,6 @@ export async function loadMessages(forPath?: string): Promise<void> {
     const items = buildItemsFromHistory(data);
     // 修订点 stamp：记录本次快照对应的磁盘修订点，后续 reconcile 与列表投影对比。
     const revision = typeof data.revision === 'string' ? data.revision : null;
-    useStore.getState().setSessionRegistryFiles(
-      targetPath,
-      Array.isArray(data.sessionFiles) ? data.sessionFiles : [],
-    );
     useStore.getState().setSessionTodosForPath(targetPath, migratedTodos);
     if (items.length > 0) {
       useStore.getState().initSession(targetPath, items, data.hasMore ?? false, revision);
@@ -400,7 +419,12 @@ export async function loadMessages(forPath?: string): Promise<void> {
         data: buildInflightAssistantMessage(snapshot),
       });
     }
-  } catch (err) { console.error('[loadMessages] error:', err); }
+  } catch (err) {
+    console.error('[loadMessages] error:', err);
+    // fetch 失败也要清理本次 flight 记录，避免残留记录被后续 load 误判 version 冲突
+    // （不消费返回值：失败路径不需要重放任何东西）。
+    useStore.getState().consumeSessionFilesFlight(targetPath, myVersion);
+  }
 }
 
 export async function completeSessionTodos(sessionPath: string): Promise<boolean> {
@@ -523,9 +547,28 @@ export function reconcileCurrentSessionMessages(reason = 'unknown'): Promise<voi
 // Session 列表
 // ══════════════════════════════════════════════════════
 
-export async function loadSessions(): Promise<void> {
+// 与 /api/sessions 并行探测 session 元数据待恢复状态（/api/health 的
+// sessionStore 附块）。失败/超时一律静默忽略——这只是一个附加提示信号，绝不能
+// 让健康检查探测的失败反过来拖垮或延后会话列表本身的加载。
+async function fetchSessionMetaRecoveryStatus(): Promise<SessionMetaRecoveryStatus | null> {
   try {
-    const res = await hanaFetch('/api/sessions');
+    const res = await hanaFetch('/api/health');
+    const data = await res.json();
+    return (data && typeof data === 'object' && data.sessionStore) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadSessions(): Promise<void> {
+  // 先发起 /api/sessions（调用顺序上排在前面，保持它是 loadSessions() 触发的
+  // 第一个 hanaFetch 调用——调用方/测试对"/api/sessions 是这次加载的第一个
+  // 请求"这个顺序有既有假设），紧接着不等待地发起 /api/health 探测：两个请求
+  // 仍然背靠背同时打到网络上，只是调用顺序固定，不会因为并行而变得不确定。
+  const sessionsFetchPromise = hanaFetch('/api/sessions');
+  const metaRecoveryPromise = fetchSessionMetaRecoveryStatus();
+  try {
+    const res = await sessionsFetchPromise;
     const data = await res.json();
     const serverSessions = Array.isArray(data) ? data.map(normalizeServerSessionProjection) : [];
     const localSessions = useStore.getState().sessions || [];
@@ -561,6 +604,7 @@ export async function loadSessions(): Promise<void> {
       await switchSession(sessions[0].path);
     }
   } catch { /* ignore */ }
+  useStore.getState().setSessionMetaRecovery(await metaRecoveryPromise);
 }
 
 const EMPTY_FIRST_MESSAGE_PLACEHOLDER = '(no messages)';
@@ -762,6 +806,9 @@ export async function switchSession(path: string): Promise<void> {
       agentPatch.agentName = data.agentName || ag?.name || data.agentId;
       agentPatch.agentYuan = ag?.yuan || 'hanako';
       agentPatch.agentAvatarUrl = ag?.hasAvatar ? hanaUrl(`/api/agents/${data.agentId}/avatar?t=${Date.now()}`) : null;
+      agentPatch.homeFolder = typeof ag?.homeFolder === 'string' && ag.homeFolder.trim()
+        ? ag.homeFolder.trim()
+        : null;
     }
 
     // 保存当前 session 的附件到 keyed store
@@ -1101,10 +1148,15 @@ export async function createNewSession(options: CreateNewSessionOptions = {}): P
   }
 
   const s = useStore.getState();
+  const primaryAgent = findPrimaryAgent(s.agents);
+  const primaryWorkspace = resolveAgentWorkspace(primaryAgent);
   const requestedFolder = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null;
-  const defaultWorkspaceMountId = requestedFolder ? null : (s.deskWorkspaceMountId || null);
-  const defaultWorkspaceLabel = defaultWorkspaceMountId ? (s.deskWorkspaceLabel || null) : null;
-  const defaultFolder = requestedFolder || s.homeFolder || (defaultWorkspaceMountId ? null : s.deskBasePath) || null;
+  const defaultWorkspaceMountId = null;
+  const defaultWorkspaceLabel = null;
+  const defaultFolder = requestedFolder || primaryWorkspace || (!primaryAgent ? s.homeFolder : null) || null;
+  const selectedPrimaryAgentId = primaryAgent && primaryAgent.id !== s.currentAgentId
+    ? primaryAgent.id
+    : null;
   const pendingProjectId = typeof options.projectId === 'string' && options.projectId.trim()
     ? options.projectId.trim()
     : null;
@@ -1114,13 +1166,13 @@ export async function createNewSession(options: CreateNewSessionOptions = {}): P
     currentSessionPath: null,
     currentSessionId: null,
     pendingSessionSwitchPath: null,
-    // 有显式 Agent home 时以 home 为准；没有绑定 workspace 的 agent
-    // 以当前 session cwd 延续工作流，不从其他 agent 的 home_folder 推导。
+    // 全局新建始终回到 Primary Agent。显式项目 cwd 只覆盖本次工作目录；
+    // 普通新建使用 Primary Agent 的有效工作区（显式 home 或服务端默认工作区）。
     selectedFolder: defaultFolder,
     selectedWorkspaceMountId: defaultWorkspaceMountId,
     selectedWorkspaceLabel: defaultWorkspaceLabel,
     workspaceFolders: [],
-    selectedAgentId: null,
+    selectedAgentId: selectedPrimaryAgentId,
     ...pendingNewSessionIdentityPatch(),
     pendingProjectId,
     pendingNewSessionThinkingLevel: null,

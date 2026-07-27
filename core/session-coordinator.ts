@@ -15,7 +15,8 @@ import { isDefaultWorkspacePath, restoreDefaultWorkspaceIfMissing } from "../sha
 import { computeHardTruncation } from "./compaction-utils.ts";
 import {
   appendCompactionResultToSession,
-  createCachePreservingCompactionResult,
+  createColdUtilitySummaryResult,
+  isDirectCompactionInProgress,
   runCachePreservingCompactionForSession,
 } from "./session-compactor.ts";
 import { teardownSessionResources } from "./session-teardown.ts";
@@ -131,10 +132,35 @@ import {
 const log = createModuleLogger("session");
 const SESSION_META_PAYLOAD_DIR = "session-meta-payloads";
 const SESSION_META_PAYLOAD_FIELDS = ["promptSnapshot", "memoryReflectionSnapshot"];
-const SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES = 256 * 1024;
+// payload 字段一律外置为 sidecar 文件，索引文件只承载小标量，防止快照全文把共享索引撑大
+const SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES = 0;
 const SESSION_META_INDEX_MAX_BYTES = 1024 * 1024;
-const REMINDER_HEADER_RE = /^\[hana_reminder at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\]$/;
+// 当前块头是静态的；`at <时间戳>` 是历史 JSONL 里的旧块头，剥离端必须继续认
+const REMINDER_HEADER_RE = /^\[hana_reminder(?: at \d{4}-\d{2}-\d{2} \d{2}:\d{2})?\]$/;
 const SESSION_MODEL_UNAVAILABLE_API = "hana-unavailable-model";
+const identitySessionTransformContext = async (messages: any[]) => messages;
+
+export class SessionTransformContextResolutionError extends Error {
+  code = "SESSION_TRANSFORM_CONTEXT_UNKNOWN";
+  sessionPath: any;
+
+  constructor(sessionPath: any) {
+    super(`Session transform context unavailable: unknown session ${sessionPath || "(empty)"}`);
+    this.name = "SessionTransformContextResolutionError";
+    this.sessionPath = sessionPath;
+  }
+}
+
+export class SessionAgentRunRuntimeResolutionError extends Error {
+  code = "SESSION_AGENT_RUN_RUNTIME_UNKNOWN";
+  sessionPath: any;
+
+  constructor(sessionPath: any, reason = "unknown session") {
+    super(`Session AgentRun runtime unavailable: ${reason} ${sessionPath || "(empty)"}`);
+    this.name = "SessionAgentRunRuntimeResolutionError";
+    this.sessionPath = sessionPath;
+  }
+}
 
 type SessionModelAvailability = {
   available: boolean;
@@ -214,7 +240,8 @@ function createUnavailableSessionModel(models: any, provider: string, modelId: s
 /** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
 export const PATROL_TOOLS_DEFAULT = "*";
 function splitLeadingSessionReminder(text: any) {
-  if (typeof text !== "string" || !text.startsWith(`${REMINDER_BLOCK_PREFIX} at `)) return null;
+  // 粗筛只看前缀，精确匹配交给下面的整行 REMINDER_HEADER_RE
+  if (typeof text !== "string" || !text.startsWith(REMINDER_BLOCK_PREFIX)) return null;
   const firstNewline = text.indexOf("\n");
   if (firstNewline < 0 || !REMINDER_HEADER_RE.test(text.slice(0, firstNewline).replace(/\r$/, ""))) return null;
   const closingMarker = `\n${REMINDER_BLOCK_END}`;
@@ -979,6 +1006,7 @@ export class SessionCoordinator {
   declare _sessionManifestStore: any;
   declare _envChangeLedger: any;
   declare _ensureSessionLoadedInFlight: Map<string, Promise<any>>;
+  declare _metaQuarantines: Map<string, { metaPath: string; backupPath: string; quarantinedAt: string }>;
 
   /**
    * @param {object} deps
@@ -1026,6 +1054,12 @@ export class SessionCoordinator {
     this._sessionManifestStore = deps.sessionManifestStore || null;
     this._envChangeLedger = deps.envChangeLedger || null;
     this._ensureSessionLoadedInFlight = new Map();
+    // 运行期 session-meta 隔离记录：key 是 metaPath，value 是隔离详情。
+    // 只记内存态（不落盘）——重启后 quarantine 文件仍在磁盘上，但这份
+    // "刚刚发生过隔离"的提示只需要覆盖当前进程生命周期；重启后的存量隔离
+    // 文件由 listSkippedMetaSources（账本）与 _sessionManifestStoreRecovery
+    // 两条独立信号覆盖，不需要这里补历史。
+    this._metaQuarantines = new Map();
   }
 
   static _TITLES_TTL = 60_000; // 60 秒
@@ -1559,6 +1593,45 @@ export class SessionCoordinator {
   getSessionStreamFn(sessionPath: any) {
     const entry = this._getSessionEntryByPath(sessionPath);
     return entry?.session?.agent?.streamFn || null;
+  }
+
+  getSessionAgentRunRuntime(sessionPath: any) {
+    const entry = this._getSessionEntryByPath(sessionPath);
+    if (!sessionPath || !entry?.session) {
+      throw new SessionAgentRunRuntimeResolutionError(sessionPath);
+    }
+    const session = entry.session;
+    const agent = session.agent;
+    if (typeof agent?.streamFn !== "function") {
+      throw new SessionAgentRunRuntimeResolutionError(sessionPath, "missing streamFn for session");
+    }
+    const tools = Object.freeze(
+      (Array.isArray(agent.state?.tools) ? agent.state.tools : [])
+        .map((tool) => Object.freeze({ ...tool })),
+    );
+    const streamOptions = Object.freeze({
+      sessionId: agent.sessionId ?? session.sessionManager?.getSessionId?.(),
+      onPayload: agent.onPayload,
+      onResponse: agent.onResponse,
+      transport: agent.transport,
+      thinkingBudgets: agent.thinkingBudgets,
+      maxRetryDelayMs: agent.maxRetryDelayMs,
+    });
+    return Object.freeze({
+      streamFn: agent.streamFn,
+      tools,
+      streamOptions,
+    });
+  }
+
+  getSessionTransformContext(sessionPath: any) {
+    const entry = this._getSessionEntryByPath(sessionPath);
+    if (!sessionPath || !entry?.session) {
+      throw new SessionTransformContextResolutionError(sessionPath);
+    }
+    return typeof entry.session.agent?.transformContext === "function"
+      ? entry.session.agent.transformContext
+      : identitySessionTransformContext;
   }
 
   getSessionProviderCacheAffinityKey(sessionPath: any) {
@@ -4202,8 +4275,9 @@ export class SessionCoordinator {
     const targetSessionPath = session.sessionManager?.getSessionFile?.() || null;
     const targetSessionId = targetSessionPath ? this._sessionIdForPath(targetSessionPath) : null;
     try {
-      const result = await createCachePreservingCompactionResult({
+      const result = await createColdUtilitySummaryResult({
         preparation,
+        transcriptMessages,
         model,
         systemPrompt: session.agent?.state?.systemPrompt ?? session.systemPrompt,
         customInstructions: [
@@ -5124,7 +5198,10 @@ export class SessionCoordinator {
     if (entry._switching) {
       throw new Error("Model switch already in progress for this session");
     }
-    if (session.isCompacting) {
+    // Both kinds of compaction rewrite this session's history, so either one
+    // blocks a model switch: isCompacting covers the SDK's own pass, and the
+    // direct cache-preserving pass reports itself separately.
+    if (session.isCompacting || isDirectCompactionInProgress(session)) {
       throw new Error("Cannot switch model while compaction is in progress");
     }
 
@@ -7084,12 +7161,23 @@ export class SessionCoordinator {
       );
       await fsp.rename(metaPath, backupPath);
       this.invalidateMetaCache(metaPath);
+      this._metaQuarantines.set(metaPath, {
+        metaPath,
+        backupPath,
+        quarantinedAt: new Date().toISOString(),
+      });
       log.warn(`oversized session-meta quarantined: ${backupPath}`);
     } catch (err) {
       if (err?.code !== "ENOENT") {
         log.warn(`oversized session-meta quarantine failed: ${err.message}`);
       }
     }
+  }
+
+  // 供 engine.getSessionMetadataRecoveryStatus() 聚合消费：本进程生命周期内
+  // 运行期发生过的 session-meta 隔离全集。数组顺序无意义，调用方按需处理。
+  listMetaQuarantines() {
+    return Array.from(this._metaQuarantines.values());
   }
 
   async _compactOversizedSessionMeta(metaPath: any) {

@@ -36,6 +36,7 @@ const initialStateFactory = (): MockState => ({
   sessionRegistryFilesByPath: {} as Record<string, unknown>,
   sessionModelsByPath: {} as Record<string, unknown>,
   _loadMessagesVersion: {} as Record<string, number>,
+  _sessionFilesFlightByPath: {} as Record<string, { version: number; resetSeen: boolean; upserts: Record<string, unknown>[] }>,
   scrollPositions: {} as Record<string, number>,
   todosLiveVersionBySession: {} as Record<string, number>,
   todosBySession: {} as Record<string, unknown>,
@@ -85,6 +86,7 @@ const initialStateFactory = (): MockState => ({
   cwdHistory: [] as string[],
   selectedAgentId: null,
   thinkingLevel: 'medium',
+  metaRecovery: null as unknown,
 });
 
 const dispatchedEvents: CustomEvent[] = [];
@@ -201,6 +203,7 @@ function installStoreMethods() {
     delete (mockState.sessionModelsByPath as Record<string, unknown>)[path];
     delete (mockState._loadMessagesVersion as Record<string, number>)[path];
     delete (mockState.scrollPositions as Record<string, number>)[path];
+    delete (mockState._sessionFilesFlightByPath as Record<string, unknown>)[path];
   });
   s.setSessionRegistryFiles = vi.fn((path: string, files: unknown[]) => {
     const bySession = mockState.sessionRegistryFilesByPath as Record<string, unknown>;
@@ -210,6 +213,29 @@ function installStoreMethods() {
     const bySession = mockState.sessionRegistryFilesByPath as Record<string, Record<string, unknown>[]>;
     const files = bySession[path] || [];
     bySession[path] = [...files, file];
+    const flightByPath = mockState._sessionFilesFlightByPath as Record<string, { version: number; resetSeen: boolean; upserts: Record<string, unknown>[] }>;
+    const flight = flightByPath[path];
+    if (flight) flight.upserts = [...flight.upserts, file];
+  });
+  s.beginSessionFilesFlight = vi.fn((path: string, version: number) => {
+    const flightByPath = mockState._sessionFilesFlightByPath as Record<string, { version: number; resetSeen: boolean; upserts: Record<string, unknown>[] }>;
+    flightByPath[path] = { version, resetSeen: false, upserts: [] };
+  });
+  s.consumeSessionFilesFlight = vi.fn((path: string, version: number) => {
+    const flightByPath = mockState._sessionFilesFlightByPath as Record<string, { version: number; resetSeen: boolean; upserts: Record<string, unknown>[] }>;
+    const flight = flightByPath[path];
+    if (!flight || flight.version !== version) return null;
+    delete flightByPath[path];
+    return { resetSeen: flight.resetSeen, upserts: flight.upserts };
+  });
+  s.applyBranchResetSessionFiles = vi.fn((path: string, files: unknown[] | null) => {
+    if (Array.isArray(files)) {
+      const bySession = mockState.sessionRegistryFilesByPath as Record<string, unknown>;
+      bySession[path] = files;
+    }
+    const flightByPath = mockState._sessionFilesFlightByPath as Record<string, { version: number; resetSeen: boolean; upserts: Record<string, unknown>[] }>;
+    const flight = flightByPath[path];
+    if (flight) flight.resetSeen = true;
   });
   s.setSessionTodosForPath = vi.fn((path: string, todos: unknown[]) => {
     const bySession = mockState.todosBySession as Record<string, unknown>;
@@ -256,6 +282,7 @@ function installStoreMethods() {
   s.setDeskFiles = vi.fn((files: unknown[]) => { mockState.deskFiles = files; });
   s.setDeskJianContent = vi.fn((content: string | null) => { mockState.deskJianContent = content; });
   s.clearStaleMessageLocate = vi.fn();
+  s.setSessionMetaRecovery = vi.fn((status: unknown) => { mockState.metaRecovery = status; });
 }
 
 import { hanaFetch } from '../../hooks/use-hana-fetch';
@@ -585,26 +612,61 @@ function mockPermissionDefault(mode = 'ask') {
   });
 
   describe('createNewSession cwd draft', () => {
-    it('uses the agent home folder and refreshes the visible desk root', async () => {
+    it('resets a global new-session draft to the primary agent and its effective workspace', async () => {
+      (mockState as Record<string, unknown>).agents = [
+        {
+          id: 'hana',
+          name: 'Hana',
+          isPrimary: true,
+          homeFolder: '/workspace/Primary',
+          effectiveHomeFolder: '/workspace/Primary',
+        },
+        {
+          id: 'mio',
+          name: 'Mio',
+          isPrimary: false,
+          homeFolder: '/workspace/Mio',
+          effectiveHomeFolder: '/workspace/Mio',
+        },
+      ];
+      (mockState as Record<string, unknown>).currentAgentId = 'mio';
       (mockState as Record<string, unknown>).deskBasePath = '/workspace/Desktop';
       (mockState as Record<string, unknown>).deskCurrentPath = 'old/subdir';
       (mockState as Record<string, unknown>).deskFiles = [{ name: 'stale.md' }];
       (mockState as Record<string, unknown>).deskJianContent = 'stale';
-      (mockState as Record<string, unknown>).homeFolder = '/workspace/AgentHome';
+      (mockState as Record<string, unknown>).homeFolder = '/workspace/Mio';
       mockPermissionDefault();
 
       await createNewSession();
 
-      expect(mockState.selectedFolder).toBe('/workspace/AgentHome');
+      expect(mockState.selectedAgentId).toBe('hana');
+      expect(mockState.selectedFolder).toBe('/workspace/Primary');
       expect(mockState.pendingNewSession).toBe(true);
-      expect(mockState.deskBasePath).toBe('/workspace/AgentHome');
+      expect(mockState.deskBasePath).toBe('/workspace/Primary');
       expect(mockState.deskCurrentPath).toBe('');
       expect(mockState.deskFiles).toEqual([]);
       expect(mockState.deskJianContent).toBeNull();
-      expect(mockLoadDeskFiles).toHaveBeenCalledWith('', '/workspace/AgentHome', null);
+      expect(mockLoadDeskFiles).toHaveBeenCalledWith('', '/workspace/Primary', null);
     });
 
-    it('uses the current session cwd for a new session when the agent has no explicit home folder', async () => {
+    it('uses the primary agent effective default workspace instead of the active session cwd', async () => {
+      (mockState as Record<string, unknown>).agents = [
+        {
+          id: 'hana',
+          name: 'Hana',
+          isPrimary: true,
+          homeFolder: null,
+          effectiveHomeFolder: '/home/test/Desktop/OH-WorkSpace',
+        },
+        {
+          id: 'mio',
+          name: 'Mio',
+          isPrimary: false,
+          homeFolder: null,
+          effectiveHomeFolder: '/home/test/Desktop/OH-WorkSpace',
+        },
+      ];
+      (mockState as Record<string, unknown>).currentAgentId = 'mio';
       (mockState as Record<string, unknown>).homeFolder = null;
       (mockState as Record<string, unknown>).deskBasePath = '/workspace/current-session';
       (mockState as Record<string, unknown>).deskCurrentPath = 'notes';
@@ -613,10 +675,11 @@ function mockPermissionDefault(mode = 'ask') {
 
       await createNewSession();
 
-      expect(mockState.selectedFolder).toBe('/workspace/current-session');
-      expect(mockState.deskBasePath).toBe('/workspace/current-session');
-      expect(mockState.deskCurrentPath).toBe('notes');
-      expect(mockLoadDeskFiles).toHaveBeenCalledWith('notes', '/workspace/current-session', null);
+      expect(mockState.selectedAgentId).toBe('hana');
+      expect(mockState.selectedFolder).toBe('/home/test/Desktop/OH-WorkSpace');
+      expect(mockState.deskBasePath).toBe('/home/test/Desktop/OH-WorkSpace');
+      expect(mockState.deskCurrentPath).toBe('');
+      expect(mockLoadDeskFiles).toHaveBeenCalledWith('', '/home/test/Desktop/OH-WorkSpace', null);
     });
 
     it('invalidates an in-flight session switch so the new-session desk stays on the agent home folder', async () => {
@@ -1042,6 +1105,27 @@ function mockPermissionDefault(mode = 'ask') {
     });
 
     it('carries an explicit project id from the new-session draft into session creation', async () => {
+      Object.assign(mockState, {
+        agents: [
+          {
+            id: 'hana',
+            name: 'Hana',
+            isPrimary: true,
+            homeFolder: '/workspace/primary',
+            effectiveHomeFolder: '/workspace/primary',
+          },
+          {
+            id: 'mio',
+            name: 'Mio',
+            isPrimary: false,
+            homeFolder: '/workspace/mio',
+            effectiveHomeFolder: '/workspace/mio',
+          },
+        ],
+        currentAgentId: 'mio',
+        homeFolder: '/workspace/mio',
+        deskBasePath: '/workspace/mio-session',
+      });
       mockPermissionDefault();
 
       await createNewSession({ projectId: 'project-hana', cwd: '/workspace/project-hana' });
@@ -1067,6 +1151,7 @@ function mockPermissionDefault(mode = 'ask') {
             cwd: '/workspace/project-hana',
             projectId: 'project-hana',
             permissionMode: 'ask',
+            agentId: 'hana',
             currentSessionPath: null,
           }),
         }),
@@ -1105,14 +1190,20 @@ function mockPermissionDefault(mode = 'ask') {
       const firstPromise = new Promise<Response>(r => { resolveFirst = r; });
       mockFetch.mockImplementationOnce(() => firstPromise);
       mockFetch.mockImplementationOnce(async () =>
-        jsonResponse({ messages: [{ text: 'new' }], blocks: [], todos: [], hasMore: false }),
+        jsonResponse({
+          messages: [{ text: 'new' }], blocks: [], todos: [], hasMore: false,
+          sessionFiles: [{ fileId: 'sf_new', filePath: '/tmp/new.md' }],
+        }),
       );
 
       const p1 = loadMessages('/a');
       const p2 = loadMessages('/a');
       await p2;
       // v1 的响应后到；此时 _loadMessagesVersion['/a'] === 2，应被判为 stale
-      resolveFirst(jsonResponse({ messages: [{ text: 'stale' }], blocks: [], todos: [], hasMore: false }));
+      resolveFirst(jsonResponse({
+        messages: [{ text: 'stale' }], blocks: [], todos: [], hasMore: false,
+        sessionFiles: [{ fileId: 'sf_stale', filePath: '/tmp/stale.md' }],
+      }));
       await p1;
 
       const chat = mockState.chatSessions as Record<string, { items: Array<{ data: { text: string } }> }>;
@@ -1120,6 +1211,10 @@ function mockPermissionDefault(mode = 'ask') {
       // 最新的 v2 结果取胜
       expect(chat['/a'].items).toHaveLength(1);
       expect(chat['/a'].items[0].data.text).toBe('new');
+      // v1（stale）不应写入 SessionFile registry；v2 的结果保留
+      expect((mockState.sessionRegistryFilesByPath as Record<string, unknown>)['/a']).toEqual([
+        { fileId: 'sf_new', filePath: '/tmp/new.md' },
+      ]);
     });
 
     it('正常单次调用写入 initSession', async () => {
@@ -1137,7 +1232,7 @@ function mockPermissionDefault(mode = 'ask') {
         .toEqual([{ fileId: 'sf_write', filePath: '/workspace/draft.md' }]);
     });
 
-    it('mid-flight 收到 live message 更新时，跳过 messages hydrate', async () => {
+    it('主 bug 回归（#2188）：mid-flight 收到 live message 更新时，跳过 messages hydrate 但仍写入 SessionFile registry', async () => {
       let resolveFetch!: (r: Response) => void;
       const pending = new Promise<Response>((resolve) => { resolveFetch = resolve; });
       mockFetch.mockImplementationOnce(() => pending);
@@ -1146,11 +1241,54 @@ function mockPermissionDefault(mode = 'ask') {
       bumpMessageLiveVersion('/a');
       resolveFetch(jsonResponse({
         messages: [{ text: 'stale' }], blocks: [], todos: [], hasMore: false,
+        sessionFiles: [{ fileId: 'sf_live', filePath: '/tmp/live.md' }],
       }));
       await task;
 
       const initSession = (mockState as unknown as { initSession: ReturnType<typeof vi.fn> }).initSession;
       expect(initSession).not.toHaveBeenCalled();
+      // messages/todos hydrate 被放弃，但 SessionFile registry 必须仍然写入
+      // （否则远程 WebUI 的文件面板永远空 — #2188 根因）。
+      expect((mockState.sessionRegistryFilesByPath as Record<string, unknown>)['/a']).toEqual([
+        { fileId: 'sf_live', filePath: '/tmp/live.md' },
+      ]);
+    });
+
+    it('mid-flight 期间收到 upsert：hydrate 后 registry 为快照与重放增量合并（重放后写胜）', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        messages: [{ text: 'hello' }], blocks: [], todos: [], hasMore: false,
+        sessionFiles: [{ fileId: 'sf_snapshot', filePath: '/tmp/snapshot.md' }],
+      }));
+
+      const task = loadMessages('/a');
+      // mid-flight：真实链路里这是 WS tool_end / content_block file 触发的 upsert
+      (mockState as unknown as { upsertSessionRegistryFile: (path: string, f: Record<string, unknown>) => void })
+        .upsertSessionRegistryFile('/a', { fileId: 'sf_live', filePath: '/tmp/live.md' });
+      await task;
+
+      expect((mockState.sessionRegistryFilesByPath as Record<string, unknown>)['/a']).toEqual([
+        { fileId: 'sf_snapshot', filePath: '/tmp/snapshot.md' },
+        { fileId: 'sf_live', filePath: '/tmp/live.md' },
+      ]);
+    });
+
+    it('mid-flight 期间收到 branch reset：hydrate 放弃旧快照，不覆盖 reset 后的权威 registry', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        messages: [{ text: 'hello' }], blocks: [], todos: [], hasMore: false,
+        sessionFiles: [{ fileId: 'sf_snapshot', filePath: '/tmp/snapshot.md' }],
+      }));
+
+      const task = loadMessages('/a');
+      // mid-flight：真实链路里这是 WS session_branch_reset 触发的 applyBranchResetSessionFiles
+      (mockState as unknown as { applyBranchResetSessionFiles: (path: string, files: unknown[] | null) => void })
+        .applyBranchResetSessionFiles('/a', [{ fileId: 'sf_post_reset', filePath: '/tmp/post.md' }]);
+      await task;
+
+      const setSessionRegistryFiles = (mockState as unknown as { setSessionRegistryFiles: ReturnType<typeof vi.fn> }).setSessionRegistryFiles;
+      expect(setSessionRegistryFiles).not.toHaveBeenCalled();
+      expect((mockState.sessionRegistryFilesByPath as Record<string, unknown>)['/a']).toEqual([
+        { fileId: 'sf_post_reset', filePath: '/tmp/post.md' },
+      ]);
     });
 
     it('stale 响应不会先把 todos 回滚到旧快照', async () => {
@@ -1259,7 +1397,9 @@ function mockPermissionDefault(mode = 'ask') {
       expect(mockState.sessionLocatorsById).toMatchObject({
         sess_a: { path: '/session/current-b.jsonl' },
       });
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // 只断言没有多打一次 /api/sessions（没有触发额外 reload）——loadSessions()
+      // 并行探测 /api/health 是另一个调用，不属于本用例要锁的"没有多余重载"行为。
+      expect(mockFetch.mock.calls.filter(([url]) => url === '/api/sessions')).toHaveLength(1);
     });
 
     it('uses reconciled state before deciding whether the first session needs auto-switching', async () => {
@@ -1279,7 +1419,9 @@ function mockPermissionDefault(mode = 'ask') {
       expect(mockState.currentSessionId).toBe('sess_b');
       expect(mockState.currentSessionPath).toBe('/session/b.jsonl');
       expect(mockState.pendingSessionSwitchPath).toBeNull();
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // 只断言没有多打一次 /api/sessions（没有触发额外 reload）——loadSessions()
+      // 并行探测 /api/health 是另一个调用，不属于本用例要锁的"没有多余重载"行为。
+      expect(mockFetch.mock.calls.filter(([url]) => url === '/api/sessions')).toHaveLength(1);
     });
 
     it('does not infer focused identity from path when currentSessionId is absent', async () => {
@@ -1333,7 +1475,9 @@ function mockPermissionDefault(mode = 'ask') {
       ]);
       expect(mockState.currentSessionPath).toBeNull();
       expect(mockState.pendingSessionSwitchPath).toBe('/b');
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // 只断言没有多打一次 /api/sessions（没有触发额外 reload）——loadSessions()
+      // 并行探测 /api/health 是另一个调用，不属于本用例要锁的"没有多余重载"行为。
+      expect(mockFetch.mock.calls.filter(([url]) => url === '/api/sessions')).toHaveLength(1);
     });
 
     it('keeps the first optimistic user message when the server list is still empty for that session', async () => {
@@ -1720,6 +1864,49 @@ function mockPermissionDefault(mode = 'ask') {
       expect(mockLoadDeskFiles).toHaveBeenCalledWith('', '/workspace-a', null);
     });
 
+    it('switching across agents synchronizes the active agent home while showing the session cwd', async () => {
+      Object.assign(mockState, {
+        agents: [
+          {
+            id: 'hana',
+            name: 'Hana',
+            yuan: 'hanako',
+            isPrimary: true,
+            homeFolder: '/workspace/hana-home',
+            effectiveHomeFolder: '/workspace/hana-home',
+          },
+          {
+            id: 'mio',
+            name: 'Mio',
+            yuan: 'hanako',
+            isPrimary: false,
+            homeFolder: '/workspace/mio-home',
+            effectiveHomeFolder: '/workspace/mio-home',
+          },
+        ],
+        currentAgentId: 'hana',
+        homeFolder: '/workspace/hana-home',
+        deskBasePath: '/workspace/hana-session',
+      });
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        agentId: 'mio',
+        agentName: 'Mio',
+        cwd: '/workspace/mio-session',
+        currentModelId: null,
+        currentModelName: null,
+        currentModelProvider: null,
+      }));
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        messages: [{ text: 'mio history' }], blocks: [], todos: [], hasMore: false,
+      }));
+
+      await switchSession('/mio');
+
+      expect(mockState.currentAgentId).toBe('mio');
+      expect(mockState.homeFolder).toBe('/workspace/mio-home');
+      expect(mockState.deskBasePath).toBe('/workspace/mio-session');
+    });
+
     it('切到同一 workspace 的 session 时保留当前 desk 子目录', async () => {
       (mockState as Record<string, unknown>).deskCurrentPath = 'notes/daily';
       (mockState as Record<string, unknown>).deskBasePath = '/workspace-a';
@@ -1908,6 +2095,10 @@ function mockPermissionDefault(mode = 'ask') {
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
       mockFetch.mockResolvedValueOnce(jsonResponse([{ path: '/other' }]));
+      // loadSessions() 内部紧跟 /api/sessions 并行探测 /api/health（session
+      // 元数据待恢复状态）——按调用顺序占掉这个位置的响应队列，空块即可，
+      // fetchSessionMetaRecoveryStatus 对缺失/形状不对的响应本就容错。
+      mockFetch.mockResolvedValueOnce(jsonResponse({}));
       mockFetch.mockResolvedValueOnce(jsonResponse({
         agentId: null,
         cwd: '/workspace-other',

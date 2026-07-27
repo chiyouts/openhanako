@@ -187,6 +187,16 @@ export interface SessionCapabilityDrift {
   hasDrift: boolean;
 }
 
+/**
+ * session 元数据待恢复状态——/api/health 的 sessionStore 附块如实转发到前端。
+ * degraded=false 且 reasons 为空数组是唯一的"健康"态；非空 reasons 只用来
+ * 驱动侧边栏提示条文案，具体 kind 值前端不做分支展示（一条提示覆盖所有原因）。
+ */
+export interface SessionMetaRecoveryStatus {
+  degraded: boolean;
+  reasons: Array<{ kind: string; detail: string }>;
+}
+
 export interface Session {
   path: string;
   sessionId?: string | null;
@@ -228,6 +238,8 @@ export interface Agent {
   hasAvatar?: boolean;
   avatarRevision?: string | null;
   chatModel?: { id: string; provider?: string | null } | null;
+  /** 显式 homeFolder 或服务端默认工作区解析后的有效新会话目录。 */
+  effectiveHomeFolder?: string | null;
   homeFolder?: string | null;
   memoryMasterEnabled?: boolean;
 }

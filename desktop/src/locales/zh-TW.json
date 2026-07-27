@@ -159,6 +159,9 @@
     "searchingContent": "正在搜尋正文…",
     "searchNoResults": "沒有找到相關會話",
     "searchFailed": "搜尋失敗",
+    "metaRecoveryNoticeTitle": "部分對話待復原",
+    "metaRecoveryNoticeBody": "偵測到對話元資料異常，歷史正文仍保存在磁碟上，受影響的對話屬性可能暫缺",
+    "metaRecoveryEmpty": "對話清單暫時無法完整顯示，正文仍保存在磁碟上，請稍候或重新啟動應用程式",
     "view": {
       "time": "按時間排序",
       "project": "按項目排序",
@@ -528,7 +531,8 @@
         "avatar": "Ming.png"
       },
       "kong": {
-        "label": "模型原本的樣子",
+        "label": "無發散思考模組（如 MOOD），和其他 Agent 一致的體驗。",
+        "shortLabel": "無思考區塊，直接回答。",
         "avatar": "Kong.png"
       }
     },
