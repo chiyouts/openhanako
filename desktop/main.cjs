@@ -373,6 +373,7 @@ let _browserWebView = null;        // 当前活跃的 WebContentsView
 const _browserViews = new Map();   // sessionPath -> BrowserWorkspace; BrowserWorkspace.tabs: tabId -> WebContentsView
 let _currentBrowserSession = null; // 当前浏览器绑定的 sessionPath
 let _currentBrowserTabId = null;   // 当前浏览器绑定的 tabId
+const _browserSessionTitles = new Map(); // workspaceKey -> session title（viewer 工具栏显示"在看谁的浏览器"）
 let _browserAcceptCookies = true;
 const _browserCookiePolicyInstalledPartitions = new Set();
 
@@ -2230,7 +2231,8 @@ function writeCrashLog(errorMessage) {
   // 写入文件（best effort）
   try {
     const crashLogPath = path.join(hanakoHome, "crash.log");
-    fs.mkdirSync(hanakoHome, { recursive: true });
+    // 数据目录存放凭证，只对当前用户开放（Windows 上 NTFS 忽略该位，由用户目录 ACL 兜底）
+    fs.mkdirSync(hanakoHome, { recursive: true, mode: 0o700 });
     fs.writeFileSync(crashLogPath, content, "utf-8");
   } catch (e) {
     console.error("[desktop] 写入 crash.log 失败:", e.message);
@@ -3068,6 +3070,8 @@ function createBrowserViewerWindow(opts = {}) {
 
   // 窗口获得焦点时，将输入焦点转发到 WebContentsView（否则无法滚动/打字）
   browserViewerWindow.on("focus", () => {
+    // 用户把 viewer 拉到前台 = 用户侧活动，刷新闲置回收计时
+    _sendBrowserUserActivity(_currentBrowserSession);
     if (_browserWebView) {
       _browserWebView.webContents.focus();
       console.log("[browser-viewer] window focus → view.focus(), isFocused:", _browserWebView.webContents.isFocused());
@@ -3375,17 +3379,6 @@ function _ensureBrowserForSession(sessionPath, tabId = null) {
   return view;
 }
 
-function _ensureBrowserTabForSession(sessionPath, tabId = null) {
-  const workspace = _ensureBrowserWorkspace(sessionPath);
-  let tab = tabId ? workspace.tabs.get(tabId) : _activeBrowserTabRecord(workspace);
-  if (!tab) {
-    tab = _createBrowserTabRecord(sessionPath, { tabId });
-    workspace.tabs.set(tab.tabId, tab);
-    workspace.activeTabId = tab.tabId;
-  }
-  return tab;
-}
-
 function _ensureBrowser() {
   return _ensureBrowserForSession(null);
 }
@@ -3453,14 +3446,14 @@ function _bindBrowserViewLifecycle(view, sessionPath) {
 
 function _removeBrowserTabRecord(view) {
   if (!view) return null;
-  for (const [key, workspace] of _browserViews) {
+  for (const workspace of _browserViews.values()) {
     for (const [tabId, tab] of workspace.tabs) {
       if (tab.view !== view) continue;
       workspace.tabs.delete(tabId);
       if (workspace.activeTabId === tabId) {
         workspace.activeTabId = workspace.tabs.keys().next().value || null;
       }
-      if (workspace.tabs.size === 0) _browserViews.delete(key);
+      // 空标签组保留：崩溃/销毁路径同样只摘掉 tab，session 的 workspace 继续存在。
       return { workspace, tabId };
     }
   }
@@ -3669,13 +3662,14 @@ function _notifyViewerUrl(url) {
       canGoBack: _browserWebView.webContents.canGoBack(),
       canGoForward: _browserWebView.webContents.canGoForward(),
       sessionPath: _currentBrowserSession,
+      sessionTitle: _browserSessionTitles.get(_browserWorkspaceKey(_currentBrowserSession)) || null,
       activeTabId: _currentBrowserTabId || serialized.activeTabId,
       tabs: serialized.tabs,
     });
   }
 }
 
-async function closeBrowserSessionViaServer(sessionPath) {
+async function closeBrowserSessionViaServer(sessionPath, { revoke = false } = {}) {
   if (!sessionPath) throw new Error("No active browser session");
   if (!serverPort || !serverToken) throw new Error("Server is not ready");
   const res = await fetch(`http://127.0.0.1:${serverPort}/api/browser/close-session`, {
@@ -3684,7 +3678,7 @@ async function closeBrowserSessionViaServer(sessionPath) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${serverToken}`,
     },
-    body: JSON.stringify({ sessionPath }),
+    body: JSON.stringify({ sessionPath, revoke }),
     signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
@@ -3847,11 +3841,49 @@ async function handleBrowserCommand(cmd, params) {
     }
 
     // ── suspend ──（从窗口摘下来，但不销毁，页面状态完全保留）
+    // keepViewerVisible：会话切换用。窗口保持可见，viewer 会短暂收到 running:false 清空 UI，
+    // 紧随其后的 viewerShowSession 立刻重绘目标 session 的标签页组或空态。
     case "suspend": {
       const sp = params.sessionPath;
       const view = sp ? _getViewForSession(sp) : _browserWebView;
       if (view && view === _browserWebView) {
-        _detachActiveBrowserView({ view, sessionPath: sp || _currentBrowserSession, hideIfVisible: true });
+        _detachActiveBrowserView({
+          view,
+          sessionPath: sp || _currentBrowserSession,
+          hideIfVisible: params.keepViewerVisible !== true,
+        });
+      }
+      return {};
+    }
+
+    // ── viewerVisibility ──（闲置回收巡检用：viewer 当前是否可见、正在展示哪个 session）
+    case "viewerVisibility": {
+      return {
+        visible: !!(browserViewerWindow && !browserViewerWindow.isDestroyed() && browserViewerWindow.isVisible()),
+        sessionPath: _currentBrowserSession,
+      };
+    }
+
+    // ── viewerShowSession ──（viewer 显示指定 session 的标签页组；无组则空态。不改变窗口可见性）
+    case "viewerShowSession": {
+      const sp = params.sessionPath || null;
+      if (typeof params.title === "string" && params.title.trim()) {
+        _browserSessionTitles.set(_browserWorkspaceKey(sp), params.title.trim());
+      }
+      if (!browserViewerWindow || browserViewerWindow.isDestroyed()) return {};
+      const workspace = _getBrowserWorkspace(sp);
+      const activeTab = _activeBrowserTabRecord(workspace);
+      if (activeTab) {
+        _switchActiveBrowserTab(sp, activeTab.tabId);
+      } else {
+        browserViewerWindow.webContents.send("browser-update", {
+          sessionPath: sp,
+          sessionTitle: _browserSessionTitles.get(_browserWorkspaceKey(sp)) || null,
+          activeTabId: null,
+          tabs: [],
+          canGoBack: false,
+          canGoForward: false,
+        });
       }
       return {};
     }
@@ -3930,16 +3962,19 @@ async function handleBrowserCommand(cmd, params) {
       workspace.tabs.delete(params.tabId);
       try { if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close(); } catch {}
       if (workspace.tabs.size === 0) {
-        _browserViews.delete(_browserWorkspaceKey(sp));
+        // 关掉最后一个标签页不销毁 workspace：session 的标签组保留为空组，viewer 显示空态。
+        // 「运行中」的语义以 workspace 是否存在为准，所以这里不广播 running:false。
+        workspace.activeTabId = null;
         if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
           browserViewerWindow.webContents.send("browser-update", {
-            running: false,
             sessionPath: sp,
             activeTabId: null,
             tabs: [],
+            canGoBack: false,
+            canGoForward: false,
           });
         }
-        return { activeTabId: null, tabs: [] };
+        return _serializeBrowserWorkspace(workspace);
       }
       workspace.activeTabId = nextTabId && workspace.tabs.has(nextTabId)
         ? nextTabId
@@ -4196,6 +4231,40 @@ async function handleBrowserCommand(cmd, params) {
   }
 }
 
+/** 浏览器命令通道的当前连接：viewer 直连主进程改动标签页后，用它把快照同步回 server */
+let _browserCmdWs = null;
+
+/**
+ * 把某个 session 的标签组快照推给 server 的 BrowserManager。
+ * viewer 的新建/关闭标签页走 IPC 直达主进程、绕过 server，不同步会让 server 状态漂移。
+ */
+function _syncWorkspaceToServer(sessionPath) {
+  if (!_browserCmdWs || _browserCmdWs.readyState !== 1) return;
+  const workspace = _getBrowserWorkspace(sessionPath);
+  try {
+    _browserCmdWs.send(JSON.stringify({
+      type: "browser-workspace-sync",
+      sessionPath,
+      workspace: workspace ? _serializeBrowserWorkspace(workspace) : null,
+    }));
+  } catch {}
+}
+
+/**
+ * 告诉 server 的 BrowserManager「用户刚碰过这个 session 的浏览器」。
+ * 闲置回收要求 agent 与用户双方都超时，用户侧的时间戳只有主进程知道。
+ */
+function _sendBrowserUserActivity(sessionPath) {
+  if (!sessionPath) return;
+  if (!_browserCmdWs || _browserCmdWs.readyState !== 1) return;
+  try {
+    _browserCmdWs.send(JSON.stringify({
+      type: "browser-user-activity",
+      sessionPath,
+    }));
+  } catch {}
+}
+
 /** 通过 WebSocket 监听 server 的浏览器命令 */
 function setupBrowserCommands() {
   if (!serverPort || !serverToken) return;
@@ -4206,6 +4275,7 @@ function setupBrowserCommands() {
 
   function connect() {
     ws = new WebSocket(url);
+    _browserCmdWs = ws;
     ws.on("open", () => {
       console.log("[desktop] Browser control WS connected");
     });
@@ -4234,6 +4304,7 @@ function setupBrowserCommands() {
       }
     });
     ws.on("close", () => {
+      if (_browserCmdWs === ws) _browserCmdWs = null;
       if (!isQuitting) {
         setTimeout(connect, 2000);
       }
@@ -5088,6 +5159,7 @@ wrapIpcBestEffortHandler("open-browser-viewer", async (_event, theme, payload) =
   if (theme) _browserViewerTheme = theme;
   const { url, sessionPath: sp } = _normalizeBrowserViewerOpenPayload(payload);
   createBrowserViewerWindow();
+  _sendBrowserUserActivity(sp);
 
   if (url && isAllowedBrowserUrl(url)) {
     await _openUrlInNewBrowserTab(sp, url);
@@ -5099,37 +5171,63 @@ wrapIpcBestEffortHandler("open-browser-viewer", async (_event, theme, payload) =
     return;
   }
 
-  const workspace = _ensureBrowserWorkspace(sp);
-  const tab = _ensureBrowserTabForSession(sp);
-  workspace.activeTabId = tab.tabId;
-  _switchActiveBrowserTab(sp, tab.tabId);
+  // 打开 viewer 不替用户建标签页：有标签就切过去，空标签组渲染空态等用户点 +。
+  const workspace = _getBrowserWorkspace(sp);
+  const activeTab = _activeBrowserTabRecord(workspace);
+  if (activeTab) {
+    _switchActiveBrowserTab(sp, activeTab.tabId);
+    return;
+  }
+  if (browserViewerWindow && !browserViewerWindow.isDestroyed()) {
+    browserViewerWindow.webContents.send("browser-update", {
+      sessionPath: sp,
+      activeTabId: null,
+      tabs: [],
+      canGoBack: false,
+      canGoForward: false,
+    });
+  }
 });
 wrapIpcBestEffortHandler("browser-go-back", (_event, sessionPath) => {
-  const view = _getViewForSession(_resolveBrowserIpcSessionPath(sessionPath));
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
+  _sendBrowserUserActivity(sp);
+  const view = _getViewForSession(sp);
   if (view) view.webContents.goBack();
 });
 wrapIpcBestEffortHandler("browser-go-forward", (_event, sessionPath) => {
-  const view = _getViewForSession(_resolveBrowserIpcSessionPath(sessionPath));
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
+  _sendBrowserUserActivity(sp);
+  const view = _getViewForSession(sp);
   if (view) view.webContents.goForward();
 });
 wrapIpcBestEffortHandler("browser-reload", (_event, sessionPath) => {
-  const view = _getViewForSession(_resolveBrowserIpcSessionPath(sessionPath));
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
+  _sendBrowserUserActivity(sp);
+  const view = _getViewForSession(sp);
   if (view) view.webContents.reload();
 });
 wrapIpcBestEffortHandler("browser-new-tab", async (_event, sessionPath) => {
-  await _openUrlInNewBrowserTab(_resolveBrowserIpcSessionPath(sessionPath), null);
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
+  _sendBrowserUserActivity(sp);
+  await _openUrlInNewBrowserTab(sp, null);
+  _syncWorkspaceToServer(sp);
 });
 wrapIpcBestEffortHandler("browser-switch-tab", (_event, tabId, sessionPath) => {
   if (typeof tabId !== "string" || !tabId) return;
-  _switchActiveBrowserTab(_resolveBrowserIpcSessionPath(sessionPath), tabId);
+  const sp = _resolveBrowserIpcSessionPath(sessionPath);
+  _sendBrowserUserActivity(sp);
+  _switchActiveBrowserTab(sp, tabId);
 });
-wrapIpcBestEffortHandler("browser-close-tab", (_event, tabId, sessionPath) => {
+wrapIpcBestEffortHandler("browser-close-tab", async (_event, tabId, sessionPath) => {
   if (typeof tabId !== "string" || !tabId) return;
   const sp = _resolveBrowserIpcSessionPath(sessionPath);
-  return handleBrowserCommand("closeTab", {
+  _sendBrowserUserActivity(sp);
+  const result = await handleBrowserCommand("closeTab", {
     sessionPath: sp,
     tabId,
   });
+  _syncWorkspaceToServer(sp);
+  return result;
 });
 wrapIpcBestEffortHandler("close-browser-viewer", () => {
   if (browserViewerWindow && !browserViewerWindow.isDestroyed()) browserViewerWindow.close();
@@ -5138,7 +5236,8 @@ wrapIpcBestEffortHandler("browser-emergency-stop", (_event, sessionPath) => {
   const sp = _resolveBrowserIpcSessionPath(sessionPath);
   // 有 session 归属时必须经过 server 的 BrowserManager，保持 UI 和运行时状态一致。
   if (sp) {
-    return closeBrowserSessionViaServer(sp);
+    // 急停语义 = 销毁浏览器 + 撤销 agent 的浏览器授权，直到用户下一条消息。
+    return closeBrowserSessionViaServer(sp, { revoke: true });
   }
   // 兼容无 sessionPath 的旧浏览器实例：没有 server 状态可同步，只能本地清理。
   const view = _getViewForSession(null);

@@ -932,6 +932,7 @@ export function createSessionsRoute(engine, hub = null) {
             ? engine.getSessionPermissionMode(s.path)
             : engine.permissionMode || null),
           pinnedAt: s.pinnedAt || null,
+          pinOrder: Number.isFinite(s.pinOrder) ? s.pinOrder : null,
           agentDeleted: s.agentDeleted === true,
           readOnlyReason: s.readOnlyReason || (s.agentDeleted === true ? "agent_deleted" : null),
           continuationAvailable: s.continuationAvailable === true,
@@ -996,6 +997,7 @@ export function createSessionsRoute(engine, hub = null) {
         workspaceMountId: s.workspaceMountId || null,
         workspaceLabel: s.workspaceLabel || null,
         pinnedAt: s.pinnedAt || null,
+        pinOrder: Number.isFinite(s.pinOrder) ? s.pinOrder : null,
         agentDeleted: s.agentDeleted === true,
         readOnlyReason: s.readOnlyReason || (s.agentDeleted === true ? "agent_deleted" : null),
         continuationAvailable: s.continuationAvailable === true,
@@ -1128,11 +1130,63 @@ export function createSessionsRoute(engine, hub = null) {
         sessionPath,
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
-      const pinnedAt = await engine.setSessionPinned({
+      const { pinnedAt, pinOrder } = await engine.setSessionPinned({
         ...(sessionId ? { sessionId } : {}),
         sessionPath,
       }, pinned);
-      return c.json({ ok: true, pinnedAt, sessionId: sessionId || engine.getSessionIdForPath?.(sessionPath) || null });
+      return c.json({
+        ok: true,
+        pinnedAt,
+        pinOrder: Number.isFinite(pinOrder) ? pinOrder : null,
+        sessionId: sessionId || engine.getSessionIdForPath?.(sessionPath) || null,
+      });
+    } catch (err) {
+      return c.json(bodyFromRouteError(err), statusFromRouteError(err));
+    }
+  });
+
+  // 重排置顶区：提交完整有序的 sessionId 列表，服务端整体重新编号
+  route.post("/sessions/pin-order", async (c) => {
+    try {
+      const requestContext = createRequestContext(c, engine);
+      const body = await safeJson(c);
+      const rawSessionIds = Array.isArray(body?.sessionIds) ? body.sessionIds : null;
+      if (!rawSessionIds || rawSessionIds.length === 0) {
+        return c.json({ error: t("error.missingParam", { param: "sessionIds" }) }, 400);
+      }
+
+      const refs = [];
+      const seen = new Set();
+      for (const rawSessionId of rawSessionIds) {
+        const sessionId = normalizeRequestSessionId(rawSessionId);
+        if (!sessionId) {
+          return c.json({ error: t("error.missingParam", { param: "sessionIds" }) }, 400);
+        }
+        if (seen.has(sessionId)) {
+          return c.json({
+            error: `setSessionPinOrder: duplicate session ${sessionId}`,
+            code: "session_pin_order_duplicate",
+            sessionId,
+          }, 400);
+        }
+        seen.add(sessionId);
+        // 每个 session 都独立解析定位并鉴权：一次请求跨多个 session，
+        // 授权不能只看列表里的第一个。
+        const sessionRef = resolveSessionLocatorFromBody({ sessionId }, "setSessionPinOrder");
+        if (!isValidSessionPath(sessionRef.sessionPath, engine.agentsDir)) {
+          return c.json({ error: "Invalid session path" }, 403);
+        }
+        const auth = authorizeSessionRoute(requestContext, "sessions.write", {
+          kind: "session",
+          studioId: requestContext.studioId,
+          sessionPath: sessionRef.sessionPath,
+        });
+        if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
+        refs.push({ sessionId: sessionRef.sessionId });
+      }
+
+      const orders = await engine.setSessionPinOrder(refs);
+      return c.json({ ok: true, orders });
     } catch (err) {
       return c.json(bodyFromRouteError(err), statusFromRouteError(err));
     }
@@ -2245,7 +2299,8 @@ export function createSessionsRoute(engine, hub = null) {
       const bm = BrowserManager.instance();
       const suspendPath = oldSessionPath;
       if (suspendPath && bm.isRunning(suspendPath)) {
-        await bm.suspendForSession(suspendPath);
+        // viewer 开着就让它跟着切，不再因为切换会话把窗口藏起来
+        await bm.suspendForSession(suspendPath, { keepViewerVisible: true });
       }
 
       await engine.switchSession(sessionPath);
@@ -2255,6 +2310,10 @@ export function createSessionsRoute(engine, hub = null) {
       const browserResume = await resumeBrowserForSessionSwitch(bm, sessionPath);
 
       const session = engine.getSessionByPath(sessionPath);
+
+      // viewer 跟随：无论是否 resume 成功都告知 viewer 当前 session（没有标签页组就显示空态）。
+      // 不改变窗口可见性，viewer 没开着时这条通知只更新标题缓存。
+      void bm.notifyViewerSession(sessionPath, session?.title || null);
 
       // 从 manifest 归属解析 agentId，避免依赖 engine 焦点指针的时序。
       // switchSession 只接受 agents/{id}/sessions/*.jsonl 布局的路径，归属要么
@@ -2381,12 +2440,26 @@ export function createSessionsRoute(engine, hub = null) {
     return c.json(bm.getBrowserSessionStates());
   });
 
+  // 打开指定 session 的浏览器（侧栏徽章左键入口）：冷状态先恢复，再让 viewer 展示该 session
+  route.post("/browser/open-session", async (c) => {
+    const body = await safeJson(c);
+    const { sessionPath } = body;
+    if (!sessionPath) return c.json({ error: "missing sessionPath" }, 400);
+    const bm = BrowserManager.instance();
+    const resume = await bm.resumeForSessionIfAvailable(sessionPath);
+    const session = engine.getSessionByPath(sessionPath);
+    await bm.notifyViewerSession(sessionPath, session?.title || null);
+    return c.json({ ok: true, resume });
+  });
+
   // 关闭指定 session 的浏览器
   route.post("/browser/close-session", async (c) => {
     const body = await safeJson(c);
-    const { sessionPath } = body;
+    const { sessionPath, revoke } = body;
     if (!sessionPath) return c.json({ error: "missing sessionPath" });
     const bm = BrowserManager.instance();
+    // 急停（revoke）不只是关窗，还要撤销该 session 的 agent 浏览器授权。
+    if (revoke === true) bm.revokeBrowserAuthorization(sessionPath);
     await bm.closeBrowserForSession(sessionPath);
     hub?.eventBus?.emit?.({ type: "browser_status", running: false, url: null }, sessionPath);
     return c.json({ ok: true, sessions: bm.getBrowserSessionStates() });

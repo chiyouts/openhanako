@@ -204,6 +204,7 @@
     "unpin": "ピン留めを解除",
     "pinFailed": "セッションのピン留めに失敗しました",
     "unpinFailed": "ピン留め解除に失敗しました",
+    "reorderFailed": "ピン留めの並び替えに失敗しました",
     "archive": "アーカイブ",
     "copyId": "Session ID をコピー",
     "copyIdDone": "Session ID をコピーしました",
@@ -300,7 +301,8 @@
     "screenshotFailed": "スクリーンショットの保存に失敗しました",
     "selectedCount": "{count} 件選択中",
     "allDone": "すべて完了",
-    "markAllComplete": "すべて完了にする"
+    "markAllComplete": "すべて完了にする",
+    "back": "戻る"
   },
   "chat": {
     "find": {
@@ -447,7 +449,11 @@
     "referenceDocument": "[参考ドキュメント] {path}",
     "mention": {
       "title": "メンション",
-      "tab": { "files": "ファイル", "sessions": "会話", "agents": "エージェント" },
+      "tab": {
+        "files": "ファイル",
+        "sessions": "会話",
+        "agents": "エージェント"
+      },
       "empty": "一致する項目はありません",
       "singleAgent": "1 回のターンで招待できる Agent レビュアーは 1 人です"
     }
@@ -476,6 +482,7 @@
     "stop": "現在の返信を停止",
     "new": "新しいセッションを開始（履歴を保管）",
     "reset": "セッションをリセット（履歴を消去）",
+    "loop": "このセッションでループタスクを実行",
     "commandError": "[コマンドエラー] {message}",
     "usage": "使い方: {usage}",
     "commandTimeout": "コマンドがタイムアウトしました（>{ms}ms）"
@@ -913,6 +920,14 @@
       "noTasks": "現在の会話にバックグラウンドタスクはありません{qualifier}。",
       "noTasksQualifier": "（ステータス: {status}）"
     },
+    "loopControl": {
+      "serviceUnavailable": "ループサービスは利用できません。",
+      "noActiveSession": "アクティブなセッションがありません。",
+      "noActiveLoop": "このセッションにアクティブなループはありません。/loop <タスク> で開始してください。",
+      "delayRequired": "action=schedule には delay_seconds が必要です。",
+      "scheduled": "{seconds} 秒後のウェイクアップを予約しました（{wakeAt} 発火）。以前のアラームは置き換えられます。",
+      "completed": "ループを完了して終了しました。"
+    },
     "installSkill": {
       "safetyBlocked": "[セキュリティポリシー] Skill の安全審査に失敗しました。インストールはブロックされました。\n理由: {reason}\n\nこの Skill が安全審査を通過しなかったことをユーザーに伝え、具体的な理由を説明してください。設定で安全審査を無効にできます（非推奨）。"
     }
@@ -1313,7 +1328,25 @@
       "launchAtLogin": "ログイン時に起動",
       "keepAwake": "ロック中も実行を継続",
       "betaUpdates": "ベータ版アップデートを受け取る",
-      "autoCheckUpdates": "アップデートを自動で確認"
+      "autoCheckUpdates": "アップデートを自動で確認",
+      "inviteSectionTitle": "テストチャンネル",
+      "inviteCodeLabel": "招待コード",
+      "inviteCodeHint": "招待コードはテストチャンネルを開くためのものです。アプリの利用条件ではありません。",
+      "inviteCodePlaceholder": "招待コードを貼り付け",
+      "inviteRedeemBtn": "引き換える",
+      "inviteRedeeming": "引き換え中…",
+      "inviteErrorInvalid": "この招待コードは無効か、すでに使い切られています。",
+      "inviteErrorNetwork": "引き換えサービスに接続できません。通信環境を確認してもう一度お試しください。",
+      "inviteErrorActivate": "チャンネルの状態を保存できませんでした。",
+      "inviteConfirmTitle": "テストチャンネルに切り替えますか？",
+      "inviteConfirmBody": "切り替えると、アプリはテスト版に更新されます。テスト版がデータ形式を更新したあとは、現在の正式版には戻れません。確認すると即座に反映されます。",
+      "inviteConfirmOk": "切り替える",
+      "inviteConfirmCancel": "正式版のままにする",
+      "inviteChannelActive": "現在のチャンネル：テストチャンネル",
+      "inviteChannelActiveHint": "更新はテストチャンネルから届きます。",
+      "inviteCodesLabel": "あなたの招待コード",
+      "inviteCodesHint": "各コードは1回だけ、1台の端末で使えます。",
+      "inviteCopy": "コピー"
     },
     "access": {
       "networkAccess": "LAN アクセス",
@@ -2031,7 +2064,53 @@
       "removeConfirm": "Remove this connector? Saved per-agent switches will remain but no longer take effect.",
       "agentTitle": "Agent Configuration",
       "agentConnectorDesc": "Enable for the selected agent, just like skills.",
-      "saveError": "Save failed"
+      "saveError": "Save failed",
+      "enabledAgentsCount": "件のアシスタントで有効",
+      "manage": "管理",
+      "removeTitle": "コネクタを削除",
+      "connectionTitle": "接続方法",
+      "permissionTitle": "権限",
+      "toolsTitle": "ツール",
+      "noTools": "ツールはまだありません。コネクタを起動して一度更新すると表示されます。",
+      "noToolMatches": "一致するツールがありません",
+      "toolSearch": "ツールを検索",
+      "selectAll": "すべて選択",
+      "selectNone": "選択を解除",
+      "selectInvert": "選択を反転",
+      "badgeReadOnly": "読み取り専用",
+      "badgeDestructive": "破壊的",
+      "permissionAllow": "審査なしで許可",
+      "pinTool": "常時読み込み",
+      "permissionMode": "呼び出しの審査",
+      "permissionModeHint": "既定ではすべての呼び出しを審査します。許可リストにすると、個別に許可したツールだけが審査を省きます。",
+      "permissionReviewAll": "すべて審査",
+      "permissionAllowlist": "許可リスト",
+      "trustReadOnly": "読み取り専用の申告を信頼する",
+      "trustReadOnlyHint": "読み取り専用かどうかはサーバー自身の申告で、Hana には確認できません。有効にすると、読み取り専用と申告されたツールは毎回の審査を省きます。",
+      "deferTitle": "遅延読み込み",
+      "deferScopeNote": "以下の設定はこのコネクタだけでなく、すべてのコネクタに適用されます。",
+      "deferEnabled": "遅延読み込みを許可",
+      "deferEnabledHint": "ツールが多いときは、まず目録だけをモデルに渡し、必要になったものだけ詳細を取り出します。",
+      "deferBuiltin": "内蔵ツールも遅延読み込み",
+      "deferBuiltinHint": "オンにすると内蔵ツールもカタログ経由で必要時に読み込まれます。直接読み込みの方がモデルは積極的に動くため、コンテキストが逼迫したときのみ推奨。",
+      "deferThreshold": "しきい値",
+      "deferThresholdHint": "有効なツールがこの数を超えたときだけ目録を使い、下回る場合はすべて直接読み込みます。",
+      "agentConnectorEnabled": "このアシスタントで有効",
+      "oauthWaiting": "ブラウザでの認可を待っています",
+      "oauthWaitingHint": "認可ページをブラウザで開きました。完了すると自動で反映されます。いつでも中止できます。",
+      "oauthFailed": "認可に失敗しました",
+      "oauthTimeout": "認可の待機がタイムアウトしました",
+      "importEmpty": "コネクタが見つかりませんでした",
+      "importPreviewHint": "取り込む内容を確認してください。チェックを外すとその項目は除外されます。",
+      "importParse": "解析",
+      "importConfirm": "{count} 件を取り込む",
+      "importItemOk": "追加しました",
+      "commandRequired": "コマンドがありません",
+      "urlRequired": "URL を入力してください",
+      "urlInvalid": "この URL は解釈できません。https:// のようにスキームを付けてください",
+      "urlScheme": "URL は http または https のみ対応しています",
+      "modeSwitchTitle": "接続タイプを変更",
+      "modeSwitchBody": "ローカルとリモートは別々の設定を使います。切り替えると他方の項目は消去され、稼働中の接続も切断されます。"
     },
     "screenshot": {
       "title": "スクリーンショット共有",
@@ -2635,12 +2714,16 @@
   "browser": {
     "using": "ブラウザを使用中",
     "close": "ブラウザを閉じる",
+    "open": "ブラウザを開く",
+    "collapse": "折りたたむ",
+    "closeForSession": "このセッションのブラウザを閉じる",
     "closeBtn": "閉じる",
     "back": "戻る",
     "forward": "進む",
     "reload": "再読み込み",
     "newTab": "新しいタブ",
     "closeTab": "タブを閉じる",
+    "emptyWorkspace": "開いているタブはありません",
     "emergencyStop": "AI制御の緊急停止",
     "backgroundHint": "バックグラウンドブラウザ実行中、クリックして表示",
     "background": "バックグラウンドブラウザ"
@@ -2726,6 +2809,7 @@
     "fetchError": "取得エラー: {msg}",
     "browserError": "エラー: {msg}",
     "browserAlreadyRunning": "ブラウザは既に実行中です",
+    "browserAuthorizationRevoked": "ユーザーがブラウザ使用の許可を停止しました",
     "browserLaunched": "ブラウザを起動しました",
     "browserNotRunning": "ブラウザは実行されていません",
     "browserClosed": "ブラウザを閉じました",
@@ -2929,7 +3013,34 @@
     "stopTaskNotFound": "タスク {taskId} が見つかりません。すでに完了しているか存在しない可能性があります",
     "stopTaskAlready": "タスク {taskId} はすでに終了しています",
     "stopTaskNoHandler": "タスク {taskId} は終了操作に対応していません",
-    "stopTaskDone": "タスク {taskId} を終了しました"
+    "stopTaskDone": "タスク {taskId} を終了しました",
+    "detailShow": "詳細",
+    "detailHide": "閉じる",
+    "code": {
+      "unexpected": "処理を完了できませんでした",
+      "sessionForkActiveTask": "この範囲にはまだ実行中のタスクがあります。終了を待つか、もっと前の位置から分岐してください",
+      "sessionForkUnavailable": "このバージョンでは分岐セッションを作成できません",
+      "subagentSessionForkCycle": "サブエージェントのセッションを自身の親へ分岐させることはできません",
+      "subagentRunBusy": "サブエージェントがまだ実行中です。終了を待ってください",
+      "subagentThreadBusy": "サブエージェントのスレッドが処理中です。しばらくしてからお試しください",
+      "workflowRunBusy": "ワークフローがまだ実行中です。終了を待ってください",
+      "workflowNodeBusy": "ワークフローのノードが処理中です。しばらくしてからお試しください",
+      "sessionBusy": "このセッションは処理中です。現在の操作が終わるまでお待ちください",
+      "sessionNotLoaded": "セッションの読み込みが完了していません。しばらくしてからお試しください",
+      "sessionIdentityConflict": "セッションの識別が一致しません。再読み込みしてからお試しください",
+      "sessionIdentityUnresolved": "このメッセージがどのセッションのものか判別できません",
+      "sessionIdentityMismatch": "このメッセージは現在のセッションのものではありません",
+      "sessionManifestNotFound": "このセッションの記録が見つかりません",
+      "sessionLocatorNotActive": "このセッションは最新版ではありません。一覧を更新してください",
+      "activeSessionConflict": "別のセッションがすでに進行中です",
+      "sessionDeleteStagedConflict": "このセッションは削除中のため、今は操作できません",
+      "fileTooLarge": "ファイルが上限のサイズを超えています",
+      "invalidUpload": "アップロードされた内容を読み取れません",
+      "invalidPath": "パスが正しくありません",
+      "noAvailableModel": "利用できるモデルがありません。設定でプロバイダーを確認してください",
+      "workspaceNotFound": "このワークスペースが見つかりません",
+      "capabilityDenied": "この操作は許可されていません"
+    }
   },
   "main": {
     "tray": {
@@ -3372,6 +3483,16 @@
       "body": "確認すると、このフォルダーは現在の会話の追加サンドボックスディレクトリになります。作業ディレクトリやプロンプトは変更されません。",
       "addLabel": "認可ディレクトリを追加",
       "removeLabel": "認可ディレクトリを削除"
+    },
+    "mcpElicitation": {
+      "unsupportedField": "未対応のフィールド型",
+      "choose": "選択してください",
+      "requiredMissing": "* の付いた必須項目を入力してください"
+    },
+    "mcpTool": {
+      "allowForSession": "このセッションでは今後聞かない",
+      "allowAlways": "このツールを常に許可",
+      "grantFailed": "この許可を記憶できませんでした"
     }
   },
   "auth": {

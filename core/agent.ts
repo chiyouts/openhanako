@@ -36,6 +36,7 @@ import {
   createSubagentTool,
 } from "../lib/tools/subagent-tool.ts";
 import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.ts";
+import { createLoopControlTool } from "../lib/tools/loop-control-tool.ts";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.ts";
 import { createCurrentStatusTool } from "../lib/tools/current-status-tool.ts";
 import { createWorkflowTool } from "../lib/tools/workflow-tool.ts";
@@ -93,6 +94,7 @@ export class Agent {
   declare _channelPostHandler: any;
   declare _channelTool: any;
   declare _checkDeferredTool: any;
+  declare _loopControlTool: any;
   declare _computerUseTool: any;
   declare _config: any;
   declare _cronStore: any;
@@ -235,6 +237,7 @@ export class Agent {
     this._sessionTool = null;
     this._workflowTool = null;
     this._currentStatusTool = null;
+    this._loopControlTool = null;
 
     /**
      * 外部回调注入（由 AgentManager._createAgentInstance 填充）。
@@ -568,6 +571,9 @@ export class Agent {
       getDeferredStore: () => this._cb?.getDeferredResults?.(),
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
+    this._loopControlTool = createLoopControlTool({
+      getLoopController: () => this._cb?.getLoopController?.(),
+    });
     this._currentStatusTool = createCurrentStatusTool({
       getTimezone: () => this._cb?.getTimezone?.() || "",
       getAgent: () => this,
@@ -579,9 +585,6 @@ export class Agent {
       getSessionFolderScope: (sessionPath) => this._cb?.getEngine?.()?.getSessionFolderScope?.(sessionPath) || null,
       getBridgeContext: (sessionPath) => this._cb?.getEngine?.()?.getBridgeContextForSessionPath?.(sessionPath, { agentId: this.id }) || null,
       listOpenSubagentThreads: (sessionPath) => this._cb?.getSubagentThreadStore?.()?.listOpenDirectBySession?.(sessionPath) || [],
-      onTimeObserved: (sessionPath, observedAt) => (
-        this._cb?.getEngine?.()?.noteSessionTimeObserved?.(sessionPath, observedAt)
-      ),
     });
     // 10. 设置修改工具
     this._updateSettingsTool = createUpdateSettingsTool({
@@ -690,6 +693,8 @@ export class Agent {
       },
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
       getSessionPermissionMode: (sp) => this._cb?.getSessionPermissionMode?.(sp) ?? null,
+      // 节点 writeFolders 的 attenuation 上界：父 session 的 folder scope。
+      getSessionFolderScope: (sp) => this._cb?.getEngine?.()?.getSessionFolderScope?.(sp) || null,
       getParentCwd: () => this._cb?.getCwd?.() || null,
       getAgentId: () => this.id,
       emitEvent: (event, sp) => this._cb?.emitEvent?.(event, sp),
@@ -946,6 +951,7 @@ export class Agent {
       this._subagentCloseTool,
       this._workflowTool,
       this._checkDeferredTool,
+      this._loopControlTool,
       this._currentStatusTool,
       ...(surface === "desktop" ? [this._sessionTool] : []),
       this._cardGuideTool,
@@ -1264,7 +1270,7 @@ export class Agent {
     // 顺序：平台 → 环境 → 用户档案 → ishiki（依赖 userName）→ 样貌
     //      → 行为指南（任务/经验/工具/安全/网页/设置/技能/团队）
     //      ── cache 分界线 ──
-    //      记忆规则/置顶/记忆 → 当前时间
+    //      记忆规则/置顶/记忆 → 会话开始时间
     //
     // 用户档案和人格段放进静态前缀：userName 已统一走「显式覆盖 → 全局 preferences →
     // 语言兜底」解析，人格文件也改成惰性物化，这两段只在用户自己改档案或换人格时才变，
@@ -1398,12 +1404,14 @@ export class Agent {
         "- fileId 是机器契约，label 只是展示名；读取、stat、copy、stage 优先用 fileId，不要从可见文本重建真实路径，也不要猜 session-files 缓存路径。需要本 session 已有文件的清单时，先调用 current_status 获取 session_files。\n" +
         "- write/edit 新建或修改文件后，调用 stage_files 交付该变更（优先传结果里的 sessionFileRef.fileId）。同一未变化的文件不要重复 stage；内容再次变化时再 stage 最新版本。\n" +
         "- 继续修改文件时用 writableLocalRef.path 或普通本机路径，write/edit 不接受 fileId。\n" +
+        "- 需要在 shell 命令里使用某个 session 文件时，先用 materialize 工具把 fileId 换成本地绝对路径；不要从可见文本回忆或拼接真实路径。\n" +
         "- 不要只在文本里写文件路径；也不要在 Agent 层判断各平台如何展示或发送，消费端会处理。"
       : "\n## Session Files and Delivery\n\n" +
         "SessionFile is the unified record of local files related to the current session: user uploads, files you produce with write/edit, plugin outputs, browser screenshots, and install outputs.\n\n" +
         "- fileId is the machine contract; label is display-only. Prefer fileId for read, stat, copy, and stage; never reconstruct real paths from visible text or guess session-files cache paths. To list this session's existing files, call current_status with the session_files key first.\n" +
         "- After write/edit creates or modifies a file, call stage_files to deliver that change (prefer sessionFileRef.fileId from the tool result). Do not re-stage an unchanged file; stage again when the content changes.\n" +
         "- For further modifications use writableLocalRef.path or an ordinary local path; write/edit does not accept fileId.\n" +
+        "- To use a session file in shell commands, first call the materialize tool to resolve its fileId into a local absolute path; do not recall or reconstruct real paths from visible text.\n" +
         "- Do not merely write file paths in text, and do not decide platform-specific display or sending in the Agent layer; consumers handle it."
     );
 
@@ -1529,7 +1537,10 @@ export class Agent {
       ...(tz ? { timeZone: tz } : {}),
     };
     const dateTime = new Intl.DateTimeFormat("en-US", fmtOpts as any).format(now);
-    parts.push(`\nSession start time: ${dateTime}`);
+    parts.push(`\nSession started at: ${dateTime}`);
+    parts.push(isZh
+      ? "这是会话开始时刻的快照，不会随对话推进更新。需要知道现在的时间时，用 current_status 工具查 time。"
+      : "This is a snapshot from when the session started and does not advance. When you need the current time, call the current_status tool with key \"time\".");
     parts.push(isZh
       ? "你的一天从 04:00 开始。04:00 之前的对话属于前一天。"
       : "Your day starts at 04:00. Conversations before 04:00 belong to the previous day.");

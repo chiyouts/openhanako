@@ -19,6 +19,8 @@ import { migrateConfigScope } from "../shared/migrate-config-scope.ts";
 import { migrateToProvidersYaml } from "./migrate-providers.ts";
 import { migrateProviderMediaConfig } from "./provider-media-config.ts";
 import { runMigrations } from "./migrations.ts";
+import { healCredentialFileModes } from "./credential-file-healer.ts";
+import { pruneStaleCredentialBackups } from "./credential-backup-retention.ts";
 import { createServerRuntimeContext } from "./server-runtime-context.ts";
 import { StudioCronService } from "./studio-cron-service.ts";
 import { createRuntimeExecutionBoundary } from "./execution-boundary.ts";
@@ -44,6 +46,8 @@ import { compactSessionWithCachePreservationRecoveringRuntime } from "./session-
 import { resolveRequestReasoningLevelForContext } from "./request-reasoning-level.ts";
 import { getFreshCompactNoopReason } from "../lib/fresh-compact/policy.ts";
 import { DeferredResultCoordinator } from "../lib/deferred-result-coordinator.ts";
+import { LoopAlarmService } from "../lib/loop/alarm-service.ts";
+import { LoopController } from "../lib/loop/loop-controller.ts";
 import {
   getToolSessionPath,
   normalizeToolRuntimeContext,
@@ -135,6 +139,45 @@ import {
 import { workspaceRootsForSandbox } from "../shared/workspace-scope.ts";
 import { wrapWithCheckpoint } from "../lib/checkpoint-wrapper.ts";
 import { wrapWithSessionPermission } from "../lib/tools/session-permission-wrapper.ts";
+import { createToolCatalog } from "./tool-catalog.ts";
+import { hashCacheContractValue } from "../lib/llm/cache-prefix-contract.ts";
+import { resolveReferenceBudgetTokens } from "./session-reminders.ts";
+import { createBridgeTools, registerBridgeCapabilityDelegates } from "./tool-catalog-bridge.ts";
+import { summarizeToolParameters } from "./mcp/manager.ts";
+
+/** Matches the MCP config default; used when no manager config is available. */
+const DEFAULT_TOOL_DEFER_THRESHOLD = 10;
+
+/**
+ * Snapshots the catalog listing for the session that is being built.
+ *
+ * The fingerprint covers the catalog's tool names, so a later refresh that adds
+ * or drops a tool produces a different value and the owning session can notice
+ * it has been holding a stale listing. It deliberately ignores descriptions and
+ * schemas: a reworded description is not news worth interrupting a session for.
+ */
+function buildToolCatalogManifestSnapshot(catalog, modelContextWindowTokens) {
+  // Only MCP-origin names are fingerprinted. Those are the ones a connector
+  // refresh can change underneath a running session; builtin rows move only
+  // when the application itself changes, and including them here would make a
+  // builtin-defer session look like it had lost every tool.
+  const names = catalog.all()
+    .filter((entry) => entry.origin === "mcp")
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+  const budgetTokens = resolveReferenceBudgetTokens(modelContextWindowTokens);
+  const { tier, text } = catalog.manifest(budgetTokens);
+  return {
+    text,
+    tier,
+    // Carried so the session renders against the budget the tier was chosen
+    // for, rather than re-deriving it from whatever model state is reachable
+    // at render time.
+    budgetTokens,
+    fingerprint: hashCacheContractValue(names),
+    names,
+  };
+}
 import { filterToolObjectsByAvailability } from "./tool-availability.ts";
 import { TaskRegistry } from "../lib/task-registry.ts";
 import { BrowserManager } from "../lib/browser/browser-manager.ts";
@@ -160,6 +203,7 @@ import { SessionCollabDraftStore } from "../lib/session-collab/draft-store.ts";
 import { NotificationService } from "../lib/notifications/notification-service.ts";
 import { SpeechRecognitionService } from "./speech-recognition-service.ts";
 import { UniversalMediaManager } from "./media/universal-media-manager.ts";
+import { McpManager } from "./mcp/manager.ts";
 import { createCurrentTurnNativeMediaStore } from "./current-turn-native-media.ts";
 import {
   getSkillNameTranslationCachePath,
@@ -175,6 +219,7 @@ import {
 import { assertValidAgentId, isValidAgentId } from "../shared/agent-id.ts";
 
 const moduleLog = createModuleLogger("engine");
+const mcpLog = createModuleLogger("mcp");
 const toolAvailabilityLog = createModuleLogger("tool-availability");
 const win32SandboxCleanupLog = createModuleLogger("win32-sandbox-cleanup");
 
@@ -235,7 +280,12 @@ export class HanaEngine {
   declare _hubCallbacks: any;
   declare _imageStripNotified: any;
   declare _listeners: any;
+  declare _loopStore: any;
+  declare _loopAlarm: any;
+  declare _loopController: any;
+  declare _loopBridgeHooks: any;
   declare _media: any;
+  declare _mcp: any;
   declare _models: any;
   declare _notifications: any;
   declare _outboundProxyRuntime: any;
@@ -368,6 +418,17 @@ export class HanaEngine {
       onProviderChanged: () => this.onProviderChanged(),
       builtinAdapters: builtinMediaAdapters,
     });
+    // The data directory keeps the historical `plugin-data/mcp` location: it is
+    // where existing installs already store their connector config.
+    this._mcp = new McpManager({
+      dataDir: path.join(this.hanakoHome, "plugin-data", "mcp"),
+      log: mcpLog,
+    }, {
+      // A connector tool may come back asking the user a question. The store is
+      // read lazily because it is installed after this manager is built.
+      getConfirmStore: () => this._confirmStore,
+      emitEvent: (event, sessionPath) => this._emitEvent(event, sessionPath),
+    });
     this._sessionProjects = new SessionProjectCatalogStore({ userDir: this.userDir });
 
     // 确定启动时焦点 agent
@@ -436,6 +497,7 @@ export class HanaEngine {
       getResourceLoader: () => this._resourceLoader,
       getSkills: () => this._skills,
       buildTools: (cwd, ct, opts) => this.buildTools(cwd, ct, opts),
+      getLiveToolCatalogNames: () => this.getLiveToolCatalogNames(),
       emitEvent: (e, sp) => this._emitEvent(e, sp),
       emitDevLog: (t, l) => this.emitDevLog(t, l),
       getHomeCwd: (agentId) => this.getHomeCwd(agentId),
@@ -609,6 +671,12 @@ export class HanaEngine {
     // subagent AbortController 存储（engine 级别，跨 agent 共享）
     this._subagentControllers = new Map();
     this._subagentRunStore = null;
+
+    // 循环服务：由 server 层在 store 与桥接投递就绪后经 setLoopServices 注入
+    this._loopStore = null;
+    this._loopAlarm = null;
+    this._loopController = null;
+    this._loopBridgeHooks = null;
     this._taskRegistry.registerHandler("subagent", {
       abort: (taskId) => {
         const ctrl = this._subagentControllers.get(taskId);
@@ -736,6 +804,139 @@ export class HanaEngine {
   get deferredResults() {
     return this._deferredResultStore || null;
   }
+
+  /**
+   * 循环服务接线。bridgeHooks 由 server 层在 bridge-manager 就绪后注入：
+   * { executeLoopTurn(sessionKey, agentId, text), sendNotice(sessionKey, agentId, text),
+   *   resolveSessionId(sessionKey, agentId), ensureSessionId(sessionKey, agentId) }
+   * 未注入时桥接循环的投递按服务不可用抛错（fail-closed），桌面循环不受影响。
+   */
+  setLoopServices({ store, bridgeHooks = null }) {
+    this._loopAlarm?.dispose?.();
+    this._loopController?.dispose?.();
+    this._loopStore = store || null;
+    this._loopBridgeHooks = bridgeHooks;
+    this._loopAlarm = null;
+    this._loopController = null;
+    if (!store) return;
+
+    const requireBridgeHooks = () => {
+      if (!this._loopBridgeHooks) throw new Error("loop: bridge delivery is not wired");
+      return this._loopBridgeHooks;
+    };
+    const targetResetError = (detail) => {
+      const err: any = new Error(`loop target session was reset: ${detail}`);
+      err.code = "loop_target_reset";
+      return err;
+    };
+    // 桌面：sessionId → 当前活跃路径；换代/归档 → loop_target_reset
+    const resolveDesktopPath = (sessionId) => {
+      // resolveSessionRef 经 SessionManifestResolver 按 sessionId 解析 manifest，
+      // 当前 locator 路径在 manifest 上是 currentLocator.path；查无此 id 时抛
+      // session_manifest_not_found，对循环而言即目标已换代。清单服务本身不可用
+      // 是另一类故障，原样上抛而不伪装成换代。
+      let manifest;
+      try {
+        manifest = this.resolveSessionRef({ sessionId });
+      } catch (error: any) {
+        if (error?.code === "session_manifest_not_found" || error?.code === "session_manifest_ref_required") {
+          throw targetResetError(sessionId);
+        }
+        throw error;
+      }
+      const sessionPath = manifest?.currentLocator?.path ?? null;
+      if (!sessionPath || !this._sessionCoord.isRunnableSessionPath(sessionPath)) {
+        throw targetResetError(sessionId);
+      }
+      return sessionPath;
+    };
+    const resolveTargetSessionPathSoft = (target) => {
+      // 守恒检查用的软解析：解析不到返回 null（视为无后台任务），不抛错
+      try {
+        if (target.kind === "desktop") return resolveDesktopPath(target.sessionId);
+        const hooks = this._loopBridgeHooks;
+        if (!hooks) return null;
+        if (hooks.resolveSessionId(target.sessionKey, target.agentId) !== target.sessionId) return null;
+        const agent = this.getAgent?.(target.agentId);
+        return agent
+          ? this.bridgeSessionManager?.resolveSessionPathForSessionKey?.(target.sessionKey, agent) ?? null
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const hasLiveBackgroundWork = (target) => {
+      const sessionPath = resolveTargetSessionPathSoft(target);
+      if (!sessionPath) return false;
+      if (this.taskRegistry?.hasActiveForParentSession?.(sessionPath)) return true;
+      return (this._deferredResultStore?.listPending?.(sessionPath)?.length ?? 0) > 0;
+    };
+
+    const controller = new LoopController({
+      store,
+      hasLiveBackgroundWork,
+      deliverLoopMessage: (target, message) => {
+        if (target.kind === "desktop") {
+          const sessionPath = resolveDesktopPath(target.sessionId);
+          return this._sessionCoord.deliverCustomMessage(sessionPath, message, { triggerTurn: true });
+        }
+        const hooks = requireBridgeHooks();
+        if (hooks.resolveSessionId(target.sessionKey, target.agentId) !== target.sessionId) {
+          throw targetResetError(target.sessionKey);
+        }
+        return hooks.executeLoopTurn(target.sessionKey, target.agentId, message.content);
+      },
+      recordNotice: (target, message) => {
+        if (target.kind === "desktop") {
+          const sessionPath = resolveDesktopPath(target.sessionId);
+          return this._sessionCoord.deliverCustomMessage(sessionPath, message, { triggerTurn: false });
+        }
+        return requireBridgeHooks().sendNotice(target.sessionKey, target.agentId, message.content);
+      },
+      isTargetMidStream: (target) => {
+        if (target.kind !== "desktop") return false;
+        const sessionPath = resolveTargetSessionPathSoft(target);
+        return sessionPath ? this._sessionCoord.isSessionStreaming(sessionPath) : false;
+      },
+      isTargetRunnable: (target) => {
+        try {
+          if (target.kind === "desktop") { resolveDesktopPath(target.sessionId); return true; }
+          return this._loopBridgeHooks?.resolveSessionId?.(target.sessionKey, target.agentId) === target.sessionId;
+        } catch {
+          return false;
+        }
+      },
+      resolveSessionIdForPath: (sessionPath) => this.getSessionIdForPath?.(sessionPath) ?? null,
+      resolveTargetFromSessionRef: async (ref, { ensure = false } = {}) => {
+        if (ref?.kind === "desktop" && (ref.sessionId || ref.sessionPath)) {
+          const sessionId = ref.sessionId || this.getSessionIdForPath?.(ref.sessionPath);
+          return sessionId ? { kind: "desktop", sessionId } : null;
+        }
+        if (ref?.kind === "bridge" && ref.sessionKey) {
+          const hooks = requireBridgeHooks();
+          let sessionId = hooks.resolveSessionId(ref.sessionKey, ref.agentId);
+          if (!sessionId && ensure) sessionId = await hooks.ensureSessionId(ref.sessionKey, ref.agentId);
+          return sessionId
+            ? { kind: "bridge", sessionId, sessionKey: ref.sessionKey, agentId: ref.agentId }
+            : null;
+        }
+        return null;
+      },
+    });
+    const alarm = new LoopAlarmService({
+      store,
+      hasLiveBackgroundWork,
+      deliverWakeup: (key, reason) => controller.deliverWakeupTurn(key, reason),
+      hooks: {
+        onDeliveryExhausted: (key, err) => controller.pauseForDeliveryFailure(key, err),
+      },
+    });
+    controller.attachAlarm(alarm);
+    this._loopAlarm = alarm;
+    this._loopController = controller;
+  }
+
+  get loopController() { return this._loopController; }
 
   setSubagentRunStore(store) {
     this._subagentRunStore = store || null;
@@ -993,6 +1194,7 @@ export class HanaEngine {
   }
   get speechRecognition() { return this._speechRecognition; }
   get media() { return this._media; }
+  get mcp() { return this._mcp; }
   get resources() { return this._resources; }
   getResourceService() {
     if (!this._resources) throw new Error("resource service is not initialized");
@@ -1380,7 +1582,6 @@ export class HanaEngine {
     return this._sessionCoord.consumeRenderedSessionReminderBlock(p, receipt);
   }
   consumeSessionReminderBlock(p) { return this._sessionCoord.consumeSessionReminderBlock(p); }
-  noteSessionTimeObserved(p, observedAt) { return this._sessionCoord.noteSessionTimeObserved(p, observedAt); }
   get focusSessionPath() { return this._sessionCoord.currentSessionPath; }
   getMessages(p) { return this._sessionCoord.getSessionByPath(p)?.messages ?? []; }
   getSessionWorkspaceFolders(p = this.currentSessionPath) {
@@ -1505,6 +1706,7 @@ export class HanaEngine {
   async saveSessionTitle(p, t) { return this._sessionCoord.saveSessionTitle(p, t); }
   async clearSessionTitle(p) { return this._sessionCoord.clearSessionTitle(p); }
   async setSessionPinned(p, pinned) { return this._sessionCoord.setSessionPinned(p, pinned); }
+  async setSessionPinOrder(orderedRefs) { return this._sessionCoord.setSessionPinOrder(orderedRefs); }
   async setSessionPluginMeta(p, patch) { return this._sessionCoord.setSessionPluginMeta(p, patch); }
   createSessionContext() { return this._sessionCoord.createSessionContext(); }
   async promoteActivitySession(f, agentId) { return this._sessionCoord.promoteActivitySession(f, agentId); }
@@ -1832,6 +2034,11 @@ export class HanaEngine {
   setSessionPermissionModeForSession(sessionPath, mode, options) { return this._sessionCoord.setSessionPermissionMode(sessionPath, mode, options); }
   setCurrentSessionPermissionMode(mode) { return this._sessionCoord.setCurrentSessionPermissionMode(mode); }
   setPendingSessionPermissionMode(mode) { return this._sessionCoord.setPendingPermissionMode(mode); }
+  allowSessionInvocationCapability(ref, capability) { return this._sessionCoord.allowInvocationCapability(ref, capability); }
+  // Read on every permission decision, including on engines built without a
+  // session coordinator. No coordinator means no session ever granted anything,
+  // so an empty list is the accurate answer and the fail-closed one.
+  getSessionAllowedInvocationCapabilities(sessionPath) { return this._sessionCoord?.getAllowedInvocationCapabilities(sessionPath) || []; }
   getSessionPermissionModeDefault() { return this._sessionCoord.getPermissionModeDefault(); }
   setSessionPermissionModeDefault(mode) { return this._sessionCoord.setPermissionModeDefault(mode); }
   get accessMode() { return this._sessionCoord.getAccessMode(); }
@@ -2183,6 +2390,21 @@ export class HanaEngine {
     } else {
       log("[migrations] migration-registry 等待启动迁移前置步骤；应用继续启动，下次启动重试");
     }
+
+    // 0e. 凭证文件权限自愈。放在所有迁移之后，让本轮迁移刚写出的文件也被覆盖。
+    // 每次启动都跑：权限会因为备份恢复、跨机拷贝、外部同步而回退，
+    // 只跑一次的迁移覆盖不到这些情况。
+    // 拆成两步：清理和矫正互不依赖，任一步出意外都不该连累另一步
+    runBestEffortStartupMigrationStep("credential-backup-retention", () => {
+      pruneStaleCredentialBackups({ hanakoHome: this.hanakoHome, log });
+    }, log);
+    runBestEffortStartupMigrationStep("credential-custody", () => {
+      const healed = healCredentialFileModes({ hanakoHome: this.hanakoHome, log });
+      if (healed.failed.length > 0) {
+        log(`[credential-custody] ${healed.failed.length} 个文件未能收紧权限，已记录；应用继续启动`);
+      }
+    }, log);
+
     this._runtimeContext = createServerRuntimeContext({
       hanakoHome: this.hanakoHome,
       appVersion: this.appVersion,
@@ -2429,9 +2651,12 @@ export class HanaEngine {
       this._pluginDevEventBusCleanup?.();
       this._pluginDevEventBusCleanup = null;
       this._media?.dispose?.();
+      await this._mcp?.dispose?.();
       this._skills?.unwatch();
       this._deferredResultCoordinator?.dispose?.();
       this._deferredResultCoordinator = null;
+      this._loopAlarm?.dispose?.();
+      this._loopController?.dispose?.();
       await this._agentMgr.disposeAll(this._sessionCoord);
       await this._sessionCoord.cleanupSession();
     } finally {
@@ -2453,6 +2678,7 @@ export class HanaEngine {
    */
   async initPlugins(bus) {
     this._media?.start?.(bus);
+    await this._mcp?.start?.(bus);
     const builtinPluginsDir = path.join(this.productDir, "..", "plugins");
     const userPluginsDir = path.join(this.hanakoHome, "plugins");
     const devPluginsDir = path.join(this.hanakoHome, "plugins-dev");
@@ -2574,6 +2800,115 @@ export class HanaEngine {
   //  工具构建
   // ════════════════════════════
 
+  /**
+   * Decide whether this tool set defers, and build the catalog if it does.
+   *
+   * Returns null for the ordinary case: few enough tools that loading them all
+   * costs less than the machinery to avoid it. The count is per tool across all
+   * servers, and excludes tools that cannot defer (pinned by the user, or
+   * declared non-deferrable), because those stay in the prefix either way.
+   *
+   * Deferral is all-or-nothing across servers on purpose. Deferring only the
+   * larger connectors would make a tool's availability depend on which company
+   * shipped it, which is exactly the kind of hidden ranking the catalog avoids.
+   */
+  _planDeferredToolAssembly(mcpTools, pluginTools) {
+    const config = this._mcp?.getConfig?.() || null;
+    const deferEnabled = config ? config.deferEnabled !== false : true;
+    if (!deferEnabled) return null;
+    const threshold = Number.isSafeInteger(config?.deferThreshold) && config.deferThreshold > 0
+      ? config.deferThreshold
+      : DEFAULT_TOOL_DEFER_THRESHOLD;
+
+    const liveMcpEntries = this._liveMcpCatalogEntries(mcpTools);
+
+    const builtinDeferEnabled = this._prefs?.getBuiltinToolDeferEnabled?.() === true;
+    const builtinEntries = builtinDeferEnabled
+      ? (pluginTools || [])
+        .filter((tool) => tool?.name && tool.deferrable !== false)
+        .map((tool) => ({
+          name: tool.name,
+          toolName: tool.name,
+          description: tool.description || "",
+          paramsSummary: summarizeToolParameters(tool.parameters),
+          serverId: tool._pluginId || "plugin",
+          serverLabel: tool._pluginId || "plugin",
+          origin: "builtin",
+          deferrable: true,
+          pinned: false,
+          schemaRef: () => tool.parameters || { type: "object", properties: {} },
+        }))
+      : [];
+
+    const deferrable = [...liveMcpEntries, ...builtinEntries]
+      .filter((entry) => entry.deferrable !== false && entry.pinned !== true);
+    if (deferrable.length <= threshold) return null;
+
+    const catalog = createToolCatalog();
+    // Pinned tools are registered too: the model should be able to see that
+    // they exist and read their schema, they simply also stay loaded.
+    if (liveMcpEntries.length > 0) catalog.registerSource("mcp", liveMcpEntries);
+    if (builtinEntries.length > 0) catalog.registerSource("builtin", builtinEntries);
+
+    const builtinToolsByName = new Map<string, any>(
+      (pluginTools || []).map((tool) => [tool?.name, tool] as [string, any]),
+    );
+    const bridgeTools = createBridgeTools({
+      catalog,
+      mcpCall: (serverId, toolName, args, ctx) => this._mcp.callTool(serverId, toolName, args, ctx),
+      resolveMcpPermission: (serverId, toolName) =>
+        this._mcp?.resolveToolPermissionKind?.(serverId, toolName) ?? "review",
+      // A deferred builtin keeps its own permission voice rather than being
+      // flattened into the MCP policy model.
+      resolveBuiltinInvocation: (name, params) => {
+        const target = builtinToolsByName.get(name);
+        const resolver = target?.sessionPermission?.resolveInvocation;
+        return typeof resolver === "function" ? resolver(params) : null;
+      },
+      builtinCall: (name, args, ctx) => {
+        const target = builtinToolsByName.get(name);
+        if (typeof target?.execute !== "function") {
+          throw new Error(`Deferred tool ${name} is no longer available`);
+        }
+        return target.execute(`bridge_${name}`, args, ctx, undefined, ctx);
+      },
+      log: toolAvailabilityLog,
+    });
+
+    const deferredToolNames = new Set(deferrable.map((entry) => (
+      entry.origin === "builtin" ? entry.name : `mcp_${entry.name}`
+    )));
+    return { catalog, bridgeTools, deferredToolNames };
+  }
+
+  /**
+   * Catalog rows for the MCP tools currently published. Only tools that are
+   * actually published can be deferred, so a row in config that never made it
+   * to a live listing is not a catalog entry.
+   */
+  _liveMcpCatalogEntries(mcpTools = null) {
+    const entries = typeof this._mcp?.getCatalogEntries === "function"
+      ? (this._mcp.getCatalogEntries() || [])
+      : [];
+    const published = new Set(
+      (Array.isArray(mcpTools) ? mcpTools : (this._mcp?.getAllTools?.() || []))
+        .map((tool) => tool?.name),
+    );
+    return entries.filter((entry) => published.has(`mcp_${entry.name}`));
+  }
+
+  /**
+   * The catalog's tool names as they stand right now, for a session to compare
+   * against the listing it was given. Returns null when there is no MCP manager
+   * to ask, which reads as "no basis to claim anything changed".
+   */
+  getLiveToolCatalogNames() {
+    if (!this._mcp) return null;
+    return this._liveMcpCatalogEntries()
+      .map((entry) => entry.name)
+      .sort((left, right) => left.localeCompare(right));
+  }
+
   buildTools(cwd, customTools, opts: any = {}) {
     // Executable background runtimes bind one persisted identity snapshot at assembly time.
     // Desktop chat keeps the callback path until it moves into the same session factory.
@@ -2637,6 +2972,7 @@ export class HanaEngine {
 
     // Append plugin tools
     const pluginTools = this._pluginManager?.getAllTools() || [];
+    const mcpTools = this._mcp?.getAllTools() || [];
     const executionBoundary = this._runtimeContext
       ? this.createExecutionBoundary({ workbenchRoot: cwd })
       : null;
@@ -2670,31 +3006,33 @@ export class HanaEngine {
         },
       };
     };
+    // Deferred assembly is decided once, here, and never revisited for the life
+    // of this tool set. The session's cacheable prefix is the tool schemas plus
+    // the system prompt, and a running session asserts that prefix on every
+    // request, so a tool set that changed shape mid-session would break the
+    // cache and fail the contract. Everything dynamic goes through the
+    // conversation stream instead.
+    const deferPlan = this._planDeferredToolAssembly(mcpTools, pluginTools);
+    const directMcpTools = deferPlan
+      ? mcpTools.filter((tool) => !deferPlan.deferredToolNames.has(tool?.name))
+      : mcpTools;
+    const directPluginTools = deferPlan
+      ? pluginTools.filter((tool) => !deferPlan.deferredToolNames.has(tool?.name))
+      : pluginTools;
+    const bridgeTools = deferPlan ? deferPlan.bridgeTools : [];
+
     const runtimeCustomTools = ct.map(withRuntimeContext);
-    const wrappedPluginTools = pluginTools.map(t => ({
-      ...t,
-      execute: (toolCallId, params, signalOrRuntimeCtx, onUpdate, piCtx) => {
-        const { ctx: runtimeCtx } = normalizeToolRuntimeContext(signalOrRuntimeCtx, piCtx);
-        const runtimeSessionPath = runtimeCtx?.sessionPath
-          || getToolSessionPath(runtimeCtx)
-          || getSessionPath()
-          || null;
-        const sessionRef = resolveRuntimeSessionRef(runtimeCtx);
-        const sessionPath = runtimeSessionPath || sessionRef?.sessionPath || null;
-        const mergedCtx = {
-          ...runtimeCtx,
-          ...(sessionRef ? { sessionId: sessionRef.sessionId, sessionRef } : {}),
-          ...(sessionPath ? { sessionPath } : {}),
-          ...(opts.bridgeContext ? { bridgeContext: opts.bridgeContext } : {}),
-          ...(opts.notificationContext ? { notificationContext: opts.notificationContext } : {}),
-          allowHumanApproval,
-          approvalPolicy,
-          agentId,
-          ...executionScope,
-        };
-        return t.execute(toolCallId, params, signalOrRuntimeCtx, onUpdate, mergedCtx);
-      },
-    }));
+    // Plugin tools and MCP tools both need the same session context injection;
+    // withRuntimeContext is that wrapper, so neither gets its own copy of it.
+    const wrappedPluginTools = directPluginTools.map(withRuntimeContext);
+    const wrappedMcpTools = directMcpTools.map(withRuntimeContext);
+    const wrappedBridgeTools = bridgeTools.map(withRuntimeContext);
+    if (deferPlan) {
+      // withRuntimeContext returns copies, and the permission layer keys its
+      // delegation registry on object identity, so the objects that actually
+      // reach that layer are the ones that must be registered.
+      registerBridgeCapabilityDelegates(wrappedBridgeTools, { catalog: deferPlan.catalog });
+    }
     const pluginDevTools = this._pluginDevService && this._prefs.getPluginDevToolsEnabled?.() === true
       ? createPluginDevTools({
           pluginDevService: this._pluginDevService,
@@ -2704,11 +3042,13 @@ export class HanaEngine {
     assertUniqueBuiltToolNames([
       { source: "custom tools", tools: baseCustomTools },
       { source: "extra custom tools", tools: extraCustomTools },
-      { source: "plugin tools", tools: pluginTools },
+      { source: "plugin tools", tools: directPluginTools },
+      { source: "mcp tools", tools: directMcpTools },
+      { source: "mcp bridge tools", tools: bridgeTools },
       { source: "plugin development tools", tools: pluginDevTools },
     ]);
     const allTools = filterToolObjectsByAvailability(
-      [...runtimeCustomTools, ...wrappedPluginTools, ...pluginDevTools],
+      [...runtimeCustomTools, ...wrappedPluginTools, ...wrappedMcpTools, ...wrappedBridgeTools, ...pluginDevTools],
       toolAgent?.config || {},
       {
         agentId,
@@ -2840,7 +3180,19 @@ export class HanaEngine {
       ? opts.getPermissionMode
       : (sessionPath) => this.getSessionPermissionMode(sessionPath);
     // 拦截上下文（如 { isSubagent }）：classify 据此做与 mode 无关的固定边界（防自递归等）。
-    const permissionContext = opts.permissionContext || null;
+    //
+    // The session's capability grants are exposed as a getter rather than a
+    // snapshot: the permission wrapper spreads this object on every tool call,
+    // so a grant issued mid-session applies to the very next call without
+    // rebuilding the tool set. getSessionPath() resolves the session this tool
+    // set was built for, so a grant can never leak into another session.
+    const readSessionGrants = (sessionPath) => this.getSessionAllowedInvocationCapabilities(sessionPath);
+    const permissionContext = {
+      ...(opts.permissionContext || {}),
+      get preAuthorizedInvocationCapabilities() {
+        return readSessionGrants(getSessionPath());
+      },
+    };
     result = {
       ...result,
       tools: wrapWithSessionPermission(result.tools, {
@@ -2916,7 +3268,15 @@ export class HanaEngine {
         .filter(Boolean),
     ]);
 
-    return result;
+    // The manifest travels in the build result rather than being stashed here.
+    // The session that owns this tool set is the only thing that should hold it,
+    // and the engine has no business keeping a map from sessions to catalogs.
+    return {
+      ...result,
+      toolCatalogManifest: deferPlan
+        ? buildToolCatalogManifestSnapshot(deferPlan.catalog, opts.modelContextWindowTokens)
+        : null,
+    };
   }
 
   // ════════════════════════════

@@ -19,6 +19,7 @@ const ALL_SITE_KINDS: readonly PersistenceSiteKind[] = [
   "remove-path",
   "truncate-file",
   "atomic-write",
+  "secret-write",
   "persistent-store-constructor",
 ];
 
@@ -254,7 +255,7 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     identityContract: "userId and studioId are durable identities; spaces.json is a legacy locator/source only.",
     siteRules: [
       ...rules(["core/server-identity.ts"], "Seeds user or studio identity registries.", ["atomic-write"], "(?:usersPath|studiosPath)"),
-      ...rules(["core/local-user-account.ts"], "Updates the local user record in users.json.", ["atomic-write"], "USERS_FILE"),
+      ...rules(["core/local-user-account.ts"], "Updates the local user record in users.json.", ["secret-write"], "USERS_FILE"),
     ],
   }),
   defineStore({
@@ -269,7 +270,7 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     checkpointPolicy: "Checkpoint as permission-preserving secret material with its matching users.json identity.",
     restorePolicy: "Restore atomically before local authentication is enabled.",
     identityContract: "The credential belongs to the local userId in the same HANA_HOME.",
-    siteRules: rules(["core/local-user-account.ts"], "Writes the local user authentication record.", ["atomic-write"], "LOCAL_USER_AUTH_FILE"),
+    siteRules: rules(["core/local-user-account.ts"], "Writes the local user authentication record.", ["secret-write"], "LOCAL_USER_AUTH_FILE"),
   }),
   defineStore({
     id: "device-access-registries",
@@ -444,6 +445,7 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     firstPossibleWritePhase: "engine_construct",
     identityContract: "providerId is the durable key; YAML/JSON paths are storage locators.",
     siteRules: rules([
+      "core/credential-backup-retention.ts",
       "core/local-provider-plugin-store.ts",
       "core/migrate-providers.ts",
       "core/model-sync.ts",
@@ -452,7 +454,7 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
       "core/provider-media-config.ts",
       "core/provider-registry.ts",
       "server/routes/providers.ts",
-    ], "Owns provider catalog, authentication, model compatibility, or local provider plugin state."),
+    ], "Owns provider catalog, authentication, model compatibility, local provider plugin state, or the retention of their migration backups."),
   }),
   defineStore({
     id: "agent-profile",
@@ -787,6 +789,24 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     ],
   }),
   defineStore({
+    id: "loop-state",
+    ownerModule: "lib/loop/loop-store.ts",
+    pathPatterns: [".ephemeral/loop-state.json"],
+    format: "json",
+    schemaSource: runtimeSource("lib/loop/loop-store.ts", "LoopStore schemaVersion-1 sessionId-keyed record shape, corrupt-file quarantine, and atomic serializer"),
+    openEntry: ["new LoopStore"],
+    migrationEntry: [],
+    firstPossibleOpenPhase: "engine_construct",
+    firstPossibleWritePhase: "engine_construct",
+    checkpointPolicy: "Include running/paused loop records so restart recovery can re-arm alarms; terminal records may be pruned.",
+    restorePolicy: "Load through LoopStore so corrupt-file quarantine and record normalization apply before recovery runs.",
+    identityContract: "sessionId is the loop key for desktop and bridge targets alike; bridge sessionKey and any session path are delivery locators only.",
+    siteRules: [
+      ...rules(["lib/loop/loop-store.ts"], "Persists sessionId-keyed loop state."),
+      ...rules(["server/index.ts"], "Constructs the loop store.", ["persistent-store-constructor"], "LoopStore"),
+    ],
+  }),
+  defineStore({
     id: "terminal-session-state",
     ownerModule: "lib/terminal/terminal-session-manager.ts",
     pathPatterns: [
@@ -850,10 +870,34 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     ],
   }),
   defineStore({
+    id: "mcp-config",
+    ownerModule: "core/mcp/manager.ts",
+    pathPatterns: ["plugin-data/mcp"],
+    pathKind: "tree",
+    format: "json",
+    schemaSource: runtimeSource(
+      "core/mcp/manager.ts",
+      "normalizeMcpConfig read-time normalization (servers/connectors alias, auth and OAuth field defaults, "
+      + "per-connector permission policy defaults, deferred-loading defaults)",
+    ),
+    openEntry: ["Engine constructor via McpManager"],
+    migrationEntry: [
+      "normalizeMcpConfig read-time normalization (servers→connectors alias)",
+      "normalizeMcpConfig read-time permission policy defaults (permissionMode/toolPermissions/trustReadOnlyHint)",
+      "normalizeMcpConfig read-time deferred-loading defaults (deferEnabled true, deferThreshold 10)",
+    ],
+    checkpointPolicy: "Single JSON config; checkpoint the whole file.",
+    restorePolicy: "Restore the whole file; read-time normalization absorbs older shapes.",
+    // The directory name predates the move to core/mcp and stays put: it is
+    // where every existing install already keeps its connector config.
+    identityContract: "core/mcp owns plugin-data/mcp exclusively.",
+    siteRules: rules(["core/mcp/manager.ts"], "Sole writer of plugin-data/mcp/config.json."),
+  }),
+  defineStore({
     id: "plugin-runtime-data",
     ownerModule: "core/plugin-config.ts",
     pathPatterns: ["plugin-data/{pluginId}"],
-    pathExclusions: ["plugin-data/office/jobs", "plugin-data/office/generated"],
+    pathExclusions: ["plugin-data/office/jobs", "plugin-data/office/generated", "plugin-data/mcp"],
     pathKind: "tree",
     format: "mixed-directory",
     schemaSource: {
@@ -878,7 +922,6 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
       "core/media/universal-media-manager.ts",
       "core/media-adapters/agnes.ts",
       "plugins/jimeng-cli/adapters/dreamina.ts",
-      "plugins/mcp/lib/mcp-runtime.ts",
     ], "Writes data within the active pluginId-scoped data directory."),
   }),
   defineStore({
@@ -1036,6 +1079,30 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
       ...rules(["desktop/main.cjs"], "Writes desktop window bounds or the release-announcement version bookmark.", ["mkdir", "write-file"], "(?:lastSeenVersionPath|windowStatePath|quickChatWindowStatePath)"),
       ...rules(["desktop/auto-updater.cjs"], "Migrates or writes the current desktop update-cache version marker.", ["mkdir", "rename", "write-file"], "(?:versionFile|wrongFile, versionFile)"),
     ],
+  }),
+  defineStore({
+    id: "desktop-update-channel",
+    ownerModule: "desktop/auto-updater.cjs",
+    pathPatterns: ["update-channel.json"],
+    format: "json",
+    schemaSource: runtimeSource(
+      "desktop/auto-updater.cjs",
+      "update channel record version, device identifier, activation flag, update feed address, activation time, and held invite codes",
+    ),
+    openEntry: ["desktop update feed resolution", "invite channel status", "invite code redemption"],
+    firstPossibleOpenPhase: "runtime_ready",
+    firstPossibleWritePhase: "runtime_ready",
+    epochPolicy: "compatible",
+    checkpointPolicy: "Optional compatible shell metadata; which update address this installation follows is not durable agent or session state.",
+    restorePolicy: "Read only through the desktop updater reader; an unparsable or unknown-version record falls back to the default update address and reports the reason to the user instead of degrading silently.",
+    affectedByEpochMigration: false,
+    identityContract: "One record per desktop installation data home; the device identifier never leaves the machine and is only ever sent as a hash.",
+    siteRules: rules(
+      ["desktop/auto-updater.cjs"],
+      "Writes the desktop update channel record through its temporary file and rename.",
+      ["write-file", "rename"],
+      "updateChannel",
+    ),
   }),
   defineStore({
     id: "managed-runtime-caches",
@@ -1373,8 +1440,8 @@ export const PERSISTENCE_EXEMPTIONS: readonly PersistenceExemption[] = Object.fr
     "core/local-user-account.ts",
     "The file-local atomic helper receives paths only from the separately registered users.json and local-user-auth.json call sites.",
     "2026-10-31",
-    ["mkdir", "atomic-write"],
-    "(?:path[.]dirname\\(filePath\\)|atomicWriteSync\\(filePath)",
+    ["mkdir", "secret-write"],
+    "(?:path[.]dirname\\(filePath\\)|writeSecretFileSync\\(filePath)",
   ),
   exemption(
     "character-card-copy-helper",
@@ -1448,6 +1515,13 @@ export const PERSISTENCE_EXEMPTIONS: readonly PersistenceExemption[] = Object.fr
     "shared/safe-fs.ts",
     "shared/safe-fs.ts",
     "Shared atomic-write primitives have no store ownership; callers are scanned and assigned to concrete descriptors.",
+    "2027-01-31",
+  ),
+  exemption(
+    "generic-secret-fs-primitives",
+    "shared/secret-fs.ts",
+    "shared/secret-fs.ts",
+    "Shared owner-only write primitives have no store ownership; callers are scanned and assigned to concrete descriptors.",
     "2027-01-31",
   ),
   exemption(

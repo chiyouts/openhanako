@@ -3,12 +3,27 @@ import os from "os";
 import path from "path";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { countFiles, createUploadRoute } from "../server/routes/upload.ts";
+import { createUploadRoute } from "../server/routes/upload.ts";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.ts";
 
 function mktemp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hana-upload-route-"));
 }
+
+// 大小写不敏感的文件系统（macOS / Windows）上，同一个目录有多种拼写。
+// 只有这类文件系统能暴露"同一文件的不同路径表示"，大小写敏感的 Linux 上
+// 大小写不同就是两个不同目录，构造不出别名，相关用例整体跳过。
+const FS_CASE_INSENSITIVE = (() => {
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), "hana-case-probe-"));
+  try {
+    fs.mkdirSync(path.join(probe, "Probe"));
+    return fs.existsSync(path.join(probe, "probe"));
+  } catch {
+    return false;
+  } finally {
+    try { fs.rmSync(probe, { recursive: true, force: true }); } catch {}
+  }
+})();
 
 describe("upload route", () => {
   let tmpDir;
@@ -44,7 +59,7 @@ describe("upload route", () => {
     });
   });
 
-  it("rejects directories that contain symlinks", async () => {
+  it("accepts directories that contain symlinks by registering a reference", async () => {
     tmpDir = mktemp();
     const dirPath = path.join(tmpDir, "cycle");
     fs.mkdirSync(dirPath, { recursive: true });
@@ -62,22 +77,129 @@ describe("upload route", () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
+    expect(data.uploads[0].error).toBeUndefined();
     expect(data.uploads[0]).toMatchObject({
       src: dirPath,
-      error: "symlink not allowed",
+      dest: fs.realpathSync(dirPath),
+      isDirectory: true,
     });
   });
 
-  it("stops counting once the configured file limit is exceeded", async () => {
+  it("registers a dropped directory as an external reference without copying", async () => {
     tmpDir = mktemp();
-    const dirPath = path.join(tmpDir, "many-files");
+    const dirPath = path.join(tmpDir, "big-folder");
     fs.mkdirSync(dirPath, { recursive: true });
     for (let i = 0; i < 12; i++) {
       fs.writeFileSync(path.join(dirPath, `f-${i}.txt`), "x", "utf-8");
     }
+    const hanakoHome = path.join(tmpDir, "hana-home");
+    const sessionPath = path.join(tmpDir, "sessions", "upload.jsonl");
+    fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+    fs.writeFileSync(sessionPath, "{}\n");
+    const registry = new SessionFileRegistry({ managedCacheRoot: path.join(hanakoHome, "session-files") });
+    const engine = {
+      hanakoHome,
+      registerSessionFile: registry.registerFile.bind(registry),
+      getSessionFileBySourceKey: registry.getBySourceKey.bind(registry),
+    };
+    const app = new Hono();
+    app.route("/api", createUploadRoute(engine));
 
-    const count = await countFiles(dirPath, { limit: 9 });
-    expect(count).toBe(10);
+    const res = await app.request("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: [dirPath], sessionPath }),
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    const up = data.uploads[0];
+    expect(up.error).toBeUndefined();
+    expect(up.isDirectory).toBe(true);
+    expect(up.storageKind).toBe("external");
+    expect(up.dest).toBe(fs.realpathSync(dirPath));
+    expect(up.fileId).toBeTruthy();
+    // 12 个文件的目录不再撞 9 文件上限，且没有任何字节被复制进 session-files 缓存
+    const cacheRoot = path.join(hanakoHome, "session-files");
+    const cacheEntries = fs.existsSync(cacheRoot)
+      ? fs.readdirSync(cacheRoot).flatMap((d) => fs.readdirSync(path.join(cacheRoot, d)))
+      : [];
+    expect(cacheEntries).toHaveLength(0);
+    const [entry] = registry.list(sessionPath);
+    expect(entry.storageKind).toBe("external");
+    expect(entry.filePath).toBe(fs.realpathSync(dirPath));
+    expect(entry.isDirectory).toBe(true);
+  });
+
+  // upload 路由与 SessionFileRegistry 必须用同一种 realpath 语义。Node 的 JS 版
+  // fs.realpathSync 保留调用方给的那种拼写，native 版（fs.realpathSync.native，以及
+  // 只有 native 语义的 fs/promises.realpath）返回磁盘上的真实拼写：macOS 上体现为
+  // 大小写，Windows 上体现为 8.3 短名（RUNNER~1 vs runneradmin）。两边语义只要不一致，
+  // 同一个目录经不同入口就会算出两个 realPath，去重键、SessionFile id 和沙箱路径匹配
+  // 会一起失准，同一个目录被登记成两条记录。
+  it.skipIf(!FS_CASE_INSENSITIVE)("reuses the session file when another entry point registered the same directory under a different spelling", async () => {
+    tmpDir = mktemp();
+    const dirPath = path.join(tmpDir, "CasedFolder");
+    fs.mkdirSync(dirPath, { recursive: true });
+    fs.writeFileSync(path.join(dirPath, "note.txt"), "hello", "utf-8");
+    const aliasPath = path.join(tmpDir, "casedfolder");
+    expect(fs.existsSync(aliasPath)).toBe(true);
+
+    const hanakoHome = path.join(tmpDir, "hana-home");
+    const sessionPath = path.join(tmpDir, "sessions", "upload.jsonl");
+    fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+    fs.writeFileSync(sessionPath, "{}\n");
+    const registry = new SessionFileRegistry({ managedCacheRoot: path.join(hanakoHome, "session-files") });
+    const engine = {
+      hanakoHome,
+      registerSessionFile: registry.registerFile.bind(registry),
+      getSessionFileBySourceKey: registry.getBySourceKey.bind(registry),
+    };
+
+    // 另一条入口（stage_files、插件输出等）先用别名拼写登记了同一个目录
+    const first = registry.registerFile({
+      sessionPath,
+      filePath: aliasPath,
+      label: "casedfolder",
+      origin: "tool_output",
+      storageKind: "external",
+    });
+
+    const app = new Hono();
+    app.route("/api", createUploadRoute(engine));
+    const res = await app.request("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: [aliasPath], sessionPath }),
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.uploads[0].error).toBeUndefined();
+    expect(data.uploads[0].fileId).toBe(first.id);
+    expect(registry.list(sessionPath)).toHaveLength(1);
+  });
+
+  it("caps one upload request at 9 attachments", async () => {
+    tmpDir = mktemp();
+    const paths = [];
+    for (let i = 0; i < 10; i++) {
+      const p = path.join(tmpDir, `f-${i}.txt`);
+      fs.writeFileSync(p, "x", "utf-8");
+      paths.push(p);
+    }
+    const app = new Hono();
+    app.route("/api", createUploadRoute({ hanakoHome: path.join(tmpDir, "hana-home") }));
+
+    const res = await app.request("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    });
+    const data = await res.json();
+
+    expect(data.uploads.filter((u) => !u.error)).toHaveLength(9);
+    expect(data.uploads[9].error).toBeTruthy();
   });
 
   it("upload-blob writes base64 image to uploads dir with sanitized name", async () => {

@@ -128,8 +128,10 @@ export function classifyHttpRoute({ method = "GET", path = "" } = {}) {
   if (isSettingsWriteRoute(verb, routePath)) return scoped("settings.write");
   if (isSkillSettingsReadRoute(verb, routePath)) return scoped("settings.read");
   if (isSkillSettingsWriteRoute(verb, routePath)) return scoped("settings.write");
+  if (isMcpSessionPermissionRoute(verb, routePath)) return scoped("chat");
   if (isMcpSettingsReadRoute(verb, routePath)) return scoped("settings.read");
   if (isMcpSettingsWriteRoute(verb, routePath)) return scoped("settings.write");
+  if (isMcpAppToolCallRoute(verb, routePath)) return STUDIO_OWNER;
   if (isMediaSubmitRoute(verb, routePath)) return scoped("chat");
   if (isImageGenerationReadRoute(verb, routePath)) return scoped("settings.read");
   if (isImageGenerationWriteRoute(verb, routePath)) return scoped("settings.write");
@@ -309,8 +311,22 @@ function isWebAuthBootstrapRoute(verb, routePath) {
   return false;
 }
 
+// The MCP surface is mounted twice — at /api/mcp (first-class) and at
+// /api/plugins/mcp (compatibility alias for clients and OAuth redirect URIs
+// issued before MCP became a core module). Both mounts serve the identical
+// handlers, so both must classify identically: matching on the sub-path keeps
+// the two from drifting apart.
+const MCP_ROUTE_PREFIXES = ["/api/mcp", "/api/plugins/mcp"];
+
+function mcpSubPath(routePath) {
+  for (const prefix of MCP_ROUTE_PREFIXES) {
+    if (routePath.startsWith(`${prefix}/`)) return routePath.slice(prefix.length);
+  }
+  return null;
+}
+
 function isMcpOAuthCallbackRoute(verb, routePath) {
-  return verb === "GET" && routePath === "/api/plugins/mcp/oauth/callback";
+  return verb === "GET" && mcpSubPath(routePath) === "/oauth/callback";
 }
 
 function isHtmlPreviewDocumentRoute(verb, routePath) {
@@ -494,18 +510,50 @@ function isBridgeManagementRoute(verb, routePath) {
 
 function isMcpSettingsReadRoute(verb, routePath) {
   if (verb !== "GET") return false;
-  return routePath === "/api/plugins/mcp/state"
-    || /^\/api\/plugins\/mcp\/oauth\/poll\/[^/]+$/.test(routePath);
+  const sub = mcpSubPath(routePath);
+  if (!sub) return false;
+  return sub === "/state"
+    || sub === "/apps"
+    || /^\/(?:connectors|servers)\/[^/]+\/resources$/.test(sub)
+    || /^\/oauth\/poll\/[^/]+$/.test(sub);
 }
 
 function isMcpSettingsWriteRoute(verb, routePath) {
-  if (verb === "PUT" && (routePath === "/api/plugins/mcp/settings/enabled" || routePath === "/api/plugins/mcp/enabled")) return true;
-  if (verb === "POST" && (routePath === "/api/plugins/mcp/connectors" || routePath === "/api/plugins/mcp/servers")) return true;
-  if ((verb === "PUT" || verb === "DELETE") && /^\/api\/plugins\/mcp\/(?:connectors|servers)\/[^/]+$/.test(routePath)) return true;
-  if (verb === "POST" && /^\/api\/plugins\/mcp\/(?:connectors|servers)\/[^/]+\/(?:start|stop|refresh-tools)$/.test(routePath)) return true;
-  if (verb === "PUT" && /^\/api\/plugins\/mcp\/agents\/[^/]+\/(?:connectors|servers)\/[^/]+$/.test(routePath)) return true;
-  if (verb === "POST" && /^\/api\/plugins\/mcp\/(?:connectors|servers)\/[^/]+\/oauth\/(?:start|logout)$/.test(routePath)) return true;
+  const sub = mcpSubPath(routePath);
+  if (!sub) return false;
+  if (verb === "PUT" && (sub === "/settings/enabled" || sub === "/enabled")) return true;
+  if (verb === "POST" && (sub === "/connectors" || sub === "/servers")) return true;
+  if ((verb === "PUT" || verb === "DELETE") && /^\/(?:connectors|servers)\/[^/]+$/.test(sub)) return true;
+  if (verb === "POST" && /^\/(?:connectors|servers)\/[^/]+\/(?:start|stop|refresh-tools)$/.test(sub)) return true;
+  if (verb === "PUT" && /^\/agents\/[^/]+\/(?:connectors|servers)\/[^/]+$/.test(sub)) return true;
+  if (verb === "POST" && /^\/(?:connectors|servers)\/[^/]+\/oauth\/(?:start|logout)$/.test(sub)) return true;
+  if (verb === "POST" && /^\/(?:connectors|servers)\/[^/]+\/apps\/[^/]+\/launch$/.test(sub)) return true;
   return false;
+}
+
+// Granting a tool invocation for one session changes that session's permission
+// state, not the connector's stored settings, so it rides the session scope
+// rather than settings.write.
+//
+// Classified "chat" for the same reason /api/sessions is: at this layer the
+// principal still carries its raw scopes, and the finer sessions.write is only
+// minted later by scope expansion. The handler performs the real
+// sessions.write capability check once it has resolved the session. Without an
+// entry here the route would fall through to studio-owner and shut out every
+// remote client.
+function isMcpSessionPermissionRoute(verb, routePath) {
+  if (verb !== "POST") return false;
+  return mcpSubPath(routePath) === "/session-permissions";
+}
+
+// Invoking a connector tool on behalf of an app surface is a real side effect
+// against a third-party server, so it stays owner-only rather than riding on a
+// settings scope.
+function isMcpAppToolCallRoute(verb, routePath) {
+  if (verb !== "POST") return false;
+  const sub = mcpSubPath(routePath);
+  if (!sub) return false;
+  return /^\/(?:connectors|servers)\/[^/]+\/app-tools\/[^/]+\/call$/.test(sub);
 }
 
 function isImageGenerationReadRoute(verb, routePath) {

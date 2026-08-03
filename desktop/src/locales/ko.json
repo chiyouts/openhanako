@@ -204,6 +204,7 @@
     "unpin": "고정 해제",
     "pinFailed": "세션 고정 실패",
     "unpinFailed": "세션 고정 해제 실패",
+    "reorderFailed": "고정 순서 변경 실패",
     "archive": "보관",
     "copyId": "Session ID 복사",
     "copyIdDone": "Session ID를 복사했습니다",
@@ -300,7 +301,8 @@
     "screenshotFailed": "스크린샷 저장 실패",
     "selectedCount": "{count}개 선택됨",
     "allDone": "모두 완료",
-    "markAllComplete": "모두 완료로 표시"
+    "markAllComplete": "모두 완료로 표시",
+    "back": "뒤로"
   },
   "chat": {
     "find": {
@@ -447,7 +449,11 @@
     "referenceDocument": "[참고 문서] {path}",
     "mention": {
       "title": "멘션",
-      "tab": { "files": "파일", "sessions": "대화", "agents": "에이전트" },
+      "tab": {
+        "files": "파일",
+        "sessions": "대화",
+        "agents": "에이전트"
+      },
       "empty": "일치하는 항목이 없습니다",
       "singleAgent": "한 턴에는 한 명의 Agent 리뷰어만 초대할 수 있습니다"
     }
@@ -476,6 +482,7 @@
     "stop": "현재 응답 중지",
     "new": "새 세션 시작 (기록 보관)",
     "reset": "세션 초기화 (기록 삭제)",
+    "loop": "이 세션에서 반복 작업 실행",
     "commandError": "[명령 오류] {message}",
     "usage": "사용법: {usage}",
     "commandTimeout": "명령 시간 초과 (>{ms}ms)"
@@ -913,6 +920,14 @@
       "noTasks": "현재 대화에 백그라운드 작업이 없어요{qualifier}.",
       "noTasksQualifier": " (상태: {status})"
     },
+    "loopControl": {
+      "serviceUnavailable": "루프 서비스를 사용할 수 없습니다.",
+      "noActiveSession": "활성 세션이 없습니다.",
+      "noActiveLoop": "이 세션에 활성 루프가 없습니다. /loop <작업> 으로 시작하세요.",
+      "delayRequired": "action=schedule 에는 delay_seconds 가 필요합니다.",
+      "scheduled": "{seconds}초 후 웨이크업을 예약했습니다({wakeAt} 발동). 이전 알람은 대체됩니다.",
+      "completed": "루프를 완료하고 종료했습니다."
+    },
     "installSkill": {
       "safetyBlocked": "[보안 정책] Skill 안전 검토 실패. 설치가 차단되었어요.\n사유: {reason}\n\n이 Skill이 안전 검토를 통과하지 못했으며 구체적인 사유를 사용자에게 알려 주세요. 설정에서 안전 검토를 비활성화할 수 있어요(권장하지 않음)."
     }
@@ -1313,7 +1328,25 @@
       "launchAtLogin": "로그인 시 자동 실행",
       "keepAwake": "잠금 중에도 계속 실행",
       "betaUpdates": "베타 업데이트 수신",
-      "autoCheckUpdates": "업데이트 자동 확인"
+      "autoCheckUpdates": "업데이트 자동 확인",
+      "inviteSectionTitle": "테스트 채널",
+      "inviteCodeLabel": "초대 코드",
+      "inviteCodeHint": "초대 코드는 테스트 채널을 여는 용도입니다. 앱 사용 조건이 아닙니다.",
+      "inviteCodePlaceholder": "초대 코드를 붙여넣으세요",
+      "inviteRedeemBtn": "사용하기",
+      "inviteRedeeming": "확인 중…",
+      "inviteErrorInvalid": "이 초대 코드는 유효하지 않거나 이미 모두 사용되었습니다.",
+      "inviteErrorNetwork": "발급 서비스에 연결할 수 없습니다. 연결을 확인한 뒤 다시 시도하세요.",
+      "inviteErrorActivate": "채널 상태를 저장하지 못했습니다.",
+      "inviteConfirmTitle": "테스트 채널로 전환할까요?",
+      "inviteConfirmBody": "전환하면 앱이 테스트 버전으로 업데이트됩니다. 테스트 버전이 데이터 형식을 갱신한 뒤에는 현재 정식 버전으로 되돌릴 수 없습니다. 확인하면 즉시 적용됩니다.",
+      "inviteConfirmOk": "전환",
+      "inviteConfirmCancel": "정식 버전 유지",
+      "inviteChannelActive": "현재 채널: 테스트 채널",
+      "inviteChannelActiveHint": "이제 업데이트는 테스트 채널에서 받습니다.",
+      "inviteCodesLabel": "내 초대 코드",
+      "inviteCodesHint": "각 코드는 한 번, 기기 한 대에서만 사용할 수 있습니다.",
+      "inviteCopy": "복사"
     },
     "access": {
       "networkAccess": "LAN 접근",
@@ -2031,7 +2064,53 @@
       "removeConfirm": "Remove this connector? Saved per-agent switches will remain but no longer take effect.",
       "agentTitle": "Agent Configuration",
       "agentConnectorDesc": "Enable for the selected agent, just like skills.",
-      "saveError": "Save failed"
+      "saveError": "Save failed",
+      "enabledAgentsCount": "개 어시스턴트에서 사용 중",
+      "manage": "관리",
+      "removeTitle": "커넥터 제거",
+      "connectionTitle": "연결 방식",
+      "permissionTitle": "권한",
+      "toolsTitle": "도구",
+      "noTools": "아직 도구가 없습니다. 커넥터를 시작하고 한 번 새로 고치면 보입니다.",
+      "noToolMatches": "일치하는 도구가 없습니다",
+      "toolSearch": "도구 검색",
+      "selectAll": "전체 선택",
+      "selectNone": "선택 해제",
+      "selectInvert": "선택 반전",
+      "badgeReadOnly": "읽기 전용",
+      "badgeDestructive": "파괴적",
+      "permissionAllow": "검토 없이 허용",
+      "pinTool": "항상 로드",
+      "permissionMode": "호출 검토",
+      "permissionModeHint": "기본적으로 모든 호출을 검토합니다. 허용 목록으로 바꾸면 직접 허용한 도구만 검토를 건너뜁니다.",
+      "permissionReviewAll": "모두 검토",
+      "permissionAllowlist": "허용 목록",
+      "trustReadOnly": "읽기 전용 선언 신뢰",
+      "trustReadOnlyHint": "읽기 전용 여부는 서버가 스스로 밝힌 것이며 Hana가 확인할 수 없습니다. 켜면 읽기 전용으로 선언된 도구는 매번 검토하지 않습니다.",
+      "deferTitle": "지연 로딩",
+      "deferScopeNote": "아래 설정은 이 커넥터뿐 아니라 모든 커넥터에 함께 적용됩니다.",
+      "deferEnabled": "지연 로딩 허용",
+      "deferEnabledHint": "도구가 많을 때는 먼저 목록만 모델에 주고, 필요한 도구의 설명만 가져옵니다.",
+      "deferBuiltin": "내장 도구도 지연 로딩",
+      "deferBuiltinHint": "켜면 내장 도구도 카탈로그를 통해 필요할 때 로드됩니다. 직접 로드가 모델의 능동성에 유리하므로 컨텍스트가 부족할 때만 권장합니다.",
+      "deferThreshold": "임계값",
+      "deferThresholdHint": "사용 중인 도구가 이 수를 넘을 때만 목록을 쓰고, 그 아래면 모두 직접 로드합니다.",
+      "agentConnectorEnabled": "이 어시스턴트에서 사용",
+      "oauthWaiting": "브라우저에서 인증이 끝나기를 기다리는 중",
+      "oauthWaitingHint": "브라우저에 인증 페이지를 열었습니다. 완료되면 자동으로 반영되며, 언제든 취소할 수 있습니다.",
+      "oauthFailed": "인증에 실패했습니다",
+      "oauthTimeout": "인증 대기 시간이 초과되었습니다",
+      "importEmpty": "커넥터를 찾지 못했습니다",
+      "importPreviewHint": "가져올 항목을 확인하세요. 체크를 해제하면 그 항목은 제외됩니다.",
+      "importParse": "분석",
+      "importConfirm": "{count}개 가져오기",
+      "importItemOk": "추가됨",
+      "commandRequired": "명령이 없습니다",
+      "urlRequired": "주소를 입력하세요",
+      "urlInvalid": "이 주소를 해석할 수 없습니다. https:// 같은 스킴을 포함하세요",
+      "urlScheme": "http 또는 https 주소만 지원합니다",
+      "modeSwitchTitle": "연결 유형 변경",
+      "modeSwitchBody": "로컬과 원격은 서로 다른 설정을 씁니다. 전환하면 다른 쪽 항목이 지워지고 실행 중인 연결도 끊깁니다."
     },
     "screenshot": {
       "title": "스크린샷 공유",
@@ -2635,12 +2714,16 @@
   "browser": {
     "using": "브라우저 사용 중",
     "close": "브라우저 닫기",
+    "open": "브라우저 열기",
+    "collapse": "접기",
+    "closeForSession": "이 세션의 브라우저 닫기",
     "closeBtn": "닫기",
     "back": "뒤로",
     "forward": "앞으로",
     "reload": "새로고침",
     "newTab": "새 탭",
     "closeTab": "탭 닫기",
+    "emptyWorkspace": "열린 탭이 없어요",
     "emergencyStop": "AI 제어 긴급 중지",
     "backgroundHint": "백그라운드 브라우저 실행 중, 클릭하여 보기",
     "background": "백그라운드 브라우저"
@@ -2726,6 +2809,7 @@
     "fetchError": "가져오기 오류: {msg}",
     "browserError": "오류: {msg}",
     "browserAlreadyRunning": "브라우저가 이미 실행 중이에요",
+    "browserAuthorizationRevoked": "사용자가 브라우저 사용 권한을 중단했어요",
     "browserLaunched": "브라우저를 시작했어요",
     "browserNotRunning": "브라우저가 실행되고 있지 않아요",
     "browserClosed": "브라우저를 닫았어요",
@@ -2929,7 +3013,34 @@
     "stopTaskNotFound": "태스크 {taskId}를 찾을 수 없어요. 이미 완료됐거나 존재하지 않을 수 있어요",
     "stopTaskAlready": "태스크 {taskId}는 이미 종료됐어요",
     "stopTaskNoHandler": "태스크 {taskId}는 중단을 지원하지 않아요",
-    "stopTaskDone": "태스크 {taskId}를 종료했어요"
+    "stopTaskDone": "태스크 {taskId}를 종료했어요",
+    "detailShow": "자세히",
+    "detailHide": "접기",
+    "code": {
+      "unexpected": "작업을 완료하지 못했습니다",
+      "sessionForkActiveTask": "이 구간에 아직 실행 중인 작업이 있습니다. 끝날 때까지 기다리거나 더 앞쪽 지점에서 분기하세요",
+      "sessionForkUnavailable": "현재 버전에서는 분기 세션을 만들 수 없습니다",
+      "subagentSessionForkCycle": "서브에이전트 세션을 자신의 상위로 분기할 수 없습니다",
+      "subagentRunBusy": "서브에이전트가 아직 실행 중입니다. 끝날 때까지 기다려 주세요",
+      "subagentThreadBusy": "서브에이전트 스레드가 사용 중입니다. 잠시 후 다시 시도하세요",
+      "workflowRunBusy": "워크플로가 아직 실행 중입니다. 끝날 때까지 기다려 주세요",
+      "workflowNodeBusy": "워크플로 노드가 사용 중입니다. 잠시 후 다시 시도하세요",
+      "sessionBusy": "이 세션이 사용 중입니다. 현재 작업이 끝난 뒤 다시 시도하세요",
+      "sessionNotLoaded": "세션이 아직 다 불러와지지 않았습니다. 잠시 후 다시 시도하세요",
+      "sessionIdentityConflict": "세션 식별 정보가 맞지 않습니다. 새로 고친 뒤 다시 시도하세요",
+      "sessionIdentityUnresolved": "이 메시지가 어느 세션의 것인지 확인할 수 없습니다",
+      "sessionIdentityMismatch": "이 메시지는 현재 세션의 것이 아닙니다",
+      "sessionManifestNotFound": "이 세션의 기록을 찾을 수 없습니다",
+      "sessionLocatorNotActive": "이 세션은 더 이상 현재 버전이 아닙니다. 목록을 새로 고치세요",
+      "activeSessionConflict": "이미 다른 세션이 진행 중입니다",
+      "sessionDeleteStagedConflict": "이 세션은 삭제 중이라 지금은 사용할 수 없습니다",
+      "fileTooLarge": "파일이 허용된 크기를 넘었습니다",
+      "invalidUpload": "업로드한 내용을 읽을 수 없습니다",
+      "invalidPath": "경로가 올바르지 않습니다",
+      "noAvailableModel": "사용할 수 있는 모델이 없습니다. 설정에서 공급자를 확인하세요",
+      "workspaceNotFound": "이 작업 공간을 찾을 수 없습니다",
+      "capabilityDenied": "이 작업은 권한이 없습니다"
+    }
   },
   "main": {
     "tray": {
@@ -3372,6 +3483,16 @@
       "body": "확인하면 이 폴더가 현재 대화의 추가 샌드박스 디렉터리가 돼요. 작업 디렉터리나 프롬프트는 변경하지 않아요.",
       "addLabel": "권한 디렉터리 추가",
       "removeLabel": "권한 디렉터리 제거"
+    },
+    "mcpElicitation": {
+      "unsupportedField": "지원하지 않는 필드 유형",
+      "choose": "선택하세요",
+      "requiredMissing": "* 표시된 필수 항목을 입력하세요"
+    },
+    "mcpTool": {
+      "allowForSession": "이 세션에서는 다시 묻지 않기",
+      "allowAlways": "이 도구를 항상 허용",
+      "grantFailed": "이 허용을 기억하지 못했습니다"
     }
   },
   "auth": {

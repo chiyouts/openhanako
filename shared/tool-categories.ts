@@ -33,6 +33,7 @@ export const STANDARD_TOOL_NAMES = [
   "notify",
   "stage_files",
   "file",
+  "materialize",
   "subagent",
   "subagent_reply",
   "subagent_close",
@@ -45,6 +46,7 @@ export const STANDARD_TOOL_NAMES = [
   "stop_task",
   "hana_card_guide",
   "show_card",
+  "loop_control",
 ];
 
 export const GLOBAL_TOOL_NAMES = [

@@ -19,15 +19,20 @@ import {
   isDirectCompactionInProgress,
   runCachePreservingCompactionForSession,
 } from "./session-compactor.ts";
+import {
+  installDynamicCompactionReserve,
+  installMidRunCompaction,
+} from "./session-compaction-runtime.ts";
 import { teardownSessionResources } from "./session-teardown.ts";
 import { evaluateSessionHealth, repairOrphanToolResultEntriesInFile } from "./session-health.ts";
 import {
   applyReminderConsumption,
   collectReminderBlock,
-  noteTimeObservedForSession,
   REMINDER_BLOCK_END,
   REMINDER_BLOCK_PREFIX,
+  resolveReferenceBudgetTokens,
 } from "./session-reminders.ts";
+import { diffCatalogNames, formatCatalogChangeLines } from "./tool-catalog.ts";
 import { createModuleLogger } from "../lib/debug-log.ts";
 import { BrowserManager } from "../lib/browser/browser-manager.ts";
 import { t, getLocale } from "../lib/i18n.ts";
@@ -54,7 +59,6 @@ import {
   DEEPSEEK_ROLEPLAY_REASONING_PATCH_EXPERIMENT_ID,
   getResolvedExperimentValue,
 } from "../lib/experiments/registry.ts";
-import { isDeepSeekModel } from "./provider-compat.ts";
 import {
   normalizePlainDescription,
   stripClosedInternalNarrationBlocks,
@@ -77,6 +81,7 @@ import {
   normalizeSessionTurnContext,
 } from "./session-turn-context.ts";
 import {
+  isOfficialDeepSeekEndpoint,
   modelSupportsDirectAudioInput,
   modelSupportsAudioInput,
   modelSupportsDirectVideoInput,
@@ -95,6 +100,8 @@ import {
 import { SessionListProjectionCache } from "./session-list-projection-cache.ts";
 import {
   buildLlmContextCachePrefixContract,
+  describeCachePrefixDrift,
+  hashCacheContractValue,
   diffCachePrefixContracts,
   summarizeCachePrefixContract,
 } from "../lib/llm/cache-prefix-contract.ts";
@@ -138,6 +145,11 @@ const SESSION_META_INDEX_MAX_BYTES = 1024 * 1024;
 // 当前块头是静态的；`at <时间戳>` 是历史 JSONL 里的旧块头，剥离端必须继续认
 const REMINDER_HEADER_RE = /^\[hana_reminder(?: at \d{4}-\d{2}-\d{2} \d{2}:\d{2})?\]$/;
 const SESSION_MODEL_UNAVAILABLE_API = "hana-unavailable-model";
+// Pinned sessions carry a sparse manual order so a single drag only rewrites
+// the sessions the user actually moved. A fresh pin takes `min - STEP` to land
+// on top; a submitted reorder renumbers everything from STEP upwards.
+const PIN_ORDER_STEP = 1024;
+const PIN_ORDER_BACKFILL_STATE_KEY = "pin-order-backfill-v1";
 const identitySessionTransformContext = async (messages: any[]) => messages;
 
 export class SessionTransformContextResolutionError extends Error {
@@ -570,7 +582,9 @@ function recordAssistantUsage({ ledger, event, sessionPath, sessionId, agentId, 
 }
 
 function logDeepSeekReasoningVisibility({ event, model, sessionPath, agentId }: any) {
-  if (!isDeepSeekModel(model)) return;
+  // 覆盖 DeepSeek 全部协议通道（ChatCompletions / Responses / Anthropic），
+  // 思考链可见性是跨通道的关注点，不跟着 ChatCompletions 兼容路径一起收窄。
+  if (!isOfficialDeepSeekEndpoint(model)) return;
   const provider = textOrNull(model?.provider) || "deepseek";
   const modelId = modelIdFromModel(model) || "unknown";
   const sessionName = sessionPath ? path.basename(sessionPath) : "unknown";
@@ -1004,6 +1018,7 @@ export class SessionCoordinator {
   declare _prePromptAbortControllers: Map<string, AbortController>;
   declare _turnContextBySession: Map<string, any>;
   declare _sessionManifestStore: any;
+  declare _pinOrderBackfill: Promise<any> | null;
   declare _envChangeLedger: any;
   declare _ensureSessionLoadedInFlight: Map<string, Promise<any>>;
   declare _metaQuarantines: Map<string, { metaPath: string; backupPath: string; quarantinedAt: string }>;
@@ -1052,6 +1067,7 @@ export class SessionCoordinator {
     this._prePromptAbortControllers = new Map();
     this._turnContextBySession = new Map();
     this._sessionManifestStore = deps.sessionManifestStore || null;
+    this._pinOrderBackfill = null;
     this._envChangeLedger = deps.envChangeLedger || null;
     this._ensureSessionLoadedInFlight = new Map();
     // 运行期 session-meta 隔离记录：key 是 metaPath，value 是隔离详情。
@@ -2087,7 +2103,11 @@ export class SessionCoordinator {
     const agentToolsSnapshot = typeof agent.getToolsSnapshot === "function"
       ? agent.getToolsSnapshot(toolSnapshotOptions)
       : agent.tools;
-    const { tools: sessionTools, customTools: sessionCustomTools } = this._d.buildTools(
+    const {
+      tools: sessionTools,
+      customTools: sessionCustomTools,
+      toolCatalogManifest: sessionToolCatalogManifest = null,
+    } = this._d.buildTools(
       effectiveCwd,
       agentToolsSnapshot,
       {
@@ -2096,6 +2116,8 @@ export class SessionCoordinator {
         authorizedFolders: folderScope.authorizedFolders,
         getAuthorizedFolders: () => this.getSessionAuthorizedFolders(sessionPathRef.current || sessionPathForMeta),
         agentDir: agent.agentDir,
+        // Sizes the deferred-tool listing against the model this session froze.
+        modelContextWindowTokens: effectiveModel?.contextWindow ?? null,
       },
     );
     const sessionOpts: any = {
@@ -2390,9 +2412,6 @@ export class SessionCoordinator {
       reminderEnvStartSeq: preserveFrozenPromptReminderState
         ? (reminderState.reminderEnvStartSeq ?? reminderBaselineSeq)
         : reminderBaselineSeq,
-      // A reused frozen prompt contains an old session-start clock. Every
-      // restored runtime therefore observes time again on its first message.
-      lastTimeObservedAt: restoredPromptSnapshot ? null : Date.now(),
       reminderCompactionRevision: hasPreviousReminderState
         ? (reminderState.reminderCompactionRevision ?? 0)
         : 0,
@@ -2406,6 +2425,18 @@ export class SessionCoordinator {
       reminderUnavailableRevision: hasPreviousReminderState
         ? (reminderState.reminderUnavailableRevision ?? 0)
         : 0,
+      // A restored session keeps what it was already told; only a session that
+      // has never been handed a listing should receive one.
+      reminderReferenceDelivered: hasPreviousReminderState
+        ? reminderState.reminderReferenceDelivered === true
+        : false,
+      reminderAcceptedCatalogFingerprint: hasPreviousReminderState
+        ? (reminderState.reminderAcceptedCatalogFingerprint ?? null)
+        : null,
+      reminderAcceptedCatalogNames: hasPreviousReminderState
+        && Array.isArray(reminderState.reminderAcceptedCatalogNames)
+        ? [...reminderState.reminderAcceptedCatalogNames]
+        : [],
     };
 
     Object.assign(sessionEntry, {
@@ -2444,6 +2475,15 @@ export class SessionCoordinator {
       // #1624：session 级提示数据，归属 sessionEntry（this._sessions 由 _sessionRuntimeKeyForPath 以 sessionId 优先键控，sessionPath 仅为兼容退化键），不挂 agent/engine
       capabilityDrift,
       capabilityDriftDismissedFingerprint: restoredDriftDismissedFingerprint,
+      // Invocation capabilities the user granted for this session only. Runtime
+      // state by design: it reaches neither writeSessionMeta nor the manifest
+      // snapshot, so it dies with the runtime and the user is asked again after
+      // a restart. That is the fail-closed direction for a permission grant.
+      sessionAllowedInvocationCapabilities: new Set(),
+      // The deferred-tool listing for the tool set this session just froze.
+      // Owned by the entry because it describes that frozen set, not the
+      // engine's current view of the world.
+      toolCatalogManifest: sessionToolCatalogManifest,
       ...initialReminderState,
       lastTouchedAt: Date.now(),
       unsub,
@@ -2520,6 +2560,11 @@ export class SessionCoordinator {
       : promptSnapshotForPersist;
     this._renewCachePrefixContract(mapKey, sessionEntry, restore ? "session_restore" : "new_session");
     this._installCachePrefixGuard(mapKey, sessionEntry);
+    installDynamicCompactionReserve(session);
+    installMidRunCompaction(session, {
+      usageLedger: this._d.getUsageLedger?.() || null,
+      buildUsageContext: (s: any) => this._buildMidRunCompactionUsageContext(s),
+    });
 
     // Persist fresh snapshots and repair/establish restored snapshots. Restored
     // legacy sessions with missing toolNames get a baseline on first restore,
@@ -3423,13 +3468,19 @@ export class SessionCoordinator {
     const forkReminderState = sourceReminderEntry ? {
       reminderEnvCursor: sourceReminderEntry.reminderEnvCursor,
       reminderEnvStartSeq: sourceReminderEntry.reminderEnvStartSeq,
-      lastTimeObservedAt: sourceReminderEntry.lastTimeObservedAt,
       reminderCompactionRevision: sourceReminderEntry.reminderCompactionRevision,
       reminderConsumedCompactionRevision: sourceReminderEntry.reminderConsumedCompactionRevision,
       reminderAcceptedUnavailableToolNames: Array.isArray(sourceReminderEntry.reminderAcceptedUnavailableToolNames)
         ? [...sourceReminderEntry.reminderAcceptedUnavailableToolNames]
         : [],
       reminderUnavailableRevision: sourceReminderEntry.reminderUnavailableRevision,
+      // The fork carries the source's transcript, which already contains the
+      // listing, so re-injecting it would repeat text the branch can see.
+      reminderReferenceDelivered: sourceReminderEntry.reminderReferenceDelivered === true,
+      reminderAcceptedCatalogFingerprint: sourceReminderEntry.reminderAcceptedCatalogFingerprint ?? null,
+      reminderAcceptedCatalogNames: Array.isArray(sourceReminderEntry.reminderAcceptedCatalogNames)
+        ? [...sourceReminderEntry.reminderAcceptedCatalogNames]
+        : [],
     } : null;
     if (
       this.isSessionStreaming(sourceSessionPath)
@@ -5153,6 +5204,9 @@ export class SessionCoordinator {
     const reason = this._normalizeAbortReason(options, "abort");
     const pending = this._getRuntimeValueForPath(this._prePromptAbortControllers, sessionPath);
     if (pending) {
+      // preflight 窗口的中止不补发 turn_end：promptSession 尚未运行，本轮
+      // turn input 还没落入 branch，合成 turn_end 会把上一轮的 entry id
+      // 错绑到本轮的乐观消息上。
       pending.abort();
       this._deleteRuntimeValueForPath(this._prePromptAbortControllers, sessionPath);
       this._cleanupAbortedSessionSidecars(sessionPath, reason);
@@ -5319,6 +5373,34 @@ export class SessionCoordinator {
     });
   }
 
+  /**
+   * Usage attribution for a compaction that fires between turns of a running
+   * agentic loop. The session's own live locator is resolved to a sessionId at
+   * this boundary, so the attribution follows the session even after the run
+   * has moved the branch head.
+   * @private
+   */
+  _buildMidRunCompactionUsageContext(session: any) {
+    const sessionPath = session?.sessionManager?.getSessionFile?.() || null;
+    const sessionId = sessionPath ? this._sessionIdForPath(sessionPath) : null;
+    return {
+      source: {
+        subsystem: "compaction",
+        operation: "compact",
+        surface: "desktop",
+        trigger: "threshold",
+      },
+      attribution: {
+        kind: "session",
+        agentId: (sessionPath ? this.resolveSessionOwnership(sessionPath).agentId : null)
+          || this._d.getActiveAgentId?.()
+          || null,
+        ...(sessionId ? { sessionId } : {}),
+        ...(sessionPath ? { sessionPath } : {}),
+      },
+    };
+  }
+
   _markSessionCompacted(sessionPath: any) {
     if (!sessionPath) return false;
     const entry = this._getSessionEntryByPath(sessionPath);
@@ -5482,6 +5564,46 @@ export class SessionCoordinator {
     this._pendingPermissionMode = nextMode;
     this._emitPermissionModeChanged(nextMode, null);
     return { ok: true, mode: nextMode, enabled: isReadOnlyPermissionMode(nextMode) };
+  }
+
+  /**
+   * Grant one invocation capability for the remaining life of this session's
+   * runtime.
+   *
+   * Contrast with permission mode, which is persisted twice (session meta and
+   * the manifest snapshot). A session grant is deliberately neither: it answers
+   * "allow this for now", not "remember this". An unloaded session is an error
+   * rather than a silent no-op, because a grant the caller believes was
+   * recorded but that vanished is worse than a visible failure.
+   */
+  allowInvocationCapability(ref: any, capability: any) {
+    const normalized = typeof capability === "string" ? capability.trim() : "";
+    if (!normalized) {
+      const error: any = new Error("allow invocation capability: capability is required");
+      error.code = "invalid_capability";
+      error.status = 400;
+      throw error;
+    }
+    const { sessionId, sessionPath } = this._resolveSessionWriteRef(ref, "allow invocation capability");
+    const entry = this._getSessionEntryByPath(sessionPath);
+    if (!entry) {
+      const error: any = new Error("allow invocation capability: session runtime is not loaded");
+      error.code = "session_not_loaded";
+      error.status = 409;
+      throw error;
+    }
+    if (!(entry.sessionAllowedInvocationCapabilities instanceof Set)) {
+      entry.sessionAllowedInvocationCapabilities = new Set();
+    }
+    entry.sessionAllowedInvocationCapabilities.add(normalized);
+    return { ok: true, sessionId, capability: normalized };
+  }
+
+  /** Capabilities granted for this session, as a plain array for the classifier. */
+  getAllowedInvocationCapabilities(sessionPath: any) {
+    const entry = this._getSessionEntryByPath(sessionPath);
+    const granted = entry?.sessionAllowedInvocationCapabilities;
+    return granted instanceof Set ? [...granted] : [];
   }
 
   _applyPermissionModeToEntry(sessionPath: any, entry: any, nextMode: any) {
@@ -5650,6 +5772,12 @@ export class SessionCoordinator {
     const spShort = sessionPath ? path.basename(sessionPath) : "(anon)";
     entry.lastTouchedAt = Date.now();
 
+    // 中止路径补发 turn_end：下面的 unsub 会抢在 SDK 自己的 turn_end 之前断流，
+    // 前端就永远等不到 entry id 回绑（重试/fork/重写按钮的唯一数据源）。
+    // 必须在 _sessions 删除之前发出——chat 路由的 turn_end handler 要通过
+    // getSessionByPath 读 in-memory branch 才能算出 entry id（事件总线同步分发）。
+    this._d.emitEvent?.({ type: "turn_end", aborted: true, reason }, sessionPath);
+
     this._clearRuntimePressureTimer(sessionPath);
     this._deleteRuntimeValueForPath(this._hibernatedSessionMeta, sessionPath);
     this._deleteRuntimeValueForPath(this._sessions, sessionPath);
@@ -5760,13 +5888,20 @@ export class SessionCoordinator {
       toolNames: Array.isArray(entry.toolNames) ? [...entry.toolNames] : entry.toolNames,
       reminderEnvCursor: entry.reminderEnvCursor,
       reminderEnvStartSeq: entry.reminderEnvStartSeq,
-      lastTimeObservedAt: entry.lastTimeObservedAt,
       reminderCompactionRevision: entry.reminderCompactionRevision,
       reminderConsumedCompactionRevision: entry.reminderConsumedCompactionRevision,
       reminderAcceptedUnavailableToolNames: Array.isArray(entry.reminderAcceptedUnavailableToolNames)
         ? [...entry.reminderAcceptedUnavailableToolNames]
         : [],
       reminderUnavailableRevision: entry.reminderUnavailableRevision,
+      // Without these, a woken session would be handed its tool listing a
+      // second time and re-told about catalog changes it already saw.
+      reminderReferenceDelivered: entry.reminderReferenceDelivered === true,
+      reminderAcceptedCatalogFingerprint: entry.reminderAcceptedCatalogFingerprint ?? null,
+      reminderAcceptedCatalogNames: Array.isArray(entry.reminderAcceptedCatalogNames)
+        ? [...entry.reminderAcceptedCatalogNames]
+        : [],
+      toolCatalogManifest: entry.toolCatalogManifest || null,
       contextUsage: entry.session?.getContextUsage?.() || null,
       hibernatedAt: Date.now(),
     });
@@ -6002,15 +6137,60 @@ export class SessionCoordinator {
     if (!recipientAgentId) {
       throw new Error("renderSessionReminderBlock: session Agent ownership is unavailable");
     }
+    const isZh = getLocale().startsWith("zh");
+    const manifest = entry.toolCatalogManifest;
     return collectReminderBlock({
       sessionEntry: entry,
       ledger: this._envChangeLedger,
       recipientAgentId,
-      now: Date.now(),
-      isZh: getLocale().startsWith("zh"),
-      timeZone: this._d.getPrefs?.()?.getTimezone?.(),
+      isZh,
       unavailableToolNames: this._computeReminderUnavailableToolNamesForEntry(entry, sessionPath),
+      // The listing belongs to this session's entry, not to the engine: it
+      // describes the tool set this session froze at creation.
+      referenceText: typeof manifest?.text === "string" ? manifest.text : "",
+      referenceBudgetTokens: this._referenceBudgetTokensForEntry(entry),
+      catalogBroadcast: this._computeCatalogBroadcastForEntry(entry, isZh),
     });
+  }
+
+  /**
+   * The budget the listing was sized against when this session was built. Using
+   * the recorded value keeps the render from truncating a tier that was chosen
+   * against a larger context.
+   */
+  _referenceBudgetTokensForEntry(entry: any) {
+    const recorded = entry?.toolCatalogManifest?.budgetTokens;
+    if (typeof recorded === "number" && Number.isFinite(recorded) && recorded > 0) return recorded;
+    return resolveReferenceBudgetTokens(entry?.session?.model?.contextWindow ?? null);
+  }
+
+  /**
+   * Whether this session should be told the catalog changed shape.
+   *
+   * The comparison is against what this session has already accepted, not
+   * against its original listing, so a session that has been told once about a
+   * change is not told again, and a further change still surfaces. Sessions
+   * that never received a listing have nothing to compare and stay silent.
+   */
+  _computeCatalogBroadcastForEntry(entry: any, isZh: boolean) {
+    const snapshot = entry?.toolCatalogManifest;
+    if (!snapshot) return null;
+    const liveNames = this._d.getLiveToolCatalogNames?.();
+    if (!Array.isArray(liveNames)) return null;
+
+    const liveFingerprint = hashCacheContractValue(liveNames);
+    const acceptedFingerprint = typeof entry.reminderAcceptedCatalogFingerprint === "string"
+      ? entry.reminderAcceptedCatalogFingerprint
+      : snapshot.fingerprint;
+    if (liveFingerprint === acceptedFingerprint) return null;
+
+    const baseNames = Array.isArray(entry.reminderAcceptedCatalogNames)
+      && entry.reminderAcceptedCatalogNames.length > 0
+      ? entry.reminderAcceptedCatalogNames
+      : (Array.isArray(snapshot.names) ? snapshot.names : []);
+    const lines = formatCatalogChangeLines(diffCatalogNames(baseNames, liveNames), isZh);
+    if (lines.length === 0) return null;
+    return { lines, fingerprint: liveFingerprint, names: [...liveNames] };
   }
 
   consumeRenderedSessionReminderBlock(sessionPath: any, receipt: any) {
@@ -6028,14 +6208,6 @@ export class SessionCoordinator {
     return rendered.block;
   }
 
-  noteSessionTimeObserved(sessionPath: any, observedAt: any) {
-    if (!sessionPath) return false;
-    const entry = this._getSessionEntryByPath(sessionPath);
-    if (!entry) return false;
-    noteTimeObservedForSession(entry, observedAt);
-    return true;
-  }
-
   preflightSessionInput(sessionPath: any) {
     if (!sessionPath) throw new Error("preflightSessionInput: sessionPath is required");
     const entry = this._getSessionEntryByPath(sessionPath);
@@ -6043,7 +6215,6 @@ export class SessionCoordinator {
       throw new Error(`preflightSessionInput: session not loaded for ${sessionPath}`);
     }
     return this._assertCachePrefixContract(sessionPath, entry, {
-      allowRenew: false,
       countRequest: false,
     });
   }
@@ -6520,6 +6691,9 @@ export class SessionCoordinator {
           s.pinnedAt = typeof manifest?.pinnedAt === "string"
             ? manifest.pinnedAt
             : (typeof metaEntry?.pinnedAt === "string" ? metaEntry.pinnedAt : null);
+          s.pinOrder = Number.isFinite(manifest?.pinOrder)
+            ? manifest.pinOrder
+            : (Number.isFinite(metaEntry?.pinOrder) ? metaEntry.pinOrder : null);
           s.projectId = typeof metaEntry?.projectId === "string" && metaEntry.projectId.trim()
             ? metaEntry.projectId.trim()
             : null;
@@ -6600,6 +6774,7 @@ export class SessionCoordinator {
         workspaceLabel: entry.workspaceLabel || null,
         sessionId: entry.sessionId || this._sessionIdForPath(sessionPath),
         pinnedAt: null,
+        pinOrder: null,
         projectId: null,
         ...(isDeleted ? {
           agentDeleted: true,
@@ -6614,7 +6789,52 @@ export class SessionCoordinator {
     }
 
     allSessions.sort((a, b) => b.modified - a.modified);
+    this._ensurePinOrderBackfill(allSessions);
     return allSessions;
+  }
+
+  /**
+   * Sessions pinned before pinning carried an explicit order have none, and
+   * would otherwise all sort as "unordered". This writes the order the user was
+   * already looking at (most recently touched first) exactly once, so their
+   * pinned strip does not visibly shuffle on the upgrade. Runs in the
+   * background: the list this was called with is already on its way out.
+   */
+  _ensurePinOrderBackfill(projectedSessions: any[]) {
+    const store = this._sessionManifestStore;
+    if (!store || typeof store.getState !== "function") return;
+    if (this._pinOrderBackfill) return;
+    if (store.getState(PIN_ORDER_BACKFILL_STATE_KEY)?.completedAt) return;
+
+    const pending = projectedSessions
+      .filter((session) => (
+        typeof session?.pinnedAt === "string"
+        && session.pinnedAt
+        && !Number.isFinite(session.pinOrder)
+        && !!session.sessionId
+      ))
+      .sort((a, b) => b.modified - a.modified);
+
+    this._pinOrderBackfill = (async () => {
+      for (const [index, session] of pending.entries()) {
+        const pinOrder = (index + 1) * PIN_ORDER_STEP;
+        await this.writeSessionMeta(session.path, { pinOrder });
+        store.setPinOrder(session.sessionId, pinOrder);
+        session.pinOrder = pinOrder;
+        this._emitSessionMetadataUpdated(session.path, { pinOrder });
+      }
+      store.setState(PIN_ORDER_BACKFILL_STATE_KEY, {
+        completedAt: new Date().toISOString(),
+        ordered: pending.length,
+      });
+    })()
+      .catch((err) => {
+        // Leaving the marker unset is the retry: the next list tries again.
+        log.warn(`pin order backfill failed: ${err?.message || err}`);
+      })
+      .finally(() => {
+        this._pinOrderBackfill = null;
+      });
   }
 
   async saveSessionTitle(sessionPath: any, title: any) {
@@ -6635,16 +6855,92 @@ export class SessionCoordinator {
     this._titlesCache.set(sessionDir, { titles: { ...titles }, ts: Date.now() });
   }
 
+  /**
+   * Pins or unpins a session. A new pin goes above every existing one, and
+   * unpinning drops the order together with the timestamp — the two fields
+   * share one lifetime, so a later re-pin is a brand new pin.
+   *
+   * @returns {Promise<{pinnedAt: string|null, pinOrder: number|null}>}
+   */
   async setSessionPinned(sessionRef: any, pinned: any) {
     const { sessionId, sessionPath, manifest } = this._resolveSessionWriteRef(sessionRef, "setSessionPinned");
     const pinnedAt = pinned ? new Date().toISOString() : null;
-    await this.writeSessionMeta(sessionPath, { pinnedAt });
+    const pinOrder = pinned ? this._topPinOrder() : null;
+    await this.writeSessionMeta(sessionPath, { pinnedAt, pinOrder });
     if (manifest || sessionId) {
-      this._sessionManifestStore.setPinnedAt((manifest?.sessionId || sessionId), pinnedAt);
+      const targetSessionId = manifest?.sessionId || sessionId;
+      this._sessionManifestStore.setPinnedAt(targetSessionId, pinnedAt);
+      this._sessionManifestStore.setPinOrder(targetSessionId, pinOrder);
     }
-    await this._verifySessionPinnedState(sessionPath, pinnedAt);
-    this._emitSessionMetadataUpdated(sessionPath, { pinnedAt });
-    return pinnedAt;
+    await this._verifySessionPinnedState(sessionPath, pinnedAt, pinOrder);
+    this._emitSessionMetadataUpdated(sessionPath, { pinnedAt, pinOrder });
+    return { pinnedAt, pinOrder };
+  }
+
+  /** Order that places a session above every currently pinned one. */
+  _topPinOrder() {
+    const min = this._sessionManifestStore?.minPinOrder?.();
+    return (Number.isFinite(min) ? min : 0) - PIN_ORDER_STEP;
+  }
+
+  /**
+   * Applies a manually submitted pin order. The caller sends the complete
+   * ordered list of pinned sessions; every entry is validated before anything
+   * is written, so a list naming an unpinned or unknown session changes
+   * nothing at all rather than landing halfway.
+   *
+   * @param {Array<{sessionId: string}|string>} orderedRefs
+   * @returns {Promise<Array<{sessionId: string, pinOrder: number}>>}
+   */
+  async setSessionPinOrder(orderedRefs: any) {
+    const refs = Array.isArray(orderedRefs) ? orderedRefs : null;
+    if (!refs || refs.length === 0) {
+      const error: any = new Error("setSessionPinOrder: at least one session is required");
+      error.code = "session_pin_order_empty";
+      error.status = 400;
+      throw error;
+    }
+
+    const resolved = [];
+    const seen = new Set();
+    for (const ref of refs) {
+      const sessionId = typeof ref === "string"
+        ? ref.trim()
+        : (typeof ref?.sessionId === "string" ? ref.sessionId.trim() : "");
+      if (!sessionId) {
+        const error: any = new Error("setSessionPinOrder: sessionId is required for every entry");
+        error.code = "session_pin_order_invalid";
+        error.status = 400;
+        throw error;
+      }
+      if (seen.has(sessionId)) {
+        const error: any = new Error(`setSessionPinOrder: duplicate session ${sessionId}`);
+        error.code = "session_pin_order_duplicate";
+        error.status = 400;
+        error.sessionId = sessionId;
+        throw error;
+      }
+      seen.add(sessionId);
+      const target = this._resolveSessionWriteRef({ sessionId }, "setSessionPinOrder");
+      if (!target.manifest?.pinnedAt) {
+        const error: any = new Error(`setSessionPinOrder: session ${sessionId} is not pinned`);
+        error.code = "session_not_pinned";
+        error.status = 400;
+        error.sessionId = sessionId;
+        throw error;
+      }
+      resolved.push(target);
+    }
+
+    const orders = [];
+    for (const [index, target] of resolved.entries()) {
+      const pinOrder = (index + 1) * PIN_ORDER_STEP;
+      await this.writeSessionMeta(target.sessionPath, { pinOrder });
+      this._sessionManifestStore.setPinOrder(target.manifest.sessionId, pinOrder);
+      this._emitSessionMetadataUpdated(target.sessionPath, { pinOrder });
+      orders.push({ sessionId: target.manifest.sessionId, pinOrder });
+    }
+    return orders;
   }
 
   async setSessionPluginMeta(sessionPath: any, patch: any = {}) {
@@ -6690,7 +6986,7 @@ export class SessionCoordinator {
     return plugin;
   }
 
-  async _verifySessionPinnedState(sessionPath: any, expectedPinnedAt: any) {
+  async _verifySessionPinnedState(sessionPath: any, expectedPinnedAt: any, expectedPinOrder: any = null) {
     const metaPath = this._sessionMetaPathFor(sessionPath);
     const sessKey = path.basename(sessionPath);
     let meta = {};
@@ -6703,6 +6999,10 @@ export class SessionCoordinator {
     const actual = meta[sessKey]?.pinnedAt ?? null;
     if (actual !== expectedPinnedAt) {
       throw new Error(`setSessionPinned: expected pinnedAt=${expectedPinnedAt ?? "null"} for ${sessKey}, got ${actual ?? "null"}`);
+    }
+    const actualOrder = meta[sessKey]?.pinOrder ?? null;
+    if (actualOrder !== expectedPinOrder) {
+      throw new Error(`setSessionPinned: expected pinOrder=${expectedPinOrder ?? "null"} for ${sessKey}, got ${actualOrder ?? "null"}`);
     }
   }
 
@@ -6928,21 +7228,21 @@ export class SessionCoordinator {
     {
       model = null,
       context = null,
-      allowRenew = true,
       countRequest = true,
     }: any = {},
   ) {
     if (!entry?.session) return null;
     let expected = entry.cachePrefixContract;
     if (!expected) {
-      if (!allowRenew) {
-        throw new Error("Cache prefix contract unavailable for input preflight");
-      }
       expected = this._renewCachePrefixContract(sessionPath, entry, "late_init", { model, context });
     }
     const actual = this._buildCachePrefixContract(entry, { model, context });
     const diffs = diffCachePrefixContracts(expected, actual);
     if (diffs.length > 0) {
+      // 漂移只说明有人在请求前重建了 prompt / 工具表却没走 renew：损失的是缓存命中，
+      // 不是正确性。所以记录足够定位到那个改写者的原文级 diff，然后按当前真实状态
+      // 续签契约放行，绝不把这份内部账目变成用户请求的失败。
+      const drift = describeCachePrefixDrift(expected, actual);
       const record = {
         session: sessionPath ? path.basename(sessionPath) : null,
         renewReason: entry.cachePrefixContractRenewReason || null,
@@ -6950,6 +7250,7 @@ export class SessionCoordinator {
         diffs,
         expected: summarizeCachePrefixContract(expected),
         actual: summarizeCachePrefixContract(actual),
+        drift,
       };
       log.error(`cache_contract_violation ${JSON.stringify(record)}`);
       try {
@@ -6959,11 +7260,17 @@ export class SessionCoordinator {
           diffs,
           expected: summarizeCachePrefixContract(expected),
           actual: summarizeCachePrefixContract(actual),
+          drift,
+          action: "renewed",
         }, sessionPath);
       } catch {
-        // The provider request must still fail even if UI event delivery fails.
+        // 事件投递失败不影响本次请求，诊断已经落在日志里。
       }
-      throw new Error(`Cache prefix contract violated: ${diffs.map((d) => d.field).join(", ")}`);
+      const renewed = this._renewCachePrefixContract(sessionPath, entry, "drift_auto_renew", { model, context });
+      if (countRequest) {
+        entry.cachePrefixContractRequestCount = (entry.cachePrefixContractRequestCount || 0) + 1;
+      }
+      return renewed ?? actual;
     }
 
     if (countRequest) {
@@ -6986,9 +7293,10 @@ export class SessionCoordinator {
     entry.cachePrefixGuardInstalled = true;
     entry.cachePrefixOriginalStreamFn = originalStreamFn;
     agent.streamFn = async (model, context, options) => {
-      // The main-session prefix contract applies only to normal turns. Pi native
-      // compaction and branch summaries use their own prompt; cache-preserving
-      // side tasks remain protected by their strict session snapshot contract.
+      // 这份前缀契约是诊断工具，不是闸门：发现漂移就记下原文级 diff 并按现状续签放行，
+      // 请求照常发出。漂移意味着有人在重建 prompt / 工具表时没走续签，凭那条记录去定位。
+      // 契约只覆盖普通轮次，原生压缩与分支摘要用的是各自的 prompt；保缓存的旁路任务
+      // 仍由它们自己的严格会话快照契约把关。
       if (entry.session?.isCompacting !== true) {
         this._assertCachePrefixContract(sessionPath, entry, { model, context });
       }
@@ -7827,6 +8135,10 @@ export class SessionCoordinator {
         customTools: [...actCustomTools, ...wrappedExtraCustomTools],
       });
 
+      // Throwaway session: the proportional reserve still applies, but there is
+      // no long-lived task to resume, so no mid-run compaction is installed.
+      installDynamicCompactionReserve(session);
+
       if (isolatedProviderCacheAffinityKey && typeof session?.agent?.streamFn === "function") {
         const originalStreamFn = session.agent.streamFn;
         session.agent.streamFn = function providerCacheAffinityStream(model, context, options) {
@@ -7909,7 +8221,27 @@ export class SessionCoordinator {
       let finalErrorMessage = null;
       const sessionFiles = [];
       const toolErrors = [];
+      // 中止请求是"粘性"的：SDK 在 agent run 还没起来时 abort 是空操作，而
+      // session.prompt() 进入 agent 循环前还有一段异步准备（扩展回调、压缩检查）。
+      // 落在这段窗口里的 abort 若不补发，子 session 会照常跑完全程——报了死却不死。
+      // 因此这里记账，并在 run 开跑后（第一个事件到达即证明）补发一次。
+      let abortRequested = false;
+      let abortRedelivered = false;
+      const deliverSessionAbort = () => {
+        // session.abort() 是异步的；丢掉它的 promise 会让失败变成未处理 rejection。
+        try {
+          Promise.resolve(session.abort()).catch((err) =>
+            log.warn(`executeIsolated abort failed: ${err?.message || err}`),
+          );
+        } catch (err) {
+          log.warn(`executeIsolated abort failed: ${err?.message || err}`);
+        }
+      };
       const unsub = session.subscribe((event) => {
+        if (abortRequested && !abortRedelivered) {
+          abortRedelivered = true;
+          deliverSessionAbort();
+        }
         const parentSessionPath = typeof opts.parentSessionPath === "string" && opts.parentSessionPath.trim()
           ? opts.parentSessionPath
           : null;
@@ -8001,7 +8333,10 @@ export class SessionCoordinator {
         });
       };
 
-      const abortHandler = () => session.abort();
+      const abortHandler = () => {
+        abortRequested = true;
+        deliverSessionAbort();
+      };
       opts.signal?.addEventListener("abort", abortHandler, { once: true });
 
       if (opts.signal?.aborted) {
@@ -8024,7 +8359,14 @@ export class SessionCoordinator {
       const sessionPath = session.sessionManager?.getSessionFile?.() || null;
       const leafEntryId = session.sessionManager?.getBranch?.()?.at?.(-1)?.id || null;
       const finalReplyText = stripClosedInternalNarrationBlocks(replyText || finalAssistantText);
-      const completionError = isolatedCompletionError(finalStopReason, finalErrorMessage);
+      // 中止的返回形态与入口早退保持一致（error: "aborted"），调用方只需认这一个词。
+      // 第二个条件覆盖"中止得太早、一轮都没跑完"——此时没有 stopReason 可读，但确实是被中止的。
+      // 反过来，已经正常跑完（stopReason=stop）的结果不会因为随后到达的 abort 被丢掉。
+      const runWasAborted = finalStopReason === "aborted"
+        || (opts.signal?.aborted === true && !finalStopReason);
+      const completionError = runWasAborted
+        ? "aborted"
+        : isolatedCompletionError(finalStopReason, finalErrorMessage);
 
       if (!opts.persist && !isResumedSession && sessionPath) {
         // 非 persist 的临时 session 文件清理 best-effort：删不掉不影响返回结果。

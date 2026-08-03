@@ -204,6 +204,7 @@
     "unpin": "Unpin",
     "pinFailed": "Failed to pin session",
     "unpinFailed": "Failed to unpin session",
+    "reorderFailed": "Failed to reorder pinned sessions",
     "archive": "Archive",
     "copyId": "Copy Session ID",
     "copyIdDone": "Session ID copied",
@@ -300,7 +301,8 @@
     "screenshotFailed": "Screenshot save failed",
     "selectedCount": "{count} selected",
     "allDone": "All done",
-    "markAllComplete": "Mark all as complete"
+    "markAllComplete": "Mark all as complete",
+    "back": "Back"
   },
   "chat": {
     "find": {
@@ -447,7 +449,11 @@
     "compact": "Compact",
     "mention": {
       "title": "Mention",
-      "tab": { "files": "Files", "sessions": "Conversations", "agents": "Agents" },
+      "tab": {
+        "files": "Files",
+        "sessions": "Conversations",
+        "agents": "Agents"
+      },
       "empty": "No matches",
       "singleAgent": "Only one Agent reviewer can be invited per turn"
     }
@@ -476,6 +482,7 @@
     "stop": "Stop current reply",
     "new": "Start new session (archive history)",
     "reset": "Reset session (clear history)",
+    "loop": "Run a recurring loop task in this session",
     "commandError": "[Command error] {message}",
     "usage": "Usage: {usage}",
     "commandTimeout": "Command timed out (>{ms}ms)"
@@ -901,6 +908,14 @@
       "noActiveSession": "No active session.",
       "noTasks": "No background tasks in current conversation{qualifier}.",
       "noTasksQualifier": " (status: {status})"
+    },
+    "loopControl": {
+      "serviceUnavailable": "Loop service is not available.",
+      "noActiveSession": "No active session.",
+      "noActiveLoop": "No active loop in this session. Start one with /loop <task>.",
+      "delayRequired": "delay_seconds is required for action=schedule.",
+      "scheduled": "Wakeup scheduled in {seconds}s (fires at {wakeAt}). It replaces any previous alarm.",
+      "completed": "Loop completed and closed."
     },
     "workflow": {
       "running": "🔄 {name} is orchestrating a workflow",
@@ -1379,7 +1394,25 @@
       "launchAtLogin": "Launch at login",
       "keepAwake": "Keep running while locked",
       "betaUpdates": "Receive beta updates",
-      "autoCheckUpdates": "Check for updates automatically"
+      "autoCheckUpdates": "Check for updates automatically",
+      "inviteSectionTitle": "Test channel",
+      "inviteCodeLabel": "Invite code",
+      "inviteCodeHint": "An invite code unlocks the test channel. It does not unlock the app itself.",
+      "inviteCodePlaceholder": "Paste your invite code",
+      "inviteRedeemBtn": "Redeem",
+      "inviteRedeeming": "Redeeming…",
+      "inviteErrorInvalid": "This invite code is not valid, or it has already been used up.",
+      "inviteErrorNetwork": "Could not reach the redemption service. Check your connection and try again.",
+      "inviteErrorActivate": "The channel could not be saved.",
+      "inviteConfirmTitle": "Switch to the test channel?",
+      "inviteConfirmBody": "Once you switch, the app updates to test versions. After a test version upgrades your data, you cannot go back to the current stable version. Confirm to switch.",
+      "inviteConfirmOk": "Switch",
+      "inviteConfirmCancel": "Stay on stable",
+      "inviteChannelActive": "Current channel: test channel",
+      "inviteChannelActiveHint": "Updates now come from the test channel.",
+      "inviteCodesLabel": "Your invite codes",
+      "inviteCodesHint": "Each code works once, for one device.",
+      "inviteCopy": "Copy"
     },
     "access": {
       "networkAccess": "LAN Access",
@@ -2097,7 +2130,53 @@
       "removeConfirm": "Remove this connector? Saved per-agent switches will remain but no longer take effect.",
       "agentTitle": "Agent Configuration",
       "agentConnectorDesc": "Enable for the selected agent, just like skills.",
-      "saveError": "Save failed"
+      "saveError": "Save failed",
+      "enabledAgentsCount": "agent enabled",
+      "manage": "Manage",
+      "removeTitle": "Remove connector",
+      "connectionTitle": "Connection",
+      "permissionTitle": "Permissions",
+      "toolsTitle": "Tools",
+      "noTools": "No tools yet. Start the connector and refresh once to see them.",
+      "noToolMatches": "No matching tools",
+      "toolSearch": "Search tools",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "selectInvert": "Invert",
+      "badgeReadOnly": "Read-only",
+      "badgeDestructive": "Destructive",
+      "permissionAllow": "Allow without review",
+      "pinTool": "Always loaded",
+      "permissionMode": "Invocation review",
+      "permissionModeHint": "Every call is reviewed by default. Under allowlist, only the tools you allow one by one skip review.",
+      "permissionReviewAll": "Review everything",
+      "permissionAllowlist": "Allowlist",
+      "trustReadOnly": "Trust read-only declarations",
+      "trustReadOnlyHint": "Whether a tool is read-only is the server’s own claim, which Hana cannot verify. Once on, tools declared read-only stop being reviewed each time.",
+      "deferTitle": "Deferred loading",
+      "deferScopeNote": "These switches apply to every connector, not only this one.",
+      "deferEnabled": "Allow deferred loading",
+      "deferEnabledHint": "With many tools, give the model a catalog first and fetch the full description of a tool only when it is needed.",
+      "deferBuiltin": "Defer built-in tools too",
+      "deferBuiltinHint": "Built-in tools join the on-demand catalog as well. Eagerly loaded tools keep the model more proactive; turn this on only when context runs tight.",
+      "deferThreshold": "Threshold",
+      "deferThresholdHint": "The catalog is used only above this many enabled tools; below it, every tool is loaded directly.",
+      "agentConnectorEnabled": "Enabled for this agent",
+      "oauthWaiting": "Waiting for authorization in the browser",
+      "oauthWaitingHint": "The authorization page is open in your browser. This updates itself once you finish, and can be cancelled at any time.",
+      "oauthFailed": "Authorization failed",
+      "oauthTimeout": "Timed out waiting for authorization",
+      "importEmpty": "No connectors found",
+      "importPreviewHint": "Confirm what to import. Clear a checkbox to leave that entry out.",
+      "importParse": "Parse",
+      "importConfirm": "Import {count}",
+      "importItemOk": "Added",
+      "commandRequired": "Missing command",
+      "urlRequired": "Enter a URL",
+      "urlInvalid": "This URL cannot be parsed. Include the scheme, e.g. https://",
+      "urlScheme": "Only http and https URLs are supported",
+      "modeSwitchTitle": "Change connection type",
+      "modeSwitchBody": "Local and remote use separate settings. Switching clears the other set of fields, and a running connection is dropped."
     },
     "screenshot": {
       "title": "Screenshot Sharing",
@@ -2635,12 +2714,16 @@
   "browser": {
     "using": "Using browser",
     "close": "Close browser",
+    "open": "Open browser",
+    "collapse": "Collapse",
+    "closeForSession": "Close this session's browser",
     "closeBtn": "Close",
     "back": "Back",
     "forward": "Forward",
     "reload": "Reload",
     "newTab": "New Tab",
     "closeTab": "Close tab",
+    "emptyWorkspace": "No open tabs",
     "emergencyStop": "Emergency stop AI control",
     "backgroundHint": "Background browser running, click to view",
     "background": "Background browser"
@@ -2731,6 +2814,7 @@
     "fetchError": "Fetch error: {msg}",
     "browserError": "Error: {msg}",
     "browserAlreadyRunning": "Browser is already running",
+    "browserAuthorizationRevoked": "The user has revoked authorization to use the browser.",
     "browserLaunched": "Browser launched",
     "browserNotRunning": "Browser is not running",
     "browserClosed": "Browser closed",
@@ -2935,7 +3019,34 @@
     "stopTaskAlready": "Task {taskId} has already been stopped",
     "stopTaskNoHandler": "Task {taskId} does not support stopping",
     "stopTaskDone": "Task {taskId} has been stopped",
-    "regionUnavailable": "This area is temporarily unavailable"
+    "regionUnavailable": "This area is temporarily unavailable",
+    "detailShow": "Details",
+    "detailHide": "Hide",
+    "code": {
+      "unexpected": "That did not go through",
+      "sessionForkActiveTask": "A task is still running in this stretch of the conversation. Wait for it to finish, or branch from an earlier point.",
+      "sessionForkUnavailable": "This version cannot create branch sessions",
+      "subagentSessionForkCycle": "A subagent session cannot branch back into its own parent",
+      "subagentRunBusy": "The subagent is still running. Wait for it to finish.",
+      "subagentThreadBusy": "The subagent thread is busy. Try again shortly.",
+      "workflowRunBusy": "The workflow is still running. Wait for it to finish.",
+      "workflowNodeBusy": "That workflow node is busy. Try again shortly.",
+      "sessionBusy": "This session is busy. Wait for the current operation to finish.",
+      "sessionNotLoaded": "The session has not finished loading. Try again shortly.",
+      "sessionIdentityConflict": "The session identity does not match. Refresh and try again.",
+      "sessionIdentityUnresolved": "Could not tell which session this message belongs to",
+      "sessionIdentityMismatch": "This message belongs to a different session",
+      "sessionManifestNotFound": "No record found for this session",
+      "sessionLocatorNotActive": "This session is no longer the current version. Refresh the list.",
+      "activeSessionConflict": "Another session is already in progress",
+      "sessionDeleteStagedConflict": "This session is being deleted and cannot be used right now",
+      "fileTooLarge": "The file is larger than the allowed size",
+      "invalidUpload": "The uploaded content could not be read",
+      "invalidPath": "That path is not valid",
+      "noAvailableModel": "No model is available. Check your provider settings.",
+      "workspaceNotFound": "That workspace could not be found",
+      "capabilityDenied": "This action is not authorized"
+    }
   },
   "main": {
     "tray": {
@@ -3378,6 +3489,16 @@
       "body": "Once confirmed, this folder will become an additional sandbox directory for the current conversation. It will not change the working directory or modify prompts.",
       "addLabel": "Add authorized directory",
       "removeLabel": "Remove authorized directory"
+    },
+    "mcpElicitation": {
+      "unsupportedField": "Unsupported field type",
+      "choose": "Choose…",
+      "requiredMissing": "Fill in the fields marked *"
+    },
+    "mcpTool": {
+      "allowForSession": "Don’t ask again this session",
+      "allowAlways": "Always allow this tool",
+      "grantFailed": "Could not remember this decision"
     }
   },
   "auth": {

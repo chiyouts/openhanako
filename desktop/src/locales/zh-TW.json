@@ -204,6 +204,7 @@
     "unpin": "取消置頂",
     "pinFailed": "置頂 session 失敗",
     "unpinFailed": "取消置頂失敗",
+    "reorderFailed": "調整置頂順序失敗",
     "archive": "封存",
     "copyId": "複製 Session ID",
     "copyIdDone": "Session ID 已複製",
@@ -300,7 +301,8 @@
     "screenshotFailed": "截圖儲存失敗",
     "selectedCount": "已選 {count} 則",
     "allDone": "全部完成",
-    "markAllComplete": "全部標記為已完成"
+    "markAllComplete": "全部標記為已完成",
+    "back": "返回"
   },
   "chat": {
     "find": {
@@ -447,7 +449,11 @@
     "referenceDocument": "[参考文档] {path}",
     "mention": {
       "title": "引用內容",
-      "tab": { "files": "檔案", "sessions": "對話", "agents": "助手" },
+      "tab": {
+        "files": "檔案",
+        "sessions": "對話",
+        "agents": "助手"
+      },
       "empty": "沒有符合項目",
       "singleAgent": "每個回合暫時只能邀請一位助手審閱"
     }
@@ -476,6 +482,7 @@
     "stop": "停止當前回覆",
     "new": "開啟新會話（歸檔歷史）",
     "reset": "重置會話（清除歷史）",
+    "loop": "在目前會話循環執行任務",
     "commandError": "[命令错误] {message}",
     "usage": "用法：{usage}",
     "commandTimeout": "命令超时（>{ms}ms）"
@@ -913,6 +920,14 @@
       "noTasks": "当前对话没有后台任务{qualifier}。",
       "noTasksQualifier": "（状态: {status}）"
     },
+    "loopControl": {
+      "serviceUnavailable": "循環服務未就緒。",
+      "noActiveSession": "沒有活躍會話。",
+      "noActiveLoop": "目前會話沒有活躍循環，用 /loop <任務> 啟動。",
+      "delayRequired": "action=schedule 需要 delay_seconds。",
+      "scheduled": "已排定 {seconds} 秒後的喚醒（{wakeAt} 觸發），並取代先前的鬧鐘。",
+      "completed": "循環已完成並關閉。"
+    },
     "installSkill": {
       "safetyBlocked": "[安全策略] 技能安全审查未通过，已阻止安装。\n原因：{reason}\n\n请告知用户此技能未通过安全审查，说明具体原因。用户可以在設定中关闭安全审查（不推荐）。"
     }
@@ -1313,7 +1328,25 @@
       "launchAtLogin": "開機自啟",
       "keepAwake": "鎖定時保持執行",
       "betaUpdates": "接收測試版更新",
-      "autoCheckUpdates": "自動檢查更新"
+      "autoCheckUpdates": "自動檢查更新",
+      "inviteSectionTitle": "測試通道",
+      "inviteCodeLabel": "邀請碼",
+      "inviteCodeHint": "邀請碼只用來開啟測試通道，不是使用本應用的門檻。",
+      "inviteCodePlaceholder": "貼上你的邀請碼",
+      "inviteRedeemBtn": "兌換",
+      "inviteRedeeming": "兌換中…",
+      "inviteErrorInvalid": "這枚邀請碼無效，或者已經用完了。",
+      "inviteErrorNetwork": "連不上兌換服務，檢查網路後再試一次。",
+      "inviteErrorActivate": "通道狀態沒能儲存下來。",
+      "inviteConfirmTitle": "切換到測試通道？",
+      "inviteConfirmBody": "切換之後，應用會更新到測試版本。測試版升級過資料格式之後，就回不到目前的正式版了。確認後立即生效。",
+      "inviteConfirmOk": "切換",
+      "inviteConfirmCancel": "留在正式版",
+      "inviteChannelActive": "目前通道：測試通道",
+      "inviteChannelActiveHint": "更新現在來自測試通道。",
+      "inviteCodesLabel": "你的邀請碼",
+      "inviteCodesHint": "每枚只能用一次，綁定第一台兌換的裝置。",
+      "inviteCopy": "複製"
     },
     "access": {
       "networkAccess": "區域網路存取",
@@ -2031,7 +2064,53 @@
       "removeConfirm": "確定移除此連接器？已儲存的 per-agent 開關會保留但不再生效。",
       "agentTitle": "助手配置",
       "agentConnectorDesc": "像技能一樣，只對選中的助手啟用。",
-      "saveError": "儲存失敗"
+      "saveError": "儲存失敗",
+      "enabledAgentsCount": "個助手已啟用",
+      "manage": "管理",
+      "removeTitle": "移除連接器",
+      "connectionTitle": "連線方式",
+      "permissionTitle": "權限",
+      "toolsTitle": "工具",
+      "noTools": "還沒有工具。啟動連接器後重新整理一次即可看到。",
+      "noToolMatches": "沒有符合的工具",
+      "toolSearch": "搜尋工具",
+      "selectAll": "全選",
+      "selectNone": "全不選",
+      "selectInvert": "反選",
+      "badgeReadOnly": "唯讀",
+      "badgeDestructive": "具破壞性",
+      "permissionAllow": "直接放行",
+      "pinTool": "常駐",
+      "permissionMode": "呼叫審批",
+      "permissionModeHint": "預設每次呼叫都經過審查。改為依清單放行後，只有你逐個放行的工具才免審。",
+      "permissionReviewAll": "全部審查",
+      "permissionAllowlist": "依清單放行",
+      "trustReadOnly": "信任唯讀宣告",
+      "trustReadOnlyHint": "是否唯讀由伺服器自行宣告，Hana 無從查證。開啟後，宣告為唯讀的工具不再逐次審查。",
+      "deferTitle": "延遲載入",
+      "deferScopeNote": "以下開關對所有連接器一併生效，不只是這一個。",
+      "deferEnabled": "允許延遲載入",
+      "deferEnabledHint": "工具較多時先給模型一份目錄，用到哪個再取哪個的完整說明。",
+      "deferBuiltin": "內建工具也延遲",
+      "deferBuiltinHint": "開啟後，系統內建工具同樣進入目錄按需揭露。直接載入的內建工具讓模型更主動，上下文吃緊時再開。",
+      "deferThreshold": "啟用門檻",
+      "deferThresholdHint": "已啟用的工具數超過此值才走目錄，低於此值全部直接載入。",
+      "agentConnectorEnabled": "對此助手啟用",
+      "oauthWaiting": "等待在瀏覽器中完成授權",
+      "oauthWaitingHint": "授權頁面已在瀏覽器中開啟。完成後這裡會自動更新，也可以隨時取消。",
+      "oauthFailed": "授權失敗",
+      "oauthTimeout": "等待授權逾時",
+      "importEmpty": "沒有解析到任何連接器",
+      "importPreviewHint": "確認要匯入的連接器，取消勾選可以排除其中幾項。",
+      "importParse": "解析",
+      "importConfirm": "匯入 {count} 項",
+      "importItemOk": "已新增",
+      "commandRequired": "缺少啟動指令",
+      "urlRequired": "請填寫網址",
+      "urlInvalid": "網址無法解析，請加上 https:// 這樣的協定前綴",
+      "urlScheme": "網址只支援 http 或 https",
+      "modeSwitchTitle": "切換連線類型",
+      "modeSwitchBody": "本機與遠端用的是兩套設定。切換後另一套的欄位會被清空，正在執行的連線也會中斷。"
     },
     "screenshot": {
       "title": "截圖分享",
@@ -2635,12 +2714,16 @@
   "browser": {
     "using": "正在用瀏覽器",
     "close": "關閉瀏覽器",
+    "open": "開啟瀏覽器",
+    "collapse": "收起",
+    "closeForSession": "關閉此對話的瀏覽器",
     "closeBtn": "關閉",
     "back": "後退",
     "forward": "前進",
     "reload": "重新整理",
     "newTab": "新標籤頁",
     "closeTab": "關閉標籤頁",
+    "emptyWorkspace": "沒有開啟的分頁",
     "emergencyStop": "緊急停止 AI 控制",
     "backgroundHint": "後台瀏覽器運行中，點擊查看",
     "background": "後台瀏覽器"
@@ -2726,6 +2809,7 @@
     "fetchError": "抓取出錯: {msg}",
     "browserError": "錯誤: {msg}",
     "browserAlreadyRunning": "瀏覽器已在執行中",
+    "browserAuthorizationRevoked": "使用者已停止授權使用瀏覽器",
     "browserLaunched": "瀏覽器已啟動",
     "browserNotRunning": "瀏覽器未在執行",
     "browserClosed": "瀏覽器已關閉",
@@ -2929,7 +3013,34 @@
     "stopTaskNotFound": "找不到任務 {taskId}，可能已完成或不存在",
     "stopTaskAlready": "任務 {taskId} 已經被終止了",
     "stopTaskNoHandler": "任務 {taskId} 的類型不支援終止",
-    "stopTaskDone": "已終止任務 {taskId}"
+    "stopTaskDone": "已終止任務 {taskId}",
+    "detailShow": "詳情",
+    "detailHide": "收合",
+    "code": {
+      "unexpected": "操作沒能完成",
+      "sessionForkActiveTask": "這段對話裡還有任務在執行，等它結束再建立分支，或者從更早的位置分支",
+      "sessionForkUnavailable": "目前版本不支援建立分支工作階段",
+      "subagentSessionForkCycle": "不能把子代理工作階段分支回它自己的上游",
+      "subagentRunBusy": "子代理還在執行，等它結束再試",
+      "subagentThreadBusy": "子代理執行緒正忙，稍候再試",
+      "workflowRunBusy": "工作流程還在執行，等它結束再試",
+      "workflowNodeBusy": "工作流程節點正忙，稍候再試",
+      "sessionBusy": "這個工作階段正忙，等目前的操作結束再試",
+      "sessionNotLoaded": "工作階段還沒載入完成，稍候再試",
+      "sessionIdentityConflict": "工作階段身分對不上，重新整理後再試",
+      "sessionIdentityUnresolved": "認不出這則訊息屬於哪個工作階段",
+      "sessionIdentityMismatch": "這則訊息不屬於目前的工作階段",
+      "sessionManifestNotFound": "找不到這個工作階段的紀錄",
+      "sessionLocatorNotActive": "這個工作階段已經不是目前版本，重新整理一下清單",
+      "activeSessionConflict": "已經有另一個工作階段在進行中",
+      "sessionDeleteStagedConflict": "這個工作階段正在刪除中，暫時不能操作",
+      "fileTooLarge": "檔案太大，超出允許的大小",
+      "invalidUpload": "上傳的內容無法辨識",
+      "invalidPath": "路徑無效",
+      "noAvailableModel": "沒有可用的模型，去設定裡檢查供應商設定",
+      "workspaceNotFound": "找不到這個工作台",
+      "capabilityDenied": "這個操作沒有取得授權"
+    }
   },
   "main": {
     "tray": {
@@ -3372,6 +3483,16 @@
       "body": "确认后，这个文件夹会成为当前对话的额外沙盒目录；不会改变工作目录，也不会写入提示词。",
       "addLabel": "添加授权目录",
       "removeLabel": "移除授权目录"
+    },
+    "mcpElicitation": {
+      "unsupportedField": "暫不支援的欄位類型",
+      "choose": "請選擇",
+      "requiredMissing": "請填寫標有 * 的必填項"
+    },
+    "mcpTool": {
+      "allowForSession": "本次工作階段不再詢問此工具",
+      "allowAlways": "一律允許此工具",
+      "grantFailed": "無法記住這次授權"
     }
   },
   "auth": {

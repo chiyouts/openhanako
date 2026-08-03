@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -13,6 +13,8 @@ const archiveSessionMock = vi.fn();
 const renameSessionMock = vi.fn();
 const pinSessionMock = vi.fn();
 const createNewSessionMock = vi.fn();
+const reorderPinnedSessionsMock = vi.fn();
+const openBrowserViewerMock = vi.fn();
 
 const localServerConnection = {
   connectionId: 'local',
@@ -40,6 +42,7 @@ vi.mock('../../stores/session-actions', () => ({
   renameSession: (...args: unknown[]) => renameSessionMock(...args),
   pinSession: (...args: unknown[]) => pinSessionMock(...args),
   createNewSession: (...args: unknown[]) => createNewSessionMock(...args),
+  reorderPinnedSessions: (...args: unknown[]) => reorderPinnedSessionsMock(...args),
 }));
 
 vi.mock('../../hooks/use-i18n', () => ({
@@ -139,6 +142,9 @@ async function switchToProjectView() {
 describe('SessionList context menu', () => {
   beforeEach(() => {
     window.localStorage.removeItem('hana-session-sidebar-view-mode');
+    window.localStorage.removeItem('hana-sidebar-ui-prefs');
+    useStore.getState().applySidebarUiPrefs({});
+    useStore.setState({ sidebarUiPrefsLoaded: false });
     globalThis.t = ((key: string) => {
       if (key === 'yuan.types') return {};
       return key;
@@ -162,6 +168,12 @@ describe('SessionList context menu', () => {
     renameSessionMock.mockReset();
     pinSessionMock.mockReset();
     createNewSessionMock.mockReset();
+    reorderPinnedSessionsMock.mockReset();
+    openBrowserViewerMock.mockReset();
+    Object.defineProperty(window, 'platform', {
+      configurable: true,
+      value: { openBrowserViewer: openBrowserViewerMock },
+    });
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn(async () => undefined) },
@@ -286,11 +298,44 @@ describe('SessionList context menu', () => {
     expect(archiveSessionMock).toHaveBeenCalledWith('/tmp/agents/deleted/sessions/pinned.jsonl');
   });
 
-  it('closes a sidebar browser badge without switching the session row', async () => {
+  it('opens the session browser from a left click on the sidebar badge', async () => {
     const browserStates = {
       '/tmp/agents/hana/sessions/with-summary.jsonl': {
         url: 'https://example.com',
         running: false,
+        resumable: true,
+        unavailableReason: null,
+      },
+    };
+    hanaFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/browser/session-states') return jsonResponse(browserStates);
+      if (url === '/api/browser/open-session') return jsonResponse({ ok: true });
+      return jsonResponse({});
+    });
+
+    render(<SessionList />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'browser.open' }));
+
+    await waitFor(() => {
+      expect(hanaFetchMock).toHaveBeenCalledWith('/api/browser/open-session', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ sessionPath: '/tmp/agents/hana/sessions/with-summary.jsonl' }),
+      }));
+      expect(openBrowserViewerMock).toHaveBeenCalledWith({
+        sessionPath: '/tmp/agents/hana/sessions/with-summary.jsonl',
+      });
+    });
+    expect(hanaFetchMock).not.toHaveBeenCalledWith('/api/browser/close-session', expect.anything());
+    expect(switchSessionMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'browser.open' })).toBeInTheDocument();
+  });
+
+  it('closes the session browser from the badge context menu', async () => {
+    const browserStates = {
+      '/tmp/agents/hana/sessions/with-summary.jsonl': {
+        url: 'https://example.com',
+        running: true,
         resumable: true,
         unavailableReason: null,
       },
@@ -307,8 +352,11 @@ describe('SessionList context menu', () => {
 
     render(<SessionList />);
 
-    const closeBadge = await screen.findByRole('button', { name: 'browser.close' });
-    fireEvent.click(closeBadge);
+    fireEvent.contextMenu(await screen.findByRole('button', { name: 'browser.open' }), {
+      clientX: 40,
+      clientY: 60,
+    });
+    fireEvent.click(await screen.findByText('browser.closeForSession'));
 
     await waitFor(() => {
       expect(hanaFetchMock).toHaveBeenCalledWith('/api/browser/close-session', expect.objectContaining({
@@ -318,134 +366,72 @@ describe('SessionList context menu', () => {
     });
     expect(switchSessionMock).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'browser.close' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'browser.open' })).not.toBeInTheDocument();
     });
   });
 
-  it('applies the persisted single-line row mode to regular session rows', async () => {
-    hanaFetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/browser/session-states') return jsonResponse({});
-      if (url === '/api/preferences/sidebar-ui') {
-        return jsonResponse({
-          sidebarUi: {
-            projectView: {
-              collapsedProjectIds: [],
-              collapsedFolderIds: [],
-              showAllProjectIds: [],
-            },
-            sessionList: { rowMode: 'single-line' },
-          },
-        });
-      }
-      return jsonResponse({});
+  it('applies the persisted single-line row mode from the store to regular session rows', () => {
+    act(() => {
+      useStore.getState().applySidebarUiPrefs({
+        sidebarUi: {
+          projectView: { collapsedProjectIds: [], collapsedFolderIds: [], showAllProjectIds: [] },
+          sessionList: { rowMode: 'single-line' },
+        },
+      });
     });
 
     render(<SessionList />);
 
     const row = sessionButton('Has summary');
-    await waitFor(() => {
-      expect(row).toHaveAttribute('data-row-mode', 'single-line');
-    });
+    expect(row).toHaveAttribute('data-row-mode', 'single-line');
     expect(row.querySelector('[data-session-actions]')).toBeInTheDocument();
     expect(row).toHaveAttribute('title', expect.stringContaining('Hana'));
   });
 
-  it('waits for an active server connection before loading sidebar UI preferences', () => {
-    useStore.setState({
-      activeServerConnectionId: null,
-      activeServerConnection: null,
-    });
-
+  it('never fetches sidebar UI preferences itself', async () => {
     render(<SessionList />);
 
+    await waitFor(() => {
+      expect(hanaFetchMock).toHaveBeenCalledWith('/api/browser/session-states');
+    });
     expect(hanaFetchMock).not.toHaveBeenCalledWith('/api/preferences/sidebar-ui');
   });
 
-  it('loads single-line row mode when the server connection becomes available', async () => {
-    useStore.setState({
-      activeServerConnectionId: null,
-      activeServerConnection: null,
-    });
-    hanaFetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/browser/session-states') return jsonResponse({});
-      if (url === '/api/preferences/sidebar-ui') {
-        return jsonResponse({
-          sidebarUi: {
-            projectView: {
-              collapsedProjectIds: [],
-              collapsedFolderIds: [],
-              showAllProjectIds: [],
-            },
-            sessionList: { rowMode: 'single-line' },
-          },
-        });
-      }
-      return jsonResponse({});
-    });
-
+  it('follows the row mode when the store picks up new preferences after mount', async () => {
     render(<SessionList />);
-    expect(hanaFetchMock).not.toHaveBeenCalledWith('/api/preferences/sidebar-ui');
+    expect(sessionButton('Has summary')).toHaveAttribute('data-row-mode', 'two-line');
 
     act(() => {
-      useStore.setState({
-        activeServerConnectionId: localServerConnection.connectionId,
-        activeServerConnection: localServerConnection,
+      useStore.getState().applySidebarUiPrefs({
+        sidebarUi: {
+          projectView: { collapsedProjectIds: [], collapsedFolderIds: [], showAllProjectIds: [] },
+          sessionList: { rowMode: 'single-line' },
+        },
       });
     });
 
     await waitFor(() => {
       expect(sessionButton('Has summary')).toHaveAttribute('data-row-mode', 'single-line');
     });
-    expect(hanaFetchMock).toHaveBeenCalledWith('/api/preferences/sidebar-ui');
   });
 
-  it('retries sidebar UI preferences with bounded backoff after transient failures', async () => {
-    vi.useFakeTimers();
-    let preferenceAttempts = 0;
-    hanaFetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/browser/session-states') return jsonResponse({});
-      if (url === '/api/preferences/sidebar-ui') {
-        preferenceAttempts += 1;
-        if (preferenceAttempts < 3) throw new Error('server is still starting');
-        return jsonResponse({
-          sidebarUi: {
-            projectView: {
-              collapsedProjectIds: [],
-              collapsedFolderIds: [],
-              showAllProjectIds: [],
-            },
-            sessionList: { rowMode: 'single-line' },
-          },
-        });
-      }
-      return jsonResponse({});
+  it('keeps single-line rows on the very first frame after a remount, without any request', () => {
+    act(() => {
+      useStore.getState().applySidebarUiPrefs({
+        sidebarUi: {
+          projectView: { collapsedProjectIds: [], collapsedFolderIds: [], showAllProjectIds: [] },
+          sessionList: { rowMode: 'single-line' },
+        },
+      });
     });
+
+    const first = render(<SessionList />);
+    expect(sessionButton('Has summary')).toHaveAttribute('data-row-mode', 'single-line');
+    first.unmount();
 
     render(<SessionList />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(preferenceAttempts).toBe(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(299);
-    });
-    expect(preferenceAttempts).toBe(1);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(preferenceAttempts).toBe(2);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(599);
-    });
-    expect(preferenceAttempts).toBe(2);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-
-    expect(preferenceAttempts).toBe(3);
     expect(sessionButton('Has summary')).toHaveAttribute('data-row-mode', 'single-line');
+    expect(hanaFetchMock).not.toHaveBeenCalledWith('/api/preferences/sidebar-ui');
   });
 
   it('shows title search results first and then content results', async () => {
@@ -959,7 +945,7 @@ describe('SessionList context menu', () => {
         },
       ],
     });
-    hanaFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    hanaFetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/browser/session-states') return jsonResponse({});
       if (url === '/api/session-projects') {
         return jsonResponse({
@@ -969,10 +955,12 @@ describe('SessionList context menu', () => {
           },
         });
       }
-      if (url === '/api/preferences/sidebar-ui' && !init) {
-        return jsonResponse({ sidebarUi: { projectView: { collapsedProjectIds: ['project-root'], collapsedFolderIds: [], showAllProjectIds: [] } } });
-      }
       return jsonResponse({});
+    });
+    act(() => {
+      useStore.getState().applySidebarUiPrefs({
+        sidebarUi: { projectView: { collapsedProjectIds: ['project-root'], collapsedFolderIds: [], showAllProjectIds: [] } },
+      });
     });
 
     render(<SessionList />);
@@ -1019,7 +1007,7 @@ describe('SessionList context menu', () => {
         },
       ],
     });
-    hanaFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    hanaFetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/browser/session-states') return jsonResponse({});
       if (url === '/api/session-projects') {
         return jsonResponse({
@@ -1029,10 +1017,12 @@ describe('SessionList context menu', () => {
           },
         });
       }
-      if (url === '/api/preferences/sidebar-ui' && !init) {
-        return jsonResponse({ sidebarUi: { projectView: { collapsedProjectIds: [], collapsedFolderIds: ['folder-work'], showAllProjectIds: [] } } });
-      }
       return jsonResponse({});
+    });
+    act(() => {
+      useStore.getState().applySidebarUiPrefs({
+        sidebarUi: { projectView: { collapsedProjectIds: [], collapsedFolderIds: ['folder-work'], showAllProjectIds: [] } },
+      });
     });
 
     render(<SessionList />);
@@ -1231,6 +1221,167 @@ describe('SessionList context menu', () => {
 
     expect(css).toMatch(/\.projectSessionList\s*\{[\s\S]*padding-left:\s*0/);
     expect(css).not.toMatch(/\.projectSessionList\s*\{[\s\S]*margin-left:/);
+  });
+
+  describe('pinned strip reordering', () => {
+    function seedPinnedSessions(options: { withSessionIds?: boolean } = {}) {
+      const withSessionIds = options.withSessionIds !== false;
+      useStore.setState({
+        sessions: [
+          {
+            path: '/tmp/agents/hana/sessions/pin-a.jsonl',
+            sessionId: withSessionIds ? 'sess_pin_a' : null,
+            title: 'Pin A',
+            firstMessage: 'a',
+            modified: '2026-04-29T08:00:00.000Z',
+            messageCount: 1,
+            agentId: 'hana',
+            agentName: 'Hana',
+            cwd: '/tmp/project',
+            pinnedAt: '2026-04-28T07:00:00.000Z',
+            pinOrder: 1024,
+          },
+          {
+            path: '/tmp/agents/hana/sessions/pin-b.jsonl',
+            sessionId: withSessionIds ? 'sess_pin_b' : null,
+            title: 'Pin B',
+            firstMessage: 'b',
+            modified: '2026-04-29T07:00:00.000Z',
+            messageCount: 1,
+            agentId: 'hana',
+            agentName: 'Hana',
+            cwd: '/tmp/project',
+            pinnedAt: '2026-04-28T07:00:00.000Z',
+            pinOrder: 2048,
+          },
+          {
+            path: '/tmp/agents/hana/sessions/pin-c.jsonl',
+            sessionId: withSessionIds ? 'sess_pin_c' : null,
+            title: 'Pin C',
+            firstMessage: 'c',
+            modified: '2026-04-29T06:00:00.000Z',
+            messageCount: 1,
+            agentId: 'hana',
+            agentName: 'Hana',
+            cwd: '/tmp/project',
+            pinnedAt: '2026-04-28T07:00:00.000Z',
+            pinOrder: 3072,
+          },
+        ],
+      } as never);
+    }
+
+    function pinnedRow(title: string) {
+      const row = sessionButton(title).closest('[data-pinned-session-path]');
+      if (!row) throw new Error(`Missing pinned row: ${title}`);
+      return row as HTMLElement;
+    }
+
+    function stubRowGeometry(row: HTMLElement) {
+      row.getBoundingClientRect = () => ({
+        top: 0, bottom: 40, left: 0, right: 100, width: 100, height: 40, x: 0, y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    }
+
+    // jsdom has no DragEvent, so fireEvent cannot carry pointer coordinates on a
+    // drag event; define them on the event object the way a browser would.
+    function fireDragAt(
+      type: 'dragOver' | 'drop',
+      row: HTMLElement,
+      dataTransfer: ReturnType<typeof dragData>,
+      clientY: number,
+    ) {
+      const event = createEvent[type](row, { dataTransfer });
+      Object.defineProperty(event, 'clientY', { value: clientY });
+      fireEvent(row, event);
+    }
+
+    it('submits the full pinned order when a row is dropped above another row', async () => {
+      seedPinnedSessions();
+      render(<SessionList />);
+
+      const dataTransfer = dragData();
+      fireEvent.dragStart(sessionButton('Pin C'), { dataTransfer });
+      const target = pinnedRow('Pin A');
+      stubRowGeometry(target);
+      fireDragAt('dragOver', target, dataTransfer, 5);
+      fireDragAt('drop', target, dataTransfer, 5);
+
+      await waitFor(() => {
+        expect(reorderPinnedSessionsMock).toHaveBeenCalledWith([
+          'sess_pin_c',
+          'sess_pin_a',
+          'sess_pin_b',
+        ]);
+      });
+    });
+
+    it('submits the order with the dragged row below the target when dropped on its lower half', async () => {
+      seedPinnedSessions();
+      render(<SessionList />);
+
+      const dataTransfer = dragData();
+      fireEvent.dragStart(sessionButton('Pin A'), { dataTransfer });
+      const target = pinnedRow('Pin B');
+      stubRowGeometry(target);
+      fireDragAt('dragOver', target, dataTransfer, 35);
+      fireDragAt('drop', target, dataTransfer, 35);
+
+      await waitFor(() => {
+        expect(reorderPinnedSessionsMock).toHaveBeenCalledWith([
+          'sess_pin_b',
+          'sess_pin_a',
+          'sess_pin_c',
+        ]);
+      });
+    });
+
+    it('disables pinned reordering entirely when any pinned row has no session id', () => {
+      seedPinnedSessions({ withSessionIds: false });
+      render(<SessionList />);
+
+      expect(sessionButton('Pin A')).not.toHaveAttribute('draggable', 'true');
+
+      const dataTransfer = dragData();
+      fireEvent.dragStart(sessionButton('Pin C'), { dataTransfer });
+      fireDragAt('drop', pinnedRow('Pin A'), dataTransfer, 5);
+
+      expect(reorderPinnedSessionsMock).not.toHaveBeenCalled();
+    });
+
+    it('does not assign a pinned row to a project when it is dragged out of the pinned strip', async () => {
+      seedPinnedSessions();
+      hanaFetchMock.mockImplementation(async (url: string) => {
+        if (url === '/api/browser/session-states') return jsonResponse({});
+        if (url === '/api/session-projects') {
+          return jsonResponse({
+            catalog: {
+              folders: [],
+              projects: [{ id: 'project-custom', name: 'Custom Project', folderId: null, order: 0 }],
+            },
+          });
+        }
+        return jsonResponse({});
+      });
+
+      render(<SessionList />);
+      await switchToProjectView();
+
+      const dataTransfer = dragData();
+      fireEvent.dragStart(sessionButton('Pin A'), { dataTransfer });
+      const projectRow = await screen.findByText('Custom Project');
+      fireEvent.dragOver(projectRow, { dataTransfer });
+      fireEvent.drop(projectRow, { dataTransfer });
+
+      await waitFor(() => {
+        expect(hanaFetchMock).not.toHaveBeenCalledWith(
+          '/api/session-projects/session-assignment',
+          expect.anything(),
+        );
+      });
+      expect(reorderPinnedSessionsMock).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps the pinned heading font unified with date and project headings', () => {

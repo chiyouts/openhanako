@@ -1,4 +1,6 @@
 // tests/workflow-tool.test.js
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkflowTool } from "../lib/tools/workflow-tool.ts";
@@ -31,6 +33,7 @@ describe("workflow tool", () => {
     const runStore = makeRunStore();
     const exec = vi.fn(async () => ({ replyText: "bug", error: null }));
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: exec, getAgentId: () => "a1", emitEvent: () => {},
       getDeferredStore: () => store, getSubagentRunStore: () => runStore,
     });
@@ -55,31 +58,37 @@ describe("workflow tool", () => {
 
   it("后台跑完 resolve 合成结果到 deferred store，子 agent isoOpts 带 subagentTaskId", async () => {
     const store = makeStore();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hana-wf-auto-"));
+    const ws = path.join(root, "ws");
+    fs.mkdirSync(ws, { recursive: true });
     const exec = vi.fn(async () => ({ replyText: "bug", error: null }));
     const tool = createWorkflowTool({
       executeIsolated: exec, getAgentId: () => "a1", emitEvent: () => {},
       getSessionPermissionMode: () => "auto",
+      getSessionFolderScope: () => ({ cwd: ws, workspaceFolders: [], authorizedFolders: [], sandboxFolders: [ws] }),
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
     });
     const res = await tool.execute(
       "c1",
-      { script: META + `const o=[]; while(o.length<2){o.push(await agent('x'))} return o` },
+      { script: META + `const o=[]; const wf=[${JSON.stringify(ws)}]; while(o.length<2){o.push(await agent('x', { writeFolders: wf }))} return o` },
       undefined, undefined, makeCtx()
     ) as any;
     await flush();
     expect(store.resolve).toHaveBeenCalledWith(res.details.taskId, JSON.stringify(["bug", "bug"], null, 2));
     // 脚本内 agent() 派出的子 session 关联到这个 workflow task
     expect((exec.mock.calls[0] as any)[1]).toMatchObject({
-      agentId: "a1", parentSessionPath: "/s.jsonl", cwd: "/w",
+      agentId: "a1", parentSessionPath: "/s.jsonl", cwd: fs.realpathSync(ws),
       subagentContext: true, subagentTaskId: res.details.taskId, emitEvents: true,
       permissionMode: "auto", approvalPolicy: "deny_on_prompt", allowHumanApproval: false,
     });
+    fs.rmSync(root, { recursive: true, force: true });
   });
 
   it("workflow node session 持久化到 workflow-sessions/<runId>，ActivityHub 记录的 child path 不指向 ephemeral", async () => {
     const store = makeStore();
     const seenPersistDirs = [];
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async (_p, o) => {
         seenPersistDirs.push(o.persist);
         o.onSessionReady?.(`${o.persist}/child.jsonl`);
@@ -106,6 +115,7 @@ describe("workflow tool", () => {
     const hub = { upsert: vi.fn((e) => { upserts.push({ ...e }); return e; }) };
     const exec = vi.fn(async () => ({ replyText: "bug", error: null }));
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: exec,
       getAgentId: () => "a1",
       emitEvent: () => {},
@@ -147,6 +157,7 @@ describe("workflow tool", () => {
   it("脚本头非法时同步返回 toolError，不派后台任务", async () => {
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({}), emitEvent: () => {},
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
     });
@@ -158,6 +169,7 @@ describe("workflow tool", () => {
   it("rejects declarative meta.nodes workflows before dispatching a no-op background task (#1639)", async () => {
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({}), emitEvent: () => {},
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
     });
@@ -171,10 +183,15 @@ describe("workflow tool", () => {
     const store = makeStore();
     const runStore = makeRunStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "", error: "boom" }), emitEvent: () => {},
       getDeferredStore: () => store, getSubagentRunStore: () => runStore,
     });
-    const res = await tool.execute("c1", { script: META + `return await agent('x')` }, undefined, undefined, makeCtx()) as any;
+    const res = await tool.execute(
+      "c1",
+      { script: META + `return await agent('x')`, limits: { nodeRetries: 0 } },
+      undefined, undefined, makeCtx(),
+    ) as any;
     await flush();
     expect(res.details.taskId).toBeTruthy();
     expect(store.fail).toHaveBeenCalledWith(res.details.taskId, expect.stringMatching(/boom|agent 失败/));
@@ -185,6 +202,7 @@ describe("workflow tool", () => {
     const store = makeStore();
     const runStore = makeRunStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "ok", error: null }),
       emitEvent: () => {},
       getDeferredStore: () => store,
@@ -202,6 +220,7 @@ describe("workflow tool", () => {
   it("deferred 基础设施不可用时同步兜底执行，直接返回 result", async () => {
     const exec = vi.fn(async () => ({ replyText: "bug", error: null }));
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: exec, getAgentId: () => "a1", emitEvent: () => {},
       // 不提供 getDeferredStore → 同步兜底
     });
@@ -216,6 +235,7 @@ describe("workflow tool", () => {
 
   it("同步执行路径返回 undefined 时返回 toolError", async () => {
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "ok", error: null }),
       emitEvent: () => {},
       // 不提供 getDeferredStore → 同步兜底
@@ -228,6 +248,7 @@ describe("workflow tool", () => {
     const evts = [];
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "ok", error: null }),
       emitEvent: (e, sp) => evts.push({ e, sp }),
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
@@ -246,6 +267,7 @@ describe("workflow tool", () => {
   it("派出时 details 带 startedAt（inline 概览块算时长用）", async () => {
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "ok", error: null }), emitEvent: () => {},
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
     });
@@ -257,6 +279,7 @@ describe("workflow tool", () => {
     const evts = [];
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "ok", error: null }),
       emitEvent: (e, sp) => evts.push({ e, sp }),
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
@@ -274,21 +297,27 @@ describe("workflow tool", () => {
     const evts = [];
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => ({ replyText: "", error: "boom" }),
       emitEvent: (e) => evts.push(e),
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
     });
-    const res = await tool.execute("c1", { script: META + `return await agent('x')` }, undefined, undefined, makeCtx()) as any;
+    const res = await tool.execute(
+      "c1",
+      { script: META + `return await agent('x')`, limits: { nodeRetries: 0 } },
+      undefined, undefined, makeCtx(),
+    ) as any;
     await flush();
     const bu = evts.find((e) => e.type === "block_update" && e.patch?.streamStatus === "failed");
     expect(bu).toBeTruthy();
     expect(bu.taskId).toBe(res.details.taskId);
   });
 
-  it("workflow deadline 是 10 分钟，10 分钟前不 fail，到点后 fail", async () => {
+  it("默认无进展阈值是 10 分钟：卡死 9 分钟不 fail，10 分钟判死", async () => {
     vi.useFakeTimers();
     const store = makeStore();
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async () => new Promise(() => {}),
       emitEvent: () => {},
       getDeferredStore: () => store,
@@ -310,11 +339,140 @@ describe("workflow tool", () => {
     });
   });
 
+  it("僵尸回归：无进展超时 → store.fail 一次且 abort 真正传播（后续节点被拒、消息带 resume 指引）", async () => {
+    vi.useFakeTimers();
+    const store = makeStore();
+    const seenSignals: AbortSignal[] = [];
+    const tool = createWorkflowTool({
+      executeIsolated: (_p, o) => new Promise((_res, rej) => {
+        seenSignals.push(o.signal);
+        o.signal?.addEventListener("abort", () => rej(new Error("aborted by controller")), { once: true });
+      }),
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "read_only",
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    const res = await tool.execute(
+      "c1",
+      { script: META + `return await agent('x', { access: 'read', retries: 0 })`, limits: { idleTimeoutMs: 60_000, nodeTimeoutMs: 3_600_000 } },
+      undefined, undefined, makeCtx(),
+    ) as any;
+    // 只推到 idle 阈值，绝不 runOnlyPendingTimers：节点超时是 1h，此刻唯一能中止
+    // 在飞节点的只有 watchdog → failWith → controller.abort() 这一条链路。
+    await vi.advanceTimersByTimeAsync(61_000);
+    vi.useRealTimers();
+    await flush();
+    expect(store.fail).toHaveBeenCalledTimes(1);
+    const reason = String(store.fail.mock.calls[0][1]);
+    expect(reason).toMatch(/空转|无进展/);
+    expect(reason).toContain(res.details.taskId);   // resume 指引引用本次 runId
+    expect(reason).toContain("resumeFromRunId");
+    expect(seenSignals[0]?.aborted).toBe(true);      // abort 真正传播到在飞节点
+    expect(store.resolve).not.toHaveBeenCalled();
+  });
+
+  it("总量 backstop：无论节点是否还在喂狗，totalTimeoutMs 到点即判死并 abort", async () => {
+    vi.useFakeTimers();
+    const store = makeStore();
+    const seenSignals: AbortSignal[] = [];
+    const tool = createWorkflowTool({
+      executeIsolated: (_p, o) => new Promise((_res, rej) => {
+        seenSignals.push(o.signal);
+        o.signal?.addEventListener("abort", () => rej(new Error("aborted by controller")), { once: true });
+      }),
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "read_only",
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    // idle 长于 total：只有总量 backstop 能结束这条 run。
+    const res = await tool.execute(
+      "c1",
+      {
+        script: META + `return await agent('x', { access: 'read', retries: 0 })`,
+        limits: { idleTimeoutMs: 3_600_000, nodeTimeoutMs: 3_600_000, totalTimeoutMs: 300_000 },
+      },
+      undefined, undefined, makeCtx(),
+    ) as any;
+    await vi.advanceTimersByTimeAsync(301_000);
+    vi.useRealTimers();
+    await flush();
+    expect(store.fail).toHaveBeenCalledTimes(1);
+    expect(String(store.fail.mock.calls[0][1])).toMatch(/总时长/);
+    expect(res.details.taskId).toBeTruthy();
+    expect(seenSignals[0]?.aborted).toBe(true);
+  });
+
+  it("有进展就不判死：节点持续完成时 idleTimeoutMs 不触发（长任务合法化）", async () => {
+    vi.useFakeTimers();
+    const store = makeStore();
+    const tool = createWorkflowTool({
+      // 每个节点花 40s，共 10 个 → 总计 400s，远超 60s 的 idle 阈值，但一直有进展。
+      executeIsolated: () => new Promise((res) => { setTimeout(() => res({ replyText: "ok", error: null }), 40_000); }),
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "read_only",
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    const script = META + `const o=[]; while(o.length<10){o.push(await agent('x', { access: 'read' }))} return o.length`;
+    await tool.execute("c1", { script, limits: { idleTimeoutMs: 60_000, maxConcurrent: 1 } }, undefined, undefined, makeCtx());
+    await vi.advanceTimersByTimeAsync(500_000);
+    vi.useRealTimers();
+    await flush();
+    expect(store.fail).not.toHaveBeenCalled();
+    expect(store.resolve).toHaveBeenCalledWith(expect.any(String), "10");
+  });
+
+  it("limits.maxConcurrent 生效：并发被限制", async () => {
+    const store = makeStore();
+    let inFlight = 0, peak = 0;
+    const tool = createWorkflowTool({
+      executeIsolated: async () => {
+        inFlight++; peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return { replyText: "ok", error: null };
+      },
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "read_only",
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    await tool.execute(
+      "c1",
+      { script: META + `return await parallel(Array.from({length: 8}, () => () => agent('x', { access: 'read' })))`, limits: { maxConcurrent: 2 } },
+      undefined, undefined, makeCtx(),
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    expect(peak).toBeLessThanOrEqual(2);
+  });
+
+  it("默认并发是 16（不再是 256），越界 limits 被 clamp 到 64", async () => {
+    const store = makeStore();
+    let inFlight = 0, peak = 0;
+    const releases: Array<() => void> = [];
+    const makeTool = () => createWorkflowTool({
+      executeIsolated: async () => {
+        inFlight++; peak = Math.max(peak, inFlight);
+        await new Promise<void>((r) => releases.push(r));
+        inFlight--;
+        return { replyText: "ok", error: null };
+      },
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "read_only",
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    const script = META + `return await parallel(Array.from({length: 40}, () => () => agent('x', { access: 'read' })))`;
+    await makeTool().execute("c1", { script }, undefined, undefined, makeCtx());
+    await vi.waitFor(() => expect(releases.length).toBeGreaterThanOrEqual(16));
+    expect(peak).toBe(16);
+    releases.forEach((r) => r());
+    await flush();
+  });
+
   it("脚本里 agent() → ActivityHub workflow_agent 子 entry（parentTaskId/label/childSessionPath）", async () => {
     const store = makeStore();
     const upserts = [];
     const hub = { upsert: (e) => { upserts.push({ ...e }); return e; } };
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async (p, o) => { o.onSessionReady?.("/child.jsonl"); return { replyText: "x", error: null }; },
       getAgentId: () => "a1", emitEvent: () => {},
       getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
@@ -337,6 +495,7 @@ describe("workflow tool", () => {
       finishRun: vi.fn(),
     };
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async (p, o) => { o.onSessionReady?.("/child.jsonl"); return { replyText: "x", error: null }; },
       getAgentId: () => "a1", emitEvent: () => {},
       getDeferredStore: () => store,
@@ -384,6 +543,7 @@ describe("workflow tool", () => {
       }),
     };
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: async (p, o) => {
         o.onSessionReady?.("/child-moved.jsonl", { sessionId: "sess_child", sessionPath: "/child-moved.jsonl" });
         return { replyText: "x", error: null };
@@ -401,7 +561,7 @@ describe("workflow tool", () => {
     expect(done.tokens).toBe(1234); // 1000 + 234
   });
 
-  it("workflow agent fan-out 使用独立高并发上限，能同时启动几十个一次性节点", async () => {
+  it("workflow agent fan-out 抬高 limits.maxConcurrent 后能同时启动几十个一次性节点", async () => {
     const store = makeStore();
     let active = 0;
     let peak = 0;
@@ -414,6 +574,7 @@ describe("workflow tool", () => {
       return { replyText: "x", error: null };
     });
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: exec,
       getAgentId: () => "a1",
       emitEvent: () => {},
@@ -423,7 +584,10 @@ describe("workflow tool", () => {
 
     await tool.execute(
       "c1",
-      { script: META + `return await parallel(Array.from({ length: 64 }, (_, i) => () => agent('x' + i)))` },
+      {
+        script: META + `return await parallel(Array.from({ length: 64 }, (_, i) => () => agent('x' + i)))`,
+        limits: { maxConcurrent: 64 },
+      },
       undefined,
       undefined,
       makeCtx(),
@@ -443,6 +607,7 @@ describe("workflow tool", () => {
     };
     const exec = vi.fn(async () => ({ replyText: "ok", error: null }));
     const tool = createWorkflowTool({
+      getSessionPermissionMode: () => "read_only",
       executeIsolated: exec,
       getAgentId: () => "a1",
       emitEvent: () => {},
@@ -460,5 +625,75 @@ return "done";`;
     expect(stepEntries.length).toBeGreaterThanOrEqual(2); // log + parallel
     expect(stepEntries.some((e) => e.stepKind === "log")).toBe(true);
     expect(stepEntries.some((e) => e.stepKind === "parallel")).toBe(true);
+  });
+
+  it("execute 把父 session folder scope 传给 host api：节点 writeFolders 生效", async () => {
+    const store = makeStore();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hana-wf-tool-"));
+    const ws = path.join(root, "ws");
+    const sub = path.join(ws, "out");
+    fs.mkdirSync(sub, { recursive: true });
+    const exec = vi.fn(async () => ({ replyText: "ok", error: null }));
+    const tool = createWorkflowTool({
+      executeIsolated: exec, getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "auto",
+      getSessionFolderScope: (sp) => (sp === "/s.jsonl"
+        ? { cwd: ws, workspaceFolders: [], authorizedFolders: [], sandboxFolders: [ws] }
+        : null),
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    const script = META + `return await agent('x', { writeFolders: [${JSON.stringify(sub)}] })`;
+    await tool.execute("c1", { script }, undefined, undefined, makeCtx());
+    await flush();
+    expect((exec.mock.calls[0] as any)[1]).toMatchObject({
+      cwd: fs.realpathSync(sub),
+      workspaceFolders: [],
+      authorizedFolders: [],
+    });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("节点 writeFolders 越出父 scope → workflow 以失败收场（deferred fail，不静默裁剪）", async () => {
+    const store = makeStore();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hana-wf-tool-esc-"));
+    const ws = path.join(root, "ws");
+    const outside = path.join(root, "outside");
+    fs.mkdirSync(ws, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    const tool = createWorkflowTool({
+      executeIsolated: async () => ({ replyText: "ok", error: null }),
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "auto",
+      getSessionFolderScope: () => ({ cwd: ws, workspaceFolders: [], authorizedFolders: [], sandboxFolders: [ws] }),
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    const script = META + `return await agent('x', { writeFolders: [${JSON.stringify(outside)}] })`;
+    const res = await tool.execute("c1", { script }, undefined, undefined, makeCtx()) as any;
+    await flush();
+    expect(store.resolve).not.toHaveBeenCalled();
+    expect(store.fail).toHaveBeenCalledWith(
+      res.details.taskId,
+      expect.stringContaining("escapes the parent session folder scope"),
+    );
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("写能力节点未声明 writeFolders → workflow 失败，fail 消息含纠正指引", async () => {
+    const store = makeStore();
+    const tool = createWorkflowTool({
+      executeIsolated: async () => ({ replyText: "ok", error: null }),
+      getAgentId: () => "a1", emitEvent: () => {},
+      getSessionPermissionMode: () => "auto",
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+    });
+    const res = await tool.execute(
+      "c1", { script: META + `return await agent('x')` }, undefined, undefined, makeCtx(),
+    ) as any;
+    await flush();
+    expect(store.resolve).not.toHaveBeenCalled();
+    expect(store.fail).toHaveBeenCalledWith(
+      res.details.taskId,
+      expect.stringContaining("resumeFromRunId"),
+    );
   });
 });

@@ -9,6 +9,10 @@ import path from "path";
 import { createAgentSession, SessionManager } from "../lib/pi-sdk/index.ts";
 import { createDefaultSettings } from "./session-defaults.ts";
 import { compactSessionWithCachePreservation } from "./session-compactor.ts";
+import {
+  installDynamicCompactionReserve,
+  installMidRunCompaction,
+} from "./session-compaction-runtime.ts";
 import { repairOrphanToolResultEntriesInFile } from "./session-health.ts";
 import { debugLog, createModuleLogger } from "../lib/debug-log.ts";
 import { t, getLocale } from "../lib/i18n.ts";
@@ -210,6 +214,45 @@ function formatAutomationSuggestionText(payload, deps: any = {}) {
     "回复 /apply 创建最新这一项。",
     "也可以回复 /apply <建议ID> 精确创建。",
   ].join("\n");
+}
+
+/**
+ * Usage attribution for a compaction that fires between turns of a bridge run.
+ * Mirrors the reply attribution so compaction cost lands on the same
+ * conversation, with its own subsystem/trigger.
+ */
+function buildBridgeCompactionUsageContext({ sessionPath, agent, bridgeContext }) {
+  const conversationType = bridgeContext?.chatType === "channel" ? "channel" : "dm";
+  if (bridgeContext?.isBridgeSession) {
+    return {
+      source: {
+        subsystem: "compaction",
+        operation: "compact",
+        surface: conversationType,
+        trigger: "threshold",
+      },
+      attribution: {
+        kind: "phone_conversation",
+        agentId: agent?.id || bridgeContext?.agentId || null,
+        conversationId: bridgeContext?.sessionKey || bridgeContext?.chatId || sessionPath || "unknown",
+        conversationType,
+        sessionPath,
+      },
+    };
+  }
+  return {
+    source: {
+      subsystem: "compaction",
+      operation: "compact",
+      surface: "bridge",
+      trigger: "threshold",
+    },
+    attribution: {
+      kind: "session",
+      agentId: agent?.id || null,
+      sessionPath,
+    },
+  };
 }
 
 function recordBridgeAssistantUsage({ ledger, event, sessionPath, agent, model, bridgeContext }) {
@@ -614,6 +657,107 @@ export class BridgeSessionManager {
     const dir = path.dirname(this._indexPath(agent));
     fs.mkdirSync(dir, { recursive: true });
     atomicWriteSync(this._indexPath(agent), JSON.stringify(index, null, 2) + "\n");
+  }
+
+  /**
+   * sessionKey → 当前会话的 sessionId。索引无条目、条目没有文件引用、
+   * 或身份服务解析不到时返回 null。只读：不创建会话、不改索引。
+   */
+  resolveSessionIdForSessionKey(sessionKey, agent) {
+    if (!sessionKey || !agent) return null;
+    const index = this.readIndex(agent);
+    const raw = index?.[sessionKey];
+    if (!raw) return null;
+    const file = typeof raw === "string" ? raw : raw.file;
+    if (!file) return null;
+    const sessionPath = path.join(agent.sessionDir, "bridge", file);
+    return this._deps.getSessionIdForPath?.(sessionPath) ?? null;
+  }
+
+  /** sessionKey → 当前 jsonl 绝对路径（索引无条目返回 null；只读，不创建）。 */
+  resolveSessionPathForSessionKey(sessionKey, agent) {
+    if (!sessionKey || !agent) return null;
+    const index = this.readIndex(agent);
+    const entry = index?.[sessionKey];
+    if (!entry) return null;
+    const file = typeof entry === "string" ? entry : entry.file;
+    if (!file) return null;
+    return path.join(agent.sessionDir, "bridge", file);
+  }
+
+  /**
+   * 确保 sessionKey 对应的会话实体存在并返回其 sessionId（不存在则创建）。
+   * 不建 agent session、不跑一轮：空聊天里第一条消息就是循环启动命令时用。
+   */
+  async ensureSessionForSessionKey(sessionKey, agent) {
+    if (!sessionKey || !agent) return null;
+    const opened = this._openOrCreateOwnerSession(sessionKey, agent, {
+      createIfMissing: true,
+      locatorReasonPrefix: "loop_ensure_session",
+      label: "ensureSessionForSessionKey",
+    });
+    if (!opened) return null;
+    const { index, raw, bridgeDir, sessionPath, sessionRef } = opened;
+    // 只写 file 引用：确保会话存在不带任何聊天元数据，已有条目的元数据原样保留。
+    const { changed } = this._syncIndexEntry(index, sessionKey, raw, { bridgeDir, sessionPath, meta: null });
+    if (changed) this.writeIndex(index, agent);
+    return sessionRef?.sessionId || null;
+  }
+
+  /**
+   * owner bridge 会话实体的"打开或创建"序列：索引查、open/create、身份 ref、branch head。
+   * 助手消息补记与循环会话确保共用同一条路径；两者都不建 agent session、不跑 prompt。
+   * 返回 null 表示会话不存在且调用方不允许创建（或新会话没拿到 locator）。
+   */
+  _openOrCreateOwnerSession(sessionKey, agent, { createIfMissing = false, locatorReasonPrefix, label }: any = {}) {
+    const index = this.readIndex(agent);
+    const raw = index[sessionKey];
+    const existingFile = typeof raw === "string" ? raw : raw?.file || null;
+    const bridgeDir = path.join(agent.sessionDir, "bridge");
+    const sessionDir = path.join(bridgeDir, "owner");
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    let mgr = null;
+    let sessionPath = null;
+    if (existingFile) {
+      sessionPath = path.join(bridgeDir, existingFile);
+      if (fs.existsSync(sessionPath)) {
+        mgr = SessionManager.open(sessionPath, path.dirname(sessionPath));
+      } else if (!createIfMissing) {
+        log.warn(`${label}: session 文件不存在: ${sessionPath}`);
+        return null;
+      }
+    } else if (!createIfMissing) {
+      log.warn(`${label}: sessionKey "${sessionKey}" 不存在`);
+      return null;
+    }
+
+    const restoredExistingSession = !!mgr;
+    if (!mgr) {
+      const homeCwd = this._deps.getHomeCwd(agent.id) || process.cwd();
+      mgr = SessionManager.create(homeCwd, sessionDir);
+      sessionPath = mgr.getSessionFile?.() || null;
+      if (!sessionPath) {
+        log.warn(`${label}: new session path unavailable for "${sessionKey}"`);
+        return null;
+      }
+    }
+
+    const sessionRef = this._ensureBridgeSessionRef(sessionPath, {
+      agent,
+      sessionKey,
+      role: "owner",
+      locatorReason: restoredExistingSession
+        ? `${locatorReasonPrefix}_restore`
+        : `${locatorReasonPrefix}_create`,
+    });
+    if (restoredExistingSession) {
+      this._applySessionBranchHead(sessionRef.sessionPath, mgr, `${locatorReasonPrefix}_restore`);
+    } else {
+      this._syncSessionBranchHead(sessionRef.sessionPath, mgr, `${locatorReasonPrefix}_create`);
+    }
+
+    return { index, raw, bridgeDir, mgr, sessionPath, sessionRef, restoredExistingSession };
   }
 
   _normalizeIndexEntry(raw) {
@@ -1104,6 +1248,16 @@ export class BridgeSessionManager {
         ...sessionOpts,
       });
 
+      installDynamicCompactionReserve(session);
+      installMidRunCompaction(session, {
+        usageLedger: this._deps.getUsageLedger?.() || null,
+        buildUsageContext: (s: any) => buildBridgeCompactionUsageContext({
+          sessionPath: s?.sessionManager?.getSessionFile?.() || null,
+          agent,
+          bridgeContext,
+        }),
+      });
+
       const activeSessionPath = session.sessionManager?.getSessionFile?.() || null;
       this._assertBridgeSessionRefLocator(sessionRefRef.current, activeSessionPath, "bridge executeExternalMessage");
       sessionPathRef.current = activeSessionPath;
@@ -1329,52 +1483,13 @@ export class BridgeSessionManager {
     const agent = this._resolveAgent(opts, "recordAssistantMessage");
     try {
       const bridgeContext = this._buildBridgeContext(sessionKey, opts.meta, { ...opts, guest: false }, agent);
-      const index = this.readIndex(agent);
-      const raw = index[sessionKey];
-      const existingFile = typeof raw === "string" ? raw : raw?.file || null;
-      const bridgeDir = path.join(agent.sessionDir, "bridge");
-      const sessionDir = path.join(bridgeDir, "owner");
-      fs.mkdirSync(sessionDir, { recursive: true });
-
-      let mgr = null;
-      let sessionPath = null;
-      if (existingFile) {
-        sessionPath = path.join(bridgeDir, existingFile);
-        if (fs.existsSync(sessionPath)) {
-          mgr = SessionManager.open(sessionPath, path.dirname(sessionPath));
-        } else if (!opts.createIfMissing) {
-          log.warn(`recordAssistantMessage: session 文件不存在: ${sessionPath}`);
-          return false;
-        }
-      } else if (!opts.createIfMissing) {
-        log.warn(`recordAssistantMessage: sessionKey "${sessionKey}" 不存在`);
-        return false;
-      }
-
-      const restoredExistingSession = !!mgr;
-      if (!mgr) {
-        const homeCwd = this._deps.getHomeCwd(agent.id) || process.cwd();
-        mgr = SessionManager.create(homeCwd, sessionDir);
-        sessionPath = mgr.getSessionFile?.() || null;
-        if (!sessionPath) {
-          log.warn(`recordAssistantMessage: new session path unavailable for "${sessionKey}"`);
-          return false;
-        }
-      }
-
-      const sessionRef = this._ensureBridgeSessionRef(sessionPath, {
-        agent,
-        sessionKey,
-        role: "owner",
-        locatorReason: restoredExistingSession
-          ? "bridge_assistant_record_restore"
-          : "bridge_assistant_record_create",
+      const opened = this._openOrCreateOwnerSession(sessionKey, agent, {
+        createIfMissing: !!opts.createIfMissing,
+        locatorReasonPrefix: "bridge_assistant_record",
+        label: "recordAssistantMessage",
       });
-      if (restoredExistingSession) {
-        this._applySessionBranchHead(sessionRef.sessionPath, mgr, "bridge_assistant_record_restore");
-      } else {
-        this._syncSessionBranchHead(sessionRef.sessionPath, mgr, "bridge_assistant_record_create");
-      }
+      if (!opened) return false;
+      const { index, raw, bridgeDir, mgr, sessionPath, sessionRef } = opened;
 
       mgr.appendMessage(this._buildRecordedAssistantMessage(agent, text));
       this._syncSessionBranchHead(sessionRef.sessionPath, mgr, "bridge_assistant_record_append");
@@ -1610,6 +1725,16 @@ export class BridgeSessionManager {
       authStorage: mm.authStorage,
       modelRegistry: mm.modelRegistry,
       ...sessionOpts,
+    });
+
+    installDynamicCompactionReserve(session);
+    installMidRunCompaction(session, {
+      usageLedger: this._deps.getUsageLedger?.() || null,
+      buildUsageContext: (s: any) => buildBridgeCompactionUsageContext({
+        sessionPath: s?.sessionManager?.getSessionFile?.() || null,
+        agent,
+        bridgeContext,
+      }),
     });
 
     try {
