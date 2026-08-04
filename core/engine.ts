@@ -20,6 +20,7 @@ import { migrateToProvidersYaml } from "./migrate-providers.ts";
 import { migrateProviderMediaConfig } from "./provider-media-config.ts";
 import { runMigrations } from "./migrations.ts";
 import { healCredentialFileModes } from "./credential-file-healer.ts";
+import { PLUGIN_DATA_DIRNAME } from "./plugin-config.ts";
 import { pruneStaleCredentialBackups } from "./credential-backup-retention.ts";
 import { createServerRuntimeContext } from "./server-runtime-context.ts";
 import { StudioCronService } from "./studio-cron-service.ts";
@@ -421,7 +422,7 @@ export class HanaEngine {
     // The data directory keeps the historical `plugin-data/mcp` location: it is
     // where existing installs already store their connector config.
     this._mcp = new McpManager({
-      dataDir: path.join(this.hanakoHome, "plugin-data", "mcp"),
+      dataDir: path.join(this.hanakoHome, PLUGIN_DATA_DIRNAME, "mcp"),
       log: mcpLog,
     }, {
       // A connector tool may come back asking the user a question. The store is
@@ -730,7 +731,7 @@ export class HanaEngine {
     this._videoStripNotified = new Set();
 
     // UI context（用户当前视野）：sessionPath → { currentViewed, activeFile,
-    // activePreview, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.js
+    // activePreview, pinnedFiles }。由前端每次发 prompt 时带过来，经 server/routes/chat.ts
     // 写入；current_status 工具按需读取 ui_context 来解析“这个 / 当前打开的”等指代。
     this._uiContextBySession = new Map();
 
@@ -2459,7 +2460,7 @@ export class HanaEngine {
     this._skills = new SkillManager({ skillsDir, externalPaths });
     this._coreExtensionFactories = [
       /**
-       * Provider payload 兼容化（chat 路径）。与 callText 共享 core/provider-compat.js，
+       * Provider payload 兼容化（chat 路径）。与 callText 共享 core/provider-compat.ts，
        * 是两条调用路径唯一的 normalize 入口——末端只在"流式 vs 非流式 fetch"分叉。
        *
        * ctx.model 是 Pi SDK 标准入参，正常 chat session 都会带；少数 edge case
@@ -2684,7 +2685,7 @@ export class HanaEngine {
     const devPluginsDir = path.join(this.hanakoHome, "plugins-dev");
     const pluginDevRunsDir = path.join(this.hanakoHome, "plugin-dev-runs");
     const pluginDevSourcesDir = path.join(this.hanakoHome, "plugin-dev-sources");
-    const pluginDataDir = path.join(this.hanakoHome, "plugin-data");
+    const pluginDataDir = path.join(this.hanakoHome, PLUGIN_DATA_DIRNAME);
     fs.mkdirSync(pluginDevSourcesDir, { recursive: true });
 
     // Read app version for plugin compatibility check
@@ -3254,7 +3255,7 @@ export class HanaEngine {
     }
 
     // Startup assertion: every built-in tool must be categorized in
-    // shared/tool-categories.js. All session-creation paths route through
+    // shared/tool-categories.ts. All session-creation paths route through
     // this function, so a single check here catches the whole surface.
     assertAllBuiltInToolsPermissionCovered([
       ...result.tools,
