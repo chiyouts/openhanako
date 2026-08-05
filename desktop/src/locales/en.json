@@ -247,21 +247,7 @@
     },
     "rcTakingOver": "{platform} active",
     "subagentRunStateUnrecoverable": "Historical sub-session run state is unrecoverable",
-    "subagentLinkUnrecoverable": "Historical sub-session link is unrecoverable",
-    "capabilityDrift": {
-      "title": "Tool capabilities have changed",
-      "addedTools": "{count} new tools",
-      "removedTools": "{count} tools no longer available",
-      "promptUpdated": "prompt updated",
-      "separator": ", ",
-      "refreshButton": "Refresh agent tools",
-      "dismissButton": "Dismiss",
-      "confirmText": "Refreshing compacts the old conversation into a summary; details may be lost. Continue?",
-      "confirmButton": "Refresh now",
-      "cancelButton": "Cancel",
-      "refreshing": "Compacting conversation and refreshing tools…",
-      "refreshFailed": "Refresh failed"
-    }
+    "subagentLinkUnrecoverable": "Historical sub-session link is unrecoverable"
   },
   "common": {
     "on": "On",
@@ -446,6 +432,8 @@
     "contextActions": "Context actions",
     "refreshAndCompact": "Update and compact",
     "refreshAndCompactTooltip": "Update to the latest memory and tool set",
+    "refreshAndCompactBusy": "Updating and compacting conversation…",
+    "refreshAndCompactFailed": "Update and compact failed",
     "compact": "Compact",
     "mention": {
       "title": "Mention",
@@ -887,9 +875,9 @@
       "failed": "📄 Couldn't sort out the file"
     },
     "session": {
-      "running": "🔗 {name} is reaching another session",
-      "done": "🔗 {name} got through to the other session",
-      "failed": "🔗 {name} couldn't reach that session"
+      "running": "💬 Looking into another session",
+      "done": "💬 Looked into another session",
+      "failed": "💬 Couldn't open that session"
     },
     "subagent_reply": {
       "running": "🧭 {name} is handing the subagent a new task",
@@ -1000,6 +988,16 @@
       "running": "🧩 {name} is working through a plugin",
       "done": "🧩 {name} finished with the plugin",
       "failed": "🧩 The plugin didn't help"
+    },
+    "session_send": {
+      "running": "💬 Drafting a message to another session",
+      "done": "💬 Message drafted, waiting for your OK",
+      "failed": "💬 Couldn't draft the message"
+    },
+    "session_create": {
+      "running": "💬 Drafting a new session",
+      "done": "💬 New session drafted, waiting for your OK",
+      "failed": "💬 Couldn't draft the new session"
     }
   },
   "file_output": {
@@ -1051,6 +1049,7 @@
     "save": "Save",
     "saved": "Saved ✿",
     "saveFailed": "Failed to save",
+    "refreshFailed": "Refresh failed",
     "fileChangedOnDisk": "The file changed on disk, so the stale save was skipped",
     "noChanges": "Nothing to save",
     "autoSaved": "Auto-saved ✿",
@@ -2739,7 +2738,8 @@
       "deleteSelected": "Delete {count} items",
       "deleteN": "Delete {n} items",
       "newMdFile": "New Markdown Document",
-      "newFolder": "New Folder"
+      "newFolder": "New Folder",
+      "history": "File history"
     },
     "deleteConfirm": "Move \"{name}\" to the system Trash?",
     "deleteSelectedConfirm": "Move {count} selected items to the system Trash?",
@@ -3026,6 +3026,7 @@
     "platformTestUnsupported": "Testing not supported for this platform",
     "codexNoHealthCheck": "Codex API does not support health check",
     "modelNotFound": "Model not found: {id}",
+    "modelContextTooLarge": "The new model's context window is too small for this conversation. Compact the conversation first, then switch models again.",
     "noUtilityModel": "Utility model not configured, please add one in settings",
     "noUtilityLargeModel": "utility_large model not configured, please add one in settings",
     "modelNoProvider": "{role} model \"{model}\" has no provider association",
@@ -3501,7 +3502,25 @@
       "attachmentDirName": "Attachments"
     }
   },
+  "fileHistory": {
+    "title": "File History",
+    "searchPlaceholder": "Search files…",
+    "deletedGroup": "Deleted files",
+    "empty": "No history yet",
+    "noVersions": "No versions for this file",
+    "selectVersion": "Select a version to see changes",
+    "restore": "Restore this version",
+    "restoreDone": "Restored",
+    "error": "Operation failed",
+    "origin": {
+      "event": "In-app edit",
+      "watcher": "External change",
+      "sweep": "Baseline snapshot",
+      "restore": "Restore"
+    }
+  },
   "preview": {
+    "fileHistory": "File history",
     "cover": {
       "saveImage": "Save image",
       "regenerateWithPrompt": "Generate image with custom prompt",

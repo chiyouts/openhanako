@@ -245,20 +245,6 @@
       "deleteFailed": "刪除失敗",
       "daysAgo": "封存於 {days} 天前"
     },
-    "capabilityDrift": {
-      "title": "工具能力有更新",
-      "addedTools": "新增 {count} 個工具",
-      "removedTools": "{count} 個工具已失效",
-      "promptUpdated": "提示詞有更新",
-      "separator": "、",
-      "refreshButton": "重新整理 Agent 工具",
-      "dismissButton": "忽略",
-      "confirmText": "重新整理會把舊對話壓縮成摘要，細節可能遺失。要繼續嗎？",
-      "confirmButton": "確認重新整理",
-      "cancelButton": "取消",
-      "refreshing": "正在壓縮對話並重新整理工具…",
-      "refreshFailed": "重新整理失敗"
-    },
     "rcTakingOver": "{platform} 接管中",
     "subagentRunStateUnrecoverable": "歷史 subagent 執行狀態不可恢復",
     "subagentLinkUnrecoverable": "歷史 subagent 連結不可恢復"
@@ -441,6 +427,8 @@
     "contextActions": "上下文操作",
     "refreshAndCompact": "更新並壓縮",
     "refreshAndCompactTooltip": "更新到最新的記憶和工具集",
+    "refreshAndCompactBusy": "正在更新並壓縮對話…",
+    "refreshAndCompactFailed": "更新並壓縮失敗",
     "compact": "壓縮",
     "noAskThisConversation": "本对话不再询问",
     "confirmMoreOptions": "更多确认选项",
@@ -887,9 +875,9 @@
       "failed": "📄 檔案沒弄好"
     },
     "session": {
-      "running": "🔗 {name} 正在聯絡另一個會話",
-      "done": "🔗 {name} 跟另一個會話聯絡上了",
-      "failed": "🔗 {name} 沒聯絡上那個會話"
+      "running": "💬 正在查看別的會話",
+      "done": "💬 查看了別的會話",
+      "failed": "💬 別的會話沒打開"
     },
     "subagent_reply": {
       "running": "🧭 {name} 正在給 subagent 派新任務",
@@ -1000,6 +988,16 @@
       "running": "🧩 {name} 正在用外掛做事",
       "done": "🧩 {name} 用外掛做完了",
       "failed": "🧩 外掛沒幫上忙"
+    },
+    "session_send": {
+      "running": "💬 正在擬給別的會話的訊息",
+      "done": "💬 訊息擬好了，等你確認",
+      "failed": "💬 訊息沒擬成"
+    },
+    "session_create": {
+      "running": "💬 正在擬一個新會話",
+      "done": "💬 新會話擬好了，等你確認",
+      "failed": "💬 新會話沒擬成"
     }
   },
   "file_output": {
@@ -1051,6 +1049,7 @@
     "save": "儲存",
     "saved": "儲存成功 ✿",
     "saveFailed": "儲存失敗",
+    "refreshFailed": "重新整理失敗",
     "fileChangedOnDisk": "檔案已被外部修改，已略過舊版本儲存",
     "noChanges": "沒有需要儲存的變更",
     "autoSaved": "已自動儲存 ✿",
@@ -2739,7 +2738,8 @@
       "deleteSelected": "刪除 {count} 項",
       "deleteN": "刪除 {n} 項",
       "newMdFile": "新建 Markdown 文件",
-      "newFolder": "新建資料夾"
+      "newFolder": "新建資料夾",
+      "history": "歷史版本"
     },
     "deleteConfirm": "要把「{name}」移到系統垃圾桶嗎？",
     "deleteSelectedConfirm": "要把選取的 {count} 項移到系統垃圾桶嗎？",
@@ -3021,6 +3021,7 @@
     "platformTestUnsupported": "該平台暫不支援測試",
     "codexNoHealthCheck": "codex API 不支援健康檢測",
     "modelNotFound": "找不到模型: {id}",
+    "modelContextTooLarge": "新模型的上下文空間不足，無法容納目前會話。請先壓縮目前會話，再重新切換。",
     "noUtilityModel": "未設定 utility 模型，請在設定中新增",
     "noUtilityLargeModel": "未設定 utility_large 模型，請在設定中新增",
     "modelNoProvider": "{role} 模型 \"{model}\" 沒有 provider 歸屬",
@@ -3416,7 +3417,25 @@
       "text": "Beautify 当前支持两类能力。1) Markdown cover 工作流：先读取封面风格说明，再准备一张图片，可以来自生图工具、未来的内置头图库或用户本地图片，最后把图片复制到附件文件夹并写入 cover frontmatter。2) 整页 HTML 美学规范：生成网页 / 排版页 / 报告页前，先用 beautify_get-html-style-guide 获取 Hana 預設美术方向（无参拿路由器，再按 section 逐节取规范）。"
     }
   },
+  "fileHistory": {
+    "title": "檔案歷史",
+    "searchPlaceholder": "搜尋檔案…",
+    "deletedGroup": "已刪除檔案",
+    "empty": "尚無歷史記錄",
+    "noVersions": "該檔案暫無版本",
+    "selectVersion": "選擇一個版本查看變化",
+    "restore": "還原此版本",
+    "restoreDone": "已還原",
+    "error": "操作失敗",
+    "origin": {
+      "event": "應用內修改",
+      "watcher": "外部修改",
+      "sweep": "基線快照",
+      "restore": "還原"
+    }
+  },
   "preview": {
+    "fileHistory": "歷史版本",
     "fileMovedOrDeleted": "原稿件已移动或者删除",
     "legacyImageUpgrade": "此图片预览已升级，点此在新查看器打开",
     "coverLayoutSaveFailed": "Cover 布局保存失败，文件可能已被外部修改。",

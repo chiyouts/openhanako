@@ -1,7 +1,6 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { Hono } from "hono";
 import {
   McpManager,
   MCP_CONNECTORS_STATUS_TOOL_NAME,
@@ -13,7 +12,7 @@ import {
   toMcpToolId,
 } from "../core/mcp/manager.ts";
 import { McpHttpError } from "../core/mcp/clients/http-client.ts";
-import { createMcpRoute } from "../server/routes/mcp.ts";
+import { resolveToolInvocationPermission } from "../lib/permission/tool-invocation-permission.ts";
 
 /**
  * Build a manager with an in-memory config store. Production injects the
@@ -27,6 +26,163 @@ function createManager({ dataDir, config, log = console }: any = {}, options: an
 describe("MCP runtime policy", () => {
   it("uses stable sanitized tool ids for dynamic MCP tools", () => {
     expect(toMcpToolId("github.com", "search/repositories")).toBe("github_com_search_repositories");
+  });
+
+  it("keeps display and wire names intact while publishing a lowercase internal id", async () => {
+    const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    const definition = createMcpToolDefinition({
+      connectorId: "GitHub",
+      toolName: "SearchIssues",
+      description: "Search GitHub issues",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+      getGlobalEnabled: () => true,
+      getAgentConfig: async () => ({
+        mcp: { connectors: { GitHub: { enabled: true, tools: { SearchIssues: true } } } },
+      }),
+      callTool,
+    });
+
+    expect(definition.name).toBe("github_searchissues");
+    expect(definition.name).toMatch(/^[a-z][a-z0-9_-]*$/);
+    expect(definition.sessionPermission.resolveInvocation()).toEqual({
+      action: "invoke",
+      kind: "review",
+      capability: "github_searchissues.invoke",
+    });
+
+    await definition.execute("call-1", { query: "uppercase" }, { agentId: "hana" });
+    expect(callTool).toHaveBeenCalledWith(
+      "GitHub",
+      "SearchIssues",
+      { query: "uppercase" },
+      { agentId: "hana" },
+    );
+
+    const runtime = createManager({
+      dataDir: path.join(os.tmpdir(), "hana-mcp-uppercase-id"),
+      config: {
+        get: vi.fn(() => ({
+          enabled: true,
+          connectors: [{
+            id: "GitHub",
+            name: "GitHub Enterprise",
+            url: "https://mcp.example.test",
+            permissionMode: "allowlist",
+            toolPermissions: { mcp_GitHub_SearchIssues: "allow" },
+            pinnedTools: { GitHub_SearchIssues: true },
+            tools: [{ name: "SearchIssues", title: "Search Issues" }],
+          }],
+        })),
+        set: vi.fn(),
+      },
+      log: console,
+    });
+    runtime.registerCachedTools();
+    const published = runtime.getAllTools().find((tool) => tool.name === "mcp_github_searchissues");
+    expect(published).toBeTruthy();
+    expect(resolveToolInvocationPermission(published, {})).toMatchObject({
+      ok: true,
+      source: "descriptor",
+      descriptor: { kind: "read", capability: "github_searchissues.invoke" },
+    });
+    expect(runtime.getState().connectors[0]).toMatchObject({
+      id: "GitHub",
+      name: "GitHub Enterprise",
+      toolPermissions: { SearchIssues: "allow" },
+      pinnedTools: { SearchIssues: true },
+      tools: [{
+        name: "SearchIssues",
+        title: "Search Issues",
+        qualifiedName: "github_searchissues",
+        capability: "github_searchissues.invoke",
+      }],
+    });
+    expect(isMcpToolEnabledForAgentConfig({
+      mcp: {
+        connectors: {
+          GitHub: {
+            enabled: true,
+            tools: { mcp_GitHub_SearchIssues: true },
+          },
+        },
+      },
+    }, {
+      globalEnabled: true,
+      connectorId: "GitHub",
+      toolName: "SearchIssues",
+    })).toBe(true);
+  });
+
+  it("rejects raw MCP identities that collapse to the same lowercase tool id", () => {
+    for (const collidingTools of [
+      [{ name: "SearchIssues" }, { name: "searchissues" }],
+      [{ name: "search/issues" }, { name: "search.issues" }],
+    ]) {
+      expect(() => normalizeMcpConfig({
+        enabled: true,
+        connectors: [{ id: "GitHub", url: "https://mcp.example.test", tools: collidingTools }],
+      })).toThrow(/MCP tool id collision.*github.*GitHub\/.*both normalize/i);
+    }
+
+    expect(() => normalizeMcpConfig({
+      enabled: true,
+      connectors: [
+        { id: "GitHub", url: "https://one.example.test", tools: [{ name: "Search" }] },
+        { id: "github", url: "https://two.example.test", tools: [{ name: "search" }] },
+      ],
+    })).toThrow(/MCP tool id collision.*GitHub\/Search.*github\/search/i);
+  });
+
+  it("keeps legacy lowercase qualified names and raw permission keys compatible", () => {
+    const config = normalizeMcpConfig({
+      enabled: true,
+      connectors: [{
+        id: "github.com",
+        url: "https://mcp.example.test",
+        permissionMode: "allowlist",
+        // A short-lived historical shape stored the qualified model-facing id
+        // instead of the MCP server's exact tool name.
+        toolPermissions: { github_com_search_repositories: "allow" },
+        tools: [{ name: "search/repositories" }],
+      }],
+    });
+
+    expect(toMcpToolId("github.com", "search/repositories")).toBe("github_com_search_repositories");
+    expect(config.connectors[0].toolPermissions).toEqual({ "search/repositories": "allow" });
+    expect(isMcpToolEnabledForAgentConfig({
+      mcp: {
+        connectors: {
+          "github.com": {
+            enabled: true,
+            tools: { github_com_search_repositories: true },
+          },
+        },
+      },
+    }, {
+      globalEnabled: true,
+      connectorId: "github.com",
+      toolName: "search/repositories",
+    })).toBe(true);
+
+    const definition = createMcpToolDefinition({
+      connectorId: config.connectors[0].id,
+      toolName: config.connectors[0].tools[0].name,
+      getGlobalEnabled: () => true,
+      getAgentConfig: async () => ({}),
+      callTool: vi.fn(),
+      getPermissionPolicy: () => ({
+        permissionMode: config.connectors[0].permissionMode,
+        toolPermission: config.connectors[0].toolPermissions["search/repositories"],
+      }),
+    });
+    expect(resolveToolInvocationPermission(definition, {})).toMatchObject({
+      ok: true,
+      source: "descriptor",
+      descriptor: {
+        kind: "read",
+        capability: "github_com_search_repositories.invoke",
+      },
+    });
   });
 
   it("publishes agent-facing tool names as the mcp namespace plus the sanitized tool id", () => {
@@ -814,122 +970,6 @@ describe("MCP runtime policy", () => {
       ],
     });
     expect(result.settingsUpdate.summary).not.toContain("secret-token");
-  });
-
-  it("marks agent session capability snapshots stale after MCP agent tool settings change", async () => {
-    const request = vi.fn(async (type, _payload) => {
-      if (type === "agent:config") {
-        return { config: { mcp: { connectors: { github: { enabled: true } } } } };
-      }
-      if (type === "agent:update-config") {
-        return { config: { mcp: { connectors: { github: { enabled: true, tools: { search: true } } } } } };
-      }
-      if (type === "session:capability-drift:mark-stale") {
-        return { ok: true, marked: 1 };
-      }
-      return {};
-    });
-    const runtime = createManager({
-      dataDir: path.join(os.tmpdir(), "hana-mcp-test"),
-      config: {
-        get: vi.fn(() => ({
-          enabled: true,
-          connectors: [{ id: "github", name: "GitHub", tools: [{ name: "search" }] }],
-        })),
-        set: vi.fn(),
-      },
-      log: console,
-    });
-    await runtime.start({ request });
-
-    await runtime.handleSettingsAction({
-      action: "mcp.agent.tool.enable",
-      agentId: "hana",
-      payload: {
-        connectorId: "github",
-        toolName: "search",
-        enabled: true,
-      },
-    } as any);
-
-    expect(request).toHaveBeenCalledWith("session:capability-drift:mark-stale", {
-      agentId: "hana",
-      connectorId: "github",
-      reason: "mcp.agent.tool.enable",
-    });
-  });
-
-  it("marks session capability snapshots stale for MCP REST settings mutations", async () => {
-    let stored = { enabled: false, connectors: [] };
-    const request = vi.fn(async (type) => {
-      if (type === "agent:config") return { config: {} };
-      if (type === "session:capability-drift:mark-stale") return { ok: true, marked: 1 };
-      return {};
-    });
-    const runtime = createManager({
-      dataDir: path.join(os.tmpdir(), "hana-mcp-test"),
-      config: {
-        get: vi.fn(() => stored),
-        set: vi.fn((_key, value) => {
-          stored = value;
-        }),
-      },
-      log: console,
-    });
-    await runtime.start({ request });
-    const app = new Hono();
-    app.route("/api", createMcpRoute({ mcp: runtime } as any));
-
-    const res = await app.request("/api/mcp/settings/enabled", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: true }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(request).toHaveBeenCalledWith("session:capability-drift:mark-stale", {
-      reason: "mcp.global.enabled",
-    });
-  });
-
-  it("marks only the target agent stale for MCP REST agent tool mutations", async () => {
-    const request = vi.fn(async (type, _payload) => {
-      if (type === "agent:config") {
-        return { config: { mcp: { connectors: { github: { enabled: true } } } } };
-      }
-      if (type === "agent:update-config") {
-        return { config: { mcp: { connectors: { github: { enabled: true, tools: { search: true } } } } } };
-      }
-      if (type === "session:capability-drift:mark-stale") return { ok: true, marked: 1 };
-      return {};
-    });
-    const runtime = createManager({
-      dataDir: path.join(os.tmpdir(), "hana-mcp-test"),
-      config: {
-        get: vi.fn(() => ({
-          enabled: true,
-          connectors: [{ id: "github", name: "GitHub", tools: [{ name: "search" }] }],
-        })),
-        set: vi.fn(),
-      },
-      log: console,
-    });
-    await runtime.start({ request });
-    const app = new Hono();
-    app.route("/api", createMcpRoute({ mcp: runtime } as any));
-
-    const res = await app.request("/api/mcp/agents/hana/connectors/github", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tools: { search: true } }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(request).toHaveBeenCalledWith("session:capability-drift:mark-stale", {
-      agentId: "hana",
-      connectorId: "github",
-      reason: "mcp.agent.tool.enable",
-    });
   });
 
   it("returns an explicit tool error when MCP is globally disabled at call time", async () => {

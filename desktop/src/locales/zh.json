@@ -247,20 +247,6 @@
     },
     "subagentRunStateUnrecoverable": "历史 subagent 运行状态不可恢复",
     "subagentLinkUnrecoverable": "历史 subagent 链接不可恢复",
-    "capabilityDrift": {
-      "title": "工具能力有更新",
-      "addedTools": "新增 {count} 个工具",
-      "removedTools": "{count} 个工具已失效",
-      "promptUpdated": "提示词有更新",
-      "separator": "、",
-      "refreshButton": "刷新 Agent 工具",
-      "dismissButton": "忽略",
-      "confirmText": "刷新会把旧对话压缩成摘要，细节可能丢失。继续吗？",
-      "confirmButton": "确认刷新",
-      "cancelButton": "取消",
-      "refreshing": "正在压缩对话并刷新工具…",
-      "refreshFailed": "刷新失败"
-    },
     "rcTakingOver": "{platform} 接管中"
   },
   "common": {
@@ -441,6 +427,8 @@
     "contextActions": "上下文操作",
     "refreshAndCompact": "更新并压缩",
     "refreshAndCompactTooltip": "更新到最新的记忆和工具集",
+    "refreshAndCompactBusy": "正在更新并压缩对话…",
+    "refreshAndCompactFailed": "更新并压缩失败",
     "compact": "压缩",
     "noAskThisConversation": "本对话不再询问",
     "confirmMoreOptions": "更多确认选项",
@@ -887,9 +875,9 @@
       "failed": "📄 文件没弄好"
     },
     "session": {
-      "running": "🔗 {name} 正在联系另一个会话",
-      "done": "🔗 {name} 跟另一个会话联系上了",
-      "failed": "🔗 {name} 没联系上那个会话"
+      "running": "💬 正在查看别的会话",
+      "done": "💬 查看了别的会话",
+      "failed": "💬 别的会话没打开"
     },
     "subagent_reply": {
       "running": "🧭 {name} 正在给 subagent 派新任务",
@@ -1000,6 +988,16 @@
       "running": "🧩 {name} 正在用插件干活",
       "done": "🧩 {name} 用插件干完了",
       "failed": "🧩 插件没帮上忙"
+    },
+    "session_send": {
+      "running": "💬 正在拟给别的会话的消息",
+      "done": "💬 消息拟好了，等你确认",
+      "failed": "💬 消息没拟成"
+    },
+    "session_create": {
+      "running": "💬 正在拟一个新会话",
+      "done": "💬 新会话拟好了，等你确认",
+      "failed": "💬 新会话没拟成"
     }
   },
   "file_output": {
@@ -1051,6 +1049,7 @@
     "save": "保存",
     "saved": "保存成功 ✿",
     "saveFailed": "保存失败",
+    "refreshFailed": "刷新失败",
     "fileChangedOnDisk": "文件已被外部修改，已跳过旧版本保存",
     "noChanges": "没有需要保存的更改",
     "autoSaved": "已自动保存 ✿",
@@ -2739,7 +2738,8 @@
       "deleteSelected": "删除 {count} 项",
       "deleteN": "删除 {n} 项",
       "newMdFile": "新建 Markdown 文档",
-      "newFolder": "新建文件夹"
+      "newFolder": "新建文件夹",
+      "history": "历史版本"
     },
     "deleteConfirm": "要把「{name}」移到系统废纸篓吗？",
     "deleteSelectedConfirm": "要把选中的 {count} 项移到系统废纸篓吗？",
@@ -3021,6 +3021,7 @@
     "platformTestUnsupported": "该平台暂不支持测试",
     "codexNoHealthCheck": "codex API 不支持健康检测",
     "modelNotFound": "找不到模型: {id}",
+    "modelContextTooLarge": "新模型的上下文空间不足，无法容纳当前会话。请先压缩当前会话，再重新切换。",
     "noUtilityModel": "未配置 utility 模型，请在设置中添加",
     "noUtilityLargeModel": "未配置 utility_large 模型，请在设置中添加",
     "modelNoProvider": "{role} 模型 \"{model}\" 没有 provider 归属",
@@ -3378,7 +3379,25 @@
       "attachmentDirName": "文本附件"
     }
   },
+  "fileHistory": {
+    "title": "文件历史",
+    "searchPlaceholder": "搜索文件…",
+    "deletedGroup": "已删除文件",
+    "empty": "暂无历史记录",
+    "noVersions": "该文件暂无版本",
+    "selectVersion": "选择一个版本查看变化",
+    "restore": "还原此版本",
+    "restoreDone": "已还原",
+    "error": "操作失败",
+    "origin": {
+      "event": "应用内修改",
+      "watcher": "外部修改",
+      "sweep": "基线快照",
+      "restore": "还原"
+    }
+  },
   "preview": {
+    "fileHistory": "历史版本",
     "cover": {
       "saveImage": "保存图片",
       "regenerateWithPrompt": "自定义提示词生成图片",

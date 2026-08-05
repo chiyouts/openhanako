@@ -38,7 +38,9 @@ import {
   buildCachePreservingCompactionPrefix,
   createCachePreservingCompactionResult,
   getCachePreservingCompactionMaxTokens,
+  isCompactionHistoryReplayError,
   normalizeCompactionProviderPayload,
+  projectMessagesToLatestCompactionUsageEpoch,
   shouldHardTruncateCachePreservingCompaction,
   stripInlineMediaFromCompactionPreparation,
 } from "../../core/session-compactor.ts";
@@ -193,6 +195,15 @@ export function createCompactionGuardExtension(opts: Record<string, any> = {}) {
   }
 
   return function (pi) {
+    // A live compactionSummary starts a new usage epoch. Retained assistant
+    // messages are ordered after that summary but still carry usage from the
+    // old, much larger prompt. Pi AI's output clamp reads that usage before it
+    // builds the provider payload, so clear it only in this context projection.
+    pi.on("context", (event) => {
+      const messages = projectMessagesToLatestCompactionUsageEpoch(event.messages);
+      return messages === event.messages ? undefined : { messages };
+    });
+
     // ── L1: tool_result 单条硬限 ──
     pi.on("tool_result", (event) => {
       try {
@@ -330,6 +341,19 @@ export function createCompactionGuardExtension(opts: Record<string, any> = {}) {
           prefix = await buildPrefix(reasoningReplay);
           log.warn(`[L3] cache recovery compaction: reasoning replay unavailable, historical thinking cleared for this compaction`);
         }
+        if (prefix.historyRecovery) {
+          cacheMetadataOverride = buildCacheStrategyMetadata({
+            cacheStrategy: CACHE_STRATEGIES.CACHE_RECOVERY,
+            cacheGroup: "compaction.history",
+            templateVersion: "v1",
+            strict: false,
+            degradeReason: "malformed_reasoning_history_trim",
+          });
+          log.warn(
+            `[L3] cache recovery compaction: removed ${prefix.historyRecovery.removedMessageCount} `
+            + `provider-visible messages at a complete old-history tool boundary`,
+          );
+        }
         const messages = prefix.messages;
         const fit = shouldHardTruncateCachePreservingCompaction({
           preparation: rawPreparation,
@@ -408,6 +432,7 @@ export function createCompactionGuardExtension(opts: Record<string, any> = {}) {
           // request that reasons differently than the live requests it follows
           // cannot ride their prefix, whichever key it is filed under.
           requestReasoning = reasoningLevel,
+          requestHistoryRecovery = prefix.historyRecovery,
         } = {}) => ({
           preparation,
           model,
@@ -454,6 +479,7 @@ export function createCompactionGuardExtension(opts: Record<string, any> = {}) {
           convertToLlm: async (input: any[]) => input,
           usageLedger,
           usageContext: buildUsageContext?.({ event, ctx, model }) || null,
+          historyRecovery: requestHistoryRecovery,
         });
 
         async function retryWithClearedReasoningReplay(originalError: any) {
@@ -486,6 +512,7 @@ export function createCompactionGuardExtension(opts: Record<string, any> = {}) {
             requestKeyParams: recoveryCacheKeyParams,
             requestThinking: thinkingLevel,
             requestReasoning: reasoningLevel,
+            requestHistoryRecovery: recoveryPrefix.historyRecovery,
           }));
         }
 
@@ -508,6 +535,9 @@ export function createCompactionGuardExtension(opts: Record<string, any> = {}) {
         if (event.signal?.aborted || err?.name === "AbortError") {
           log.log("[L3] cache-preserving compaction aborted; stopping without a native summary");
           return { cancel: true };
+        }
+        if (isCompactionHistoryReplayError(err)) {
+          throw err;
         }
         if (allowNativeFallback) {
           return fallBackToPiNative(err?.message || String(err));

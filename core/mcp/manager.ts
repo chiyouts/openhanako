@@ -117,6 +117,65 @@ function normalizeToolPermissions(value) {
   return normalized;
 }
 
+function hasOwn(record, key) {
+  return !!record && Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** The previous agent-facing id, retained only for reading historical keys. */
+function toLegacyMcpToolId(serverId, toolName) {
+  return sanitizeId(`${serverId}_${toolName}`);
+}
+
+/**
+ * All persisted spellings that have identified one MCP tool over time.
+ *
+ * The MCP server's exact tool name remains the primary storage key. Older
+ * builds and external clients may instead have stored the qualified id, with
+ * or without the public `mcp_` namespace, so those spellings stay readable.
+ */
+function mcpToolIdentityAliases(connectorId, toolName) {
+  const canonical = toMcpToolId(connectorId, toolName);
+  const legacy = toLegacyMcpToolId(connectorId, toolName);
+  return [...new Set([
+    canonical,
+    `${MCP_TOOL_NAMESPACE}_${canonical}`,
+    legacy,
+    `${MCP_TOOL_NAMESPACE}_${legacy}`,
+  ])].filter((key) => key && key !== toolName);
+}
+
+/**
+ * Read a raw-name setting first, then historical qualified spellings.
+ * Conflicting legacy values fail closed by returning undefined.
+ */
+function readMcpToolIdentitySetting(record, connectorId, toolName) {
+  if (!isPlainObject(record)) return undefined;
+  if (hasOwn(record, toolName)) return record[toolName];
+  const values = mcpToolIdentityAliases(connectorId, toolName)
+    .filter((key) => hasOwn(record, key))
+    .map((key) => record[key]);
+  if (values.length === 0) return undefined;
+  return values.every((value) => value === values[0]) ? values[0] : undefined;
+}
+
+/**
+ * Give known historical keys a raw-name mirror for current UI/runtime readers.
+ * Unknown keys are retained: a stopped connector may not have refreshed the
+ * tool they belong to yet, so dropping them would erase user intent.
+ */
+function mirrorHistoricalToolSettings(record, connectorId, tools) {
+  const mirrored = { ...record };
+  for (const tool of tools) {
+    const value = readMcpToolIdentitySetting(mirrored, connectorId, tool.name);
+    if (value === undefined) continue;
+    mirrored[tool.name] = value;
+    for (const alias of mcpToolIdentityAliases(connectorId, tool.name)) {
+      delete mirrored[alias];
+    }
+  }
+  return mirrored;
+}
+
 /**
  * Decide the permission kind for a single MCP tool invocation.
  *
@@ -186,6 +245,16 @@ function normalizeConnector(connector, fallbackId = "") {
   const tools = Array.isArray(connector.tools)
     ? connector.tools.map(normalizeTool).filter(Boolean)
     : [];
+  const toolPermissions = mirrorHistoricalToolSettings(
+    normalizeToolPermissions(connector.toolPermissions),
+    id,
+    tools,
+  );
+  const pinnedTools = mirrorHistoricalToolSettings(
+    normalizePinnedTools(connector.pinnedTools),
+    id,
+    tools,
+  );
   const transport = normalizeTransport(connector);
   const authorizationToken = stringOrEmpty(connector.authorizationToken || connector.authorization_token);
   const oauth = normalizeOAuthState(connector.oauth);
@@ -225,13 +294,13 @@ function normalizeConnector(connector, fallbackId = "") {
     // pre-existing behaviour (every invocation reviewed), so no write-time
     // migration is needed and an untouched config keeps its old semantics.
     permissionMode: normalizePermissionMode(connector.permissionMode),
-    toolPermissions: normalizeToolPermissions(connector.toolPermissions),
+    toolPermissions,
     // Only an explicit `true` opts in; a truthy non-boolean must not be
     // coerced into an implicit grant.
     trustReadOnlyHint: connector.trustReadOnlyHint === true,
     // Read-time compatibility: connectors saved before deferred loading existed
     // have no pins, which is exactly the default.
-    pinnedTools: normalizePinnedTools(connector.pinnedTools),
+    pinnedTools,
     tools,
   };
 }
@@ -245,7 +314,40 @@ export function sanitizeId(value) {
 }
 
 export function toMcpToolId(serverId, toolName) {
-  return sanitizeId(`${serverId}_${toolName}`);
+  const normalized = toLegacyMcpToolId(serverId, toolName).toLowerCase();
+  if (!normalized) return "tool";
+  // The permission layer and strict model providers require a letter first.
+  // Prefixing digit-led server ids keeps the raw connector id untouched while
+  // giving the model a valid, deterministic internal name.
+  return /^[a-z]/.test(normalized) ? normalized : `tool_${normalized}`;
+}
+
+/**
+ * Refuse any ambiguous projection before tools reach the model or catalog.
+ * Lowercasing is intentionally lossy for display names; this check is what
+ * prevents two distinct server identities from silently sharing one executor.
+ */
+export function assertUniqueMcpToolIds(connectors) {
+  const seen = new Map([
+    [MCP_CONNECTORS_STATUS_TOOL_NAME, { connectorId: MCP_TOOL_NAMESPACE, toolName: MCP_CONNECTORS_STATUS_TOOL_NAME }],
+  ]);
+  for (const connector of Array.isArray(connectors) ? connectors : []) {
+    for (const tool of connector?.tools || []) {
+      const canonical = toMcpToolId(connector.id, tool.name);
+      const previous = seen.get(canonical);
+      if (!previous) {
+        seen.set(canonical, { connectorId: connector.id, toolName: tool.name });
+        continue;
+      }
+      const error: any = new Error(
+        `MCP tool id collision "${canonical}": `
+        + `"${previous.connectorId}/${previous.toolName}" and "${connector.id}/${tool.name}" `
+        + "both normalize to the same lowercase model-facing name. Rename the connector id or server tool.",
+      );
+      error.code = "MCP_TOOL_ID_COLLISION";
+      throw error;
+    }
+  }
 }
 
 /** One-line parameter digest for a catalog row, cheap enough to hold in memory. */
@@ -274,6 +376,7 @@ export function normalizeMcpConfig(value) {
   const connectors = rawConnectors
     .map((connector, index) => normalizeConnector(connector, `connector_${index + 1}`))
     .filter(Boolean);
+  assertUniqueMcpToolIds(connectors);
   return {
     ...DEFAULT_CONFIG,
     enabled: input.enabled === true,
@@ -304,7 +407,7 @@ export function isMcpToolEnabledForAgentConfig(agentConfig, { globalEnabled, ser
   const mcp = normalizeAgentMcpConfig(agentConfig);
   const connector = mcp.connectors?.[id] || mcp.servers?.[id];
   if (connector?.enabled !== true) return false;
-  return connector?.tools?.[toolName] === true;
+  return readMcpToolIdentitySetting(connector?.tools, id, toolName) === true;
 }
 
 interface McpLiveAvailabilityInput {
@@ -689,7 +792,7 @@ export class McpManager {
   /**
    * Attach the manager to the message bus and bring cached connectors up.
    * The bus is assigned before load() runs, because auto-start reaches back
-   * through the bus for agent config and capability-drift notifications.
+   * through the bus for agent config.
    */
   async start(bus) {
     this._bus = bus || null;
@@ -778,7 +881,6 @@ export class McpManager {
       config.deferThreshold = deferThreshold;
     }
     const saved = this.saveConfig(config);
-    await this._markCapabilitySnapshotsStale?.({ reason: "mcp.defer.settings" });
     return saved;
   }
 
@@ -989,7 +1091,7 @@ export class McpManager {
     this.establishing.add(id);
     try {
       await client.start();
-      await this.refreshTools(id, { staleReason: "mcp.connector.start" });
+      await this.refreshTools(id);
       this.connectorStatus.delete(id);
       return this.getConfig().connectors.find((s) => s.id === id);
     } catch (err) {
@@ -1224,7 +1326,7 @@ export class McpManager {
     this.reconnectState.delete(id);
   }
 
-  async refreshTools(id, { staleReason = "mcp.connector.refresh_tools" }: any = {}) {
+  async refreshTools(id) {
     const client = this.clients.get(id);
     if (!client?.running) throw new Error(`MCP connector "${id}" is not running`);
     const tools = await client.listTools();
@@ -1239,10 +1341,6 @@ export class McpManager {
     connector.tools = tools.map(normalizeTool).filter(Boolean);
     this.saveConfig(config);
     this.registerCachedTools();
-    await this._markCapabilitySnapshotsStale({
-      reason: staleReason,
-      connectorId: id,
-    });
     return connector.tools;
   }
 
@@ -1509,7 +1607,7 @@ export class McpManager {
             const current = this.getConfig().connectors.find((item) => item.id === connector.id);
             return {
               permissionMode: current?.permissionMode,
-              toolPermission: current?.toolPermissions?.[tool.name],
+              toolPermission: readMcpToolIdentitySetting(current?.toolPermissions, connector.id, tool.name),
               trustReadOnlyHint: current?.trustReadOnlyHint,
             };
           },
@@ -1551,7 +1649,7 @@ export class McpManager {
           serverLabel: connector.name || connector.id,
           // Only an explicit false opts a tool out of deferral.
           deferrable: tool.deferrable !== false,
-          pinned: connector.pinnedTools?.[tool.name] === true,
+          pinned: readMcpToolIdentitySetting(connector.pinnedTools, connector.id, tool.name) === true,
           schemaRef: () => tool.inputSchema || { type: "object", properties: {} },
         });
       }
@@ -1568,7 +1666,7 @@ export class McpManager {
     const connector = this.getConfig().connectors.find((item) => item.id === connectorId);
     return resolveMcpToolPermissionKind({
       permissionMode: connector?.permissionMode,
-      toolPermission: connector?.toolPermissions?.[toolName],
+      toolPermission: readMcpToolIdentitySetting(connector?.toolPermissions, connectorId, toolName),
       trustReadOnlyHint: connector?.trustReadOnlyHint,
     }, this.getRuntimeToolAnnotations(connectorId, toolName));
   }
@@ -1646,20 +1744,9 @@ export class McpManager {
     return this.updateAgentMcpConnector(agentId, serverId, patch);
   }
 
-  async _markCapabilitySnapshotsStale(payload: any = {}) {
-    if (!this._bus?.request) return null;
-    try {
-      return await this._bus.request("session:capability-drift:mark-stale", payload);
-    } catch (err) {
-      this.log.warn?.(`mcp capability drift mark skipped: ${err?.message || err}`);
-      return null;
-    }
-  }
-
   async handleSettingsAction({ action, payload = {}, agentId = null }: any = {}) {
     const input = isPlainObject(payload) ? payload : {};
     const changes = [];
-    let stalePayload = null;
     let key = action || "mcp";
     let title = "MCP settings updated";
     let summary = "MCP settings were updated.";
@@ -1673,7 +1760,6 @@ export class McpManager {
         title = enabled ? "MCP enabled" : "MCP disabled";
         summary = enabled ? "MCP connectors are enabled globally." : "MCP connectors are disabled globally.";
         changes.push({ key, label: "MCP", before: String(before), after: String(enabled) });
-        stalePayload = { reason: action };
         break;
       }
 
@@ -1690,7 +1776,6 @@ export class McpManager {
         if (input.enableGlobal === true && !beforeEnabled) {
           changes.push({ key: "mcp.enabled", label: "MCP", before: "false", after: "true" });
         }
-        stalePayload = { reason: action, connectorId: connector.id };
         break;
       }
 
@@ -1701,7 +1786,6 @@ export class McpManager {
         title = "MCP connector updated";
         summary = `Updated MCP connector ${connector.name || connector.id}.`;
         changes.push({ key, label: connector.name || connector.id, before: "configured", after: "updated" });
-        stalePayload = { reason: action, connectorId: connector.id };
         break;
       }
 
@@ -1713,7 +1797,6 @@ export class McpManager {
         title = "MCP connector removed";
         summary = `Removed MCP connector ${connector?.name || connectorId}.`;
         changes.push({ key, label: connector?.name || connectorId, before: "present", after: "removed" });
-        stalePayload = { reason: action, connectorId };
         break;
       }
 
@@ -1735,13 +1818,12 @@ export class McpManager {
         title = "MCP connector stopped";
         summary = `Stopped MCP connector ${connector?.name || connectorId}.`;
         changes.push({ key, label: connector?.name || connectorId, before: "running", after: "stopped" });
-        stalePayload = { reason: action, connectorId };
         break;
       }
 
       case "mcp.connector.refresh_tools": {
         const connectorId = connectorIdFromPayload(input);
-        const tools = await this.refreshTools(connectorId, { staleReason: action });
+        const tools = await this.refreshTools(connectorId);
         const connector = this.getConfig().connectors.find((item) => item.id === connectorId);
         key = `mcp.connector.${connectorId}.tools`;
         title = "MCP tools refreshed";
@@ -1760,7 +1842,6 @@ export class McpManager {
         title = enabled ? "MCP connector enabled for agent" : "MCP connector disabled for agent";
         summary = `${connector?.name || connectorId} is ${enabled ? "enabled" : "disabled"} for this agent.`;
         changes.push({ key, label: connector?.name || connectorId, before: "", after: String(enabled) });
-        stalePayload = { reason: action, agentId: targetAgentId, connectorId };
         break;
       }
 
@@ -1775,16 +1856,11 @@ export class McpManager {
         title = enabled ? "MCP tool enabled for agent" : "MCP tool disabled for agent";
         summary = `${connectorId}/${toolName} is ${enabled ? "enabled" : "disabled"} for this agent.`;
         changes.push({ key, label: `${connectorId}/${toolName}`, before: "", after: String(enabled) });
-        stalePayload = { reason: action, agentId: targetAgentId, connectorId };
         break;
       }
 
       default:
         throw new Error(`Unknown MCP settings action: ${action}`);
-    }
-
-    if (stalePayload) {
-      await this._markCapabilitySnapshotsStale(stalePayload);
     }
 
     return {

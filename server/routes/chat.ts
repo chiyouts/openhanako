@@ -36,6 +36,7 @@ import {
   appendSessionStreamEvent,
   resumeSessionStream,
 } from "../session-stream-store.ts";
+import { visiblePromptText } from "../../core/session-reminders.ts";
 import { AppError } from "../../shared/errors.ts";
 import { errorBus } from "../../shared/error-bus.ts";
 import { createRequestContext } from "../http/boundary.ts";
@@ -465,6 +466,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
         hasToolCall: false,
         hasThinking: false,
         hasError: false,
+        assistantStopReason: null,
         isAborted: false,
         turnActive: false,
         titleRequested: false,
@@ -704,6 +706,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
     ss.hasToolCall = false;
     ss.hasThinking = false;
     ss.hasError = false;
+    ss.assistantStopReason = null;
     ss.isAborted = false;
     ss.titleRequested = false;
     ss.titlePreview = "";
@@ -1616,18 +1619,27 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
         ss.hasError = true;
         broadcast({ type: "error", message: event.message.errorMessage || "Unknown error", sessionPath });
       }
+      if (event.message?.role === "assistant" && typeof event.message.stopReason === "string") {
+        ss.assistantStopReason = event.message.stopReason;
+      }
     } else if (event.type === "turn_end") {
       if (!ss) return;
       // 合成的中止事件带 event.aborted：中止源在 WS abort 之外时（断线宽限中止、
       // 关机 abort_all）ss.isAborted 不会被置位，只能靠事件本身识别。
       const turnWasAborted = ss.isAborted === true || event.aborted === true;
+      const turnWasTruncated = ss.assistantStopReason === "length";
       const turnStreamId = ss.streamId || null;
       flushTerminalParsers();
 
       // 空回复检测：本轮没有文本输出也没有工具调用，提示用户检查配置
       // 被 abort 的 turn 不弹此提示（用户主动停止 / WS 断开 / 连接超时）；
       // 合成中止事件同样豁免
-      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && !turnWasAborted) {
+      const truncatedWithoutVisibleResult = turnWasTruncated && !ss.hasOutput && !ss.hasToolCall;
+      if (
+        ((!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking) || truncatedWithoutVisibleResult)
+        && !ss.hasError
+        && !turnWasAborted
+      ) {
         ss.hasError = true;
         broadcast({ type: "error", message: t("error.modelNoResponse"), sessionPath });
       }
@@ -1669,6 +1681,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
       emitStreamEvent(sessionPath, ss, {
         type: "turn_end",
         ...persistedEntries,
+        ...(turnWasTruncated ? { truncated: true, stopReason: "length" } : {}),
       });
       finishSessionStream(ss);
       ss.turnActive = false;
@@ -1684,6 +1697,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
       ss.hasToolCall = false;
       ss.hasThinking = false;
       ss.hasError = false;
+      ss.assistantStopReason = null;
       ss.isAborted = false;
       ss.pendingTurnInputConsumptions = [];
       ss.consumedTurnInputsForCurrentTurn = [];
@@ -2293,8 +2307,12 @@ function sessionFileFields(file: any) {
 /**
  * 后台生成 session 标题：从第一轮对话提取摘要
  * 只在 session 还没有自定义标题时执行
+ *
+ * 首条 user 消息在提交时会被前置注入 reminder / reference 信封和附件标记，
+ * 所以取标题素材前必须先投影回用户真正打的那段文字：既喂给摘要模型，也用于
+ * 模型不可用时的截断兜底，否则标题会变成信封字面量。
  */
-async function generateSessionTitle(engine: any, notify: any, opts: any = {}) {
+export async function generateSessionTitle(engine: any, notify: any, opts: any = {}) {
   try {
     const sessionPath = opts.sessionPath;
     if (!sessionPath) return false;
@@ -2310,8 +2328,9 @@ async function generateSessionTitle(engine: any, notify: any, opts: any = {}) {
     const assistantMsg = messages.find(m => m.role === "assistant");
     if (!userMsg && !opts.userTextHint) return false;
 
-    const userText = (opts.userTextHint || extractText(userMsg?.content)).trim();
+    const userText = visiblePromptText(opts.userTextHint || extractText(userMsg?.content));
     const assistantText = (opts.assistantTextHint || extractText(assistantMsg?.content)).trim();
+    // 纯附件消息剥完信封什么都不剩：跳过生成，侧边栏回退到同样剥离过的首条消息
     if (!userText || !assistantText) return false;
 
     // 超时由 callText 内部的 AbortSignal 统一控制：超时即取消 Pi SDK 连接，无空跑
@@ -2320,7 +2339,7 @@ async function generateSessionTitle(engine: any, notify: any, opts: any = {}) {
     // API 失败时，用用户第一条消息截取作为 fallback 标题
     if (!title) {
       const fallback = userText.replace(/\n/g, " ").trim().slice(0, 30);
-      if (!fallback) return;
+      if (!fallback) return false;
       title = fallback;
       log.log(`session 标题 API 失败，使用 fallback: ${title}`);
     }
