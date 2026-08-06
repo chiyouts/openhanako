@@ -668,7 +668,7 @@
     ],
     "version": 3
   },
-  "payloadFingerprint": "sha256:0103b3720cdb56ff9011510d4ca15ccbfadd96cbd136db347f30daa8a47c3fd5",
+  "payloadFingerprint": "sha256:1f2766eadd748d7e5db3730f7cb4fcbc0ac444b62e63a2e9a4f46167fcf28ed4",
   "registry": [
     {
       "affectedByEpochMigration": true,
@@ -3118,8 +3118,8 @@
   ],
   "review": {
     "classification": "compatible",
-    "compatibilityReason": "Adds the new file-history-sqlite store to the inventory; no existing store's schema, reader, or on-disk layout changes. The per-workspace history database is created on first open and carries its own meta.schema_version, so homes without it stay readable.",
-    "payloadFingerprint": "sha256:0103b3720cdb56ff9011510d4ca15ccbfadd96cbd136db347f30daa8a47c3fd5"
+    "compatibilityReason": "Source-hash refresh only: the MCP manager tidies its in-memory tool-listing counter alongside the sibling per-connector state on stop, removal, and dispose. No stored schema, field, or write primitive changed.",
+    "payloadFingerprint": "sha256:1f2766eadd748d7e5db3730f7cb4fcbc0ac444b62e63a2e9a4f46167fcf28ed4"
   },
   "schemas": [
     {
@@ -3201,7 +3201,7 @@
       "contract": "agent config and authored Markdown/image profile protocol",
       "kind": "directory-contract",
       "module": "core/agent-manager.ts",
-      "sourceHash": "sha256:1eb1515b94791b6ebaab1adbe7551ccbc754c05b04991f9ce9025d145c456c46",
+      "sourceHash": "sha256:a1f883d4596d7fd7abb1ceab44c099deb152351421511933436b765441a4dff2",
       "storeId": "agent-profile"
     },
     {
@@ -3316,7 +3316,7 @@
       "contract": "desktop window bounds, release announcement bookmark, and update cache version marker readers",
       "kind": "directory-contract",
       "module": "desktop/main.cjs",
-      "sourceHash": "sha256:ab00d3a87caf3b994faba151ed6c370ee093dd545564535f9fefbaee314640e0",
+      "sourceHash": "sha256:03b3ae01457b17c263ef26b82bca6aa620dc8928eb60ffc171f5f4f489c632fa",
       "storeId": "desktop-window-version-state"
     },
     {
@@ -3421,7 +3421,7 @@
       "contract": "normalizeMcpConfig read-time normalization (servers/connectors alias, auth and OAuth field defaults, per-connector permission policy defaults, deferred-loading defaults)",
       "kind": "runtime-contract",
       "module": "core/mcp/manager.ts",
-      "sourceHash": "sha256:067c1cc1dc29ed5a3009f5b02f4d5bb6505a62b51a18d969f106855cacdb9c0c",
+      "sourceHash": "sha256:cbd5857f080b687f62e61aa43f046cc9d2b8122e40f1d9711237738ec237304c",
       "storeId": "mcp-config"
     },
     {
