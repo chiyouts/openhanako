@@ -109890,6 +109890,18 @@
       "reason": "Reached via esbuild source module graph, imported by server/index.ts (import-statement)."
     },
     {
+      "path": "server/openai-relay-fetch.js",
+      "inputType": "source-graph",
+      "provenance": [
+        {
+          "root": "server-bootstrap",
+          "from": "server/index.ts",
+          "kind": "import-statement"
+        }
+      ],
+      "reason": "Reached via esbuild source module graph, imported by server/index.ts (import-statement)."
+    },
+    {
       "path": "server/plugin-chat-surface.ts",
       "inputType": "source-graph",
       "provenance": [
@@ -112815,9 +112827,9 @@
     }
   ],
   "stats": {
-    "totalFiles": 9641,
+    "totalFiles": 9642,
     "byInputType": {
-      "source-graph": 660,
+      "source-graph": 661,
       "runtime-asset": 11,
       "nft-runtime-trace": 8970
     }
