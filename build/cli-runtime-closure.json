@@ -113047,11 +113047,11 @@
     }
   ],
   "stats": {
-    "totalFiles": 9655,
+    "totalFiles": 9652,
     "byInputType": {
-      "source-graph": 672,
+      "source-graph": 671,
       "runtime-asset": 11,
-      "nft-runtime-trace": 8972
+      "nft-runtime-trace": 8970
     }
   }
 }
