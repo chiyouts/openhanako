@@ -300,6 +300,7 @@
     "stop": "Stop",
     "browserScreenshot": "Browser screenshot",
     "compacting": "Compacting context",
+    "instantSimpleCompaction": "Instant simple compaction",
     "visionAuxiliary": "Vision auxiliary",
     "fileExpired": "File expired",
     "fileActions": {
@@ -430,10 +431,10 @@
     "contextWindow": "Context {windowK}k",
     "tokensUsed": "Used {tokensK}k ({pct}%)",
     "contextActions": "Context actions",
-    "refreshAndCompact": "Update and compact",
-    "refreshAndCompactTooltip": "Update to the latest memory and tool set",
-    "refreshAndCompactBusy": "Updating and compacting conversation…",
-    "refreshAndCompactFailed": "Update and compact failed",
+    "refreshAndCompact": "Compact and update",
+    "refreshAndCompactTooltip": "Compact the conversation and update to the latest memory and tool set",
+    "refreshAndCompactBusy": "Compacting and updating conversation…",
+    "refreshAndCompactFailed": "Compact and update failed",
     "compact": "Compact",
     "mention": {
       "title": "Mention",
@@ -1095,7 +1096,7 @@
     "experiments": {
       "title": "Experiments",
       "compactionTitle": "Context Compaction",
-      "compactionSectionDescription": "Choose whether compact prioritizes prompt-cache preservation or broad history compatibility.",
+      "compactionSectionDescription": "Set the default automatic compaction strategy and choose whether the chat context ring exposes an experimental one-shot action.",
       "modelPersonaTitle": "Models & Persona",
       "modelPersonaDescription": "Observe how providers adapt to Hana's persona, mood, and output contracts.",
       "memoryTitle": "Memory Experiments",
@@ -1142,10 +1143,14 @@
       },
       "compaction": {
         "title": "Compaction mode",
-        "description": "Auto prefers cache-preserving compaction. Normal compaction lets Pi SDK run its native summarizer, which is better for unstable history formats.",
+        "description": "Auto prefers cache-preserving compaction. Normal compaction uses Pi SDK's native summarizer.",
         "auto": "Auto",
         "cachePreserving": "Cache-preserving compaction",
         "piCompatible": "Normal compaction"
+      },
+      "instantSimpleCompaction": {
+        "title": "Instant simple compaction",
+        "description": "When enabled, the chat input's context-ring menu adds an Instant simple compaction action. It affects only the run you explicitly start and never changes automatic or ordinary compaction behavior."
       },
       "deepseekRoleplay": {
         "title": "DeepSeek persona immersion patch",
@@ -1856,6 +1861,45 @@
       "longtermSaved": "Long-term context saved",
       "saveDay": "Save this day",
       "daySaved": "Day saved",
+      "dream": {
+        "title": "Dream cleanup",
+        "hint": "Turn Key Facts and Long-term context into one memory per line, then merge duplicates and remove stale content",
+        "autoLabel": "Daily automatic Dream",
+        "autoHint": "Applies only to this Agent; off by default and runs at most once per logical day",
+        "run": "Organize current memory",
+        "running": "Organizing…",
+        "restore": "Restore version",
+        "view": "View result",
+        "success": "Completed {time}: {before} → {after} characters, {merged} merged, {forgotten} removed.",
+        "unchanged": "Checked {time}; there were no changes worth writing.",
+        "legacySuccess": "Completed {time}: {before} → {after} characters. This legacy run cannot verify its merge count.",
+        "revisions": {
+          "title": "Dream versions",
+          "listLabel": "Restorable versions",
+          "loading": "Loading versions…",
+          "empty": "There are no Dream versions to restore yet",
+          "manual": "Before manual cleanup",
+          "automatic": "Before automatic cleanup",
+          "preRestore": "Before restore",
+          "characters": "characters",
+          "noContent": "(No content)",
+          "restoreThis": "Restore this version",
+          "confirmHint": "The current version will be saved first, so this restore can be undone.",
+          "confirmRestore": "Confirm restore",
+          "cancel": "Cancel",
+          "close": "Close",
+          "restored": "The selected version was restored, and the previous current version was saved."
+        },
+        "failed": "Dream failed; the original memory was not changed",
+        "errors": {
+          "statusLoadFailed": "Dream status is temporarily unavailable. Try again shortly.",
+          "startFailed": "Dream could not start. Try again shortly.",
+          "autoSaveFailed": "The daily automatic Dream setting could not be saved. Try again shortly.",
+          "revisionsLoadFailed": "Dream versions are temporarily unavailable. Try again shortly.",
+          "revisionLoadFailed": "This Dream version could not be loaded. Try again shortly.",
+          "restoreFailed": "The Dream version could not be restored. Current memory was not changed."
+        }
+      },
       "sections": {
         "today": "Today",
         "week": "Earlier this week",
@@ -3120,6 +3164,15 @@
       "agentModelNotAvailable": "The model this assistant is set to use is unavailable. Pick a different one in settings.",
       "workspaceNotFound": "That workspace could not be found",
       "capabilityDenied": "This action is not authorized",
+      "dreamUnavailable": "Dream cleanup is temporarily unavailable for this Agent",
+      "dreamMemoryDisabled": "Enable memory for this Agent before running Dream",
+      "dreamMemoryBusy": "Memory maintenance is running in the background. Try again shortly.",
+      "dreamAlreadyRunning": "Dream cleanup is already running for this memory",
+      "dreamNoMemory": "There are no Key Facts or Long-term memories to organize yet",
+      "dreamMemoryChanged": "Memory changed during cleanup. Run Dream again.",
+      "dreamRevisionNotFound": "This Dream version could not be found. It may have been cleaned up.",
+      "dreamRestoreFailed": "The Dream version could not be restored. Current memory was not changed.",
+      "dreamRunFailed": "Dream cleanup failed. The original memory was not changed.",
       "internalContract": "Something went wrong inside the app; this is not on you. The details are recorded and can be attached to a report"
     }
   },

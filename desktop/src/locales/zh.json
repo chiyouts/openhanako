@@ -300,6 +300,7 @@
     "stop": "停止",
     "browserScreenshot": "浏览器截图",
     "compacting": "上下文压缩中",
+    "instantSimpleCompaction": "瞬时简易压缩",
     "visionAuxiliary": "辅助视觉",
     "fileExpired": "文件已过期",
     "fileActions": {
@@ -425,10 +426,10 @@
     "contextWindow": "上下文 {windowK}k",
     "tokensUsed": "已用 {tokensK}k ({pct}%)",
     "contextActions": "上下文操作",
-    "refreshAndCompact": "更新并压缩",
-    "refreshAndCompactTooltip": "更新到最新的记忆和工具集",
-    "refreshAndCompactBusy": "正在更新并压缩对话…",
-    "refreshAndCompactFailed": "更新并压缩失败",
+    "refreshAndCompact": "压缩并更新",
+    "refreshAndCompactTooltip": "压缩对话，并更新到最新的记忆和工具集",
+    "refreshAndCompactBusy": "正在压缩并更新对话…",
+    "refreshAndCompactFailed": "压缩并更新失败",
     "compact": "压缩",
     "noAskThisConversation": "本对话不再询问",
     "confirmMoreOptions": "更多确认选项",
@@ -1095,7 +1096,7 @@
     "experiments": {
       "title": "实验",
       "compactionTitle": "上下文压缩",
-      "compactionSectionDescription": "选择 compact 时优先保护缓存，还是优先兼容历史格式。",
+      "compactionSectionDescription": "设置自动压缩的默认策略，并决定是否在聊天的上下文圆圈中显示实验性的一次性压缩入口。",
       "modelPersonaTitle": "模型与人格",
       "modelPersonaDescription": "观察不同供应商在 Hana 人格、心境和输出契约上的适配表现。",
       "memoryTitle": "记忆实验",
@@ -1142,10 +1143,14 @@
       },
       "compaction": {
         "title": "压缩模式",
-        "description": "自动会优先使用缓存保护压缩；普通压缩会放行 Pi SDK 原生摘要，更适合历史格式不稳定的会话。",
+        "description": "自动会优先使用缓存保护压缩；普通压缩会放行 Pi SDK 原生摘要。",
         "auto": "自动",
         "cachePreserving": "缓存保护压缩",
         "piCompatible": "普通压缩"
+      },
+      "instantSimpleCompaction": {
+        "title": "瞬时简易压缩",
+        "description": "打开后，聊天输入框的上下文圆圈菜单会增加“瞬时简易压缩”。它只影响你主动点击的这一次压缩，不改变自动压缩或普通压缩的行为。"
       },
       "deepseekRoleplay": {
         "title": "DeepSeek 人格沉浸补丁",
@@ -1856,6 +1861,45 @@
       "longtermSaved": "长期情况已保存",
       "saveDay": "保存这一天",
       "daySaved": "这一天已保存",
+      "dream": {
+        "title": "Dream 整理",
+        "hint": "把重要事实与长期情况整理成一行一条，去重合并并清理过时内容",
+        "autoLabel": "每日自动 Dream",
+        "autoHint": "仅对当前 Agent 生效；默认关闭，每个逻辑日最多运行一次",
+        "run": "整理当下记忆",
+        "running": "正在整理…",
+        "restore": "恢复版本",
+        "view": "查看整理结果",
+        "success": "{time} 完成：{before} → {after} 字符，合并 {merged} 条，筛除 {forgotten} 条。",
+        "unchanged": "{time} 检查完成，本次没有需要写回的变化。",
+        "legacySuccess": "{time} 完成：{before} → {after} 字符。这是旧版运行记录，无法核对实际合并数量。",
+        "revisions": {
+          "title": "Dream 版本",
+          "listLabel": "可恢复版本",
+          "loading": "正在读取版本…",
+          "empty": "还没有可恢复的 Dream 版本",
+          "manual": "手动整理前",
+          "automatic": "自动整理前",
+          "preRestore": "恢复操作前",
+          "characters": "字符",
+          "noContent": "（无内容）",
+          "restoreThis": "恢复到此版本",
+          "confirmHint": "恢复前会先保存当前版本，之后仍可撤销。",
+          "confirmRestore": "确认恢复",
+          "cancel": "取消",
+          "close": "关闭",
+          "restored": "已恢复到所选版本；恢复前的当前版本也已保存。"
+        },
+        "failed": "Dream 整理失败，原记忆未改动",
+        "errors": {
+          "statusLoadFailed": "暂时无法读取 Dream 状态，请稍后重试",
+          "startFailed": "暂时无法开始 Dream 整理，请稍后重试",
+          "autoSaveFailed": "无法保存每日自动 Dream 设置，请稍后重试",
+          "revisionsLoadFailed": "暂时无法读取 Dream 版本，请稍后重试",
+          "revisionLoadFailed": "暂时无法读取这个 Dream 版本，请稍后重试",
+          "restoreFailed": "恢复 Dream 版本失败，当前记忆没有改动"
+        }
+      },
       "sections": {
         "today": "今天",
         "week": "本周早些时候",
@@ -3115,6 +3159,15 @@
       "agentModelNotAvailable": "这个助手配置的模型当前不可用，去设置里给它换一个",
       "workspaceNotFound": "找不到这个工作台",
       "capabilityDenied": "这个操作没有获得授权",
+      "dreamUnavailable": "这个 Agent 暂时无法使用 Dream 整理",
+      "dreamMemoryDisabled": "请先为这个 Agent 开启记忆",
+      "dreamMemoryBusy": "记忆正在后台整理，请稍后再试",
+      "dreamAlreadyRunning": "当前记忆正在进行 Dream 整理",
+      "dreamNoMemory": "当前还没有重要事实或长期记忆可整理",
+      "dreamMemoryChanged": "整理期间记忆发生了变化，请重新运行 Dream",
+      "dreamRevisionNotFound": "找不到这个 Dream 版本，它可能已经被清理",
+      "dreamRestoreFailed": "恢复 Dream 版本失败，当前记忆没有改动",
+      "dreamRunFailed": "Dream 整理失败，原记忆没有改动",
       "internalContract": "应用内部出了点问题，这不是你的操作问题；详情已记录，可在反馈时附上"
     }
   },
