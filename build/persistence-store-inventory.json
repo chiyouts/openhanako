@@ -226,8 +226,8 @@
       "pathPatterns": [
         "agents/{agentId}/config.yaml",
         "agents/{agentId}/identity.md",
-        "agents/{agentId}/ishiki.md",
-        "agents/{agentId}/public-ishiki.md",
+        "agents/{agentId}/AGENTS.md",
+        "agents/{agentId}/AGENTS.public.md",
         "agents/{agentId}/appearance-summary.json",
         "agents/{agentId}/avatars/{fileName}",
         "agents/{agentId}/pinned.md",
@@ -252,7 +252,8 @@
         "new HanaAgent"
       ],
       "migrationEntry": [
-        "lib/compat/checks/config-yaml.ts"
+        "lib/compat/checks/config-yaml.ts",
+        "core/agents-md-migration.ts"
       ],
       "protocolModules": [],
       "firstPossibleOpenPhase": "first_run_seed",
@@ -2508,7 +2509,7 @@
     {
       "sourceFile": "core/agent-manager.ts",
       "kind": "copy-file",
-      "excerpt": "fs.copyFileSync(publicIshikiSrc, path.join(agentDir, \"public-ishiki.md\"))",
+      "excerpt": "fs.copyFileSync(publicAgentsSrc, path.join(agentDir, PUBLIC_PERSONA_FILE_NAME))",
       "reason": "Creates, rolls back, or edits agent profile material.",
       "storeId": "agent-profile",
       "exemptionId": null,
@@ -2664,6 +2665,24 @@
       "excerpt": "fs.writeFileSync(migrationDone, new Date().toISOString())",
       "reason": "Creates the memory directory and records legacy memories.db import state.",
       "storeId": "agent-memory",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "core/agents-md-migration.ts",
+      "kind": "rename",
+      "excerpt": "fs.renameSync(legacyPath, currentPath)",
+      "reason": "Renames agent persona files onto their current names.",
+      "storeId": "agent-profile",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "core/agents-md-migration.ts",
+      "kind": "rename",
+      "excerpt": "fs.renameSync(legacyPath, supersededPath)",
+      "reason": "Renames agent persona files onto their current names.",
+      "storeId": "agent-profile",
       "exemptionId": null,
       "ordinal": 0
     },
@@ -3111,7 +3130,7 @@
     {
       "sourceFile": "core/first-run.ts",
       "kind": "copy-file",
-      "excerpt": "fs.copyFileSync(publicIshikiSrc, path.join(agentDir, \"public-ishiki.md\"))",
+      "excerpt": "fs.copyFileSync(publicAgentsSrc, path.join(agentDir, PUBLIC_PERSONA_FILE_NAME))",
       "reason": "First-run seeds several registered stores from packaged templates. Flow-sensitive attribution moves into the future coordinator; this exact composition file is not ignored by directory.",
       "storeId": null,
       "exemptionId": "cross-store-first-run-bootstrap",
@@ -6260,6 +6279,15 @@
     },
     {
       "sourceFile": "lib/desk/cron-store.ts",
+      "kind": "copy-file",
+      "excerpt": "fs.copyFileSync(this._jobsPath, backupPath, fs.constants.COPYFILE_EXCL)",
+      "reason": "Writes cron jobs or execution receipts.",
+      "storeId": "cron-automation",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "lib/desk/cron-store.ts",
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(path.dirname(this._jobsPath), { recursive: true })",
       "reason": "Writes cron jobs or execution receipts.",
@@ -6271,6 +6299,24 @@
       "sourceFile": "lib/desk/cron-store.ts",
       "kind": "mkdir",
       "excerpt": "fs.mkdirSync(this._runsDir, { recursive: true })",
+      "reason": "Writes cron jobs or execution receipts.",
+      "storeId": "cron-automation",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "lib/desk/cron-store.ts",
+      "kind": "rename",
+      "excerpt": "fs.renameSync(tmpPath, this._jobsPath)",
+      "reason": "Writes cron jobs or execution receipts.",
+      "storeId": "cron-automation",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "lib/desk/cron-store.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(backupPath, mainBytes, { flag: \"wx\" })",
       "reason": "Writes cron jobs or execution receipts.",
       "storeId": "cron-automation",
       "exemptionId": null,
@@ -8358,25 +8404,25 @@
     {
       "sourceFile": "server/routes/agents.ts",
       "kind": "write-file",
+      "excerpt": "fs.writeFile( path.join(agentDir(engine, id), PUBLIC_PERSONA_FILE_NAME), content, \"utf-8\", )",
+      "reason": "Reads, repairs, removes, or edits agent/user profile material.",
+      "storeId": "agent-profile",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/routes/agents.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFile(path.join(agentDir(engine, id), \"AGENTS.md\"), content, \"utf-8\")",
+      "reason": "Reads, repairs, removes, or edits agent/user profile material.",
+      "storeId": "agent-profile",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/routes/agents.ts",
+      "kind": "write-file",
       "excerpt": "fs.writeFile(path.join(agentDir(engine, id), \"identity.md\"), content, \"utf-8\")",
-      "reason": "Reads, repairs, removes, or edits agent/user profile material.",
-      "storeId": "agent-profile",
-      "exemptionId": null,
-      "ordinal": 0
-    },
-    {
-      "sourceFile": "server/routes/agents.ts",
-      "kind": "write-file",
-      "excerpt": "fs.writeFile(path.join(agentDir(engine, id), \"ishiki.md\"), content, \"utf-8\")",
-      "reason": "Reads, repairs, removes, or edits agent/user profile material.",
-      "storeId": "agent-profile",
-      "exemptionId": null,
-      "ordinal": 0
-    },
-    {
-      "sourceFile": "server/routes/agents.ts",
-      "kind": "write-file",
-      "excerpt": "fs.writeFile(path.join(agentDir(engine, id), \"public-ishiki.md\"), content, \"utf-8\")",
       "reason": "Reads, repairs, removes, or edits agent/user profile material.",
       "storeId": "agent-profile",
       "exemptionId": null,
