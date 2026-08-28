@@ -533,6 +533,9 @@ describe("auto-updater", () => {
   });
 
   it("reports the invite channel as unconfigured when no redemption endpoint is set", async () => {
+    // 模拟"内置默认端点为空的构建"（如开源侧留空常量的形态）：
+    // 编译期常量测试改不了，走专用复位口注入空值。
+    mod.__setInviteApiUrlOverrideForTests("");
     const home = createTempHome();
     initWithMockWindow({ hanakoHome: home });
 
@@ -540,6 +543,18 @@ describe("auto-updater", () => {
       configured: false,
       active: false,
       inviteCodes: [],
+      channel: "default",
+    }));
+  });
+
+  it("falls back to the baked-in default endpoint when neither env nor override is present", async () => {
+    const home = createTempHome();
+    initWithMockWindow({ hanakoHome: home });
+
+    // 2026-08-20 起内置默认端点随版发布：无任何覆盖时通道即视为已配置。
+    await expect(ipcHandlers["invite:status"]()).resolves.toEqual(expect.objectContaining({
+      configured: true,
+      active: false,
       channel: "default",
     }));
   });
@@ -632,6 +647,7 @@ describe("auto-updater", () => {
   });
 
   it("refuses to redeem when no redemption endpoint is configured", async () => {
+    mod.__setInviteApiUrlOverrideForTests("");
     const home = createTempHome();
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -673,6 +689,25 @@ describe("auto-updater", () => {
       url: "https://updates.example.com/alpha/",
     });
     expect(mod.getState().updateChannel).toBe("alpha");
+  });
+
+  it("kicks an immediate update check when the invite channel is activated", async () => {
+    process.env.HANA_INVITE_API_URL = "https://invite.example.com";
+    const home = createTempHome();
+    initWithMockWindow({ hanakoHome: home });
+    mockAutoUpdater.checkForUpdates.mockClear();
+    mockAutoUpdater.setFeedURL.mockClear();
+
+    await ipcHandlers["invite:activate"]({}, { feedUrl: "https://updates.example.com/alpha", inviteCodes: [] });
+    await Promise.resolve();
+
+    // 激活即检查：feed 已切到邀请通道，并立刻发起了一次更新检查——
+    // 测试者不需要等 4 小时轮询或重启应用才能发现内测版本。
+    expect(mockAutoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "generic",
+      url: "https://updates.example.com/alpha/",
+    }));
+    expect(mockAutoUpdater.checkForUpdates).toHaveBeenCalled();
   });
 
   it("refuses to activate a channel without an https feed address", async () => {

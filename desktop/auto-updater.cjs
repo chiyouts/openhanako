@@ -16,10 +16,10 @@ const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 小时
 const DIGEST_ASSET_NAME = "release-digest.v1.json";
 const UPDATE_CHANNEL_FILE_NAME = "update-channel.json";
 const UPDATE_CHANNEL_VERSION = 1;
-// 邀请核销服务地址。内置默认值刻意留空：留空即"通道未配置"，设置页不渲染
-// 任何邀请入口，正式构建在服务上线前不会露出半个按钮。上线后填这里，
-// 或用 HANA_INVITE_API_URL 覆盖。
-const DEFAULT_INVITE_API_URL = "";
+// 邀请核销服务地址。服务已于 2026-08-20 上线（Cloudflare Worker），地址
+// 非秘密——邀请码才是凭证，端点按 IP 限速。留空即"通道未配置"、设置页
+// 不渲染邀请入口；HANA_INVITE_API_URL 可临时覆盖。
+const DEFAULT_INVITE_API_URL = "https://alpha-invite-gate.hanaagent.workers.dev";
 const DEFAULT_GITHUB_OWNER = "liliMozi";
 const DEFAULT_GITHUB_REPO = "openhanako";
 
@@ -656,7 +656,18 @@ function setupAutoUpdater() {
 
 // ── 邀请码核销 ──
 
+// 测试专用：DEFAULT_INVITE_API_URL 是编译期常量，测试无法通过环境变量表达
+// "常量为空的构建"（例如开源侧把默认值留空的形态），只能经此复位口注入。
+// null = 不覆盖；每条测试重新 import 模块，状态天然复位。
+let inviteApiUrlOverrideForTests = null;
+function __setInviteApiUrlOverrideForTests(value) {
+  inviteApiUrlOverrideForTests = value;
+}
+
 function resolveInviteApiUrl(env = process.env) {
+  if (inviteApiUrlOverrideForTests !== null) {
+    return trimTrailingSlash(inviteApiUrlOverrideForTests);
+  }
   return trimTrailingSlash(env.HANA_INVITE_API_URL || DEFAULT_INVITE_API_URL);
 }
 
@@ -777,6 +788,9 @@ function activateInviteChannel(payload) {
   });
   logUpdate("update channel activated from an invite redemption");
   applyUpdateFeedConfig(resolveUpdateFeedConfig());
+  // 激活即检查：测试者刚拿到通道钥匙，就该立刻看到通道里的最新版本，
+  // 而不是等 4 小时轮询或下次启动。检查失败不阻塞激活（轮询兜底）。
+  checkForUpdatesOnce("invite-activate").catch(() => {});
   return inviteStatus();
 }
 
@@ -891,4 +905,5 @@ module.exports = {
   resolveUpdateFeedConfig,
   buildReleaseDigestUrl,
   normalizeReleaseDigest,
+  __setInviteApiUrlOverrideForTests,
 };
